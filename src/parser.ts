@@ -78,6 +78,12 @@ export default class Parser {
                 return { kind: "Identifier", name: this.eat().value } as Identifier
             case TokenType.Number:
                 return { kind: "NumericLiteral", value: parseFloat(this.eat().value) } as NumericLiteral
+            case TokenType.OpenParenthesis:
+                this.eat()
+                const expression = this.parseExpression()
+                this.eatExactly(TokenType.CloseParenthesis, 'Expected closing parenthesis')
+
+                return expression
             default:
                 throw new Error(`Unexpected token type: ${tokenType}`)
         }
@@ -94,5 +100,15 @@ export default class Parser {
 
     private eat(): Token {
         return this.tokens.shift()!
+    }
+
+    private eatExactly(type: TokenType, err: string): Token {
+        const token = this.eat()
+
+        if (!token || token.type !== type) {
+            throw new Error(err)
+        }
+
+        return token
     }
 }

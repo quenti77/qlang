@@ -2,7 +2,7 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { Identifier, NumericLiteral } from "./ast"
+import type { BinaryExpression, Identifier, NumericLiteral } from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -49,6 +49,28 @@ describe("Parser", () => {
             left: leftExpr,
             right: rightExpr,
             operator
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [binaryExpr]
+        })
+    })
+
+    test("make priority parenthesis expression", () => {
+        const ast = makeASTFromInput('5 * (2 + 3)')
+        const leftExpr: NumericLiteral = { kind: 'NumericLiteral', value: 5 }
+        const rightExpr: BinaryExpression = {
+            kind: 'BinaryExpression',
+            left: { kind: 'NumericLiteral', value: 2 } as NumericLiteral,
+            right: { kind: 'NumericLiteral', value: 3 } as NumericLiteral,
+            operator: '+'
+        }
+        const binaryExpr = {
+            kind: 'BinaryExpression',
+            left: leftExpr,
+            right: rightExpr,
+            operator: '*'
         }
 
         expect(ast).toEqual({

@@ -11,6 +11,14 @@ export enum TokenType {
     EOF = 'eof',
 }
 
+export enum BinaryOperator {
+    Plus = '+',
+    Minus = '-',
+    Multiply = '*',
+    Divide = '/',
+    Modulus = '%',
+}
+
 export interface Token {
     type: TokenType
     value: string
@@ -27,3 +35,5 @@ export const KEYWORDS: Record<string, TokenType> = {
     'alors': TokenType.Then,
     'fin': TokenType.End,
 }
+
+export const OPERATORS: string[] = Object.values(BinaryOperator)

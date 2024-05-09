@@ -3,6 +3,7 @@ import { expect, test, describe, beforeEach } from "bun:test"
 import Parser from "./parser"
 import Lexer from "./lexer"
 import type { Identifier, NumericLiteral } from "./ast"
+import { OPERATORS } from "./token"
 
 describe("Parser", () => {
     let lexer: Lexer
@@ -39,15 +40,15 @@ describe("Parser", () => {
         })
     })
 
-    test("make AST addition expression", () => {
-        const ast = makeASTFromInput('40 + 2')
+    test.each(OPERATORS)("make AST simple binary expression for %s", (operator) => {
+        const ast = makeASTFromInput(`40 ${operator} 2`)
         const leftExpr: NumericLiteral = { kind: 'NumericLiteral', value: 40 }
         const rightExpr: NumericLiteral = { kind: 'NumericLiteral', value: 2 }
         const binaryExpr = {
             kind: 'BinaryExpression',
             left: leftExpr,
             right: rightExpr,
-            operator: '+'
+            operator
         }
 
         expect(ast).toEqual({

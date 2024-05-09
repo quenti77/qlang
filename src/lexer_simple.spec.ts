@@ -1,7 +1,7 @@
 import { expect, test, describe, beforeEach } from "bun:test"
 
 import Lexer from "./lexer"
-import { TokenType, createToken, KEYWORDS } from "./token"
+import { TokenType, createToken, KEYWORDS, OPERATORS } from "./token"
 
 describe("Simple Lexer", () => {
 
@@ -111,6 +111,17 @@ describe("Simple Lexer", () => {
             createToken(TokenType.BinaryOperator, '+', 1, keywordLength + 6),
             createToken(TokenType.Number, '2', 1, keywordLength + 8),
             createToken(TokenType.EOF, '', 1, keywordLength + 9),
+        ])
+    })
+
+    test.each(OPERATORS)("tokenize an operator: %s", (operator) => {
+        lexer.tokenize(`a ${operator} 2`)
+
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Identifier, 'a', 1, 1),
+            createToken(TokenType.BinaryOperator, operator, 1, 3),
+            createToken(TokenType.Number, '2', 1, 5),
+            createToken(TokenType.EOF, '', 1, 6),
         ])
     })
 

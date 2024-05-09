@@ -1,4 +1,4 @@
-import { TokenType, createToken, KEYWORDS, type Token } from "./token"
+import { TokenType, createToken, KEYWORDS, OPERATORS, type Token } from "./token"
 
 export default class Lexer {
 
@@ -32,12 +32,14 @@ export default class Lexer {
         let src = this.currentLine.split('')
 
         while (src.length > 0) {
-            if (['+', '-', '*', '/'].includes(src[0])) {
+            if (OPERATORS.includes(src[0])) {
                 this.pushToken(TokenType.BinaryOperator, src.shift()!)
             } else if (src[0] === '(') {
                 this.pushToken(TokenType.OpenParenthesis, src.shift()!)
             } else if (src[0] === ')') {
                 this.pushToken(TokenType.CloseParenthesis, src.shift()!)
+            } else if (src[0] === '=') {
+                this.pushToken(TokenType.Equals, src.shift()!)
             } else if (/[0-9]/.test(src[0])) {
                 let number = src.shift()!
                 while (/[0-9]/.test(src[0])) {
@@ -56,8 +58,6 @@ export default class Lexer {
                 } else {
                     this.pushToken(TokenType.Identifier, token)
                 }
-            } else if (src[0] === '=') {
-                this.pushToken(TokenType.Equals, src.shift()!)
             } else {
                 src.shift()
                 this.col++

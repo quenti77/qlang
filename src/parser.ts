@@ -25,6 +25,7 @@ export default class Parser {
         return program
     }
 
+    // Parser methods order by precedence
     private parseStatement(): Statement {
         return this.parseExpression()
     }
@@ -34,9 +35,27 @@ export default class Parser {
     }
 
     private parseAdditiveExpression(): Expression {
-        let left = this.parsePrimaryExpression()
+        let left = this.parseMultiplicitaveExpression()
 
         while (['+', '-'].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseMultiplicitaveExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
+        return left
+    }
+
+    private parseMultiplicitaveExpression(): Expression {
+        let left = this.parsePrimaryExpression()
+
+        while (['*', '/', '%'].includes(this.at().value)) {
             const operator = this.eat().value
             const right = this.parsePrimaryExpression()
 

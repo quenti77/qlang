@@ -7,7 +7,10 @@ export enum TokenType {
     CloseParenthesis = 'close_parenthesis',
     If = 'if',
     Then = 'then',
+    Else = 'else',
+    ElseIf = 'elseif',
     End = 'end',
+    Null = 'null',
     EOF = 'eof',
 }
 
@@ -33,7 +36,10 @@ export function createToken(type: TokenType, value: string, line: number, column
 export const KEYWORDS: Record<string, TokenType> = {
     'si': TokenType.If,
     'alors': TokenType.Then,
+    'sinon': TokenType.Else,
+    'sinonsi': TokenType.ElseIf,
     'fin': TokenType.End,
+    'rien': TokenType.Null,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

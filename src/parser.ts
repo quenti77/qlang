@@ -1,4 +1,4 @@
-import type { BinaryExpression, Expression, Identifier, NumericLiteral, Program, Statement } from "./ast"
+import type { BinaryExpression, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement } from "./ast"
 import { TokenType, type Token } from "./token"
 
 export default class Parser {
@@ -76,6 +76,9 @@ export default class Parser {
         switch (tokenType) {
             case TokenType.Identifier:
                 return { kind: "Identifier", name: this.eat().value } as Identifier
+            case TokenType.Null:
+                this.eat()
+                return { kind: "NullLiteral", value: 'null' } as NullLiteral
             case TokenType.Number:
                 return { kind: "NumericLiteral", value: parseFloat(this.eat().value) } as NumericLiteral
             case TokenType.OpenParenthesis:

@@ -2,7 +2,7 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { BinaryExpression, Identifier, NumericLiteral } from "./ast"
+import type { BinaryExpression, Identifier, NullLiteral, NumericLiteral } from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -37,6 +37,16 @@ describe("Parser", () => {
         expect(ast).toEqual({
             kind: 'Program',
             body: [numericLiteral]
+        })
+    })
+
+    test("make AST simple null expression", () => {
+        const ast = makeASTFromInput('rien')
+        const nullLiteral: NullLiteral = { kind: 'NullLiteral', value: 'null' }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [nullLiteral]
         })
     })
 

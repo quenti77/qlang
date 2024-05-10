@@ -53,7 +53,7 @@ export default class Lexer {
                 }
 
                 const reserved = KEYWORDS[token]
-                if (reserved !== undefined) {
+                if (typeof reserved === 'string') {
                     this.pushToken(reserved, token)
                 } else {
                     this.pushToken(TokenType.Identifier, token)

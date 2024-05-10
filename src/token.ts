@@ -5,6 +5,7 @@ export enum TokenType {
     Equals = 'equals',
     OpenParenthesis = 'open_parenthesis',
     CloseParenthesis = 'close_parenthesis',
+    Let = 'let',
     If = 'if',
     Then = 'then',
     Else = 'else',
@@ -34,6 +35,7 @@ export function createToken(type: TokenType, value: string, line: number, column
 }
 
 export const KEYWORDS: Record<string, TokenType> = {
+    'let': TokenType.Let,
     'si': TokenType.If,
     'alors': TokenType.Then,
     'sinon': TokenType.Else,

@@ -1,11 +1,13 @@
 import Lexer from "./src/lexer"
 import Parser from "./src/parser"
+import Environment from "./src/runtime/environment"
 import Interpreter from "./src/runtime/interpreter"
 
 function cli() {
     const lexer = new Lexer()
     const parser = new Parser()
-    const interpreter = new Interpreter()
+    const env = new Environment()
+    const interpreter = new Interpreter(env)
 
     console.log("\nWelcome to qlang!")
     console.log("Type 'exit' to quit the cli\n")

@@ -4,6 +4,7 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import type { RuntimeValue } from "./values"
+import Environment from "./environment"
 
 describe("Interpreter", () => {
 
@@ -20,7 +21,7 @@ describe("Interpreter", () => {
     beforeEach(() => {
         lexer = new Lexer()
         parser = new Parser()
-        interpreter = new Interpreter()
+        interpreter = new Interpreter(new Environment())
     })
 
     test('evaluate simple numeric expression', () => {

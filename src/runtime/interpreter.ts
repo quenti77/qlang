@@ -1,24 +1,34 @@
-import type { BinaryExpression, NumericLiteral, Program, Statement } from "../ast";
-import type { NullValue, NumberValue, RuntimeValue } from "./values";
+import type { BinaryExpression, Identifier, NumericLiteral, Program, Statement } from "../ast"
+import { MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
+import Environment from "./environment"
 
 export default class Interpreter {
+
+    private env: Environment
+
+    constructor(env: Environment) {
+        this.env = env
+    }
+
     public evaluate(astNode: Statement): RuntimeValue {
         switch (astNode.kind) {
             case 'Program':
                 return this.evaluateProgram(astNode as Program)
             case 'BinaryExpression':
                 return this.evaluateBinaryExpression(astNode as BinaryExpression)
+            case 'Identifier':
+                return this.evaluateIdentifier(astNode as Identifier)
             case 'NumericLiteral':
-                return { type: 'number', value: (astNode as NumericLiteral).value } as NumberValue
+                return MK_NUMBER((astNode as NumericLiteral).value)
             case 'NullLiteral':
-                return { type: 'null', value: 'null' } as NullValue
+                return MK_NULL()
             default:
                 throw new Error(`Unknown node type ${astNode.kind}`)
         }
     }
 
     private evaluateProgram(program: Program): RuntimeValue {
-        let lastEvaluated: RuntimeValue = { type: 'null', value: 'null' } as NullValue
+        let lastEvaluated: RuntimeValue = MK_NULL()
 
         for (const statement of program.body) {
             lastEvaluated = this.evaluate(statement)
@@ -38,10 +48,19 @@ export default class Interpreter {
             )
         }
 
-        return { type: 'null', value: 'null' } as NullValue
+        return MK_NULL()
     }
 
-    private evaluateNumericBinaryExpression(operator: string, left: NumberValue, right: NumberValue): NumberValue {
+    private evaluateIdentifier(identifier: Identifier): RuntimeValue {
+        const val = this.env.lookupVariable(identifier.name)
+        return val
+    }
+
+    private evaluateNumericBinaryExpression(
+        operator: string,
+        left: NumberValue,
+        right: NumberValue,
+    ): NumberValue {
         let result = 0
         if (operator === '+') {
             result = left.value + right.value
@@ -56,6 +75,6 @@ export default class Interpreter {
         } else {
             throw new Error(`Unknown operator ${operator}`)
         }
-        return { type: 'number', value: result }
+        return MK_NUMBER(result)
     }
 }

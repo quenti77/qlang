@@ -88,4 +88,14 @@ describe("Parser", () => {
             body: [binaryExpr]
         })
     })
+
+    test.each(['vrai', 'faux'])("make AST boolean literal for %s", (value) => {
+        const ast = makeASTFromInput(value)
+        const booleanLiteral = { kind: 'BooleanLiteral', value: value === 'vrai' }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [booleanLiteral]
+        })
+    })
 })

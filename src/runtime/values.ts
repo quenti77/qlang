@@ -1,4 +1,4 @@
-export type ValueType = 'null' | 'number'
+export type ValueType = 'null' | 'number' | 'boolean'
 
 export interface RuntimeValue {
     type: ValueType
@@ -20,4 +20,13 @@ export interface NumberValue extends RuntimeValue {
 
 export function MK_NUMBER(value: number): NumberValue {
     return { type: 'number', value }
+}
+
+export interface BooleanValue extends RuntimeValue {
+    type: 'boolean'
+    value: boolean
+}
+
+export function MK_BOOLEAN(value: boolean): BooleanValue {
+    return { type: 'boolean', value }
 }

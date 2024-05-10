@@ -2,6 +2,7 @@ export type NodeType =
     | 'Program'
     | 'NumericLiteral'
     | 'NullLiteral'
+    | 'BooleanLiteral'
     | 'Identifier'
     | 'BinaryExpression'
 
@@ -36,4 +37,9 @@ export interface NumericLiteral extends Expression {
 export interface NullLiteral extends Expression {
     kind: 'NullLiteral'
     value: 'null'
+}
+
+export interface BooleanLiteral extends Expression {
+    kind: 'BooleanLiteral'
+    value: boolean
 }

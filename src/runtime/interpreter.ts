@@ -1,5 +1,5 @@
-import type { BinaryExpression, Identifier, NumericLiteral, Program, Statement } from "../ast"
-import { MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
+import type { BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement } from "../ast"
+import { MK_BOOLEAN, MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
 import Environment from "./environment"
 
 export default class Interpreter {
@@ -22,6 +22,8 @@ export default class Interpreter {
                 return MK_NUMBER((astNode as NumericLiteral).value)
             case 'NullLiteral':
                 return MK_NULL()
+            case 'BooleanLiteral':
+                return MK_BOOLEAN((astNode as BooleanLiteral).value)
             default:
                 throw new Error(`Unknown node type ${astNode.kind}`)
         }

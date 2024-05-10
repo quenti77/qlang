@@ -12,6 +12,7 @@ export enum TokenType {
     ElseIf = 'elseif',
     End = 'end',
     Null = 'null',
+    Boolean = 'boolean',
     EOF = 'eof',
 }
 
@@ -35,13 +36,15 @@ export function createToken(type: TokenType, value: string, line: number, column
 }
 
 export const KEYWORDS: Record<string, TokenType> = {
-    'let': TokenType.Let,
+    'dec': TokenType.Let,
     'si': TokenType.If,
     'alors': TokenType.Then,
     'sinon': TokenType.Else,
     'sinonsi': TokenType.ElseIf,
     'fin': TokenType.End,
     'rien': TokenType.Null,
+    'vrai': TokenType.Boolean,
+    'faux': TokenType.Boolean,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

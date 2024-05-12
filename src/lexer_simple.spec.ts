@@ -125,4 +125,39 @@ describe("Simple Lexer", () => {
         ])
     })
 
+    test("tokenize a string", () => {
+        lexer.tokenize('"hello world"')
+
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.String, 'hello world', 1, 2),
+            createToken(TokenType.EOF, '', 1, 14),
+        ])
+    })
+
+    test("tokenize a string with escaped quotes", () => {
+        lexer.tokenize(`"hello \\"w\\"orld"`)
+
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.String, 'hello "w"orld', 1, 2),
+            createToken(TokenType.EOF, '', 1, 16),
+        ])
+    })
+
+    test("tokenize a string with escaped backslashes", () => {
+        lexer.tokenize(`"hello \\\\world"`)
+
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.String, 'hello \\world', 1, 2),
+            createToken(TokenType.EOF, '', 1, 15),
+        ])
+    })
+
+    test("tokenize a string with escaped newlines", () => {
+        lexer.tokenize(`"hello\nworld"`)
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.String, 'hello\nworld', 1, 2),
+            createToken(TokenType.EOF, '', 2, 7),
+        ])
+    })
+
 })

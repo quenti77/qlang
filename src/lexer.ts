@@ -8,6 +8,7 @@ export default class Lexer {
 
     private lines: string[] = []
     private tokens: Token[] = []
+    private src: string[] = []
 
     public get Tokens(): Token[] {
         return this.tokens
@@ -29,27 +30,29 @@ export default class Lexer {
             return
         }
 
-        let src = this.currentLine.split('')
+        this.src = this.currentLine.split('')
 
-        while (src.length > 0) {
-            if (OPERATORS.includes(src[0])) {
-                this.pushToken(TokenType.BinaryOperator, src.shift()!)
-            } else if (src[0] === '(') {
-                this.pushToken(TokenType.OpenParenthesis, src.shift()!)
-            } else if (src[0] === ')') {
-                this.pushToken(TokenType.CloseParenthesis, src.shift()!)
-            } else if (src[0] === '=') {
-                this.pushToken(TokenType.Equals, src.shift()!)
-            } else if (/[0-9]/.test(src[0])) {
-                let number = src.shift()!
-                while (/[0-9]/.test(src[0])) {
-                    number += src.shift()!
+        while (this.src.length > 0) {
+            if (OPERATORS.includes(this.src[0])) {
+                this.pushToken(TokenType.BinaryOperator, this.src.shift()!)
+            } else if (this.src[0] === '(') {
+                this.pushToken(TokenType.OpenParenthesis, this.src.shift()!)
+            } else if (this.src[0] === ')') {
+                this.pushToken(TokenType.CloseParenthesis, this.src.shift()!)
+            } else if (this.src[0] === '=') {
+                this.pushToken(TokenType.Equals, this.src.shift()!)
+            } else if (/[0-9]/.test(this.src[0])) {
+                let number = this.src.shift()!
+                while (/[0-9]/.test(this.src[0])) {
+                    number += this.src.shift()!
                 }
                 this.pushToken(TokenType.Number, number)
-            } else if (this.isIdentifier(src[0], false)) {
-                let token = src.shift()!
-                while (this.isIdentifier(src[0], true)) {
-                    token += src.shift()!
+            } else if (this.src[0] === '"') {
+                this.processString()
+            } else if (this.isIdentifier(this.src[0], false)) {
+                let token = this.src.shift()!
+                while (this.isIdentifier(this.src[0], true)) {
+                    token += this.src.shift()!
                 }
 
                 const reserved = KEYWORDS[token]
@@ -59,10 +62,58 @@ export default class Lexer {
                     this.pushToken(TokenType.Identifier, token)
                 }
             } else {
-                src.shift()
+                this.src.shift()
                 this.col++
             }
         }
+    }
+
+    private processString(): void {
+        this.eat()
+
+        const startLine = this.row
+        const startColumn = this.col
+
+        let value = ''
+        while (this.src[0] !== '"') {
+            const currentChar = this.eat()
+            if (currentChar === '\\') {
+                const nextChar = this.src.shift()
+                switch (nextChar) {
+                    case '\\':
+                        value += '\\'
+                        break
+                    case '"':
+                        value += '"'
+                        break
+                    case 'n':
+                        this.nextLine()
+                        break
+                    default:
+                        throw new Error(`Unknown escape sequence: \\${nextChar}`)
+                }
+                continue
+            }
+            if (currentChar === undefined) {
+                if (!this.hasMoreLines()) {
+                    throw new Error('Unterminated string')
+                }
+                this.nextLine()
+                value += '\n'
+                continue
+            }
+            value += currentChar
+        }
+
+        this.tokens.push(createToken(TokenType.String, value, startLine, startColumn))
+        this.eat()
+    }
+
+    private eat(): string | undefined {
+        const currentChar = this.src.shift()
+        this.col++
+
+        return currentChar
     }
 
     private pushToken(type: TokenType, value: string, line: number = this.row, column: number = this.col) {
@@ -88,6 +139,7 @@ export default class Lexer {
             this.row++
         }
         this.currentLine = this.lines.shift()
+        this.src = this.currentLine?.split('') ?? []
         this.col = 1
     }
 

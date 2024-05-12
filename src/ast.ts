@@ -5,6 +5,7 @@ export type NodeType =
     // Expressions
     | 'AssignmentExpression'
     | 'NumericLiteral'
+    | 'StringLiteral'
     | 'NullLiteral'
     | 'BooleanLiteral'
     | 'Identifier'
@@ -48,6 +49,11 @@ export interface Identifier extends Expression {
 export interface NumericLiteral extends Expression {
     kind: 'NumericLiteral'
     value: number
+}
+
+export interface StringLiteral extends Expression {
+    kind: 'StringLiteral'
+    value: string
 }
 
 export interface NullLiteral extends Expression {

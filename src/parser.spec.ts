@@ -191,4 +191,28 @@ describe("Parser", () => {
             body: [variableDeclaration, variableDeclaration2, assignment]
         })
     })
+
+    test("make AST string literal", () => {
+        const ast = makeASTFromInput('"hello"')
+        const stringLiteral = { kind: 'StringLiteral', value: 'hello' }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [stringLiteral]
+        })
+    })
+
+    test("make AST string literal with escape character in variable", () => {
+        const ast = makeASTFromInput('dec abc = "hello\nworld"')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: { kind: 'StringLiteral', value: 'hello\nworld' }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration]
+        })
+    })
 })

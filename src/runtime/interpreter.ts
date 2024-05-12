@@ -1,5 +1,5 @@
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "../ast"
-import { MK_BOOLEAN, MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, StringLiteral, VariableDeclarationStatement } from "../ast"
+import { MK_BOOLEAN, MK_NULL, MK_NUMBER, MK_STRING, type AlgebraicValue, type NullValue, type NumberValue, type RuntimeValue } from "./values"
 import Environment from "./environment"
 
 export default class Interpreter {
@@ -24,6 +24,8 @@ export default class Interpreter {
                 return this.evaluateIdentifier(astNode as Identifier)
             case 'NumericLiteral':
                 return MK_NUMBER((astNode as NumericLiteral).value)
+            case 'StringLiteral':
+                return MK_STRING((astNode as StringLiteral).value)
             case 'NullLiteral':
                 return MK_NULL()
             case 'BooleanLiteral':
@@ -65,11 +67,11 @@ export default class Interpreter {
         const leftHandSide = this.evaluate(binaryExpr.left)
         const rightHandSide = this.evaluate(binaryExpr.right)
 
-        if (leftHandSide.type === 'number' && rightHandSide.type === 'number') {
-            return this.evaluateNumericBinaryExpression(
+        if ('value' in leftHandSide && 'value' in rightHandSide) {
+            return this.evaluateAlgebraicBinaryExpression(
                 binaryExpr.operator,
-                leftHandSide as NumberValue,
-                rightHandSide as NumberValue,
+                leftHandSide as AlgebraicValue,
+                rightHandSide as AlgebraicValue,
             )
         }
 
@@ -81,25 +83,28 @@ export default class Interpreter {
         return val
     }
 
-    private evaluateNumericBinaryExpression(
+    private evaluateAlgebraicBinaryExpression(
         operator: string,
-        left: NumberValue,
-        right: NumberValue,
-    ): NumberValue {
-        let result = 0
-        if (operator === '+') {
-            result = left.value + right.value
-        } else if (operator === '-') {
-            result = left.value - right.value
-        } else if (operator === '*') {
-            result = left.value * right.value
-        } else if (operator === '/') {
-            result = left.value / right.value
-        } else if (operator === '%') {
-            result = left.value % right.value
-        } else {
-            throw new Error(`Unknown operator ${operator}`)
+        left: AlgebraicValue,
+        right: AlgebraicValue,
+    ): AlgebraicValue {
+        if ((left.type === 'string' || right.type === 'string') && operator !== '+') {
+            throw new Error('Invalid operation between string and other type')
         }
-        return MK_NUMBER(result)
+        if ((left.type === 'string' || right.type === 'string')) {
+            return MK_STRING((left.value as string) + (right.value as string))
+        }
+        if (operator === '+') {
+            return MK_NUMBER((left.value as number) + (right.value as number))
+        } else if (operator === '-') {
+            return MK_NUMBER((left.value as number) - (right.value as number))
+        } else if (operator === '*') {
+            return MK_NUMBER((left.value as number) * (right.value as number))
+        } else if (operator === '/') {
+            return MK_NUMBER((left.value as number) / (right.value as number))
+        } else if (operator === '%') {
+            return MK_NUMBER((left.value as number) % (right.value as number))
+        }
+        throw new Error(`Invalid operator ${operator} for algebraic expression`)
     }
 }

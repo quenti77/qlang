@@ -1,4 +1,4 @@
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "./ast"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, StringLiteral, VariableDeclarationStatement } from "./ast"
 import { TokenType, type Token } from "./token"
 
 export default class Parser {
@@ -123,6 +123,8 @@ export default class Parser {
                 return { kind: "BooleanLiteral", value: this.eat().value === 'vrai' } as BooleanLiteral
             case TokenType.Number:
                 return { kind: "NumericLiteral", value: parseFloat(this.eat().value) } as NumericLiteral
+            case TokenType.String:
+                return { kind: "StringLiteral", value: this.eat().value } as StringLiteral
             case TokenType.OpenParenthesis:
                 this.eat()
                 const expression = this.parseExpression()

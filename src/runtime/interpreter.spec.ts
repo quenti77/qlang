@@ -4,7 +4,7 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import Environment from "./environment"
-import type { BooleanValue, NumberValue } from "./values"
+import type { BooleanValue, NumberValue, StringValue } from "./values"
 
 describe("Interpreter", () => {
 
@@ -54,6 +54,22 @@ describe("Interpreter", () => {
         expect(result).toEqual({ type: 'boolean', value: value === 'vrai' } as BooleanValue)
     })
 
+    const operations = [
+        { input: '40 + 2', expected: { type: 'number', value: 42 } as NumberValue },
+        { input: 'vrai + vrai', expected: { type: 'number', value: 2 } as NumberValue },
+        { input: 'rien + 2', expected: { type: 'number', value: 2 } as NumberValue },
+        { input: '40 + "2"', expected: { type: 'string', value: '402' } as StringValue },
+        { input: '40 + vrai', expected: { type: 'number', value: 41 } as NumberValue },
+        { input: '40 + rien', expected: { type: 'number', value: 40 } as NumberValue },
+        { input: '40 + faux', expected: { type: 'number', value: 40 } as NumberValue },
+    ]
+    test.each(operations)("evaluate operations with inputs %#", ({ input, expected }) => {
+        const ast = makeASTFromInput(input)
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(expected)
+    })
+
     test('evaluate simple variable declaration', () => {
         const ast = makeASTFromInput('dec a = 42')
         const result = interpreter.evaluate(ast)
@@ -92,5 +108,13 @@ describe("Interpreter", () => {
     test('evaluate variable not found', () => {
         const ast = makeASTFromInput('a')
         expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+    })
+
+    test('evaluate variable assignment with string', () => {
+        const ast = makeASTFromInput('dec a = "hello"')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'string', value: 'hello' } as StringValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'string', value: 'hello' } as StringValue)
     })
 })

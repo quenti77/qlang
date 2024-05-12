@@ -11,6 +11,7 @@ describe("Interpreter", () => {
     let lexer: Lexer
     let parser: Parser
     let interpreter: Interpreter
+    let env: Environment
 
     const makeASTFromInput = (input: string): any => {
         lexer.tokenize(input)
@@ -21,7 +22,8 @@ describe("Interpreter", () => {
     beforeEach(() => {
         lexer = new Lexer()
         parser = new Parser()
-        interpreter = new Interpreter(new Environment())
+        env = new Environment()
+        interpreter = new Interpreter(env)
     })
 
     test('evaluate simple numeric expression', () => {
@@ -52,4 +54,32 @@ describe("Interpreter", () => {
         expect(result).toEqual({ type: 'boolean', value: value === 'vrai' } as BooleanValue)
     })
 
+    test('evaluate simple variable declaration', () => {
+        const ast = makeASTFromInput('dec a = 42')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'number', value: 42 } as NumberValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'number', value: 42 } as NumberValue)
+    })
+
+    test('evaluate variable declaration with expression', () => {
+        const ast = makeASTFromInput('dec a = 40 + 2')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'number', value: 42 } as NumberValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'number', value: 42 } as NumberValue)
+    })
+
+    test.skip('evaluate variable assignment', () => {
+        const ast = makeASTFromInput('dec a = 40\na = 2')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'number', value: 2 } as NumberValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'number', value: 2 } as NumberValue)
+    })
+
+    test('evaluate variable not found', () => {
+        const ast = makeASTFromInput('a')
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+    })
 })

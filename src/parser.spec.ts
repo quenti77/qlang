@@ -98,4 +98,50 @@ describe("Parser", () => {
             body: [booleanLiteral]
         })
     })
+
+    test("make AST variable declaration", () => {
+        const ast = makeASTFromInput('dec abc = 42')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration]
+        })
+    })
+
+    test("make AST variable declaration with expression multilines", () => {
+        const ast = makeASTFromInput('dec abc =\n40 + 2')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: {
+                kind: 'BinaryExpression',
+                left: { kind: 'NumericLiteral', value: 40 } as NumericLiteral,
+                right: { kind: 'NumericLiteral', value: 2 } as NumericLiteral,
+                operator: '+'
+            } as BinaryExpression
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration]
+        })
+    })
+
+    test("make AST variable declaration without value", () => {
+        const ast = makeASTFromInput('dec abc')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc'
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration]
+        })
+    })
 })

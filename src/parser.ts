@@ -1,4 +1,4 @@
-import type { BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement } from "./ast"
+import type { BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "./ast"
 import { TokenType, type Token } from "./token"
 
 export default class Parser {
@@ -27,7 +27,32 @@ export default class Parser {
 
     // Parser methods order by precedence
     private parseStatement(): Statement {
-        return this.parseExpression()
+        switch (this.at().type) {
+            case TokenType.Let:
+                return this.parseVariableDeclarationStatement()
+            default:
+                return this.parseExpression()
+        }
+    }
+
+    private parseVariableDeclarationStatement(): Statement {
+        this.eatExactly(TokenType.Let, 'Expected "let" keyword')
+
+        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+
+        if (this.at().type === TokenType.Equals) {
+            this.eatExactly(TokenType.Equals, 'Expected "="')
+            return {
+                kind: 'VariableDeclarationStatement',
+                identifier,
+                value: this.parseExpression(),
+            } as VariableDeclarationStatement
+        }
+
+        return {
+            kind: 'VariableDeclarationStatement',
+            identifier,
+        } as VariableDeclarationStatement
     }
 
     private parseExpression(): Expression {

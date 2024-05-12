@@ -1,4 +1,4 @@
-import type { BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement } from "../ast"
+import type { BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "../ast"
 import { MK_BOOLEAN, MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
 import Environment from "./environment"
 
@@ -14,6 +14,8 @@ export default class Interpreter {
         switch (astNode.kind) {
             case 'Program':
                 return this.evaluateProgram(astNode as Program)
+            case 'VariableDeclarationStatement':
+                return this.evaluateVariableDeclaration(astNode as VariableDeclarationStatement)
             case 'BinaryExpression':
                 return this.evaluateBinaryExpression(astNode as BinaryExpression)
             case 'Identifier':
@@ -36,6 +38,16 @@ export default class Interpreter {
             lastEvaluated = this.evaluate(statement)
         }
         return lastEvaluated
+    }
+
+    private evaluateVariableDeclaration(variableDeclaration: VariableDeclarationStatement): RuntimeValue {
+        if (variableDeclaration.value) {
+            const value = this.evaluate(variableDeclaration.value)
+            this.env.declareVariable(variableDeclaration.identifier, value)
+            return value
+        }
+        this.env.declareVariable(variableDeclaration.identifier, MK_NULL())
+        return MK_NULL()
     }
 
     private evaluateBinaryExpression(binaryExpr: BinaryExpression): RuntimeValue {

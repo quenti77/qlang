@@ -1,6 +1,9 @@
 export type NodeType =
+    // Statements
     | 'Program'
     | 'VariableDeclarationStatement'
+    // Expressions
+    | 'AssignmentExpression'
     | 'NumericLiteral'
     | 'NullLiteral'
     | 'BooleanLiteral'
@@ -23,6 +26,12 @@ export interface VariableDeclarationStatement extends Statement {
 }
 
 export interface Expression extends Statement { }
+
+export interface AssignmentExpression extends Expression {
+    kind: 'AssignmentExpression'
+    assignment: Expression
+    value: Expression
+}
 
 export interface BinaryExpression extends Expression {
     kind: 'BinaryExpression'

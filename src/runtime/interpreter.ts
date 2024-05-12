@@ -1,4 +1,4 @@
-import type { BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "../ast"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "../ast"
 import { MK_BOOLEAN, MK_NULL, MK_NUMBER, type NullValue, type NumberValue, type RuntimeValue } from "./values"
 import Environment from "./environment"
 
@@ -16,6 +16,8 @@ export default class Interpreter {
                 return this.evaluateProgram(astNode as Program)
             case 'VariableDeclarationStatement':
                 return this.evaluateVariableDeclaration(astNode as VariableDeclarationStatement)
+            case 'AssignmentExpression':
+                return this.evaluateAssignmentExpression(astNode as AssignmentExpression)
             case 'BinaryExpression':
                 return this.evaluateBinaryExpression(astNode as BinaryExpression)
             case 'Identifier':
@@ -48,6 +50,15 @@ export default class Interpreter {
         }
         this.env.declareVariable(variableDeclaration.identifier, MK_NULL())
         return MK_NULL()
+    }
+
+    private evaluateAssignmentExpression(node: AssignmentExpression): RuntimeValue {
+        if (node.assignment.kind !== 'Identifier') {
+            throw new Error('Invalid assignment target')
+        }
+
+        const identifier = (node.assignment as Identifier).name
+        return this.env.assignVariable(identifier, this.evaluate(node.value))
     }
 
     private evaluateBinaryExpression(binaryExpr: BinaryExpression): RuntimeValue {

@@ -144,4 +144,51 @@ describe("Parser", () => {
             body: [variableDeclaration]
         })
     })
+
+    test("make AST variable assignment", () => {
+        const ast = makeASTFromInput('dec abc = 42\nabc = 2')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
+        }
+        const assignment = {
+            kind: 'AssignmentExpression',
+            assignment: { kind: 'Identifier', name: 'abc' } as Identifier,
+            value: { kind: 'NumericLiteral', value: 2 } as NumericLiteral
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration, assignment]
+        })
+    })
+
+    test("make AST variable assignment with multiple variables", () => {
+        const ast = makeASTFromInput('dec abc = 42\ndec def = abc\nabc = def = 2')
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
+        }
+        const variableDeclaration2 = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'def',
+            value: { kind: 'Identifier', name: 'abc' } as Identifier
+        }
+        const assignment = {
+            kind: 'AssignmentExpression',
+            assignment: { kind: 'Identifier', name: 'abc' } as Identifier,
+            value: {
+                kind: 'AssignmentExpression',
+                assignment: { kind: 'Identifier', name: 'def' } as Identifier,
+                value: { kind: 'NumericLiteral', value: 2 } as NumericLiteral
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration, variableDeclaration2, assignment]
+        })
+    })
 })

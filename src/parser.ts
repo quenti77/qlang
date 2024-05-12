@@ -1,4 +1,4 @@
-import type { BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "./ast"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, VariableDeclarationStatement } from "./ast"
 import { TokenType, type Token } from "./token"
 
 export default class Parser {
@@ -56,7 +56,22 @@ export default class Parser {
     }
 
     private parseExpression(): Expression {
-        return this.parseAdditiveExpression()
+        return this.parseAssignmentExpression()
+    }
+
+    private parseAssignmentExpression(): Expression {
+        const left = this.parseAdditiveExpression()
+
+        if (this.at().type === TokenType.Equals) {
+            this.eatExactly(TokenType.Equals, 'Expected "="')
+
+            return {
+                kind: 'AssignmentExpression',
+                assignment: left,
+                value: this.parseAssignmentExpression(),
+            } as AssignmentExpression
+        }
+        return left
     }
 
     private parseAdditiveExpression(): Expression {

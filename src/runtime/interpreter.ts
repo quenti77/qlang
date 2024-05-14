@@ -1,5 +1,22 @@
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, NumericLiteral, Program, Statement, StringLiteral, VariableDeclarationStatement } from "../ast"
-import { MK_BOOLEAN, MK_NULL, MK_NUMBER, MK_STRING, type AlgebraicValue, type NullValue, type NumberValue, type RuntimeValue } from "./values"
+import type {
+    AssignmentExpression,
+    BinaryExpression,
+    BooleanLiteral,
+    Identifier,
+    NumericLiteral,
+    Program,
+    Statement,
+    StringLiteral,
+    VariableDeclarationStatement,
+} from "../ast"
+import {
+    MK_BOOLEAN,
+    MK_NULL,
+    MK_NUMBER,
+    MK_STRING,
+    type AlgebraicValue,
+    type RuntimeValue,
+} from "./values"
 import Environment from "./environment"
 
 export default class Interpreter {

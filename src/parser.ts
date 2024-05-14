@@ -1,4 +1,16 @@
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Expression, Identifier, NullLiteral, NumericLiteral, Program, Statement, StringLiteral, VariableDeclarationStatement } from "./ast"
+import type {
+    AssignmentExpression,
+    BinaryExpression,
+    BooleanLiteral,
+    Expression,
+    Identifier,
+    NullLiteral,
+    NumericLiteral,
+    Program,
+    Statement,
+    StringLiteral,
+    VariableDeclarationStatement,
+} from "./ast"
 import { TokenType, type Token } from "./token"
 
 export default class Parser {

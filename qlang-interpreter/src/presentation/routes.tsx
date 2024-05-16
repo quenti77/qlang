@@ -5,5 +5,11 @@ export const router = createBrowserRouter([
     {
         path: '/',
         element: <Layout />,
+        children: [
+            {
+                path: '/',
+                element: (<div className="p-4 text-center">HELLO</div>)
+            }
+        ]
     }
 ])

@@ -10,14 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tolgee/react": "^5.26.0",
     "localforage": "^1.10.0",
     "match-sorter": "^6.3.4",
     "monaco-editor": "0.48.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.23.1",
-    "sort-by": "^1.2.0",
-    "theme-change": "^2.5.0"
+    "sort-by": "^1.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",

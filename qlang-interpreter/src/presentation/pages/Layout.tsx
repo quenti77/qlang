@@ -1,8 +1,8 @@
 import { useTranslate } from "@tolgee/react"
 import { IconHome } from "../../infrastructure/icons"
-import { LangSelector } from "../../infrastructure/tolgee/components/LangSelector"
+import { LangSelector } from "../../infrastructure/tolgee/LangSelector"
 import ThemeSwitch from "../../infrastructure/themes/ThemeSwitch"
-import { Outlet } from "react-router-dom"
+import { Link, Outlet } from "react-router-dom"
 
 export default function Layout() {
     const { t } = useTranslate('dashboard')
@@ -29,7 +29,7 @@ export default function Layout() {
                 <label htmlFor="main-drawer" aria-label="close sidebar" className="drawer-overlay"></label>
                 <ul className="menu min-h-full bg-base-200 text-base-content p-0 [&_li>*]:rounded-none">
                     <li className="min-h-12 flex justify-center content-center"><a>QL</a></li>
-                    <li><a><IconHome size="md" /></a></li>
+                    <li><Link to={'/'}><IconHome size="md" /></Link></li>
                 </ul>
             </div>
         </div>

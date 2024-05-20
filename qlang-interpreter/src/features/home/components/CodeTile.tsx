@@ -1,3 +1,4 @@
+import CodeEditor from "@/infrastructure/monacoEditor/components/Editor"
 import Tile from "@/presentation/components/Tile"
 
 import { useTranslate } from "@tolgee/react"
@@ -7,7 +8,7 @@ export default function CodeTile() {
 
     return (
         <Tile title={t('code.title')}>
-            Code tile
+            <CodeEditor />
         </Tile>
     )
 }

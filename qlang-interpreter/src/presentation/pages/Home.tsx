@@ -1,6 +1,6 @@
-import CodeTile from "@/application/home/components/CodeTile"
-import HelpTile from "@/application/home/components/HelpTile"
-import OutputTile from "@/application/home/components/OutputTile"
+import CodeTile from "@/features/home/components/CodeTile"
+import HelpTile from "@/features/home/components/HelpTile"
+import OutputTile from "@/features/home/components/OutputTile"
 
 export default function Home() {
     return (

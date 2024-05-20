@@ -1,51 +1,50 @@
-import { editor as MonacoEditor, MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
+import { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api"
 import { signal } from "@maverick-js/signals"
 
 export default class CodeEditor {
     private el: HTMLElement
-    private value: string = ""
     private editor: MonacoEditor.IStandaloneCodeEditor | null = null
+
+    private value: string = ""
+    private theme: "light" | "dark" = "light"
 
     public get Current() { return this.editor }
 
-    public constructor(el: HTMLElement, initialValue: string = "") {
+    public constructor(el: HTMLElement) {
         this.el = el
-        this.value = initialValue
     }
 
-    public init() {
-        console.log("init")
-        if (this.editor) {
-            return
+    public init(initialValue: string = "") {
+        this.value = initialValue
+        if (this.editor === null) {
+            this.editor = MonacoEditor.create(this.el, this.getOptions())
+        } else {
+            this.editor.updateOptions(this.getOptions())
         }
+    }
 
-        console.log("init editor")
-        this.editor = MonacoEditor.create(this.el, {
+    public setTheme(theme: "light" | "dark") {
+        this.theme = theme
+        if (this.editor) {
+            this.editor.updateOptions(this.getOptions())
+        }
+    }
+
+    private getOptions() {
+        return {
             value: this.value,
             language: "",
-            theme: "",
+            theme: this.theme === "light" ? "vs-light" : "vs-dark",
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             automaticLayout: true,
             fontLigatures: true,
-            fontSize: 18,
+            fontSize: 16,
             fontFamily: "JetBrains Mono, monospace",
             lineHeight: 24,
-            scrollbar: {
-                verticalScrollbarSize: 5,
-                verticalSliderSize: 3,
-                horizontalScrollbarSize: 5,
-                horizontalSliderSize: 3,
-            },
             // https://github.com/microsoft/monaco-editor/issues/2273
             quickSuggestions: { other: true, strings: true },
-        })
-    }
-
-    public removeEditor() {
-        if (this.editor) {
-            this.editor.dispose()
-            this.editor = null
         }
     }
+
 }

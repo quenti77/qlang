@@ -1,33 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
 import CodeEditor from '../signal'
+import useReactive from '@/presentation/hooks/useReactive'
+
+import { useContext, useEffect, useRef, useState } from 'react'
+import { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api"
+import { ThemeContext } from '@/infrastructure/themes/ThemeProvider'
 
 interface EditorProps {
     defaultValue?: string
 }
 
 export default function Editor({ defaultValue }: EditorProps) {
+    const { theme } = useContext(ThemeContext)
     const editorRef = useRef<HTMLDivElement>(null)
-    const [editor, setEditor] = useState<CodeEditor | null>(null)
+
+    const [editor, setEditor] = useReactive<CodeEditor | null>(null)
+    const [value, setValue] = useState(defaultValue || "")
 
     useEffect(() => {
-        console.log({ editor, monacoEditor: editor?.Current, ref: editorRef?.current })
-        if (editor === null && editorRef.current) {
-            const codeEditor = new CodeEditor(editorRef.current, defaultValue)
-            setEditor(codeEditor)
-            return
+        if (editorRef.current && editor && editorRef.current.querySelector('.monaco-editor') === null) {
+            editor.init(value)
         }
-        if (editor && editor.Current === null) {
-            editor.init()
+        if (editorRef.current && !editor && editorRef.current.querySelector('.monaco-editor') === null) {
+            const newEditor = new CodeEditor(editorRef.current)
+            newEditor.init(value)
+
+            setEditor(newEditor)
         }
-        return () => {
-            if (editor) {
-                editor.removeEditor()
-                editor.init()
-            }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editor])
+
+    useEffect(() => {
+        if (editor?.Current) {
+            editor.setTheme(theme)
         }
-    }, [editor, editor?.Current, defaultValue])
+    }, [editor, theme])
 
     return (
-        <div ref={editorRef} style={{ flex: 1, height: '100%' }} />
+        <div ref={editorRef} className="flex-1 flex justify-stretch content-stretch" style={{ height: '94%' }} />
     )
 }

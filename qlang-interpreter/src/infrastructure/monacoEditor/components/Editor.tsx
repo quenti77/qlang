@@ -1,8 +1,7 @@
 import CodeEditor from '../signal'
 import useReactive from '@/presentation/hooks/useReactive'
 
-import { useContext, useEffect, useRef, useState } from 'react'
-import { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api"
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ThemeContext } from '@/infrastructure/themes/ThemeProvider'
 
 interface EditorProps {
@@ -16,6 +15,12 @@ export default function Editor({ defaultValue }: EditorProps) {
     const [editor, setEditor] = useReactive<CodeEditor | null>(null)
     const [value, setValue] = useState(defaultValue || "")
 
+    const onContentChangeHandler = useCallback((event: Event) => {
+        if (event instanceof CustomEvent) {
+            setValue(event.detail)
+        }
+    }, [])
+
     useEffect(() => {
         if (editorRef.current && editor && editorRef.current.querySelector('.monaco-editor') === null) {
             editor.init(value)
@@ -23,8 +28,13 @@ export default function Editor({ defaultValue }: EditorProps) {
         if (editorRef.current && !editor && editorRef.current.querySelector('.monaco-editor') === null) {
             const newEditor = new CodeEditor(editorRef.current)
             newEditor.init(value)
+            newEditor.addEventListener('contentChange', onContentChangeHandler)
 
             setEditor(newEditor)
+        }
+        return () => {
+            if (!(editor instanceof CodeEditor)) return
+            editor?.removeEventListener('contentChange', onContentChangeHandler)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor])

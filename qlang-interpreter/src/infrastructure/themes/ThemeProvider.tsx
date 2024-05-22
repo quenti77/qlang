@@ -9,12 +9,15 @@ interface ThemeContextType {
 
 export const ThemeContext = createContext({} as ThemeContextType)
 
+function isDark() {
+    return localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setTheme] = useState<Theme>('light')
+    const [theme, setTheme] = useState<Theme>(isDark() ? 'dark' : 'light')
 
     useEffect(() => {
-        const isDark = localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
-        setTheme(isDark ? 'dark' : 'light')
+        setTheme(isDark() ? 'dark' : 'light')
     }, [])
 
     useEffect(() => {

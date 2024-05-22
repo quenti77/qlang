@@ -1,7 +1,7 @@
 import { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api"
-import { signal } from "@maverick-js/signals"
+import { LANG_ID } from "./languages/qlang"
 
-export default class CodeEditor {
+export default class CodeEditor extends EventTarget {
     private el: HTMLElement
     private editor: MonacoEditor.IStandaloneCodeEditor | null = null
 
@@ -11,6 +11,7 @@ export default class CodeEditor {
     public get Current() { return this.editor }
 
     public constructor(el: HTMLElement) {
+        super()
         this.el = el
     }
 
@@ -18,6 +19,10 @@ export default class CodeEditor {
         this.value = initialValue
         if (this.editor === null) {
             this.editor = MonacoEditor.create(this.el, this.getOptions())
+            this.editor.onDidChangeModelContent(() => {
+                this.value = this.editor?.getValue() || ""
+                this.dispatchEvent(new CustomEvent('contentChange', { detail: this.value }))
+            })
         } else {
             this.editor.updateOptions(this.getOptions())
         }
@@ -33,7 +38,7 @@ export default class CodeEditor {
     private getOptions() {
         return {
             value: this.value,
-            language: "",
+            language: LANG_ID,
             theme: this.theme === "light" ? "vs-light" : "vs-dark",
             minimap: { enabled: false },
             scrollBeyondLastLine: false,

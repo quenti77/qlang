@@ -9,7 +9,7 @@ export default function Tile({ title, children }: TileProps) {
             <h2 className="rounded-t py-1 px-2 font-bold bg-zinc-50 dark:bg-zinc-900">
                 {title}
             </h2>
-            <div className="rounded-b flex-1 flex justify-stretch content-stretch">
+            <div className="rounded-b flex-1 overflow-auto flex justify-stretch content-stretch">
                 {children}
             </div>
         </div>

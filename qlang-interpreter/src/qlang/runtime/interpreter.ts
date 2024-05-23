@@ -4,6 +4,7 @@ import type {
     BooleanLiteral,
     Identifier,
     NumericLiteral,
+    PrintStatement,
     Program,
     Statement,
     StringLiteral,
@@ -18,13 +19,21 @@ import {
     type RuntimeValue,
 } from "./values"
 import Environment from "./environment"
+import { Std } from "./std"
 
 export default class Interpreter {
 
     private env: Environment
+    private stdOut: Std
+    private stdErr: Std
 
-    constructor(env: Environment) {
+    public get StdOut(): Std { return this.stdOut }
+    public get StdErr(): Std { return this.stdErr }
+
+    constructor(env: Environment, stdOut: Std, stdErr: Std) {
         this.env = env
+        this.stdOut = stdOut
+        this.stdErr = stdErr
     }
 
     public evaluate(astNode: Statement): RuntimeValue {
@@ -35,6 +44,8 @@ export default class Interpreter {
                 return this.evaluateVariableDeclaration(astNode as VariableDeclarationStatement)
             case 'AssignmentExpression':
                 return this.evaluateAssignmentExpression(astNode as AssignmentExpression)
+            case 'PrintStatement':
+                return this.evaluatePrintStatement(astNode as PrintStatement)
             case 'BinaryExpression':
                 return this.evaluateBinaryExpression(astNode as BinaryExpression)
             case 'Identifier':
@@ -68,6 +79,13 @@ export default class Interpreter {
             return value
         }
         this.env.declareVariable(variableDeclaration.identifier, MK_NULL())
+        return MK_NULL()
+    }
+
+    private evaluatePrintStatement(printStatement: PrintStatement): RuntimeValue {
+        const statement = this.evaluate(printStatement.value)
+        this.stdOut.print('value' in statement ? statement.value?.toString() : statement.type)
+
         return MK_NULL()
     }
 

@@ -4,23 +4,46 @@ import Lexer from "@/qlang/lexer"
 import Parser from "@/qlang/parser"
 import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
+import { Std } from "@/qlang/runtime/std"
+import { AlgebraicValue, RuntimeValue } from "@/qlang/runtime/values"
 
 export const LANG_ID = "qlang"
 
 const lexer = new Lexer()
 const parser = new Parser()
 
-export const run = (code: string) => {
+function isAlgebraicValue(runtimeValue: RuntimeValue): runtimeValue is AlgebraicValue {
+    return 'value' in runtimeValue
+}
+
+function formatError(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return 'Unknown error'
+    }
+    return error.message
+}
+
+export const run = (code: string): { out: string[], err: string[] } => {
     lexer.tokenize(code)
     parser.setTokens(lexer.Tokens)
 
-    const ast = parser.makeAST()
+    const stdOut = new Std()
+    const stdErr = new Std()
 
-    const env = new Environment()
-    const interpreter = new Interpreter(env)
-    const results = interpreter.evaluate(ast)
+    try {
+        const ast = parser.makeAST()
+        const env = new Environment()
+        const interpreter = new Interpreter(env, stdOut, stdErr)
+        const result = interpreter.evaluate(ast)
 
-    return 'value' in results ? JSON.parse(JSON.stringify(results.value)) : 'rien'
+        if (isAlgebraicValue(result)) {
+            stdOut.print(result.value === null ? 'rien' : result.value.toString())
+        }
+    } catch (error) {
+        stdErr.print(formatError(error))
+    }
+
+    return { out: stdOut.Log, err: stdErr.Log }
 }
 
 

@@ -1,25 +1,23 @@
 import CodeTile from "@/features/home/components/CodeTile"
 import HelpTile from "@/features/home/components/HelpTile"
-import OutputTile from "@/features/home/components/OutputTile"
+import OutputTile, { OutputRow } from "@/features/home/components/OutputTile"
 import { run } from "@/infrastructure/monacoEditor/languages/qlang"
 import { debounce } from "@/infrastructure/utils"
 import { useState } from "react"
 
 export default function Home() {
     const [code, setCode] = useState<string>("")
-    const [output, setOutput] = useState<string[]>([])
+    const [output, setOutput] = useState<OutputRow[]>([])
 
     const handleContentChange = debounce((content: string) => {
         setCode(content)
 
-        let result = null
-        try {
-            result = run(content)
-        } catch (error) {
-            result = (error as Error).message
-        }
+        const { out, err } = run(content)
+        const standardOutput = out.map((line) => ({ type: 'out', content: line }))
+        const standardError = err.map((line) => ({ type: 'err', content: line }))
 
-        setOutput(() => [result])
+        // setOutput((prev) => [...prev, ...standardOutput, ...standardError] as OutputRow[])
+        setOutput([...standardOutput, ...standardError] as OutputRow[])
     }, 500)
 
     return (

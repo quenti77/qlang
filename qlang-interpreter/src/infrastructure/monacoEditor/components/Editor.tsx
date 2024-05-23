@@ -6,9 +6,10 @@ import { ThemeContext } from '@/infrastructure/themes/ThemeProvider'
 
 interface EditorProps {
     defaultValue?: string
+    contentChangeHandler: (content: string) => void
 }
 
-export default function Editor({ defaultValue }: EditorProps) {
+export default function Editor({ defaultValue, contentChangeHandler }: EditorProps) {
     const { theme } = useContext(ThemeContext)
     const editorRef = useRef<HTMLDivElement>(null)
 
@@ -18,26 +19,27 @@ export default function Editor({ defaultValue }: EditorProps) {
     const onContentChangeHandler = useCallback((event: Event) => {
         if (event instanceof CustomEvent) {
             setValue(event.detail)
+            contentChangeHandler(event.detail)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     useEffect(() => {
         if (editorRef.current && editor && editorRef.current.querySelector('.monaco-editor') === null) {
             editor.init(value)
+            editor.removeEventListener('contentChange', onContentChangeHandler)
+            editor.addEventListener('contentChange', onContentChangeHandler)
         }
         if (editorRef.current && !editor && editorRef.current.querySelector('.monaco-editor') === null) {
             const newEditor = new CodeEditor(editorRef.current)
             newEditor.init(value)
+            newEditor.setTheme(theme)
             newEditor.addEventListener('contentChange', onContentChangeHandler)
 
             setEditor(newEditor)
         }
-        return () => {
-            if (!(editor instanceof CodeEditor)) return
-            editor?.removeEventListener('contentChange', onContentChangeHandler)
-        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [editor])
+    }, [editor, onContentChangeHandler])
 
     useEffect(() => {
         if (editor?.Current) {

@@ -1,7 +1,28 @@
-import { root } from "@maverick-js/signals"
 import { languages } from "monaco-editor"
+import { KEYWORDS } from "@/qlang/token"
+import Lexer from "@/qlang/lexer"
+import Parser from "@/qlang/parser"
+import Environment from "@/qlang/runtime/environment"
+import Interpreter from "@/qlang/runtime/interpreter"
 
 export const LANG_ID = "qlang"
+
+const lexer = new Lexer()
+const parser = new Parser()
+
+export const run = (code: string) => {
+    lexer.tokenize(code)
+    parser.setTokens(lexer.Tokens)
+
+    const ast = parser.makeAST()
+
+    const env = new Environment()
+    const interpreter = new Interpreter(env)
+    const results = interpreter.evaluate(ast)
+
+    return 'value' in results ? JSON.parse(JSON.stringify(results.value)) : 'rien'
+}
+
 
 languages.register({ id: LANG_ID })
 
@@ -24,17 +45,7 @@ languages.setLanguageConfiguration(LANG_ID, {
 })
 
 languages.setMonarchTokensProvider(LANG_ID, {
-    keywords: [
-        'dec',
-        'si',
-        'alors',
-        'sinon',
-        'sinonsi',
-        'fin',
-        'rien',
-        'vrai',
-        'faux',
-    ],
+    keywords: Array.from(Object.keys(KEYWORDS)),
     tokenizer: {
         root: [
             [/REM.*/, "comment"],
@@ -57,7 +68,7 @@ languages.setMonarchTokensProvider(LANG_ID, {
             ],
             [/\d/, "number"],
             [/[ \t\r\n]+/, ""],
-            [/[{}()\[\]]/, "bracket"],
+            [/[{}()[\]]/, "bracket"],
             [/"[^"]*"/, "string"],
             [/'[^']*'/, "string"],
         ],

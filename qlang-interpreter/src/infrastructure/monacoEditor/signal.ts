@@ -44,9 +44,9 @@ export default class CodeEditor extends EventTarget {
             scrollBeyondLastLine: false,
             automaticLayout: true,
             fontLigatures: true,
-            fontSize: 20,
+            fontSize: 16,
             fontFamily: "JetBrains Mono, monospace",
-            lineHeight: 40,
+            lineHeight: 32,
             // https://github.com/microsoft/monaco-editor/issues/2273
             quickSuggestions: { other: true, strings: true },
         }

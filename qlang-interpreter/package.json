@@ -12,6 +12,7 @@
   "dependencies": {
     "@maverick-js/signals": "^5.11.5",
     "@tolgee/react": "^5.26.0",
+    "highlight.js": "^11.9.0",
     "localforage": "^1.10.0",
     "match-sorter": "^6.3.4",
     "monaco-editor": "0.48.0",

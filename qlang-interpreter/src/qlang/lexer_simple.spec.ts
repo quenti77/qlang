@@ -120,8 +120,8 @@ describe("Simple Lexer", () => {
         expect(lexer.Tokens).toEqual([
             createToken(TokenType.Identifier, 'a', 1, 1),
             createToken(TokenType.BinaryOperator, operator, 1, 3),
-            createToken(TokenType.Number, '2', 1, 5),
-            createToken(TokenType.EOF, '', 1, 6),
+            createToken(TokenType.Number, '2', 1, operator.length + 4),
+            createToken(TokenType.EOF, '', 1, operator.length + 5),
         ])
     })
 

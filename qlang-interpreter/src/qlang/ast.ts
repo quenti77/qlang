@@ -3,6 +3,7 @@ export type NodeType =
     | 'Program'
     | 'VariableDeclarationStatement'
     | 'PrintStatement'
+    | 'IfStatement'
     // Expressions
     | 'AssignmentExpression'
     | 'NumericLiteral'
@@ -30,6 +31,13 @@ export interface VariableDeclarationStatement extends Statement {
 export interface PrintStatement extends Statement {
     kind: 'PrintStatement'
     value: Expression
+}
+
+export interface IfStatement extends Statement {
+    kind: 'IfStatement'
+    condition: Expression
+    thenBranch: Statement
+    elseBranch?: Statement
 }
 
 export interface Expression extends Statement { }

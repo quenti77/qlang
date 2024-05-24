@@ -10,7 +10,6 @@ export enum TokenType {
     If = 'if',
     Then = 'then',
     Else = 'else',
-    ElseIf = 'elseif',
     End = 'end',
     Null = 'null',
     Boolean = 'boolean',
@@ -25,6 +24,14 @@ export enum BinaryOperator {
     Multiply = '*',
     Divide = '/',
     Modulus = '%',
+    EqualsEquals = '==',
+    NotEquals = '!=',
+    GreaterThan = '>',
+    LessThan = '<',
+    GreaterThanOrEqual = '>=',
+    LessThanOrEqual = '<=',
+    And = 'et',
+    Or = 'ou',
 }
 
 export interface Token {
@@ -43,13 +50,14 @@ export const KEYWORDS: Record<string, TokenType> = {
     'si': TokenType.If,
     'alors': TokenType.Then,
     'sinon': TokenType.Else,
-    'sinonsi': TokenType.ElseIf,
     'fin': TokenType.End,
     'rien': TokenType.Null,
     'vrai': TokenType.Boolean,
     'faux': TokenType.Boolean,
     'lire': TokenType.Read,
     'ecrire': TokenType.Print,
+    'et': TokenType.BinaryOperator,
+    'ou': TokenType.BinaryOperator,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

@@ -33,14 +33,18 @@ export default class Lexer {
         this.src = this.currentLine.split('')
 
         while (this.src.length > 0) {
-            if (OPERATORS.includes(this.src[0])) {
+            if (OPERATORS.includes(this.src[0]) && !this.isStartLogicalOperator(this.src[0])) {
                 this.pushToken(TokenType.BinaryOperator, this.src.shift()!)
             } else if (this.src[0] === '(') {
                 this.pushToken(TokenType.OpenParenthesis, this.src.shift()!)
             } else if (this.src[0] === ')') {
                 this.pushToken(TokenType.CloseParenthesis, this.src.shift()!)
-            } else if (this.src[0] === '=') {
-                this.pushToken(TokenType.Equals, this.src.shift()!)
+            } else if (this.isStartLogicalOperator(this.src[0])) {
+                let currentChar = this.src.shift()!
+                if (this.src[0] === '=') {
+                    currentChar += this.src.shift()!
+                }
+                this.pushToken(currentChar === '=' ? TokenType.Equals : TokenType.BinaryOperator, currentChar)
             } else if (/[0-9]/.test(this.src[0])) {
                 let number = this.src.shift()!
                 while (/[0-9]/.test(this.src[0])) {
@@ -66,6 +70,10 @@ export default class Lexer {
                 this.col++
             }
         }
+    }
+
+    private isStartLogicalOperator(char: string): boolean {
+        return ['=', '!', '<', '>'].includes(char)
     }
 
     private processString(): void {

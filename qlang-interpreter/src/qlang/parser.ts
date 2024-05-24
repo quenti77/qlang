@@ -4,6 +4,7 @@ import type {
     BooleanLiteral,
     Expression,
     Identifier,
+    IfStatement,
     NullLiteral,
     NumericLiteral,
     PrintStatement,
@@ -45,6 +46,8 @@ export default class Parser {
                 return this.parseVariableDeclarationStatement()
             case TokenType.Print:
                 return this.parsePrintStatement()
+            case TokenType.If:
+                return this.parseIfStatement()
             default:
                 return this.parseExpression()
         }
@@ -79,12 +82,34 @@ export default class Parser {
         } as PrintStatement
     }
 
+    private parseIfStatement(): Statement {
+        this.eatExactly(TokenType.If, 'Expected "si" keyword')
+        const condition = this.parseExpression()
+        this.eatExactly(TokenType.Then, 'Expected "alors" keyword')
+        const thenBranch = this.parseStatement()
+
+        let elseBranch: Statement | undefined = undefined
+        if (this.at().type === TokenType.Else) {
+            this.eatExactly(TokenType.Else, 'Expected "sinon" keyword')
+            elseBranch = this.parseStatement()
+        }
+
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'IfStatement',
+            condition,
+            thenBranch,
+            elseBranch,
+        } as IfStatement
+    }
+
     private parseExpression(): Expression {
         return this.parseAssignmentExpression()
     }
 
     private parseAssignmentExpression(): Expression {
-        const left = this.parseAdditiveExpression()
+        const left = this.parseLogicalExpression()
 
         if (this.at().type === TokenType.Equals) {
             this.eatExactly(TokenType.Equals, 'Expected "="')
@@ -95,6 +120,60 @@ export default class Parser {
                 value: this.parseAssignmentExpression(),
             } as AssignmentExpression
         }
+        return left
+    }
+
+    private parseLogicalExpression(): Expression {
+        let left = this.parseEqualityExpression()
+
+        while (['et', 'ou'].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseEqualityExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
+        return left
+    }
+
+    private parseEqualityExpression(): Expression {
+        let left = this.parseRelationalExpression()
+
+        while (['==', '!='].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseRelationalExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
+        return left
+    }
+
+    private parseRelationalExpression(): Expression {
+        let left = this.parseAdditiveExpression()
+
+        while (['>', '<', '>=', '<='].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseAdditiveExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
         return left
     }
 

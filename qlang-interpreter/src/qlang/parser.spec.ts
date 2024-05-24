@@ -228,4 +228,67 @@ describe("Parser", () => {
             body: [printStatement]
         })
     })
+
+    test("make AST if statement", () => {
+        const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nfin')
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'PrintStatement',
+                value: { kind: 'NumericLiteral', value: 42 }
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST if else statement", () => {
+        const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nsinon\n  ecrire 2\nfin')
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'PrintStatement',
+                value: { kind: 'NumericLiteral', value: 42 }
+            },
+            elseBranch: {
+                kind: 'PrintStatement',
+                value: { kind: 'NumericLiteral', value: 2 }
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST if else if statement", () => {
+        const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nsinon si 2 alors\n  ecrire 2\nfin')
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'PrintStatement',
+                value: { kind: 'NumericLiteral', value: 42 }
+            },
+            elseBranch: {
+                kind: 'IfStatement',
+                condition: { kind: 'NumericLiteral', value: 2 },
+                thenBranch: {
+                    kind: 'PrintStatement',
+                    value: { kind: 'NumericLiteral', value: 2 }
+                }
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
 })

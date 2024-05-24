@@ -48,6 +48,6 @@ export default function Editor({ defaultValue, contentChangeHandler }: EditorPro
     }, [editor, theme])
 
     return (
-        <div ref={editorRef} className="flex-1 flex justify-stretch content-stretch" style={{ height: '94%' }} />
+        <div ref={editorRef} className="flex-1 flex justify-stretch content-stretch overflow-auto" style={{ height: '100%' }} />
     )
 }

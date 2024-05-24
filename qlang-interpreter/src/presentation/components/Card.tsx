@@ -5,7 +5,7 @@ interface TileProps {
 
 export default function Card({ title, children }: TileProps) {
     return (
-        <div className="shadow-md dark:shadow-ld-zinc-600 rounded-xl w-full flex flex-col justify-stretch content-stretch">
+        <div className="shadow-md dark:shadow-ld-zinc-600 rounded-xl w-full flex flex-col justify-stretch content-stretch mb-2">
             <h2 className="rounded-t-xl py-1 px-2 font-bold">
                 {title}
             </h2>

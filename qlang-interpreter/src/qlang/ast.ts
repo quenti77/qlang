@@ -4,6 +4,7 @@ export type NodeType =
     | 'VariableDeclarationStatement'
     | 'PrintStatement'
     | 'IfStatement'
+    | 'BlockStatement'
     // Expressions
     | 'AssignmentExpression'
     | 'NumericLiteral'
@@ -38,6 +39,11 @@ export interface IfStatement extends Statement {
     condition: Expression
     thenBranch: Statement
     elseBranch?: Statement
+}
+
+export interface BlockStatement extends Statement {
+    kind: 'BlockStatement'
+    body: Statement[]
 }
 
 export interface Expression extends Statement { }

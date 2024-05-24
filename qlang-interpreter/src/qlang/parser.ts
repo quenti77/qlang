@@ -1,6 +1,7 @@
 import type {
     AssignmentExpression,
     BinaryExpression,
+    BlockStatement,
     BooleanLiteral,
     Expression,
     Identifier,
@@ -82,19 +83,26 @@ export default class Parser {
         } as PrintStatement
     }
 
-    private parseIfStatement(): Statement {
-        this.eatExactly(TokenType.If, 'Expected "si" keyword')
+    private parseIfStatement(endNeeded: boolean = true): Statement {
+        if (endNeeded) {
+            this.eatExactly(TokenType.If, 'Expected "si" keyword')
+        }
         const condition = this.parseExpression()
         this.eatExactly(TokenType.Then, 'Expected "alors" keyword')
-        const thenBranch = this.parseStatement()
+        const thenBranch = this.parseBlockStatement([TokenType.Else, TokenType.ElseIf])
 
         let elseBranch: Statement | undefined = undefined
         if (this.at().type === TokenType.Else) {
             this.eatExactly(TokenType.Else, 'Expected "sinon" keyword')
-            elseBranch = this.parseStatement()
+            elseBranch = this.parseBlockStatement()
+        } else if (this.at().type === TokenType.ElseIf) {
+            this.eatExactly(TokenType.ElseIf, 'Expected "sinonsi" keyword')
+            elseBranch = this.parseIfStatement(false)
         }
 
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        if (endNeeded) {
+            this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        }
 
         return {
             kind: 'IfStatement',
@@ -102,6 +110,23 @@ export default class Parser {
             thenBranch,
             elseBranch,
         } as IfStatement
+    }
+
+    private parseBlockStatement(withCondition: TokenType[] = []): BlockStatement {
+        const block: BlockStatement = {
+            kind: 'BlockStatement',
+            body: [],
+        }
+
+        while (
+            this.isEOF() === false &&
+            this.at().type !== TokenType.End &&
+            withCondition.includes(this.at().type) === false
+        ) {
+            block.body.push(this.parseStatement())
+        }
+
+        return block
     }
 
     private parseExpression(): Expression {

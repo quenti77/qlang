@@ -229,14 +229,16 @@ describe("Parser", () => {
         })
     })
 
-    test("make AST if statement", () => {
+    test("make AST if statement define block", () => {
         const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nfin')
         const ifStatement = {
             kind: 'IfStatement',
             condition: { kind: 'NumericLiteral', value: 42 },
             thenBranch: {
-                kind: 'PrintStatement',
-                value: { kind: 'NumericLiteral', value: 42 }
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
             }
         }
 
@@ -246,18 +248,29 @@ describe("Parser", () => {
         })
     })
 
-    test("make AST if else statement", () => {
-        const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nsinon\n  ecrire 2\nfin')
+    test("make AST if else statement define blocks", () => {
+        const code = [
+            'si 42 alors',
+            '  ecrire 42',
+            'sinon',
+            '  ecrire 2',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
         const ifStatement = {
             kind: 'IfStatement',
             condition: { kind: 'NumericLiteral', value: 42 },
             thenBranch: {
-                kind: 'PrintStatement',
-                value: { kind: 'NumericLiteral', value: 42 }
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
             },
             elseBranch: {
-                kind: 'PrintStatement',
-                value: { kind: 'NumericLiteral', value: 2 }
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
+                ]
             }
         }
 
@@ -268,22 +281,258 @@ describe("Parser", () => {
     })
 
     test("make AST if else if statement", () => {
-        const ast = makeASTFromInput('si 42 alors\n  ecrire 42\nsinon si 2 alors\n  ecrire 2\nfin')
+        const code = [
+            'si 42 alors',
+            '  ecrire 42',
+            'sinonsi 2 alors',
+            '  ecrire 2',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
         const ifStatement = {
             kind: 'IfStatement',
             condition: { kind: 'NumericLiteral', value: 42 },
             thenBranch: {
-                kind: 'PrintStatement',
-                value: { kind: 'NumericLiteral', value: 42 }
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
             },
             elseBranch: {
                 kind: 'IfStatement',
                 condition: { kind: 'NumericLiteral', value: 2 },
                 thenBranch: {
-                    kind: 'PrintStatement',
-                    value: { kind: 'NumericLiteral', value: 2 }
+                    kind: 'BlockStatement',
+                    body: [
+                        { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
+                    ]
                 }
             }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST if else if else statement", () => {
+        const code = [
+            'si 42 alors',
+            '  ecrire 42',
+            'sinonsi 2 alors',
+            '  ecrire 2',
+            'sinonsi 3 alors',
+            '  ecrire 3',
+            'sinon',
+            '  ecrire 4',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
+            },
+            elseBranch: {
+                kind: 'IfStatement',
+                condition: { kind: 'NumericLiteral', value: 2 },
+                thenBranch: {
+                    kind: 'BlockStatement',
+                    body: [
+                        { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
+                    ]
+                },
+                elseBranch: {
+                    kind: 'IfStatement',
+                    condition: { kind: 'NumericLiteral', value: 3 },
+                    thenBranch: {
+                        kind: 'BlockStatement',
+                        body: [
+                            { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 3 } }
+                        ]
+                    },
+                    elseBranch: {
+                        kind: 'BlockStatement',
+                        body: [
+                            { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 4 } }
+                        ]
+                    }
+                }
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST if else if else statement with nested if", () => {
+        const code = [
+            'si 42 alors',
+            '  ecrire 42',
+            'sinon',
+            '  si 3 alors',
+            '    ecrire 3',
+            '  fin',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
+            },
+            elseBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    {
+                        kind: 'IfStatement',
+                        condition: { kind: 'NumericLiteral', value: 3 },
+                        thenBranch: {
+                            kind: 'BlockStatement',
+                            body: [
+                                { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 3 } }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST IfStatement with multiple statements", () => {
+        const code = [
+            'si 42 alors',
+            '  ecrire 42',
+            '  ecrire 2',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: { kind: 'NumericLiteral', value: 42 },
+            thenBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } },
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
+                ]
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST IfStatement with et and ou", () => {
+        const code = [
+            'si a < b et a < c ou b < c alors',
+            '  ecrire 42',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: {
+                kind: 'BinaryExpression',
+                left: {
+                    kind: 'BinaryExpression',
+                    left: {
+                        kind: 'BinaryExpression',
+                        left: { kind: 'Identifier', name: 'a' },
+                        right: { kind: 'Identifier', name: 'b' },
+                        operator: '<'
+                    },
+                    right: {
+                        kind: 'BinaryExpression',
+                        left: { kind: 'Identifier', name: 'a' },
+                        right: { kind: 'Identifier', name: 'c' },
+                        operator: '<'
+                    },
+                    operator: 'et',
+                },
+                right: {
+                    kind: 'BinaryExpression',
+                    left: { kind: 'Identifier', name: 'b' },
+                    right: { kind: 'Identifier', name: 'c' },
+                    operator: '<'
+                },
+                operator: 'ou'
+            },
+            thenBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
+            },
+            elseBranch: undefined
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [ifStatement]
+        })
+    })
+
+    test("make AST IfStatement with et and ou with parenthesis", () => {
+        const code = [
+            'si a < b et (a < c ou b < c) alors',
+            '  ecrire 42',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const ifStatement = {
+            kind: 'IfStatement',
+            condition: {
+                kind: 'BinaryExpression',
+                left: {
+                    kind: 'BinaryExpression',
+                    left: { kind: 'Identifier', name: 'a' },
+                    right: { kind: 'Identifier', name: 'b' },
+                    operator: '<'
+                },
+                right: {
+                    kind: 'BinaryExpression',
+                    left: {
+                        kind: 'BinaryExpression',
+                        left: { kind: 'Identifier', name: 'a' },
+                        right: { kind: 'Identifier', name: 'c' },
+                        operator: '<'
+                    },
+                    right: {
+                        kind: 'BinaryExpression',
+                        left: { kind: 'Identifier', name: 'b' },
+                        right: { kind: 'Identifier', name: 'c' },
+                        operator: '<'
+                    },
+                    operator: 'ou',
+                },
+                operator: 'et'
+            },
+            thenBranch: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
+            },
+            elseBranch: undefined
         }
 
         expect(ast).toEqual({

@@ -2,6 +2,7 @@ export type NodeType =
     // Statements
     | 'Program'
     | 'VariableDeclarationStatement'
+    | 'PrintStatement'
     // Expressions
     | 'AssignmentExpression'
     | 'NumericLiteral'
@@ -24,6 +25,11 @@ export interface VariableDeclarationStatement extends Statement {
     kind: 'VariableDeclarationStatement'
     identifier: string
     value?: Expression
+}
+
+export interface PrintStatement extends Statement {
+    kind: 'PrintStatement'
+    value: Expression
 }
 
 export interface Expression extends Statement { }

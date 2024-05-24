@@ -4,7 +4,9 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import Environment from "./environment"
-import type { BooleanValue, NumberValue, StringValue } from "./values"
+import type { BooleanValue, NullValue, NumberValue, StringValue } from "./values"
+import { Std } from "./std"
+import { Program } from "../ast"
 
 describe("Interpreter", () => {
 
@@ -12,8 +14,10 @@ describe("Interpreter", () => {
     let parser: Parser
     let interpreter: Interpreter
     let env: Environment
+    let stdOut: Std
+    let stdErr: Std
 
-    const makeASTFromInput = (input: string): any => {
+    const makeASTFromInput = (input: string): Program => {
         lexer.tokenize(input)
         parser.setTokens(lexer.Tokens)
         return parser.makeAST()
@@ -23,7 +27,10 @@ describe("Interpreter", () => {
         lexer = new Lexer()
         parser = new Parser()
         env = new Environment()
-        interpreter = new Interpreter(env)
+        stdOut = new Std()
+        stdErr = new Std()
+
+        interpreter = new Interpreter(env, stdOut, stdErr)
     })
 
     test('evaluate simple numeric expression', () => {
@@ -116,5 +123,13 @@ describe("Interpreter", () => {
 
         expect(result).toEqual({ type: 'string', value: 'hello' } as StringValue)
         expect(env.lookupVariable('a')).toEqual({ type: 'string', value: 'hello' } as StringValue)
+    })
+
+    test('evaluate print statement', () => {
+        const ast = makeASTFromInput('ecrire 42')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['42'])
     })
 })

@@ -1,7 +1,7 @@
-import Lexer from "./src/lexer"
-import Parser from "./src/parser"
-import Environment from "./src/runtime/environment"
-import Interpreter from "./src/runtime/interpreter"
+import Lexer from "./qlang-interpreter/src/qlang/lexer"
+import Parser from "./qlang-interpreter/src/qlang/parser"
+import Environment from "./qlang-interpreter/src/qlang/runtime/environment"
+import Interpreter from "./qlang-interpreter/src/qlang/runtime/interpreter"
 
 function cli() {
     const lexer = new Lexer()

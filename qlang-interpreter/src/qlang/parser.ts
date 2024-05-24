@@ -6,6 +6,7 @@ import type {
     Identifier,
     NullLiteral,
     NumericLiteral,
+    PrintStatement,
     Program,
     Statement,
     StringLiteral,
@@ -42,6 +43,8 @@ export default class Parser {
         switch (this.at().type) {
             case TokenType.Let:
                 return this.parseVariableDeclarationStatement()
+            case TokenType.Print:
+                return this.parsePrintStatement()
             default:
                 return this.parseExpression()
         }
@@ -65,6 +68,15 @@ export default class Parser {
             kind: 'VariableDeclarationStatement',
             identifier,
         } as VariableDeclarationStatement
+    }
+
+    private parsePrintStatement(): Statement {
+        this.eatExactly(TokenType.Print, 'Expected "ecrire" keyword')
+
+        return {
+            kind: 'PrintStatement',
+            value: this.parseExpression(),
+        } as PrintStatement
     }
 
     private parseExpression(): Expression {
@@ -137,12 +149,13 @@ export default class Parser {
                 return { kind: "NumericLiteral", value: parseFloat(this.eat().value) } as NumericLiteral
             case TokenType.String:
                 return { kind: "StringLiteral", value: this.eat().value } as StringLiteral
-            case TokenType.OpenParenthesis:
+            case TokenType.OpenParenthesis: {
                 this.eat()
                 const expression = this.parseExpression()
                 this.eatExactly(TokenType.CloseParenthesis, 'Expected closing parenthesis')
 
                 return expression
+            }
             default:
                 throw new Error(`Unexpected token type: ${tokenType}`)
         }

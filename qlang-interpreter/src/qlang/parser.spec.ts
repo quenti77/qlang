@@ -215,4 +215,17 @@ describe("Parser", () => {
             body: [variableDeclaration]
         })
     })
+
+    test("make AST print statement", () => {
+        const ast = makeASTFromInput('ecrire 42')
+        const printStatement = {
+            kind: 'PrintStatement',
+            value: { kind: 'NumericLiteral', value: 42 }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [printStatement]
+        })
+    })
 })

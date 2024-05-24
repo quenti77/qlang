@@ -14,6 +14,8 @@ export enum TokenType {
     End = 'end',
     Null = 'null',
     Boolean = 'boolean',
+    Read = 'read',
+    Print = 'print',
     EOF = 'eof',
 }
 
@@ -46,6 +48,8 @@ export const KEYWORDS: Record<string, TokenType> = {
     'rien': TokenType.Null,
     'vrai': TokenType.Boolean,
     'faux': TokenType.Boolean,
+    'lire': TokenType.Read,
+    'ecrire': TokenType.Print,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

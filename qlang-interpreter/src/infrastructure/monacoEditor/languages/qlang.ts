@@ -55,7 +55,7 @@ languages.setLanguageConfiguration(LANG_ID, {
         ["(", ")"],
     ],
     comments: {
-        lineComment: "REM",
+        lineComment: "rem",
     },
     autoClosingPairs: [
         { open: "[", close: "]" },
@@ -71,7 +71,7 @@ languages.setMonarchTokensProvider(LANG_ID, {
     keywords: Array.from(Object.keys(KEYWORDS)),
     tokenizer: {
         root: [
-            [/REM.*/, "comment"],
+            [/rem.*/, "comment"],
             [/[+\-/*<>=%]/, "delimiter"],
             [
                 /[a-zA-Z_]\w*/,

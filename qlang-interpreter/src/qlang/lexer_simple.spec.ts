@@ -160,4 +160,21 @@ describe("Simple Lexer", () => {
         ])
     })
 
+    test("tokenize a comment line", () => {
+        lexer.tokenize('rem this is a comment')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.EOF, '', 1, 22),
+        ])
+    })
+
+    test("tokenize end of line comments", () => {
+        lexer.tokenize('a = 1 rem this is a comment')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Identifier, 'a', 1, 1),
+            createToken(TokenType.Equals, '=', 1, 3),
+            createToken(TokenType.Number, '1', 1, 5),
+            createToken(TokenType.EOF, '', 1, 28),
+        ])
+    })
+
 })

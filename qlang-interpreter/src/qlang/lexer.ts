@@ -63,6 +63,13 @@ export default class Lexer {
                 if (typeof reserved === 'string') {
                     this.pushToken(reserved, token)
                 } else {
+                    if (token === 'rem') {
+                        this.addCol(token)
+                        while (this.src.length > 0) {
+                            this.eat()
+                        }
+                        break
+                    }
                     this.pushToken(TokenType.Identifier, token)
                 }
             } else {
@@ -122,6 +129,10 @@ export default class Lexer {
         this.col++
 
         return currentChar
+    }
+
+    private addCol(char: string): void {
+        this.col += char.length
     }
 
     private pushToken(type: TokenType, value: string, line: number = this.row, column: number = this.col) {

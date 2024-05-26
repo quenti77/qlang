@@ -2,7 +2,7 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, IfStatement, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement } from "./ast"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, ForStatement, Identifier, IfStatement, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement, WhileStatement } from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -538,6 +538,112 @@ describe("Parser", () => {
         expect(ast).toEqual({
             kind: 'Program',
             body: [ifStatement]
+        })
+    })
+
+    test("make AST while statement", () => {
+        const code = [
+            'tantque vrai alors',
+            '  ecrire 42',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const whileStatement = {
+            kind: 'WhileStatement',
+            condition: { kind: 'BooleanLiteral', value: true },
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
+                ]
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [whileStatement as WhileStatement]
+        })
+    })
+
+    test("make AST for statement", () => {
+        const code = [
+            'pour abc de 1 jusque 10 evol 2 alors',
+            '  ecrire abc',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const forStatement = {
+            kind: 'ForStatement',
+            identifier: 'abc',
+            from: { kind: 'NumericLiteral', value: 1 },
+            until: {
+                kind: 'BinaryExpression',
+                left: { kind: 'Identifier', name: 'abc' },
+                right: { kind: 'NumericLiteral', value: 10 },
+                operator: '<='
+            },
+            step: {
+                kind: 'AssignmentExpression',
+                assignment: { kind: 'Identifier', name: 'abc' },
+                value: {
+                    kind: 'BinaryExpression',
+                    left: { kind: 'Identifier', name: 'abc' },
+                    right: { kind: 'NumericLiteral', value: 2 },
+                    operator: '+'
+                }
+            },
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'abc' } }
+                ]
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [forStatement as ForStatement]
+        })
+    })
+
+    test("make AST for statement without evol", () => {
+        const code = [
+            'pour abc de 1 jusque 10 alors',
+            '  ecrire abc',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const forStatement = {
+            kind: 'ForStatement',
+            identifier: 'abc',
+            from: { kind: 'NumericLiteral', value: 1 },
+            until: {
+                kind: 'BinaryExpression',
+                left: { kind: 'Identifier', name: 'abc' },
+                right: { kind: 'NumericLiteral', value: 10 },
+                operator: '<='
+            },
+            step: {
+                kind: 'AssignmentExpression',
+                assignment: { kind: 'Identifier', name: 'abc' },
+                value: {
+                    kind: 'BinaryExpression',
+                    left: { kind: 'Identifier', name: 'abc' },
+                    right: { kind: 'NumericLiteral', value: 1 },
+                    operator: '+'
+                }
+            },
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'abc' } }
+                ]
+            }
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [forStatement as ForStatement]
         })
     })
 })

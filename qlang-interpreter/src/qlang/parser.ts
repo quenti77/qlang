@@ -4,6 +4,7 @@ import type {
     BlockStatement,
     BooleanLiteral,
     Expression,
+    ForStatement,
     Identifier,
     IfStatement,
     NullLiteral,
@@ -14,6 +15,7 @@ import type {
     StringLiteral,
     UnaryExpression,
     VariableDeclarationStatement,
+    WhileStatement,
 } from "./ast"
 import { TokenType, type Token } from "./token"
 
@@ -50,6 +52,10 @@ export default class Parser {
                 return this.parsePrintStatement()
             case TokenType.If:
                 return this.parseIfStatement()
+            case TokenType.While:
+                return this.parseWhileStatement()
+            case TokenType.For:
+                return this.parseForStatement()
             default:
                 return this.parseExpression()
         }
@@ -111,6 +117,67 @@ export default class Parser {
             thenBranch,
             elseBranch,
         } as IfStatement
+    }
+
+    private parseWhileStatement(): Statement {
+        this.eatExactly(TokenType.While, 'Expected "tantque" keyword')
+        const condition = this.parseExpression()
+        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+
+        const body = this.parseBlockStatement()
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'WhileStatement',
+            condition,
+            body,
+        } as WhileStatement
+    }
+
+    private parseForStatement(): Statement {
+        this.eatExactly(TokenType.For, 'Expected "pour" keyword')
+        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier')
+        this.eatExactly(TokenType.From, 'Expected "de" keyword')
+        const from = this.parseExpression()
+
+        this.eatExactly(TokenType.Until, 'Expected "jusque" keyword')
+        const until = {
+            kind: 'BinaryExpression',
+            left: { kind: 'Identifier', name: identifier.value },
+            right: this.parseExpression(),
+            operator: '<=',
+        } as BinaryExpression
+
+        const token = this.at().type
+        let step = { kind: 'NumericLiteral', value: 1 } as Expression
+        if (token === TokenType.Step) {
+            this.eatExactly(TokenType.Step, 'Expected "evol" keyword')
+            step = this.parseExpression()
+        }
+
+        step = {
+            kind: 'AssignmentExpression',
+            assignment: { kind: 'Identifier', name: identifier.value },
+            value: {
+                kind: 'BinaryExpression',
+                left: { kind: 'Identifier', name: identifier.value },
+                right: step,
+                operator: '+',
+            } as BinaryExpression,
+        } as AssignmentExpression
+
+        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        const body = this.parseBlockStatement()
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'ForStatement',
+            identifier: identifier.value,
+            from,
+            until,
+            step,
+            body,
+        } as ForStatement
     }
 
     private parseBlockStatement(withCondition: TokenType[] = []): BlockStatement {

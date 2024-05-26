@@ -209,5 +209,4 @@ describe("Simple Lexer", () => {
             createToken(TokenType.EOF, '', 1, 6),
         ])
     })
-
 })

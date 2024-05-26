@@ -223,4 +223,32 @@ describe("Interpreter", () => {
         const ast = makeASTFromInput(code.join('\n'))
         expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
     })
+
+    test('evaluate while statement', () => {
+        const code = [
+            'dec i = 0',
+            'tantque i < 3 alors',
+            '    ecrire i',
+            '    i = i + 1',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['0', '1', '2'])
+    })
+
+    test('evaluate for statement', () => {
+        const code = [
+            'pour i de 0 jusque 3 alors',
+            '    ecrire i',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['0', '1', '2', '3'])
+    })
 })

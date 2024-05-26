@@ -4,6 +4,8 @@ export type NodeType =
     | 'VariableDeclarationStatement'
     | 'PrintStatement'
     | 'IfStatement'
+    | 'WhileStatement'
+    | 'ForStatement'
     | 'BlockStatement'
     // Expressions
     | 'AssignmentExpression'
@@ -40,6 +42,21 @@ export interface IfStatement extends Statement {
     condition: Expression
     thenBranch: Statement
     elseBranch?: Statement
+}
+
+export interface WhileStatement extends Statement {
+    kind: 'WhileStatement'
+    condition: Expression
+    body: Statement
+}
+
+export interface ForStatement extends Statement {
+    kind: 'ForStatement'
+    identifier: string
+    from: Expression
+    until: Expression
+    step: Expression
+    body: Statement
 }
 
 export interface BlockStatement extends Statement {

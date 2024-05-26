@@ -3,6 +3,7 @@ import type {
     BinaryExpression,
     BlockStatement,
     BooleanLiteral,
+    ForStatement,
     Identifier,
     IfStatement,
     NumericLiteral,
@@ -12,6 +13,7 @@ import type {
     StringLiteral,
     UnaryExpression,
     VariableDeclarationStatement,
+    WhileStatement,
 } from "../ast"
 import {
     MK_BOOLEAN,
@@ -53,6 +55,10 @@ export default class Interpreter {
                 return this.evaluateBlockStatement(astNode as BlockStatement)
             case 'IfStatement':
                 return this.evaluateIfStatement(astNode as IfStatement)
+            case 'WhileStatement':
+                return this.evaluateWhileStatement(astNode as WhileStatement)
+            case 'ForStatement':
+                return this.evaluateForStatement(astNode as ForStatement)
             case 'UnaryExpression':
                 return this.evaluateUnaryExpression(astNode as UnaryExpression)
             case 'BinaryExpression':
@@ -125,6 +131,32 @@ export default class Interpreter {
             this.env = this.env.Parent!
             return result
         }
+
+        return MK_NULL()
+    }
+
+    private evaluateWhileStatement(whileStatement: WhileStatement): RuntimeValue {
+        this.env = new Environment(this.env)
+        while ((this.evaluate(whileStatement.condition) as AlgebraicValue).value) {
+            this.evaluate(whileStatement.body)
+        }
+        this.env = this.env.Parent!
+
+        return MK_NULL()
+    }
+
+    private evaluateForStatement(forStatement: ForStatement): RuntimeValue {
+        this.env = new Environment(this.env)
+        if (this.env.resolve(forStatement.identifier, false) === null) {
+            this.env.declareVariable(forStatement.identifier, MK_NULL())
+        }
+        this.env.assignVariable(forStatement.identifier, this.evaluate(forStatement.from))
+
+        while ((this.evaluate(forStatement.until) as AlgebraicValue).value) {
+            this.evaluate(forStatement.body)
+            this.evaluate(forStatement.step)
+        }
+        this.env = this.env.Parent!
 
         return MK_NULL()
     }

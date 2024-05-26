@@ -65,6 +65,11 @@ languages.setLanguageConfiguration(LANG_ID, {
     surroundingPairs: [
         { open: '"', close: '"' },
     ],
+    indentationRules: {
+        increaseIndentPattern: /.*\b(si|pour|tantque|pour chaque)\b.*\b(alors)\b.*/,
+        decreaseIndentPattern: /^\s*\b(sinon|sinonsi|fin)\b.*$/,
+        indentNextLinePattern: /.*\b(sinon|sinonsi)\b.*\b(alors)?\b.*/,
+    },
 })
 
 languages.setMonarchTokensProvider(LANG_ID, {
@@ -95,5 +100,5 @@ languages.setMonarchTokensProvider(LANG_ID, {
             [/"[^"]*"/, "string"],
             [/'[^']*'/, "string"],
         ],
-    }
+    },
 })

@@ -43,13 +43,16 @@ export default class CodeEditor extends EventTarget {
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             automaticLayout: true,
+            autoIndent: "full",
+            formatOnPaste: true,
+            formatOnType: true,
             fontLigatures: true,
             fontSize: 16,
             fontFamily: "JetBrains Mono, monospace",
             lineHeight: 32,
             // https://github.com/microsoft/monaco-editor/issues/2273
             quickSuggestions: { other: true, strings: true },
-        }
+        } as MonacoEditor.IEditorOptions & MonacoEditor.IGlobalEditorOptions
     }
 
 }

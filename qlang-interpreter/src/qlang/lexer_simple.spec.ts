@@ -177,4 +177,37 @@ describe("Simple Lexer", () => {
         ])
     })
 
+    test("tokenize unary operator", () => {
+        lexer.tokenize('-1')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.UnaryOperator, '-', 1, 1),
+            createToken(TokenType.Number, '1', 1, 2),
+            createToken(TokenType.EOF, '', 1, 3),
+        ])
+    })
+
+    test("tokenize unary operator with parenthesis", () => {
+        lexer.tokenize('-(1 + 2)')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.UnaryOperator, '-', 1, 1),
+            createToken(TokenType.OpenParenthesis, '(', 1, 2),
+            createToken(TokenType.Number, '1', 1, 3),
+            createToken(TokenType.BinaryOperator, '+', 1, 5),
+            createToken(TokenType.Number, '2', 1, 7),
+            createToken(TokenType.CloseParenthesis, ')', 1, 8),
+            createToken(TokenType.EOF, '', 1, 9),
+        ])
+    })
+
+    test("tokenize unary operator with binary operator", () => {
+        lexer.tokenize('1 --a')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Number, '1', 1, 1),
+            createToken(TokenType.BinaryOperator, '-', 1, 3),
+            createToken(TokenType.UnaryOperator, '-', 1, 4),
+            createToken(TokenType.Identifier, 'a', 1, 5),
+            createToken(TokenType.EOF, '', 1, 6),
+        ])
+    })
+
 })

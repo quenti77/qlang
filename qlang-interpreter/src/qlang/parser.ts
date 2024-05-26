@@ -12,6 +12,7 @@ import type {
     Program,
     Statement,
     StringLiteral,
+    UnaryExpression,
     VariableDeclarationStatement,
 } from "./ast"
 import { TokenType, type Token } from "./token"
@@ -221,11 +222,11 @@ export default class Parser {
     }
 
     private parseMultiplicitaveExpression(): Expression {
-        let left = this.parsePrimaryExpression()
+        let left = this.parseUnaryExpression()
 
         while (['*', '/', '%'].includes(this.at().value)) {
             const operator = this.eat().value
-            const right = this.parsePrimaryExpression()
+            const right = this.parseUnaryExpression()
 
             left = {
                 kind: 'BinaryExpression',
@@ -236,6 +237,21 @@ export default class Parser {
         }
 
         return left
+    }
+
+    private parseUnaryExpression(): Expression {
+        if (this.at().type === TokenType.UnaryOperator) {
+            const operator = this.eat().value
+            const value = this.parseUnaryExpression()
+
+            return {
+                kind: 'UnaryExpression',
+                operator,
+                value,
+            } as UnaryExpression
+        }
+
+        return this.parsePrimaryExpression()
     }
 
     private parsePrimaryExpression(): Expression {

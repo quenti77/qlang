@@ -2,6 +2,7 @@ export enum TokenType {
     Number = 'number',
     String = 'string',
     Identifier = 'identifier',
+    UnaryOperator = 'unary_operator',
     BinaryOperator = 'binary_operator',
     Equals = 'equals',
     OpenParenthesis = 'open_parenthesis',
@@ -17,6 +18,11 @@ export enum TokenType {
     Read = 'read',
     Print = 'print',
     EOF = 'eof',
+}
+
+export enum UnaryOperator {
+    Minus = '-',
+    Not = 'non',
 }
 
 export enum BinaryOperator {
@@ -60,6 +66,7 @@ export const KEYWORDS: Record<string, TokenType> = {
     'ecrire': TokenType.Print,
     'et': TokenType.BinaryOperator,
     'ou': TokenType.BinaryOperator,
+    'non': TokenType.UnaryOperator,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

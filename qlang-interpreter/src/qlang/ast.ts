@@ -7,12 +7,13 @@ export type NodeType =
     | 'BlockStatement'
     // Expressions
     | 'AssignmentExpression'
+    | 'UnaryExpression'
+    | 'BinaryExpression'
     | 'NumericLiteral'
     | 'StringLiteral'
     | 'NullLiteral'
     | 'BooleanLiteral'
     | 'Identifier'
-    | 'BinaryExpression'
 
 export interface Statement {
     kind: NodeType
@@ -54,6 +55,12 @@ export interface AssignmentExpression extends Expression {
     value: Expression
 }
 
+export interface UnaryExpression extends Expression {
+    kind: 'UnaryExpression'
+    operator: string
+    value: Expression
+}
+
 export interface BinaryExpression extends Expression {
     kind: 'BinaryExpression'
     left: Expression
@@ -66,22 +73,26 @@ export interface Identifier extends Expression {
     name: string
 }
 
-export interface NumericLiteral extends Expression {
+export interface Literal {
+    kind: NodeType
+}
+
+export interface NumericLiteral extends Literal {
     kind: 'NumericLiteral'
     value: number
 }
 
-export interface StringLiteral extends Expression {
+export interface StringLiteral extends Literal {
     kind: 'StringLiteral'
     value: string
 }
 
-export interface NullLiteral extends Expression {
+export interface NullLiteral extends Literal {
     kind: 'NullLiteral'
     value: 'null'
 }
 
-export interface BooleanLiteral extends Expression {
+export interface BooleanLiteral extends Literal {
     kind: 'BooleanLiteral'
     value: boolean
 }

@@ -5,6 +5,10 @@ export default class Environment {
     private parent?: Environment
     private variables: Map<string, RuntimeValue>
 
+    public get Parent(): Environment | undefined {
+        return this.parent
+    }
+
     constructor(parentEnv?: Environment) {
         this.parent = parentEnv
         this.variables = new Map()

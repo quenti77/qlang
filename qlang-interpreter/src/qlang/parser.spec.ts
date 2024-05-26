@@ -2,14 +2,14 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { BinaryExpression, Identifier, NullLiteral, NumericLiteral } from "./ast"
+import type { AssignmentExpression, BinaryExpression, BooleanLiteral, Identifier, IfStatement, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement } from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
     let lexer: Lexer
     let parser: Parser
 
-    const makeASTFromInput = (input: string): any => {
+    const makeASTFromInput = (input: string): Program => {
         lexer.tokenize(input)
         parser.setTokens(lexer.Tokens)
         return parser.makeAST()
@@ -59,7 +59,7 @@ describe("Parser", () => {
             left: leftExpr,
             right: rightExpr,
             operator
-        }
+        } as BinaryExpression
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -81,7 +81,7 @@ describe("Parser", () => {
             left: leftExpr,
             right: rightExpr,
             operator: '*'
-        }
+        } as BinaryExpression
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -95,7 +95,7 @@ describe("Parser", () => {
 
         expect(ast).toEqual({
             kind: 'Program',
-            body: [booleanLiteral]
+            body: [booleanLiteral as BooleanLiteral]
         })
     })
 
@@ -105,7 +105,7 @@ describe("Parser", () => {
             kind: 'VariableDeclarationStatement',
             identifier: 'abc',
             value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
-        }
+        } as VariableDeclarationStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -124,7 +124,7 @@ describe("Parser", () => {
                 right: { kind: 'NumericLiteral', value: 2 } as NumericLiteral,
                 operator: '+'
             } as BinaryExpression
-        }
+        } as VariableDeclarationStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -137,7 +137,7 @@ describe("Parser", () => {
         const variableDeclaration = {
             kind: 'VariableDeclarationStatement',
             identifier: 'abc'
-        }
+        } as VariableDeclarationStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -151,12 +151,12 @@ describe("Parser", () => {
             kind: 'VariableDeclarationStatement',
             identifier: 'abc',
             value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
-        }
+        } as VariableDeclarationStatement
         const assignment = {
             kind: 'AssignmentExpression',
             assignment: { kind: 'Identifier', name: 'abc' } as Identifier,
             value: { kind: 'NumericLiteral', value: 2 } as NumericLiteral
-        }
+        } as AssignmentExpression
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -170,12 +170,12 @@ describe("Parser", () => {
             kind: 'VariableDeclarationStatement',
             identifier: 'abc',
             value: { kind: 'NumericLiteral', value: 42 } as NumericLiteral
-        }
+        } as VariableDeclarationStatement
         const variableDeclaration2 = {
             kind: 'VariableDeclarationStatement',
             identifier: 'def',
             value: { kind: 'Identifier', name: 'abc' } as Identifier
-        }
+        } as VariableDeclarationStatement
         const assignment = {
             kind: 'AssignmentExpression',
             assignment: { kind: 'Identifier', name: 'abc' } as Identifier,
@@ -184,7 +184,7 @@ describe("Parser", () => {
                 assignment: { kind: 'Identifier', name: 'def' } as Identifier,
                 value: { kind: 'NumericLiteral', value: 2 } as NumericLiteral
             }
-        }
+        } as AssignmentExpression
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -198,7 +198,7 @@ describe("Parser", () => {
 
         expect(ast).toEqual({
             kind: 'Program',
-            body: [stringLiteral]
+            body: [stringLiteral as StringLiteral]
         })
     })
 
@@ -208,7 +208,7 @@ describe("Parser", () => {
             kind: 'VariableDeclarationStatement',
             identifier: 'abc',
             value: { kind: 'StringLiteral', value: 'hello\nworld' }
-        }
+        } as VariableDeclarationStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -221,7 +221,7 @@ describe("Parser", () => {
         const printStatement = {
             kind: 'PrintStatement',
             value: { kind: 'NumericLiteral', value: 42 }
-        }
+        } as PrintStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -240,7 +240,7 @@ describe("Parser", () => {
                     { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 42 } }
                 ]
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -272,7 +272,7 @@ describe("Parser", () => {
                     { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
                 ]
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -308,7 +308,7 @@ describe("Parser", () => {
                     ]
                 }
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -364,7 +364,7 @@ describe("Parser", () => {
                     }
                 }
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -407,7 +407,7 @@ describe("Parser", () => {
                     }
                 ]
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -433,7 +433,7 @@ describe("Parser", () => {
                     { kind: 'PrintStatement', value: { kind: 'NumericLiteral', value: 2 } }
                 ]
             }
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -483,7 +483,7 @@ describe("Parser", () => {
                 ]
             },
             elseBranch: undefined
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',
@@ -533,7 +533,7 @@ describe("Parser", () => {
                 ]
             },
             elseBranch: undefined
-        }
+        } as IfStatement
 
         expect(ast).toEqual({
             kind: 'Program',

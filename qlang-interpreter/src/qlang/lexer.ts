@@ -33,8 +33,10 @@ export default class Lexer {
         this.src = this.currentLine.split('')
 
         while (this.src.length > 0) {
-            if (OPERATORS.includes(this.src[0]) && !this.isStartLogicalOperator(this.src[0])) {
+            if (this.processOperator()) {
                 this.pushToken(TokenType.BinaryOperator, this.src.shift()!)
+            } else if (this.src[0] === '-') {
+                this.pushToken(TokenType.UnaryOperator, this.src.shift()!)
             } else if (this.src[0] === '(') {
                 this.pushToken(TokenType.OpenParenthesis, this.src.shift()!)
             } else if (this.src[0] === ')') {
@@ -77,6 +79,21 @@ export default class Lexer {
                 this.col++
             }
         }
+    }
+
+    private processOperator(): boolean {
+        if (this.isStartLogicalOperator(this.src[0])) {
+            return false
+        }
+        if (!OPERATORS.includes(this.src[0])) {
+            return false
+        }
+
+        if (this.src[0] === '-' && /[a-zA-Z0-9_]|\(|\)/.test(this.src[1] ?? '')) {
+            return false
+        }
+
+        return true
     }
 
     private isStartLogicalOperator(char: string): boolean {

@@ -1,0 +1,15 @@
+{
+  "code.title" : "Code Editor",
+  "help.condition.intro" : "A condition is a way <strong>to execute code</strong> based on the <strong>result of an expression</strong> that returns \"true\" or equivalent to \"true\"",
+  "help.condition.title" : "Conditions",
+  "help.loop.break" : "Finally, there are 2 instructions. The first which allows you to end a loop with <strong>arret</strong> and the second which allows you to skip the following instructions and move on to the next round directly via <strong>continuer</strong>",
+  "help.loop.for" : "The second loop is <strong>for</strong> and this allows you to loop a defined number of times.",
+  "help.loop.intro" : "Loops allow you to <strong>repeat</strong> a set of instructions a certain number of times. There are several types of loops.",
+  "help.loop.title" : "Loops",
+  "help.loop.while" : "The first loop is <strong>tantque</strong> which allows, as its name suggests, to repeat a set of instructions as long as the condition remains <strong>vrai</strong>. The number of iterations is not defined.",
+  "help.title" : "Language Manual",
+  "help.variable.intro" : "A variable allows you to store <strong class=\"text-green\">information</strong> in memory.",
+  "help.variable.title" : "Variable manipulation",
+  "output.title" : "Output",
+  "title" : "QLang interpreter"
+}

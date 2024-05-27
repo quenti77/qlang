@@ -1,4 +1,9 @@
 import { Tolgee, DevTools, FormatSimple, LanguageDetector, LanguageStorage } from "@tolgee/react"
+import frDashboard from "./dashboard/fr-FR.json"
+import enDashboard from "./dashboard/en.json"
+import jaDashboard from "./dashboard/ja-JP.json"
+
+console.log(frDashboard)
 
 export const tolgee = Tolgee()
     .use(DevTools())
@@ -10,9 +15,9 @@ export const tolgee = Tolgee()
         defaultLanguage: 'fr-FR',
         ns: ['dashboard'],
 
-        // for development
-        apiUrl: import.meta.env.VITE_APP_TOLGEE_API_URL,
-        apiKey: import.meta.env.VITE_APP_TOLGEE_API_KEY,
-
-        staticData: {},
+        staticData: {
+            'fr-FR:dashboard': frDashboard,
+            'en:dashboard': enDashboard,
+            'ja-JP:dashboard': jaDashboard,
+        },
     })

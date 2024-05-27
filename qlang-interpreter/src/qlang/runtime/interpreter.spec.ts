@@ -253,7 +253,7 @@ describe("Interpreter", () => {
     })
 
     const breakStatements = [
-        { statement: 'arret', expected: { type: 'break' } as BreakValue },
+        { statement: 'arreter', expected: { type: 'break' } as BreakValue },
         { statement: 'continuer', expected: { type: 'continue' } as ContinueValue },
         { statement: 'retour 42', expected: { type: 'return', value: 42 } as ReturnValue },
     ]

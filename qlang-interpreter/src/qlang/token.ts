@@ -72,7 +72,7 @@ export const KEYWORDS: Record<string, TokenType> = {
     'sinon': TokenType.Else,
     'sinonsi': TokenType.ElseIf,
     'fin': TokenType.End,
-    'arret': TokenType.Break,
+    'arreter': TokenType.Break,
     'continuer': TokenType.Continue,
     'retour': TokenType.Return,
     'rien': TokenType.Null,

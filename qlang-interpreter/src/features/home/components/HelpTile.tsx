@@ -25,19 +25,23 @@ tantque condition alors
 fin`, { language: "qlang" }).value
 
 const simpleFor = hljs.highlight(`rem Boucle pour
-pour i de 1 à 10 evol 2 faire rem evol est optionnel
+pour i de 1 jusque 10 alors
+    rem Code à exécuter
+fin
+rem evol est optionnel et par défaut à 1
+pour i de 1 jusque 10 evol 2 alors
     rem Code à exécuter
 fin`, { language: "qlang" }).value
 
 const simpleBreak = hljs.highlight(`rem Sortie de boucle
-pour i de 1 à 10 alors
-    si i = 5 alors
+pour i de 1 jusque 10 alors
+    si i == 5 alors
         continuer
     fin
 fin
-tantque vrai faire
+tantque vrai alors
     si condition alors
-        sortir
+        arreter
     fin
 fin`, { language: "qlang" }).value
 

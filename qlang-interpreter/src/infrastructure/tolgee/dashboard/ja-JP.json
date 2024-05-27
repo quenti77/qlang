@@ -1,15 +1,15 @@
 {
-  "code.title" : "コードエディター",
-  "help.condition.intro" : "条件は、\"true\" または \"true\" と同等のものを返す<strong>式の結果</strong>に基づいて<strong>コードを実行する</strong>方法です",
-  "help.condition.title" : "条件",
-  "help.loop.break" : "最後に手順が2つあります。 1 つ目では<strong>arret</strong> でループを終了でき、2 つ目では次の手順をスキップして<strong>continuer</strong> で直接次のラウンドに進むことができます。",
-  "help.loop.for" : "2 番目のループは<strong>for</strong>で、これにより、定義された回数だけループすることができます。",
-  "help.loop.intro" : "ループは、一定回数の指示を<strong>繰り返す</strong>ためのものです。いくつかの種類があります。",
-  "help.loop.title" : "ループ",
-  "help.loop.while" : "最初のループは<strong>tantque</strong>で、その名前が示すように、条件が<strong>vrai</strong>の間、一連の命令を繰り返します。回数は定義されていません。",
-  "help.title" : "言語マニュアル",
-  "help.variable.intro" : "変数は<strong class=\"text-green\">情報</strong>を記憶するために使用されます。",
-  "help.variable.title" : "変数の操作",
-  "output.title" : "結果",
-  "title" : "QLang 解釈"
+  "code.title": "コードエディター",
+  "help.condition.intro": "条件は、\"true\" または \"true\" と同等のものを返す<strong>式の結果</strong>に基づいて<strong>コードを実行する</strong>方法です",
+  "help.condition.title": "条件",
+  "help.loop.break": "最後に手順が2つあります。 1 つ目では<strong>arreter</strong> でループを終了でき、2 つ目では次の手順をスキップして<strong>continuer</strong> で直接次のラウンドに進むことができます。",
+  "help.loop.for": "2 番目のループは<strong>for</strong>で、これにより、定義された回数だけループすることができます。",
+  "help.loop.intro": "ループは、一定回数の指示を<strong>繰り返す</strong>ためのものです。いくつかの種類があります。",
+  "help.loop.title": "ループ",
+  "help.loop.while": "最初のループは<strong>tantque</strong>で、その名前が示すように、条件が<strong>vrai</strong>の間、一連の命令を繰り返します。回数は定義されていません。",
+  "help.title": "言語マニュアル",
+  "help.variable.intro": "変数は<strong class=\"text-green\">情報</strong>を記憶するために使用されます。",
+  "help.variable.title": "変数の操作",
+  "output.title": "結果",
+  "title": "QLang 解釈"
 }

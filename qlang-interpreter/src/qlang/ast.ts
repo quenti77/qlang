@@ -3,14 +3,19 @@ export type NodeType =
     | 'Program'
     | 'VariableDeclarationStatement'
     | 'PrintStatement'
+    | 'IfStatement'
+    | 'WhileStatement'
+    | 'ForStatement'
+    | 'BlockStatement'
     // Expressions
     | 'AssignmentExpression'
+    | 'UnaryExpression'
+    | 'BinaryExpression'
     | 'NumericLiteral'
     | 'StringLiteral'
     | 'NullLiteral'
     | 'BooleanLiteral'
     | 'Identifier'
-    | 'BinaryExpression'
 
 export interface Statement {
     kind: NodeType
@@ -32,11 +37,44 @@ export interface PrintStatement extends Statement {
     value: Expression
 }
 
+export interface IfStatement extends Statement {
+    kind: 'IfStatement'
+    condition: Expression
+    thenBranch: Statement
+    elseBranch?: Statement
+}
+
+export interface WhileStatement extends Statement {
+    kind: 'WhileStatement'
+    condition: Expression
+    body: Statement
+}
+
+export interface ForStatement extends Statement {
+    kind: 'ForStatement'
+    identifier: string
+    from: Expression
+    until: Expression
+    step: Expression
+    body: Statement
+}
+
+export interface BlockStatement extends Statement {
+    kind: 'BlockStatement'
+    body: Statement[]
+}
+
 export interface Expression extends Statement { }
 
 export interface AssignmentExpression extends Expression {
     kind: 'AssignmentExpression'
     assignment: Expression
+    value: Expression
+}
+
+export interface UnaryExpression extends Expression {
+    kind: 'UnaryExpression'
+    operator: string
     value: Expression
 }
 
@@ -52,22 +90,26 @@ export interface Identifier extends Expression {
     name: string
 }
 
-export interface NumericLiteral extends Expression {
+export interface Literal {
+    kind: NodeType
+}
+
+export interface NumericLiteral extends Literal {
     kind: 'NumericLiteral'
     value: number
 }
 
-export interface StringLiteral extends Expression {
+export interface StringLiteral extends Literal {
     kind: 'StringLiteral'
     value: string
 }
 
-export interface NullLiteral extends Expression {
+export interface NullLiteral extends Literal {
     kind: 'NullLiteral'
     value: 'null'
 }
 
-export interface BooleanLiteral extends Expression {
+export interface BooleanLiteral extends Literal {
     kind: 'BooleanLiteral'
     value: boolean
 }

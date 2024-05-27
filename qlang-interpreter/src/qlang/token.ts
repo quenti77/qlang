@@ -2,6 +2,7 @@ export enum TokenType {
     Number = 'number',
     String = 'string',
     Identifier = 'identifier',
+    UnaryOperator = 'unary_operator',
     BinaryOperator = 'binary_operator',
     Equals = 'equals',
     OpenParenthesis = 'open_parenthesis',
@@ -10,13 +11,23 @@ export enum TokenType {
     If = 'if',
     Then = 'then',
     Else = 'else',
-    ElseIf = 'elseif',
+    ElseIf = 'else_if',
     End = 'end',
+    While = 'while',
+    For = 'for',
+    From = 'from',
+    Until = 'until',
+    Step = 'step',
     Null = 'null',
     Boolean = 'boolean',
     Read = 'read',
     Print = 'print',
     EOF = 'eof',
+}
+
+export enum UnaryOperator {
+    Minus = '-',
+    Not = 'non',
 }
 
 export enum BinaryOperator {
@@ -25,6 +36,14 @@ export enum BinaryOperator {
     Multiply = '*',
     Divide = '/',
     Modulus = '%',
+    EqualsEquals = '==',
+    NotEquals = '!=',
+    GreaterThan = '>',
+    LessThan = '<',
+    GreaterThanOrEqual = '>=',
+    LessThanOrEqual = '<=',
+    And = 'et',
+    Or = 'ou',
 }
 
 export interface Token {
@@ -41,6 +60,11 @@ export function createToken(type: TokenType, value: string, line: number, column
 export const KEYWORDS: Record<string, TokenType> = {
     'dec': TokenType.Let,
     'si': TokenType.If,
+    'pour': TokenType.For,
+    'de': TokenType.From,
+    'jusque': TokenType.Until,
+    'evol': TokenType.Step,
+    'tantque': TokenType.While,
     'alors': TokenType.Then,
     'sinon': TokenType.Else,
     'sinonsi': TokenType.ElseIf,
@@ -50,6 +74,9 @@ export const KEYWORDS: Record<string, TokenType> = {
     'faux': TokenType.Boolean,
     'lire': TokenType.Read,
     'ecrire': TokenType.Print,
+    'et': TokenType.BinaryOperator,
+    'ou': TokenType.BinaryOperator,
+    'non': TokenType.UnaryOperator,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

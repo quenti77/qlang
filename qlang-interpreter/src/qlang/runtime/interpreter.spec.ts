@@ -132,4 +132,123 @@ describe("Interpreter", () => {
         expect(result).toEqual({ type: 'null', value: null } as NullValue)
         expect(stdOut.Log).toEqual(['42'])
     })
+
+    test('evaluate unary minus epxression', () => {
+        const ast = makeASTFromInput('dec a = -42\na = -a')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'number', value: 42 } as NumberValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'number', value: 42 } as NumberValue)
+    })
+
+    test('evaluate unary not epxression', () => {
+        const ast = makeASTFromInput('dec a = non vrai')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'boolean', value: false } as BooleanValue)
+        expect(env.lookupVariable('a')).toEqual({ type: 'boolean', value: false } as BooleanValue)
+    })
+
+    test('evaluate if statement', () => {
+        const ast = makeASTFromInput('si vrai alors\n  ecrire 42\nfin')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['42'])
+    })
+
+    test('evaluate if else statement', () => {
+        const ast = makeASTFromInput('si faux alors\n  ecrire 42\nsinon\n  ecrire 24\nfin')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['24'])
+    })
+
+    test('evaluate if else if statement', () => {
+        const ast = makeASTFromInput('si faux alors\n  ecrire 42\nsinonsi vrai alors\n  ecrire 24\nfin')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['24'])
+    })
+
+    test('evaluate if else if else statement', () => {
+        const ast = makeASTFromInput('si faux alors\n  ecrire 42\nsinonsi faux alors\n  ecrire 24\nsinon\n  ecrire 12\nfin')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['12'])
+    })
+
+    test('evaluate and right side short circuit', () => {
+        const code = [
+            'dec age = 15',
+            'dec isEvaluate = faux',
+            'si age >= 18 et (isEvaluate = vrai) alors',
+            '    ecrire "Vous êtes majeur"',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual([])
+        expect(env.lookupVariable('isEvaluate')).toEqual({ type: 'boolean', value: false } as BooleanValue)
+    })
+
+    test('evaluate or right side short circuit', () => {
+        const code = [
+            'dec age = 20',
+            'dec isEvaluate = faux',
+            'si age >= 18 ou (isEvaluate = vrai) alors',
+            '    ecrire "Vous êtes majeur"',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['Vous êtes majeur'])
+        expect(env.lookupVariable('isEvaluate')).toEqual({ type: 'boolean', value: false } as BooleanValue)
+    })
+
+    test('evaluate declation and assignment in if statement throw an error outside if', () => {
+        const code = [
+            'si vrai alors',
+            '    dec a = 42',
+            'fin',
+            'a'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+    })
+
+    test('evaluate while statement', () => {
+        const code = [
+            'dec i = 0',
+            'tantque i < 3 alors',
+            '    ecrire i',
+            '    i = i + 1',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['0', '1', '2'])
+    })
+
+    test('evaluate for statement', () => {
+        const code = [
+            'pour i de 0 jusque 3 alors',
+            '    ecrire i',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['0', '1', '2', '3'])
+    })
 })

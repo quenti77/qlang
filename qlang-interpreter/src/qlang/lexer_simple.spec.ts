@@ -120,8 +120,8 @@ describe("Simple Lexer", () => {
         expect(lexer.Tokens).toEqual([
             createToken(TokenType.Identifier, 'a', 1, 1),
             createToken(TokenType.BinaryOperator, operator, 1, 3),
-            createToken(TokenType.Number, '2', 1, 5),
-            createToken(TokenType.EOF, '', 1, 6),
+            createToken(TokenType.Number, '2', 1, operator.length + 4),
+            createToken(TokenType.EOF, '', 1, operator.length + 5),
         ])
     })
 
@@ -160,4 +160,53 @@ describe("Simple Lexer", () => {
         ])
     })
 
+    test("tokenize a comment line", () => {
+        lexer.tokenize('rem this is a comment')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.EOF, '', 1, 22),
+        ])
+    })
+
+    test("tokenize end of line comments", () => {
+        lexer.tokenize('a = 1 rem this is a comment')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Identifier, 'a', 1, 1),
+            createToken(TokenType.Equals, '=', 1, 3),
+            createToken(TokenType.Number, '1', 1, 5),
+            createToken(TokenType.EOF, '', 1, 28),
+        ])
+    })
+
+    test("tokenize unary operator", () => {
+        lexer.tokenize('-1')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.UnaryOperator, '-', 1, 1),
+            createToken(TokenType.Number, '1', 1, 2),
+            createToken(TokenType.EOF, '', 1, 3),
+        ])
+    })
+
+    test("tokenize unary operator with parenthesis", () => {
+        lexer.tokenize('-(1 + 2)')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.UnaryOperator, '-', 1, 1),
+            createToken(TokenType.OpenParenthesis, '(', 1, 2),
+            createToken(TokenType.Number, '1', 1, 3),
+            createToken(TokenType.BinaryOperator, '+', 1, 5),
+            createToken(TokenType.Number, '2', 1, 7),
+            createToken(TokenType.CloseParenthesis, ')', 1, 8),
+            createToken(TokenType.EOF, '', 1, 9),
+        ])
+    })
+
+    test("tokenize unary operator with binary operator", () => {
+        lexer.tokenize('1 --a')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Number, '1', 1, 1),
+            createToken(TokenType.BinaryOperator, '-', 1, 3),
+            createToken(TokenType.UnaryOperator, '-', 1, 4),
+            createToken(TokenType.Identifier, 'a', 1, 5),
+            createToken(TokenType.EOF, '', 1, 6),
+        ])
+    })
 })

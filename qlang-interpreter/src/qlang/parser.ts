@@ -1,16 +1,21 @@
 import type {
     AssignmentExpression,
     BinaryExpression,
+    BlockStatement,
     BooleanLiteral,
     Expression,
+    ForStatement,
     Identifier,
+    IfStatement,
     NullLiteral,
     NumericLiteral,
     PrintStatement,
     Program,
     Statement,
     StringLiteral,
+    UnaryExpression,
     VariableDeclarationStatement,
+    WhileStatement,
 } from "./ast"
 import { TokenType, type Token } from "./token"
 
@@ -45,6 +50,12 @@ export default class Parser {
                 return this.parseVariableDeclarationStatement()
             case TokenType.Print:
                 return this.parsePrintStatement()
+            case TokenType.If:
+                return this.parseIfStatement()
+            case TokenType.While:
+                return this.parseWhileStatement()
+            case TokenType.For:
+                return this.parseForStatement()
             default:
                 return this.parseExpression()
         }
@@ -79,12 +90,119 @@ export default class Parser {
         } as PrintStatement
     }
 
+    private parseIfStatement(endNeeded: boolean = true): Statement {
+        if (endNeeded) {
+            this.eatExactly(TokenType.If, 'Expected "si" keyword')
+        }
+        const condition = this.parseExpression()
+        this.eatExactly(TokenType.Then, 'Expected "alors" keyword')
+        const thenBranch = this.parseBlockStatement([TokenType.Else, TokenType.ElseIf])
+
+        let elseBranch: Statement | undefined = undefined
+        if (this.at().type === TokenType.Else) {
+            this.eatExactly(TokenType.Else, 'Expected "sinon" keyword')
+            elseBranch = this.parseBlockStatement()
+        } else if (this.at().type === TokenType.ElseIf) {
+            this.eatExactly(TokenType.ElseIf, 'Expected "sinonsi" keyword')
+            elseBranch = this.parseIfStatement(false)
+        }
+
+        if (endNeeded) {
+            this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        }
+
+        return {
+            kind: 'IfStatement',
+            condition,
+            thenBranch,
+            elseBranch,
+        } as IfStatement
+    }
+
+    private parseWhileStatement(): Statement {
+        this.eatExactly(TokenType.While, 'Expected "tantque" keyword')
+        const condition = this.parseExpression()
+        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+
+        const body = this.parseBlockStatement()
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'WhileStatement',
+            condition,
+            body,
+        } as WhileStatement
+    }
+
+    private parseForStatement(): Statement {
+        this.eatExactly(TokenType.For, 'Expected "pour" keyword')
+        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier')
+        this.eatExactly(TokenType.From, 'Expected "de" keyword')
+        const from = this.parseExpression()
+
+        this.eatExactly(TokenType.Until, 'Expected "jusque" keyword')
+        const until = {
+            kind: 'BinaryExpression',
+            left: { kind: 'Identifier', name: identifier.value },
+            right: this.parseExpression(),
+            operator: '<=',
+        } as BinaryExpression
+
+        const token = this.at().type
+        let step = { kind: 'NumericLiteral', value: 1 } as Expression
+        if (token === TokenType.Step) {
+            this.eatExactly(TokenType.Step, 'Expected "evol" keyword')
+            step = this.parseExpression()
+        }
+
+        step = {
+            kind: 'AssignmentExpression',
+            assignment: { kind: 'Identifier', name: identifier.value },
+            value: {
+                kind: 'BinaryExpression',
+                left: { kind: 'Identifier', name: identifier.value },
+                right: step,
+                operator: '+',
+            } as BinaryExpression,
+        } as AssignmentExpression
+
+        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        const body = this.parseBlockStatement()
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'ForStatement',
+            identifier: identifier.value,
+            from,
+            until,
+            step,
+            body,
+        } as ForStatement
+    }
+
+    private parseBlockStatement(withCondition: TokenType[] = []): BlockStatement {
+        const block: BlockStatement = {
+            kind: 'BlockStatement',
+            body: [],
+        }
+
+        while (
+            this.isEOF() === false &&
+            this.at().type !== TokenType.End &&
+            withCondition.includes(this.at().type) === false
+        ) {
+            block.body.push(this.parseStatement())
+        }
+
+        return block
+    }
+
     private parseExpression(): Expression {
         return this.parseAssignmentExpression()
     }
 
     private parseAssignmentExpression(): Expression {
-        const left = this.parseAdditiveExpression()
+        const left = this.parseLogicalExpression()
 
         if (this.at().type === TokenType.Equals) {
             this.eatExactly(TokenType.Equals, 'Expected "="')
@@ -95,6 +213,60 @@ export default class Parser {
                 value: this.parseAssignmentExpression(),
             } as AssignmentExpression
         }
+        return left
+    }
+
+    private parseLogicalExpression(): Expression {
+        let left = this.parseEqualityExpression()
+
+        while (['et', 'ou'].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseEqualityExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
+        return left
+    }
+
+    private parseEqualityExpression(): Expression {
+        let left = this.parseRelationalExpression()
+
+        while (['==', '!='].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseRelationalExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
+        return left
+    }
+
+    private parseRelationalExpression(): Expression {
+        let left = this.parseAdditiveExpression()
+
+        while (['>', '<', '>=', '<='].includes(this.at().value)) {
+            const operator = this.eat().value
+            const right = this.parseAdditiveExpression()
+
+            left = {
+                kind: 'BinaryExpression',
+                left,
+                right,
+                operator,
+            } as BinaryExpression
+        }
+
         return left
     }
 
@@ -117,11 +289,11 @@ export default class Parser {
     }
 
     private parseMultiplicitaveExpression(): Expression {
-        let left = this.parsePrimaryExpression()
+        let left = this.parseUnaryExpression()
 
         while (['*', '/', '%'].includes(this.at().value)) {
             const operator = this.eat().value
-            const right = this.parsePrimaryExpression()
+            const right = this.parseUnaryExpression()
 
             left = {
                 kind: 'BinaryExpression',
@@ -132,6 +304,21 @@ export default class Parser {
         }
 
         return left
+    }
+
+    private parseUnaryExpression(): Expression {
+        if (this.at().type === TokenType.UnaryOperator) {
+            const operator = this.eat().value
+            const value = this.parseUnaryExpression()
+
+            return {
+                kind: 'UnaryExpression',
+                operator,
+                value,
+            } as UnaryExpression
+        }
+
+        return this.parsePrimaryExpression()
     }
 
     private parsePrimaryExpression(): Expression {

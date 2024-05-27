@@ -33,14 +33,20 @@ export default class Lexer {
         this.src = this.currentLine.split('')
 
         while (this.src.length > 0) {
-            if (OPERATORS.includes(this.src[0])) {
+            if (this.processOperator()) {
                 this.pushToken(TokenType.BinaryOperator, this.src.shift()!)
+            } else if (this.src[0] === '-') {
+                this.pushToken(TokenType.UnaryOperator, this.src.shift()!)
             } else if (this.src[0] === '(') {
                 this.pushToken(TokenType.OpenParenthesis, this.src.shift()!)
             } else if (this.src[0] === ')') {
                 this.pushToken(TokenType.CloseParenthesis, this.src.shift()!)
-            } else if (this.src[0] === '=') {
-                this.pushToken(TokenType.Equals, this.src.shift()!)
+            } else if (this.isStartLogicalOperator(this.src[0])) {
+                let currentChar = this.src.shift()!
+                if (this.src[0] === '=') {
+                    currentChar += this.src.shift()!
+                }
+                this.pushToken(currentChar === '=' ? TokenType.Equals : TokenType.BinaryOperator, currentChar)
             } else if (/[0-9]/.test(this.src[0])) {
                 let number = this.src.shift()!
                 while (/[0-9]/.test(this.src[0])) {
@@ -59,6 +65,13 @@ export default class Lexer {
                 if (typeof reserved === 'string') {
                     this.pushToken(reserved, token)
                 } else {
+                    if (token === 'rem') {
+                        this.addCol(token)
+                        while (this.src.length > 0) {
+                            this.eat()
+                        }
+                        break
+                    }
                     this.pushToken(TokenType.Identifier, token)
                 }
             } else {
@@ -66,6 +79,25 @@ export default class Lexer {
                 this.col++
             }
         }
+    }
+
+    private processOperator(): boolean {
+        if (this.isStartLogicalOperator(this.src[0])) {
+            return false
+        }
+        if (!OPERATORS.includes(this.src[0])) {
+            return false
+        }
+
+        if (this.src[0] === '-' && /[a-zA-Z0-9_]|\(|\)/.test(this.src[1] ?? '')) {
+            return false
+        }
+
+        return true
+    }
+
+    private isStartLogicalOperator(char: string): boolean {
+        return ['=', '!', '<', '>'].includes(char)
     }
 
     private processString(): void {
@@ -114,6 +146,10 @@ export default class Lexer {
         this.col++
 
         return currentChar
+    }
+
+    private addCol(char: string): void {
+        this.col += char.length
     }
 
     private pushToken(type: TokenType, value: string, line: number = this.row, column: number = this.col) {

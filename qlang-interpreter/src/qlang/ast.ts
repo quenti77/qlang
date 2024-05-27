@@ -7,6 +7,9 @@ export type NodeType =
     | 'WhileStatement'
     | 'ForStatement'
     | 'BlockStatement'
+    | 'BreakStatement'
+    | 'ContinueStatement'
+    | 'ReturnStatement'
     // Expressions
     | 'AssignmentExpression'
     | 'UnaryExpression'
@@ -62,6 +65,19 @@ export interface ForStatement extends Statement {
 export interface BlockStatement extends Statement {
     kind: 'BlockStatement'
     body: Statement[]
+}
+
+export interface BreakStatement extends Statement {
+    kind: 'BreakStatement'
+}
+
+export interface ContinueStatement extends Statement {
+    kind: 'ContinueStatement'
+}
+
+export interface ReturnStatement extends Statement {
+    kind: 'ReturnStatement'
+    value: Expression
 }
 
 export interface Expression extends Statement { }

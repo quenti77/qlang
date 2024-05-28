@@ -41,18 +41,20 @@ export default class Lexer {
                 this.pushToken(TokenType.OpenParenthesis, this.src.shift()!)
             } else if (this.src[0] === ')') {
                 this.pushToken(TokenType.CloseParenthesis, this.src.shift()!)
+            } else if (this.src[0] === '[') {
+                this.pushToken(TokenType.OpenBrackets, this.src.shift()!)
+            } else if (this.src[0] === ']') {
+                this.pushToken(TokenType.CloseBrackets, this.src.shift()!)
+            } else if (this.src[0] === ',') {
+                this.pushToken(TokenType.Comma, this.src.shift()!)
             } else if (this.isStartLogicalOperator(this.src[0])) {
                 let currentChar = this.src.shift()!
                 if (this.src[0] === '=') {
                     currentChar += this.src.shift()!
                 }
                 this.pushToken(currentChar === '=' ? TokenType.Equals : TokenType.BinaryOperator, currentChar)
-            } else if (/[0-9]/.test(this.src[0])) {
-                let number = this.src.shift()!
-                while (/[0-9]/.test(this.src[0])) {
-                    number += this.src.shift()!
-                }
-                this.pushToken(TokenType.Number, number)
+            } else if (this.src[0] === '.' || this.isNumber(this.src[0])) {
+                this.processNumber()
             } else if (this.src[0] === '"') {
                 this.processString()
             } else if (this.isIdentifier(this.src[0], false)) {
@@ -98,6 +100,23 @@ export default class Lexer {
 
     private isStartLogicalOperator(char: string): boolean {
         return ['=', '!', '<', '>'].includes(char)
+    }
+
+    private processNumber(): void {
+        let token = this.src.shift()!
+        let hasDot = token === '.'
+
+        while (this.hasMoreChars() && (this.isNumber(this.src[0]) || this.src[0] === '.')) {
+            if (this.src[0] === '.') {
+                if (hasDot) {
+                    throw new Error('Invalid number')
+                }
+                hasDot = true
+            }
+            token += this.src.shift()!
+        }
+
+        this.pushToken(TokenType.Number, token)
     }
 
     private processString(): void {
@@ -164,6 +183,17 @@ export default class Lexer {
         return withNumber
             ? /[a-zA-Z0-9_]/.test(token)
             : /[a-zA-Z_]/.test(token)
+    }
+
+    private isNumber(token: string | undefined): boolean {
+        if (token === undefined) {
+            return false
+        }
+        return token.charCodeAt(0) >= 48 && token.charCodeAt(0) <= 57
+    }
+
+    private hasMoreChars(): boolean {
+        return this.src.length > 0
     }
 
     private hasMoreLines(): boolean {

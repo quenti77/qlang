@@ -11,6 +11,14 @@ describe("Simple Lexer", () => {
         lexer = new Lexer()
     })
 
+    test('tokenize float numbers', () => {
+        lexer.tokenize('1.2')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.Number, '1.2', 1, 1),
+            createToken(TokenType.EOF, '', 1, 4),
+        ])
+    })
+
     test("tokenize an simple math expression", () => {
         const input = '40 + 20 * 60 - 40 / 30'
         lexer.tokenize(input)

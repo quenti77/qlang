@@ -40,6 +40,16 @@ describe("Parser", () => {
         })
     })
 
+    test("make AST simple float numeric literal", () => {
+        const ast = makeASTFromInput('42.42')
+        const numericLiteral: NumericLiteral = { kind: 'NumericLiteral', value: 42.42 }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [numericLiteral]
+        })
+    })
+
     test("make AST simple null expression", () => {
         const ast = makeASTFromInput('rien')
         const nullLiteral: NullLiteral = { kind: 'NullLiteral', value: 'null' }

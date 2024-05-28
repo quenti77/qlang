@@ -1,4 +1,4 @@
-import { languages } from "monaco-editor"
+import { languages, editor, type Position } from "monaco-editor"
 import { KEYWORDS } from "@/qlang/token"
 import Lexer from "@/qlang/lexer"
 import Parser from "@/qlang/parser"
@@ -6,6 +6,7 @@ import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
 import { Std } from "@/qlang/runtime/std"
 import { AlgebraicValue, RuntimeValue } from "@/qlang/runtime/values"
+import ITextModel = editor.ITextModel
 
 export const LANG_ID = "qlang"
 
@@ -101,4 +102,52 @@ languages.setMonarchTokensProvider(LANG_ID, {
             [/'[^']*'/, "string"],
         ],
     },
+})
+
+const extendedSuggestions = {
+    dec: `dec \${1:nom}`,
+    fonction: `fonction \${1:nom}($2)
+    $3
+fin`,
+    ecrire: `ecrire $1`,
+    si: `si \${1:condition} alors
+    $2
+fin`,
+    tantque: `tantque \${1:condition} alors
+    $2
+fin`,
+    pour: `pour \${1:indentifiant} de $2 jusque $3 alors
+    $3
+fin`,
+}
+
+const suggestions = Object.keys(KEYWORDS).map((label) => {
+    if (label in extendedSuggestions) {
+        return [label, extendedSuggestions[label as keyof typeof extendedSuggestions]]
+    }
+    return [label, label]
+})
+
+languages.registerCompletionItemProvider(LANG_ID, {
+    provideCompletionItems: (
+        model: ITextModel,
+        position: Position,
+    ): languages.ProviderResult<languages.CompletionList> => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+        };
+        return {
+            suggestions: suggestions.map(([label, insertText]) => ({
+                label,
+                insertText,
+                kind: languages.CompletionItemKind.Keyword,
+                insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                range: range,
+            })),
+        }
+    }
 })

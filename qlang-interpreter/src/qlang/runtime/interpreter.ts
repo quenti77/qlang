@@ -9,6 +9,7 @@ import type {
     NumericLiteral,
     PrintStatement,
     Program,
+    ReturnStatement,
     Statement,
     StringLiteral,
     UnaryExpression,
@@ -16,10 +17,13 @@ import type {
     WhileStatement,
 } from "../ast"
 import {
+    BreakValue,
+    ContinueValue,
     MK_BOOLEAN,
     MK_NULL,
     MK_NUMBER,
     MK_STRING,
+    ReturnValue,
     type AlgebraicValue,
     type RuntimeValue,
 } from "./values"
@@ -108,7 +112,23 @@ export default class Interpreter {
         let lastEvaluated: RuntimeValue = MK_NULL()
 
         for (const statement of blockStatement.body) {
+            if (statement.kind === 'BreakStatement') {
+                return { type: 'break' } as BreakValue
+            }
+            if (statement.kind === 'ContinueStatement') {
+                return { type: 'continue' } as ContinueValue
+            }
+            if (statement.kind === 'ReturnStatement') {
+                const result = this.evaluate((statement as ReturnStatement).value) as AlgebraicValue
+                return {
+                    type: 'return',
+                    value: result.value,
+                } as ReturnValue
+            }
             lastEvaluated = this.evaluate(statement)
+            if (lastEvaluated.type === 'break' || lastEvaluated.type === 'continue' || lastEvaluated.type === 'return') {
+                return lastEvaluated
+            }
         }
         return lastEvaluated
     }
@@ -138,10 +158,17 @@ export default class Interpreter {
     private evaluateWhileStatement(whileStatement: WhileStatement): RuntimeValue {
         this.env = new Environment(this.env)
         while ((this.evaluate(whileStatement.condition) as AlgebraicValue).value) {
-            this.evaluate(whileStatement.body)
+            const result = this.evaluate(whileStatement.body)
+            if (result.type === 'break') {
+                break
+            }
+            if (result.type === 'return') {
+                this.env = this.env.Parent!
+                return result
+            }
         }
-        this.env = this.env.Parent!
 
+        this.env = this.env.Parent!
         return MK_NULL()
     }
 
@@ -153,7 +180,14 @@ export default class Interpreter {
         this.env.assignVariable(forStatement.identifier, this.evaluate(forStatement.from))
 
         while ((this.evaluate(forStatement.until) as AlgebraicValue).value) {
-            this.evaluate(forStatement.body)
+            const result = this.evaluate(forStatement.body)
+            if (result.type === 'break') {
+                break
+            }
+            if (result.type === 'return') {
+                this.env = this.env.Parent!
+                return result
+            }
             this.evaluate(forStatement.step)
         }
         this.env = this.env.Parent!

@@ -11,6 +11,7 @@ import type {
     NumericLiteral,
     PrintStatement,
     Program,
+    ReturnStatement,
     Statement,
     StringLiteral,
     UnaryExpression,
@@ -56,6 +57,14 @@ export default class Parser {
                 return this.parseWhileStatement()
             case TokenType.For:
                 return this.parseForStatement()
+            case TokenType.Break:
+                this.eat()
+                return { kind: 'BreakStatement' } as Statement
+            case TokenType.Continue:
+                this.eat()
+                return { kind: 'ContinueStatement' } as Statement
+            case TokenType.Return:
+                return this.parseReturnStatement()
             default:
                 return this.parseExpression()
         }
@@ -195,6 +204,15 @@ export default class Parser {
         }
 
         return block
+    }
+
+    private parseReturnStatement(): Statement {
+        this.eatExactly(TokenType.Return, 'Expected "retour" keyword')
+
+        return {
+            kind: 'ReturnStatement',
+            value: this.parseExpression(),
+        } as ReturnStatement
     }
 
     private parseExpression(): Expression {

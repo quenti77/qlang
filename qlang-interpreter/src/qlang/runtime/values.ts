@@ -1,11 +1,30 @@
-export type ValueType = 'null' | 'number' | 'boolean' | 'string'
+export type ValueType =
+    | 'null'
+    | 'number'
+    | 'boolean'
+    | 'string'
+    | 'break'
+    | 'continue'
+    | 'return'
 
 export interface RuntimeValue {
     type: ValueType
 }
 
+export interface BreakValue extends RuntimeValue {
+    type: 'break'
+}
+
+export interface ContinueValue extends RuntimeValue {
+    type: 'continue'
+}
+
 export interface AlgebraicValue extends RuntimeValue {
     value: number | string | boolean | null
+}
+
+export interface ReturnValue extends AlgebraicValue {
+    type: 'return'
 }
 
 export interface NullValue extends AlgebraicValue {

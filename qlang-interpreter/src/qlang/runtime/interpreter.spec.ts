@@ -4,9 +4,9 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import Environment from "./environment"
-import type { BooleanValue, NullValue, NumberValue, StringValue } from "./values"
+import type { BooleanValue, BreakValue, ContinueValue, NullValue, NumberValue, ReturnValue, StringValue } from "./values"
 import { Std } from "./std"
-import { Program } from "../ast"
+import { Program, WhileStatement } from "../ast"
 
 describe("Interpreter", () => {
 
@@ -250,5 +250,40 @@ describe("Interpreter", () => {
 
         expect(result).toEqual({ type: 'null', value: null } as NullValue)
         expect(stdOut.Log).toEqual(['0', '1', '2', '3'])
+    })
+
+    const breakStatements = [
+        { statement: 'arreter', expected: { type: 'break' } as BreakValue },
+        { statement: 'continuer', expected: { type: 'continue' } as ContinueValue },
+        { statement: 'retour 42', expected: { type: 'return', value: 42 } as ReturnValue },
+    ]
+    test.each(breakStatements)('evaluate with directly break statement in block return this', (el) => {
+        const code = [
+            'tantque vrai alors',
+            `    ${el.statement}`,
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const whileStatement = ast.body[0] as WhileStatement
+        const result = interpreter.evaluate(whileStatement.body)
+
+        expect(result).toEqual(el.expected)
+    })
+
+    test.each(breakStatements)('evaluate break statement in if block return this', (el) => {
+        const code = [
+            'tantque vrai alors',
+            '    si vrai alors',
+            '        si vrai alors',
+            `            ${el.statement}`,
+            '        fin',
+            '    fin',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const whileStatement = ast.body[0] as WhileStatement
+        const result = interpreter.evaluate(whileStatement.body)
+
+        expect(result).toEqual(el.expected)
     })
 })

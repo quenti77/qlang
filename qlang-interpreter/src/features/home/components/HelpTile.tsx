@@ -19,6 +19,32 @@ sinon
     rem Code à exécuter si la condition est fausse
 fin`, { language: "qlang" }).value
 
+const simpleWhile = hljs.highlight(`rem Boucle tantque
+tantque condition alors
+    rem Code à exécuter
+fin`, { language: "qlang" }).value
+
+const simpleFor = hljs.highlight(`rem Boucle pour
+pour i de 1 jusque 10 alors
+    rem Code à exécuter
+fin
+rem evol est optionnel et par défaut à 1
+pour i de 1 jusque 10 evol 2 alors
+    rem Code à exécuter
+fin`, { language: "qlang" }).value
+
+const simpleBreak = hljs.highlight(`rem Sortie de boucle
+pour i de 1 jusque 10 alors
+    si i == 5 alors
+        continuer
+    fin
+fin
+tantque vrai alors
+    si condition alors
+        arreter
+    fin
+fin`, { language: "qlang" }).value
+
 const codeClass = "my-2 p-2 overflow-x-auto border border-gray-100 dark:border-gray-700"
 
 export default function HelpTile() {
@@ -42,6 +68,15 @@ export default function HelpTile() {
                 <Card title={t('help.condition.title')}>
                     <p dangerouslySetInnerHTML={{ __html: t('help.condition.intro') }} />
                     <pre className={codeClass}><code dangerouslySetInnerHTML={{ __html: simpleCondition }} /></pre>
+                </Card>
+                <Card title={t('help.loop.title')}>
+                    <p dangerouslySetInnerHTML={{ __html: t('help.loop.intro') }} />
+                    <p dangerouslySetInnerHTML={{ __html: t('help.loop.while') }} />
+                    <pre className={codeClass}><code dangerouslySetInnerHTML={{ __html: simpleWhile }} /></pre>
+                    <p dangerouslySetInnerHTML={{ __html: t('help.loop.for') }} />
+                    <pre className={codeClass}><code dangerouslySetInnerHTML={{ __html: simpleFor }} /></pre>
+                    <p dangerouslySetInnerHTML={{ __html: t('help.loop.break') }} />
+                    <pre className={codeClass}><code dangerouslySetInnerHTML={{ __html: simpleBreak }} /></pre>
                 </Card>
             </div>
         </Tile>

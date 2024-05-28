@@ -150,12 +150,16 @@ export default class Parser {
         const from = this.parseExpression()
 
         this.eatExactly(TokenType.Until, 'Expected "jusque" keyword')
-        const until = {
-            kind: 'BinaryExpression',
-            left: { kind: 'Identifier', name: identifier.value },
-            right: this.parseExpression(),
-            operator: '<=',
-        } as BinaryExpression
+
+        let until: Expression = this.parseExpression()
+        if (until.kind === 'NumericLiteral' || until.kind === 'Identifier') {
+            until = {
+                kind: 'BinaryExpression',
+                left: { kind: 'Identifier', name: identifier.value },
+                right: until,
+                operator: '<=',
+            } as BinaryExpression
+        }
 
         const token = this.at().type
         let step = { kind: 'NumericLiteral', value: 1 } as Expression

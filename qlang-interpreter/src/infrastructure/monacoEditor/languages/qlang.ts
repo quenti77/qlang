@@ -116,8 +116,8 @@ fin`,
     tantque: `tantque \${1:condition} alors
     $2
 fin`,
-    pour: `pour \${1:indentifiant} de $2 jusque $3 alors
-    $3
+    pour: `pour \${1:indentifiant} de \${2:debut} jusque \${3:fin_inclus} alors
+    $4
 fin`,
 }
 

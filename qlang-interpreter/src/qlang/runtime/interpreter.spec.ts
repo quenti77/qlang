@@ -252,6 +252,19 @@ describe("Interpreter", () => {
         expect(stdOut.Log).toEqual(['0', '1', '2', '3'])
     })
 
+    test('evaluate for statement with decrement step', () => {
+        const code = [
+            'pour i de 10 jusque i >= 0 evol -1 alors',
+            '    ecrire i',
+            'fin',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['10', '9', '8', '7', '6', '5', '4', '3', '2', '1', '0'])
+    })
+
     const breakStatements = [
         { statement: 'arreter', expected: { type: 'break' } as BreakValue },
         { statement: 'continuer', expected: { type: 'continue' } as ContinueValue },

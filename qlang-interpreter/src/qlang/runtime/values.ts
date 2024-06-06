@@ -6,6 +6,7 @@ export type ValueType =
     | 'break'
     | 'continue'
     | 'return'
+    | 'array'
 
 export interface RuntimeValue {
     type: ValueType
@@ -25,6 +26,15 @@ export interface AlgebraicValue extends RuntimeValue {
 
 export interface ReturnValue extends AlgebraicValue {
     type: 'return'
+}
+
+export interface ArrayValue extends RuntimeValue {
+    type: 'array'
+    value: AlgebraicValue[]
+}
+
+export function MK_ARRAY(value: AlgebraicValue[]): ArrayValue {
+    return { type: 'array', value }
 }
 
 export interface NullValue extends AlgebraicValue {

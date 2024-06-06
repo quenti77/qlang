@@ -1,4 +1,5 @@
 import type {
+    ArrayExpression,
     AssignmentExpression,
     BinaryExpression,
     BlockStatement,
@@ -6,6 +7,7 @@ import type {
     ForStatement,
     Identifier,
     IfStatement,
+    MemberExpression,
     NumericLiteral,
     PrintStatement,
     Program,
@@ -17,12 +19,14 @@ import type {
     WhileStatement,
 } from "../ast"
 import {
+    ArrayValue,
     BreakValue,
     ContinueValue,
     MK_BOOLEAN,
     MK_NULL,
     MK_NUMBER,
     MK_STRING,
+    NumberValue,
     ReturnValue,
     type AlgebraicValue,
     type RuntimeValue,
@@ -51,8 +55,6 @@ export default class Interpreter {
                 return this.evaluateProgram(astNode as Program)
             case 'VariableDeclarationStatement':
                 return this.evaluateVariableDeclaration(astNode as VariableDeclarationStatement)
-            case 'AssignmentExpression':
-                return this.evaluateAssignmentExpression(astNode as AssignmentExpression)
             case 'PrintStatement':
                 return this.evaluatePrintStatement(astNode as PrintStatement)
             case 'BlockStatement':
@@ -63,22 +65,8 @@ export default class Interpreter {
                 return this.evaluateWhileStatement(astNode as WhileStatement)
             case 'ForStatement':
                 return this.evaluateForStatement(astNode as ForStatement)
-            case 'UnaryExpression':
-                return this.evaluateUnaryExpression(astNode as UnaryExpression)
-            case 'BinaryExpression':
-                return this.evaluateBinaryExpression(astNode as BinaryExpression)
-            case 'Identifier':
-                return this.evaluateIdentifier(astNode as Identifier)
-            case 'NumericLiteral':
-                return MK_NUMBER((astNode as NumericLiteral).value)
-            case 'StringLiteral':
-                return MK_STRING((astNode as StringLiteral).value)
-            case 'NullLiteral':
-                return MK_NULL()
-            case 'BooleanLiteral':
-                return MK_BOOLEAN((astNode as BooleanLiteral).value)
             default:
-                throw new Error(`Unknown node type ${astNode.kind}`)
+                return this.evaluateExpression(astNode)
         }
     }
 
@@ -103,9 +91,26 @@ export default class Interpreter {
 
     private evaluatePrintStatement(printStatement: PrintStatement): RuntimeValue {
         const statement = this.evaluate(printStatement.value)
-        this.stdOut.print('value' in statement ? statement.value?.toString() : statement.type)
+        this.stdOut.print(this.toString(statement))
 
         return MK_NULL()
+    }
+
+    private toString(statement: RuntimeValue): string {
+        if (!('value' in statement)) {
+            return statement.type
+        }
+
+        if (!Array.isArray(statement.value)) {
+            return statement.value?.toString() ?? 'rien'
+        }
+
+        return this.toStringArray(statement as ArrayValue)
+    }
+
+    private toStringArray(array: ArrayValue): string {
+        const elements = array.value.map((element) => this.toString(element))
+        return `[${elements.join(', ')}]`
     }
 
     private evaluateBlockStatement(blockStatement: BlockStatement): RuntimeValue {
@@ -195,6 +200,33 @@ export default class Interpreter {
         return MK_NULL()
     }
 
+    private evaluateExpression(expression: Statement): RuntimeValue {
+        switch (expression.kind) {
+            case 'AssignmentExpression':
+                return this.evaluateAssignmentExpression(expression as AssignmentExpression)
+            case 'UnaryExpression':
+                return this.evaluateUnaryExpression(expression as UnaryExpression)
+            case 'BinaryExpression':
+                return this.evaluateBinaryExpression(expression as BinaryExpression)
+            case 'ArrayExpression':
+                return this.evaluateArrayExpression(expression as ArrayExpression)
+            case 'MemberExpression':
+                return this.evaluateMemberExpression(expression as MemberExpression)
+            case 'Identifier':
+                return this.evaluateIdentifier(expression as Identifier)
+            case 'NumericLiteral':
+                return MK_NUMBER((expression as NumericLiteral).value)
+            case 'StringLiteral':
+                return MK_STRING((expression as StringLiteral).value)
+            case 'NullLiteral':
+                return MK_NULL()
+            case 'BooleanLiteral':
+                return MK_BOOLEAN((expression as BooleanLiteral).value)
+            default:
+                throw new Error(`Unknown node type ${expression.kind}`)
+        }
+    }
+
     private evaluateAssignmentExpression(node: AssignmentExpression): RuntimeValue {
         if (node.assignment.kind !== 'Identifier') {
             throw new Error('Invalid assignment target')
@@ -235,6 +267,32 @@ export default class Interpreter {
 
     private isLogicalOperator(operator: string): boolean {
         return ['et', 'ou', '==', '!=', '<', '<=', '>', '>='].includes(operator)
+    }
+
+    private evaluateArrayExpression(arrayExpression: ArrayExpression): RuntimeValue {
+        return {
+            type: 'array',
+            value: arrayExpression.elements.map((element) => this.evaluate(element))
+        } as ArrayValue
+    }
+
+    private evaluateMemberExpression(memberExpression: MemberExpression): RuntimeValue {
+        const object = this.evaluateExpression(memberExpression.object)
+        if (object.type !== 'array') {
+            throw new Error('Access to non-array object')
+        }
+
+        const property = this.evaluateExpression(memberExpression.property)
+        if (property.type !== 'number') {
+            throw new Error('Access to non-numeric index')
+        }
+
+        const index = (property as NumberValue).value
+        if (index < 0 || index >= (object as ArrayValue).value.length) {
+            throw new Error('Index out of bounds')
+        }
+
+        return (object as ArrayValue).value[index]
     }
 
     private evaluateIdentifier(identifier: Identifier): RuntimeValue {

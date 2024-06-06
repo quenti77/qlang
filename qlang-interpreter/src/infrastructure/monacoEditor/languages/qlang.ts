@@ -5,8 +5,9 @@ import Parser from "@/qlang/parser"
 import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
 import { Std } from "@/qlang/runtime/std"
-import { AlgebraicValue, RuntimeValue } from "@/qlang/runtime/values"
+import { AlgebraicValue, ArrayValue, NumberValue, RuntimeValue, StringValue } from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
+import { PrintStatement } from "@/qlang/ast"
 
 export const LANG_ID = "qlang"
 
@@ -24,6 +25,28 @@ function formatError(error: unknown): string {
     return error.message
 }
 
+function toStringAlgebraicValue(element: AlgebraicValue): string {
+    switch (element.type) {
+        case 'number':
+            return (element as NumberValue).value.toString()
+        case 'string':
+            return (element as StringValue).value
+        case 'boolean':
+            return element.value ? 'vrai' : 'faux'
+        case 'null':
+            return 'rien'
+        case 'array':
+            return toStringArrayValue(element as unknown as ArrayValue)
+        default:
+            return 'inconnue'
+    }
+}
+
+function toStringArrayValue(array: ArrayValue): string {
+    const elements = array.value.map(toStringAlgebraicValue).join(', ')
+    return `[${elements}]`
+}
+
 export const run = (code: string): { out: string[], err: string[] } => {
     lexer.tokenize(code)
     parser.setTokens(lexer.Tokens)
@@ -38,7 +61,7 @@ export const run = (code: string): { out: string[], err: string[] } => {
         const result = interpreter.evaluate(ast)
 
         if (isAlgebraicValue(result)) {
-            stdOut.print(result.value === null ? 'rien' : result.value.toString())
+            stdOut.print(toStringAlgebraicValue(result))
         }
     } catch (error) {
         stdErr.print(formatError(error))

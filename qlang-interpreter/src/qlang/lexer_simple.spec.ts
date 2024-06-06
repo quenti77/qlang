@@ -217,4 +217,13 @@ describe("Simple Lexer", () => {
             createToken(TokenType.EOF, '', 1, 6),
         ])
     })
+
+    test("tokenize open and close brackets", () => {
+        lexer.tokenize('[]')
+        expect(lexer.Tokens).toEqual([
+            createToken(TokenType.OpenBrackets, '[', 1, 1),
+            createToken(TokenType.CloseBrackets, ']', 1, 2),
+            createToken(TokenType.EOF, '', 1, 3),
+        ])
+    })
 })

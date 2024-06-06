@@ -4,7 +4,17 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import Environment from "./environment"
-import type { BooleanValue, BreakValue, ContinueValue, NullValue, NumberValue, ReturnValue, StringValue } from "./values"
+import {
+    MK_ARRAY,
+    MK_NUMBER,
+    type BooleanValue,
+    type BreakValue,
+    type ContinueValue,
+    type NullValue,
+    type NumberValue,
+    type ReturnValue,
+    type StringValue,
+} from "./values"
 import { Std } from "./std"
 import { Program, WhileStatement } from "../ast"
 
@@ -252,6 +262,19 @@ describe("Interpreter", () => {
         expect(stdOut.Log).toEqual(['0', '1', '2', '3'])
     })
 
+    test('evaluate for statement with decrement step', () => {
+        const code = [
+            'pour i de 10 jusque i >= 0 evol -1 alors',
+            '    ecrire i',
+            'fin',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual({ type: 'null', value: null } as NullValue)
+        expect(stdOut.Log).toEqual(['10', '9', '8', '7', '6', '5', '4', '3', '2', '1', '0'])
+    })
+
     const breakStatements = [
         { statement: 'arreter', expected: { type: 'break' } as BreakValue },
         { statement: 'continuer', expected: { type: 'continue' } as ContinueValue },
@@ -285,5 +308,47 @@ describe("Interpreter", () => {
         const result = interpreter.evaluate(whileStatement.body)
 
         expect(result).toEqual(el.expected)
+    })
+
+    test('evaluate array created returns array value', () => {
+        const ast = makeASTFromInput('[1, 2, 3]')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_ARRAY([MK_NUMBER(1), MK_NUMBER(2), MK_NUMBER(3)]))
+    })
+
+    test('evaluate array access returns value at index', () => {
+        const ast = makeASTFromInput('[1, 2, 3][0]')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(1))
+    })
+
+    test('evaluate array access on the complex array returns value at index', () => {
+        const ast = makeASTFromInput('[[1, 2], [3, 4]][1][0]')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(3))
+    })
+
+    test.only('evaluate array access throw an error with push syntax read', () => {
+        const ast = makeASTFromInput('[[1, 2], [3, 4]][1][]')
+
+        expect(() => interpreter.evaluate(ast)).toThrowError("Access to non-numeric index")
+    })
+
+    test('evaluate assignment to array access', () => {
+        const ast = makeASTFromInput('dec a = [1, 2, 3]\na[0] = 42')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate assigment to push in array', () => {
+        const ast = makeASTFromInput('dec a = []\na[] = 42\na[] = 24')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(24))
+        expect(env.lookupVariable('a')).toEqual(MK_ARRAY([MK_NUMBER(42), MK_NUMBER(24)]))
     })
 })

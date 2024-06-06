@@ -19,6 +19,8 @@ export type NodeType =
     | 'NullLiteral'
     | 'BooleanLiteral'
     | 'Identifier'
+    | 'MemberExpression'
+    | 'ArrayExpression'
 
 export interface Statement {
     kind: NodeType
@@ -104,6 +106,17 @@ export interface BinaryExpression extends Expression {
 export interface Identifier extends Expression {
     kind: 'Identifier'
     name: string
+}
+
+export interface MemberExpression extends Expression {
+    kind: 'MemberExpression'
+    object: Expression
+    property: Expression | null
+}
+
+export interface ArrayExpression extends Expression {
+    kind: 'ArrayExpression'
+    elements: Expression[]
 }
 
 export interface Literal {

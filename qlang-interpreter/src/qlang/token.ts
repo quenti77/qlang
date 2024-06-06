@@ -7,6 +7,8 @@ export enum TokenType {
     Equals = 'equals',
     OpenParenthesis = 'open_parenthesis',
     CloseParenthesis = 'close_parenthesis',
+    OpenBrackets = 'open_brackets',
+    CloseBrackets = 'close_brackets',
     Let = 'let',
     If = 'if',
     Then = 'then',
@@ -25,6 +27,9 @@ export enum TokenType {
     Boolean = 'boolean',
     Read = 'read',
     Print = 'print',
+    Function = 'function',
+    Comma = 'comma',
+    Dot = 'dot',
     EOF = 'eof',
 }
 
@@ -83,6 +88,7 @@ export const KEYWORDS: Record<string, TokenType> = {
     'et': TokenType.BinaryOperator,
     'ou': TokenType.BinaryOperator,
     'non': TokenType.UnaryOperator,
+    'fonction': TokenType.Function,
 }
 
 export const OPERATORS: string[] = Object.values(BinaryOperator)

@@ -2,7 +2,7 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { AssignmentExpression, BinaryExpression, BooleanLiteral, ForStatement, Identifier, IfStatement, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement, WhileStatement } from "./ast"
+import type { ArrayExpression, AssignmentExpression, BinaryExpression, BooleanLiteral, ForStatement, Identifier, IfStatement, MemberExpression, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement, WhileStatement } from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -654,6 +654,160 @@ describe("Parser", () => {
         expect(ast).toEqual({
             kind: 'Program',
             body: [forStatement as ForStatement]
+        })
+    })
+
+    test("make AST for simple array expression", () => {
+        const ast = makeASTFromInput('[1, 2, 3]')
+        const arrayExpression = {
+            kind: 'ArrayExpression',
+            elements: [
+                { kind: 'NumericLiteral', value: 1 },
+                { kind: 'NumericLiteral', value: 2 },
+                { kind: 'NumericLiteral', value: 3 }
+            ]
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [arrayExpression as ArrayExpression]
+        })
+    })
+
+    test("make AST for nested array expression", () => {
+        const ast = makeASTFromInput('[1, [2, 3,], 4,]')
+        const arrayExpression = {
+            kind: 'ArrayExpression',
+            elements: [
+                { kind: 'NumericLiteral', value: 1 },
+                {
+                    kind: 'ArrayExpression',
+                    elements: [
+                        { kind: 'NumericLiteral', value: 2 },
+                        { kind: 'NumericLiteral', value: 3 }
+                    ]
+                },
+                { kind: 'NumericLiteral', value: 4 }
+            ]
+        }
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [arrayExpression as ArrayExpression]
+        })
+    })
+
+    const BAD_ARRAY_EXPRESSIONS = [
+        '[1, 2, 3',
+        '[1, 2 3]',
+        '[1, 2, 3[]',
+    ]
+    test.each(BAD_ARRAY_EXPRESSIONS)("make AST with bad syntax into array expression", (code: string) => {
+        expect(() => makeASTFromInput(code)).toThrow()
+    })
+
+    test("make AST access array expression from variable", () => {
+        const code = [
+            'dec abc = [1, 2, 3]',
+            'ecrire abc[1]'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: {
+                kind: 'ArrayExpression',
+                elements: [
+                    { kind: 'NumericLiteral', value: 1 },
+                    { kind: 'NumericLiteral', value: 2 },
+                    { kind: 'NumericLiteral', value: 3 }
+                ]
+            }
+        } as VariableDeclarationStatement
+
+        const printStatement = {
+            kind: 'PrintStatement',
+            value: {
+                kind: 'MemberExpression',
+                object: { kind: 'Identifier', name: 'abc' },
+                property: { kind: 'NumericLiteral', value: 1 }
+            }
+        } as PrintStatement
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration, printStatement]
+        })
+    })
+
+    test("make AST access array expression from array expression", () => {
+        const ast = makeASTFromInput('[1, 2, 3][1]')
+        const arrayExpression = {
+            kind: 'ArrayExpression',
+            elements: [
+                { kind: 'NumericLiteral', value: 1 } as NumericLiteral,
+                { kind: 'NumericLiteral', value: 2 },
+                { kind: 'NumericLiteral', value: 3 }
+            ]
+        } as ArrayExpression
+        const memberExpression = {
+            kind: 'MemberExpression',
+            object: arrayExpression,
+            property: { kind: 'NumericLiteral', value: 1 }
+        } as MemberExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [memberExpression]
+        })
+    })
+
+    test("make AST access array expression from array expression with variable", () => {
+        const code = [
+            'dec tab = [1, [2, 3], 4]',
+            'dec index = 1',
+            'tab[index][index]'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const tabDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'tab',
+            value: {
+                kind: 'ArrayExpression',
+                elements: [
+                    { kind: 'NumericLiteral', value: 1 },
+                    {
+                        kind: 'ArrayExpression',
+                        elements: [
+                            { kind: 'NumericLiteral', value: 2 },
+                            { kind: 'NumericLiteral', value: 3 }
+                        ]
+                    },
+                    { kind: 'NumericLiteral', value: 4 }
+                ]
+            }
+        } as VariableDeclarationStatement
+
+        const indexDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'index',
+            value: { kind: 'NumericLiteral', value: 1 }
+        } as VariableDeclarationStatement
+
+        const memberExpression = {
+            kind: 'MemberExpression',
+            object: {
+                kind: 'MemberExpression',
+                object: { kind: 'Identifier', name: 'tab' },
+                property: { kind: 'Identifier', name: 'index' }
+            },
+            property: { kind: 'Identifier', name: 'index' }
+        } as MemberExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [tabDeclaration, indexDeclaration, memberExpression]
         })
     })
 })

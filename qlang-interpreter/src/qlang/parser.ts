@@ -1,4 +1,5 @@
 import type {
+    ArrayExpression,
     AssignmentExpression,
     BinaryExpression,
     BlockStatement,
@@ -7,6 +8,7 @@ import type {
     ForStatement,
     Identifier,
     IfStatement,
+    MemberExpression,
     NullLiteral,
     NumericLiteral,
     PrintStatement,
@@ -226,16 +228,16 @@ export default class Parser {
     private parseAssignmentExpression(): Expression {
         const left = this.parseLogicalExpression()
 
-        if (this.at().type === TokenType.Equals) {
-            this.eatExactly(TokenType.Equals, 'Expected "="')
-
-            return {
-                kind: 'AssignmentExpression',
-                assignment: left,
-                value: this.parseAssignmentExpression(),
-            } as AssignmentExpression
+        if (this.at().type !== TokenType.Equals) {
+            return left
         }
-        return left
+
+        this.eatExactly(TokenType.Equals, 'Expected "="')
+        return {
+            kind: 'AssignmentExpression',
+            assignment: left,
+            value: this.parseAssignmentExpression(),
+        } as AssignmentExpression
     }
 
     private parseLogicalExpression(): Expression {
@@ -340,7 +342,50 @@ export default class Parser {
             } as UnaryExpression
         }
 
-        return this.parsePrimaryExpression()
+        return this.parseArrayAccessExpression()
+    }
+
+    private parseArrayAccessExpression(): Expression {
+        let expression = this.parseArrayExpression()
+
+        while (this.at().type === TokenType.OpenBrackets) {
+            this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+            const index = this.parseExpression()
+            this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
+
+            expression = {
+                kind: 'MemberExpression',
+                object: expression,
+                property: index,
+            } as MemberExpression
+        }
+
+        return expression
+    }
+
+    private parseArrayExpression(): Expression {
+        if (this.at().type !== TokenType.OpenBrackets) {
+            return this.parsePrimaryExpression()
+        }
+
+        this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+
+        const elements = []
+        while (this.at().type !== TokenType.CloseBrackets) {
+            elements.push(this.parseExpression())
+
+            const token = this.attempt([TokenType.Comma, TokenType.CloseBrackets], 'Expected "," or "]"')
+            if (token.type === TokenType.Comma) {
+                this.eat()
+            }
+        }
+
+        this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
+
+        return {
+            kind: 'ArrayExpression',
+            elements,
+        } as ArrayExpression
     }
 
     private parsePrimaryExpression(): Expression {
@@ -392,4 +437,15 @@ export default class Parser {
 
         return token
     }
+
+    private attempt(types: TokenType[], err: string): Token {
+        const token = this.at()
+
+        if (types.includes(token.type)) {
+            return token
+        }
+
+        throw new Error(err)
+    }
+
 }

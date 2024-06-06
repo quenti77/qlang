@@ -228,12 +228,41 @@ export default class Interpreter {
     }
 
     private evaluateAssignmentExpression(node: AssignmentExpression): RuntimeValue {
-        if (node.assignment.kind !== 'Identifier') {
-            throw new Error('Invalid assignment target')
+        if (node.assignment.kind === 'Identifier') {
+            const identifier = (node.assignment as Identifier).name
+            return this.env.assignVariable(identifier, this.evaluate(node.value))
         }
 
-        const identifier = (node.assignment as Identifier).name
-        return this.env.assignVariable(identifier, this.evaluate(node.value))
+        if (node.assignment.kind === 'MemberExpression') {
+            const memberExpression = node.assignment as MemberExpression
+            const object = this.evaluateExpression(memberExpression.object) as AlgebraicValue
+            if (object.type !== 'array') {
+                throw new Error('Assignment to non-array object')
+            }
+
+            const array = object as ArrayValue
+            if (memberExpression.property === null) {
+                const value = this.attemptAlgebraicValue(this.evaluateExpression(node.value))
+                array.value.push(value)
+
+                return value
+            }
+
+            const property = this.evaluateExpression(memberExpression.property)
+            if (property.type !== 'number') {
+                throw new Error('Assignment to non-numeric index')
+            }
+
+            const index = (property as NumberValue).value
+            if (index < 0 || index >= array.value.length) {
+                throw new Error('Index out of bounds')
+            }
+
+            const value = this.attemptAlgebraicValue(this.evaluateExpression(node.value))
+            return array.value[index] = value
+        }
+
+        throw new Error('Invalid assignment target')
     }
 
     private evaluateUnaryExpression(unaryExpr: UnaryExpression): RuntimeValue {
@@ -282,17 +311,22 @@ export default class Interpreter {
             throw new Error('Access to non-array object')
         }
 
+        const array = object as ArrayValue
+        if (memberExpression.property === null) {
+            throw new Error('Access to non-numeric index')
+        }
+
         const property = this.evaluateExpression(memberExpression.property)
         if (property.type !== 'number') {
             throw new Error('Access to non-numeric index')
         }
 
         const index = (property as NumberValue).value
-        if (index < 0 || index >= (object as ArrayValue).value.length) {
+        if (index < 0 || index >= array.value.length) {
             throw new Error('Index out of bounds')
         }
 
-        return (object as ArrayValue).value[index]
+        return array.value[index]
     }
 
     private evaluateIdentifier(identifier: Identifier): RuntimeValue {
@@ -362,5 +396,13 @@ export default class Interpreter {
             return MK_NUMBER((left.value as number) % (right.value as number))
         }
         throw new Error(`Invalid operator ${operator} for algebraic expression`)
+    }
+
+    private attemptAlgebraicValue(value: RuntimeValue): AlgebraicValue {
+        if ('value' in value) {
+            return value as AlgebraicValue
+        }
+
+        throw new Error('Invalid algebraic value')
     }
 }

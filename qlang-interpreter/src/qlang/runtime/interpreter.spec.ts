@@ -4,7 +4,17 @@ import Parser from "../parser"
 import Lexer from "../lexer"
 import Interpreter from "./interpreter"
 import Environment from "./environment"
-import { MK_ARRAY, MK_NULL, MK_NUMBER, type ArrayValue, type BooleanValue, type BreakValue, type ContinueValue, type NullValue, type NumberValue, type ReturnValue, type StringValue } from "./values"
+import {
+    MK_ARRAY,
+    MK_NUMBER,
+    type BooleanValue,
+    type BreakValue,
+    type ContinueValue,
+    type NullValue,
+    type NumberValue,
+    type ReturnValue,
+    type StringValue,
+} from "./values"
 import { Std } from "./std"
 import { Program, WhileStatement } from "../ast"
 
@@ -319,5 +329,26 @@ describe("Interpreter", () => {
         const result = interpreter.evaluate(ast)
 
         expect(result).toEqual(MK_NUMBER(3))
+    })
+
+    test.only('evaluate array access throw an error with push syntax read', () => {
+        const ast = makeASTFromInput('[[1, 2], [3, 4]][1][]')
+
+        expect(() => interpreter.evaluate(ast)).toThrowError("Access to non-numeric index")
+    })
+
+    test('evaluate assignment to array access', () => {
+        const ast = makeASTFromInput('dec a = [1, 2, 3]\na[0] = 42')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate assigment to push in array', () => {
+        const ast = makeASTFromInput('dec a = []\na[] = 42\na[] = 24')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(24))
+        expect(env.lookupVariable('a')).toEqual(MK_ARRAY([MK_NUMBER(42), MK_NUMBER(24)]))
     })
 })

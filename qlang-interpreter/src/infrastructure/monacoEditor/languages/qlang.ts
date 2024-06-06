@@ -7,7 +7,6 @@ import Interpreter from "@/qlang/runtime/interpreter"
 import { Std } from "@/qlang/runtime/std"
 import { AlgebraicValue, ArrayValue, NumberValue, RuntimeValue, StringValue } from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
-import { PrintStatement } from "@/qlang/ast"
 
 export const LANG_ID = "qlang"
 

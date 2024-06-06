@@ -350,6 +350,15 @@ export default class Parser {
 
         while (this.at().type === TokenType.OpenBrackets) {
             this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+            if (this.at().type === TokenType.CloseBrackets) {
+                this.eat()
+                expression = {
+                    kind: 'MemberExpression',
+                    object: expression,
+                    property: null,
+                } as MemberExpression
+                break
+            }
             const index = this.parseExpression()
             this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
 

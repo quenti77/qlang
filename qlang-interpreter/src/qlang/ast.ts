@@ -111,7 +111,7 @@ export interface Identifier extends Expression {
 export interface MemberExpression extends Expression {
     kind: 'MemberExpression'
     object: Expression
-    property: Expression
+    property: Expression | null
 }
 
 export interface ArrayExpression extends Expression {

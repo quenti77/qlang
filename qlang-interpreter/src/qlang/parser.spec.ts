@@ -810,4 +810,74 @@ describe("Parser", () => {
             body: [tabDeclaration, indexDeclaration, memberExpression]
         })
     })
+
+    test("make AST access to push new element into array", () => {
+        const code = [
+            'dec tab = []',
+            'tab[] = 1'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const tabDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'tab',
+            value: {
+                kind: 'ArrayExpression',
+                elements: []
+            }
+        } as VariableDeclarationStatement
+
+        const assignment = {
+            kind: 'AssignmentExpression',
+            assignment: {
+                kind: 'MemberExpression',
+                object: { kind: 'Identifier', name: 'tab' },
+                property: null
+            },
+            value: { kind: 'NumericLiteral', value: 1 }
+        } as AssignmentExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [tabDeclaration, assignment]
+        })
+    })
+
+    test("make AST access to push new element into sub array", () => {
+        const code = [
+            'dec tab = [[]]',
+            'tab[0][] = 1'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const tabDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'tab',
+            value: {
+                kind: 'ArrayExpression',
+                elements: [
+                    { kind: 'ArrayExpression', elements: [] }
+                ]
+            }
+        } as VariableDeclarationStatement
+
+        const assignment = {
+            kind: 'AssignmentExpression',
+            assignment: {
+                kind: 'MemberExpression',
+                object: {
+                    kind: 'MemberExpression',
+                    object: { kind: 'Identifier', name: 'tab' },
+                    property: { kind: 'NumericLiteral', value: 0 }
+                },
+                property: null
+            },
+            value: { kind: 'NumericLiteral', value: 1 }
+        } as AssignmentExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [tabDeclaration, assignment]
+        })
+    })
 })

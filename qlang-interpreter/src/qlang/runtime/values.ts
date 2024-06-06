@@ -21,14 +21,14 @@ export interface ContinueValue extends RuntimeValue {
 }
 
 export interface AlgebraicValue extends RuntimeValue {
-    value: number | string | boolean | null
+    value: number | string | boolean | null | AlgebraicValue[]
 }
 
 export interface ReturnValue extends AlgebraicValue {
     type: 'return'
 }
 
-export interface ArrayValue extends RuntimeValue {
+export interface ArrayValue extends AlgebraicValue {
     type: 'array'
     value: AlgebraicValue[]
 }

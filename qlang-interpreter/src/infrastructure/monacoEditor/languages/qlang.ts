@@ -5,7 +5,14 @@ import Parser from "@/qlang/parser"
 import Interpreter from "@/qlang/runtime/interpreter"
 import { Std } from "@/qlang/runtime/std"
 import { makeGlobalEnv } from "./qlangGlobals"
-import { AlgebraicValue, ArrayValue, FunctionValue, NumberValue, RuntimeValue, StringValue } from "@/qlang/runtime/values"
+import {
+    AlgebraicValue,
+    ArrayValue,
+    FunctionValue,
+    NumberValue,
+    RuntimeValue,
+    StringValue,
+} from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
 
 export const LANG_ID = "qlang"
@@ -152,13 +159,16 @@ fin`,
         return [label, label]
     })
 
-    suggestions.push(['test', `fonction a(val)
-    fonction b(mul)
-        retour val * mul
-    fin
-    retour b
-fin
-a(2)(3)`])
+    const code = [
+        'fonction fibonacci(n)',
+        '    si n <= 1 alors',
+        '        retour n',
+        '    fin',
+        '    retour fibonacci(n - 1) + fibonacci(n - 2)',
+        'fin',
+        'fibonacci(10)',
+    ]
+    suggestions.push(['test', code.join('\n')])
 
     languages.registerCompletionItemProvider(LANG_ID, {
         provideCompletionItems: (

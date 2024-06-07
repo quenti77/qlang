@@ -68,7 +68,7 @@ export interface ForStatement extends Statement {
 
 export interface FunctionStatement extends Statement {
     kind: 'FunctionStatement'
-    identifier: string
+    identifier: string | null
     parameters: string[]
     body: BlockStatement
 }
@@ -131,7 +131,7 @@ export interface ArrayExpression extends Expression {
 export interface CallExpression extends Expression {
     kind: 'CallExpression'
     callee: Expression
-    arguments: Expression[]
+    arguments: Expression[] | FunctionStatement
 }
 
 export interface Literal {

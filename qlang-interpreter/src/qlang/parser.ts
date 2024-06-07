@@ -86,7 +86,7 @@ export default class Parser {
             return {
                 kind: 'VariableDeclarationStatement',
                 identifier,
-                value: this.parseExpression(),
+                value: this.at().type === TokenType.Function ? this.parseFunctionDeclarationStatement() : this.parseExpression(),
             } as VariableDeclarationStatement
         }
 
@@ -201,7 +201,10 @@ export default class Parser {
 
     private parseFunctionDeclarationStatement(): Statement {
         this.eatExactly(TokenType.Function, 'Expected "fonction" keyword')
-        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+        const identifier = this.at().type === TokenType.OpenParenthesis
+            ? null
+            : this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+
         this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
 
         const params = []
@@ -439,7 +442,7 @@ export default class Parser {
 
             const args = []
             while (this.at().type !== TokenType.CloseParenthesis) {
-                args.push(this.parseExpression())
+                args.push(this.at().type === TokenType.Function ? this.parseFunctionDeclarationStatement() : this.parseExpression())
 
                 const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
                 if (token.type === TokenType.Comma) {

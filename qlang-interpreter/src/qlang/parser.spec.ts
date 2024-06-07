@@ -1012,4 +1012,95 @@ describe("Parser", () => {
             body: [functionDeclaration]
         })
     })
+
+    test("make AST function without identifier", () => {
+        const code = [
+            'fonction (a)',
+            '    ecrire a',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const functionDeclaration = {
+            kind: 'FunctionStatement',
+            identifier: null,
+            parameters: ['a'],
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'a' } } as PrintStatement
+                ]
+            }
+        } as FunctionStatement
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [functionDeclaration]
+        })
+    })
+
+    test("make AST variable value is a function without identifier", () => {
+        const code = [
+            'dec abc = fonction (a)',
+            '    ecrire a',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const variableDeclaration = {
+            kind: 'VariableDeclarationStatement',
+            identifier: 'abc',
+            value: {
+                kind: 'FunctionStatement',
+                identifier: null,
+                parameters: ['a'],
+                body: {
+                    kind: 'BlockStatement',
+                    body: [
+                        { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'a' } } as PrintStatement
+                    ]
+                }
+            }
+        } as VariableDeclarationStatement
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [variableDeclaration]
+        })
+    })
+
+    test("make AST function call with anonymous function", () => {
+        const code = [
+            'abc(fonction (a)',
+            '    ecrire a',
+            'fin)'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const callExpression = {
+            kind: 'CallExpression',
+            callee: {
+                kind: 'Identifier',
+                name: 'abc'
+            },
+            arguments: [
+                {
+                    kind: 'FunctionStatement',
+                    identifier: null,
+                    parameters: ['a'],
+                    body: {
+                        kind: 'BlockStatement',
+                        body: [
+                            { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'a' } } as PrintStatement
+                        ]
+                    }
+                } as FunctionStatement
+            ]
+        } as CallExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [callExpression]
+        })
+    })
 })

@@ -457,4 +457,32 @@ describe("Interpreter", () => {
 
         expect(result).toEqual(MK_NUMBER(84))
     })
+
+    test('evaluate declaration variable with anonymous function', () => {
+        const code = [
+            'dec a = fonction()',
+            '    retour 42',
+            'fin',
+            'a()',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate call fonction with closure argument', () => {
+        const code = [
+            'fonction a(val)',
+            '    val(21, 2)',
+            'fin',
+            'a(fonction(a, b)',
+            '    retour a * b',
+            'fin)',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
 })

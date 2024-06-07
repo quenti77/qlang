@@ -213,8 +213,8 @@ export default class Interpreter {
     }
 
     private evaluateFunctionDeclaration(functionStatement: FunctionStatement): RuntimeValue {
-        const name = functionStatement.identifier
         const qfunction = new QFunction(functionStatement, this.env)
+        const name = qfunction.Name
 
         const envFound = this.env.resolve(name, false)
         if (envFound === null) {

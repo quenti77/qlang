@@ -33,12 +33,17 @@ export class QFunction implements Callable {
         if (func.identifier === null) {
             QFunction.counter++
             this.name = `anon#${QFunction.counter}`
+        } else {
+            this.name = func.identifier
         }
-        this.name = func.identifier
     }
 
     get Arity(): number {
         return this.func.parameters.length
+    }
+
+    get Name(): string {
+        return this.name
     }
 
     call(interpreter: Interpreter, args: AlgebraicValue[]): AlgebraicValue {

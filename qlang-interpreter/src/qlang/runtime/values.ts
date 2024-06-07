@@ -1,4 +1,4 @@
-import { Callable, QFunction } from "./callable"
+import { Callable } from "./callable"
 
 export type ValueType =
     | 'null'

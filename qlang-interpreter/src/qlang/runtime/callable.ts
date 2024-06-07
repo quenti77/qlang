@@ -1,28 +1,54 @@
+import { FunctionStatement } from "../ast"
+import Environment from "./environment"
+import Interpreter from "./interpreter"
 import { AlgebraicValue } from "./values"
 
-export type CallableCallback = (...args: AlgebraicValue[]) => AlgebraicValue
+export type CallableCallback = (interpreter: Interpreter, ...args: AlgebraicValue[]) => AlgebraicValue
 
-export class Callable {
+export interface Callable {
+
+    get Arity(): number
+
+    call(interpreter: Interpreter, args: AlgebraicValue[]): AlgebraicValue
+
+    toString(): string
+
+}
+
+export class QFunction implements Callable {
 
     private static counter: number = 0
 
-    public readonly arity: number
-    public readonly name: string
-    public readonly call: CallableCallback
+    private readonly func: FunctionStatement
+    private readonly closure: Environment
+    private readonly name: string
 
     constructor(
-        arity: number,
-        name: string | null,
-        call: CallableCallback,
+        func: FunctionStatement,
+        closure: Environment
     ) {
-        this.arity = arity
-        this.call = call
+        this.func = func
+        this.closure = closure
 
-        if (name === null) {
-            Callable.counter++
-            name = `anon#${Callable.counter}`
+        if (func.identifier === null) {
+            QFunction.counter++
+            this.name = `anon#${QFunction.counter}`
         }
-        this.name = name
+        this.name = func.identifier
+    }
+
+    get Arity(): number {
+        return this.func.parameters.length
+    }
+
+    call(interpreter: Interpreter, args: AlgebraicValue[]): AlgebraicValue {
+        const environment = new Environment(this.closure)
+
+        for (let i = 0; i < this.Arity; i++) {
+            environment.declareVariable(this.func.parameters[i], args[i])
+        }
+
+        return interpreter.evaluateBlockStatement(this.func.body, environment) as AlgebraicValue
     }
 
     toString() {

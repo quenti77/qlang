@@ -1,4 +1,4 @@
-import { Callable } from "./callable"
+import { Callable, QFunction } from "./callable"
 
 export type ValueType =
     | 'null'
@@ -55,7 +55,7 @@ export function MK_ALGEBRAIC(value: AlgebraicValueType): AlgebraicValue {
     if (Array.isArray(value)) {
         return MK_ARRAY(value)
     }
-    if (value instanceof Callable) {
+    if ('Arity' in value) {
         return MK_FUNCTION(value)
     }
     throw new Error(`Unsupported algebraic value: ${value}`)

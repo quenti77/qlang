@@ -442,7 +442,7 @@ describe("Interpreter", () => {
         expect(result).toEqual(MK_NUMBER(55))
     })
 
-    test.skip('evaluate function returning another function', () => {
+    test('evaluate function returning another function', () => {
         const code = [
             'fonction a(val)',
             '    fonction b(mul)',

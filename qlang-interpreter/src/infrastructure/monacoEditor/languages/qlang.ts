@@ -175,13 +175,13 @@ fin`,
             model: ITextModel,
             position: Position,
         ): languages.ProviderResult<languages.CompletionList> => {
-            const word = model.getWordUntilPosition(position);
+            const word = model.getWordUntilPosition(position)
             const range = {
                 startLineNumber: position.lineNumber,
                 endLineNumber: position.lineNumber,
                 startColumn: word.startColumn,
                 endColumn: word.endColumn,
-            };
+            }
             return {
                 suggestions: suggestions.map(([label, insertText]) => ({
                     label,

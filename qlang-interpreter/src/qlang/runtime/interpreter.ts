@@ -33,13 +33,12 @@ import {
     MK_RETURN,
     MK_STRING,
     NumberValue,
-    ReturnValue,
     type AlgebraicValue,
     type RuntimeValue,
 } from "./values"
 import Environment from "./environment"
 import { Std } from "./std"
-import { Callable } from "./callable"
+import { QFunction } from "./callable"
 
 export default class Interpreter {
 
@@ -65,7 +64,7 @@ export default class Interpreter {
             case 'PrintStatement':
                 return this.evaluatePrintStatement(astNode as PrintStatement)
             case 'BlockStatement':
-                return this.evaluateBlockStatement(astNode as BlockStatement)
+                return this.evaluateBlockStatement(astNode as BlockStatement, this.env)
             case 'IfStatement':
                 return this.evaluateIfStatement(astNode as IfStatement)
             case 'WhileStatement':
@@ -122,22 +121,29 @@ export default class Interpreter {
         return `[${elements.join(', ')}]`
     }
 
-    private evaluateBlockStatement(blockStatement: BlockStatement): RuntimeValue {
+    public evaluateBlockStatement(blockStatement: BlockStatement, environment: Environment): RuntimeValue {
+        const previousEnv = this.env
+        this.env = environment
+
         let lastEvaluated: RuntimeValue = MK_NULL()
 
         for (const statement of blockStatement.body) {
             if (statement.kind === 'BreakStatement') {
+                this.env = previousEnv
                 return MK_BREAK()
             }
             if (statement.kind === 'ContinueStatement') {
+                this.env = previousEnv
                 return MK_CONTINUE()
             }
             if (statement.kind === 'ReturnStatement') {
                 const result = this.evaluate((statement as ReturnStatement).value) as AlgebraicValue
+                this.env = previousEnv
                 return MK_RETURN(result)
             }
             lastEvaluated = this.evaluate(statement)
             if (lastEvaluated.type === 'break' || lastEvaluated.type === 'continue' || lastEvaluated.type === 'return') {
+                this.env = previousEnv
                 return lastEvaluated
             }
         }
@@ -208,27 +214,13 @@ export default class Interpreter {
 
     private evaluateFunctionDeclaration(functionStatement: FunctionStatement): RuntimeValue {
         const name = functionStatement.identifier
-
-        const callback = (...args: AlgebraicValue[]) => {
-            const env = new Environment(this.env)
-            for (let i = 0; i < functionStatement.parameters.length; i++) {
-                env.declareVariable(functionStatement.parameters[i], args[i])
-            }
-
-            this.env = env
-            const result = this.evaluate(functionStatement.body)
-
-            this.env = this.env.Parent!
-            return result.type === 'return' ? MK_ALGEBRAIC((result as ReturnValue).value) : MK_NULL()
-        }
-
-        const callable = new Callable(functionStatement.parameters.length, name ?? null, callback)
+        const qfunction = new QFunction(functionStatement, this.env)
 
         const envFound = this.env.resolve(name, false)
         if (envFound === null) {
             this.env.declareVariable(name, MK_NULL())
         }
-        return this.env.assignVariable(name, MK_FUNCTION(callable))
+        return this.env.assignVariable(name, MK_FUNCTION(qfunction))
     }
 
     private evaluateExpression(expression: Statement): RuntimeValue {
@@ -369,15 +361,15 @@ export default class Interpreter {
         }
 
         const callee = expression as FunctionValue
-        if (callExpression.arguments.length !== callee.value.arity) {
-            throw new Error(`Expected ${callee.value.arity} arguments, got ${callExpression.arguments.length} instead`)
+        if (callExpression.arguments.length !== callee.value.Arity) {
+            throw new Error(`Expected ${callee.value.Arity} arguments, got ${callExpression.arguments.length} instead`)
         }
 
         const args = callExpression.arguments.map(
             (argument) => this.attemptAlgebraicValue(this.evaluate(argument)),
         )
 
-        const currentValue = callee.value.call(...args)
+        const currentValue = callee.value.call(this, args)
         return currentValue.type === 'return'
             ? MK_ALGEBRAIC(currentValue.value)
             : currentValue

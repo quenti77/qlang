@@ -6,6 +6,7 @@ export type NodeType =
     | 'IfStatement'
     | 'WhileStatement'
     | 'ForStatement'
+    | 'FunctionStatement'
     | 'BlockStatement'
     | 'BreakStatement'
     | 'ContinueStatement'
@@ -21,6 +22,7 @@ export type NodeType =
     | 'Identifier'
     | 'MemberExpression'
     | 'ArrayExpression'
+    | 'CallExpression'
 
 export interface Statement {
     kind: NodeType
@@ -62,6 +64,13 @@ export interface ForStatement extends Statement {
     until: Expression
     step: Expression
     body: Statement
+}
+
+export interface FunctionStatement extends Statement {
+    kind: 'FunctionStatement'
+    identifier: string
+    parameters: string[]
+    body: BlockStatement
 }
 
 export interface BlockStatement extends Statement {
@@ -117,6 +126,12 @@ export interface MemberExpression extends Expression {
 export interface ArrayExpression extends Expression {
     kind: 'ArrayExpression'
     elements: Expression[]
+}
+
+export interface CallExpression extends Expression {
+    kind: 'CallExpression'
+    callee: Expression
+    arguments: Expression[]
 }
 
 export interface Literal {

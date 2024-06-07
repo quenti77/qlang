@@ -2,7 +2,26 @@ import { expect, test, describe, beforeEach } from "bun:test"
 
 import Parser from "./parser"
 import Lexer from "./lexer"
-import type { ArrayExpression, AssignmentExpression, BinaryExpression, BooleanLiteral, ForStatement, Identifier, IfStatement, MemberExpression, NullLiteral, NumericLiteral, PrintStatement, Program, StringLiteral, VariableDeclarationStatement, WhileStatement } from "./ast"
+import type {
+    ArrayExpression,
+    AssignmentExpression,
+    BinaryExpression,
+    BooleanLiteral,
+    CallExpression,
+    ForStatement,
+    FunctionStatement,
+    Identifier,
+    IfStatement,
+    MemberExpression,
+    NullLiteral,
+    NumericLiteral,
+    PrintStatement,
+    Program,
+    ReturnStatement,
+    StringLiteral,
+    VariableDeclarationStatement,
+    WhileStatement,
+} from "./ast"
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -878,6 +897,119 @@ describe("Parser", () => {
         expect(ast).toEqual({
             kind: 'Program',
             body: [tabDeclaration, assignment]
+        })
+    })
+
+    test("make AST call function with empty parameters", () => {
+        const ast = makeASTFromInput('abc()')
+        const callExpression = {
+            kind: 'CallExpression',
+            callee: { kind: 'Identifier', name: 'abc' },
+            arguments: []
+        } as CallExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [callExpression]
+        })
+    })
+
+    test("make AST call function with one parameter value", () => {
+        const ast = makeASTFromInput('abc(42)')
+        const callExpression = {
+            kind: 'CallExpression',
+            callee: { kind: 'Identifier', name: 'abc' },
+            arguments: [{ kind: 'NumericLiteral', value: 42 } as NumericLiteral]
+        } as CallExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [callExpression]
+        })
+    })
+
+    test("make AST call function with multiple parameters", () => {
+        const ast = makeASTFromInput('abc(42, "hello", a)')
+        const callExpression = {
+            kind: 'CallExpression',
+            callee: { kind: 'Identifier', name: 'abc' },
+            arguments: [
+                { kind: 'NumericLiteral', value: 42 },
+                { kind: 'StringLiteral', value: 'hello' },
+                { kind: 'Identifier', name: 'a' } as Identifier
+            ]
+        } as CallExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [callExpression]
+        })
+    })
+
+    test("make AST function declaration without parameters", () => {
+        const code = [
+            'fonction abc()',
+            '  ecrire 42',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const functionDeclaration = {
+            kind: 'FunctionStatement',
+            identifier: 'abc',
+            parameters: [],
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    {
+                        kind: 'PrintStatement',
+                        value: { kind: 'NumericLiteral', value: 42 },
+                    } as PrintStatement
+                ]
+            }
+        } as FunctionStatement
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [functionDeclaration]
+        })
+    })
+
+    test("make AST function declaration with parameters and more lines", () => {
+        const code = [
+            'fonction addition(a, b)',
+            '    ecrire a',
+            '    ecrire b',
+            '    retour a + b',
+            'fin'
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+
+        const functionDeclaration = {
+            kind: 'FunctionStatement',
+            identifier: 'addition',
+            parameters: ['a', 'b'],
+            body: {
+                kind: 'BlockStatement',
+                body: [
+                    { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'a' } },
+                    { kind: 'PrintStatement', value: { kind: 'Identifier', name: 'b' } },
+                    {
+                        kind: 'ReturnStatement',
+                        value: {
+                            kind: 'BinaryExpression',
+                            left: { kind: 'Identifier', name: 'a' },
+                            right: { kind: 'Identifier', name: 'b' },
+                            operator: '+'
+                        }
+                    } as ReturnStatement
+                ]
+            }
+        } as FunctionStatement
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [functionDeclaration]
         })
     })
 })

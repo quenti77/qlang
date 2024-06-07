@@ -7,6 +7,7 @@ export type ValueType =
     | 'continue'
     | 'return'
     | 'array'
+    | 'function'
 
 export interface RuntimeValue {
     type: ValueType

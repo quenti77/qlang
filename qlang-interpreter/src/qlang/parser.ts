@@ -4,8 +4,10 @@ import type {
     BinaryExpression,
     BlockStatement,
     BooleanLiteral,
+    CallExpression,
     Expression,
     ForStatement,
+    FunctionStatement,
     Identifier,
     IfStatement,
     MemberExpression,
@@ -59,6 +61,8 @@ export default class Parser {
                 return this.parseWhileStatement()
             case TokenType.For:
                 return this.parseForStatement()
+            case TokenType.Function:
+                return this.parseFunctionDeclarationStatement()
             case TokenType.Break:
                 this.eat()
                 return { kind: 'BreakStatement' } as Statement
@@ -193,6 +197,36 @@ export default class Parser {
             step,
             body,
         } as ForStatement
+    }
+
+    private parseFunctionDeclarationStatement(): Statement {
+        this.eatExactly(TokenType.Function, 'Expected "fonction" keyword')
+        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+        this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+
+        const params = []
+        while (this.at().type !== TokenType.CloseParenthesis) {
+            if (params.length >= 48) {
+                throw new Error('Too many parameters')
+            }
+            params.push(this.eatExactly(TokenType.Identifier, 'Expected identifier').value)
+
+            const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+            if (token.type === TokenType.Comma) {
+                this.eat()
+            }
+        }
+
+        this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
+        const body = this.parseBlockStatement()
+        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+
+        return {
+            kind: 'FunctionStatement',
+            identifier,
+            parameters: params,
+            body,
+        } as FunctionStatement
     }
 
     private parseBlockStatement(withCondition: TokenType[] = []): BlockStatement {
@@ -374,7 +408,7 @@ export default class Parser {
 
     private parseArrayExpression(): Expression {
         if (this.at().type !== TokenType.OpenBrackets) {
-            return this.parsePrimaryExpression()
+            return this.parseCallExpression()
         }
 
         this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
@@ -395,6 +429,34 @@ export default class Parser {
             kind: 'ArrayExpression',
             elements,
         } as ArrayExpression
+    }
+
+    private parseCallExpression(): Expression {
+        let expression = this.parsePrimaryExpression()
+
+        while (this.at().type === TokenType.OpenParenthesis) {
+            this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+
+            const args = []
+            while (this.at().type !== TokenType.CloseParenthesis) {
+                args.push(this.parseExpression())
+
+                const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+                if (token.type === TokenType.Comma) {
+                    this.eat()
+                }
+            }
+
+            this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
+
+            expression = {
+                kind: 'CallExpression',
+                callee: expression,
+                arguments: args,
+            } as CallExpression
+        }
+
+        return expression
     }
 
     private parsePrimaryExpression(): Expression {

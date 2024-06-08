@@ -10,12 +10,14 @@ export default class Lexer {
     private lines: string[] = []
     private tokens: Token[] = []
     private src: string[] = []
+    private code: string = ''
 
     public get Tokens(): Token[] {
         return this.tokens
     }
 
     public tokenize(input: string): void {
+        this.code = input
         this.reset()
         this.lines = input.split('\n')
 
@@ -113,7 +115,7 @@ export default class Lexer {
                     this.addCol(token)
                     const posEnd = this.position.copy()
 
-                    throw new IllegalCharError(posStart, posEnd, '.')
+                    throw new IllegalCharError(posStart, posEnd, '.', this.code)
                 }
                 hasDot = true
             }
@@ -146,7 +148,7 @@ export default class Lexer {
                     default: {
                         this.addCol(currentChar)
                         const posEnd = this.position.copy()
-                        throw new IllegalCharError(posStart, posEnd, nextChar ?? '')
+                        throw new IllegalCharError(posStart, posEnd, nextChar ?? '', this.code)
                     }
                 }
                 continue
@@ -154,7 +156,7 @@ export default class Lexer {
             if (currentChar === undefined) {
                 if (!this.hasMoreLines()) {
                     const posEnd = this.position.copy()
-                    throw new StringUnterminatedError(posStart, posEnd)
+                    throw new StringUnterminatedError(posStart, posEnd, this.code)
                 }
                 this.nextLine()
                 value += '\n'

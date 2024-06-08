@@ -30,7 +30,7 @@ describe("Parser", () => {
 
     const makeASTFromInput = (input: string): Program => {
         lexer.tokenize(input)
-        parser.setTokens(lexer.Tokens)
+        parser.setTokens(lexer.Tokens, input)
         return parser.makeAST()
     }
 

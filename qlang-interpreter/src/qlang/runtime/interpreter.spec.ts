@@ -31,7 +31,7 @@ describe("Interpreter", () => {
 
     const makeASTFromInput = (input: string): Program => {
         lexer.tokenize(input)
-        parser.setTokens(lexer.Tokens)
+        parser.setTokens(lexer.Tokens, input)
         return parser.makeAST()
     }
 
@@ -126,7 +126,7 @@ describe("Interpreter", () => {
 
     test('evaluate variable not found', () => {
         const ast = makeASTFromInput('a')
-        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' non déclarée")
     })
 
     test('evaluate variable assignment with string', () => {
@@ -233,7 +233,7 @@ describe("Interpreter", () => {
             'a'
         ]
         const ast = makeASTFromInput(code.join('\n'))
-        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' non déclarée")
     })
 
     test('evaluate while statement', () => {

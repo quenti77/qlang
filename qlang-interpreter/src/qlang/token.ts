@@ -96,4 +96,11 @@ export const KEYWORDS: Record<string, TokenType> = {
     'fonction': TokenType.Function,
 }
 
+export function findKeywordFromToken(token: TokenType): string[] | undefined {
+    return Object.entries(KEYWORDS)
+        .filter(([, value]) => value === token)
+        .map(([key]) => key)
+
+}
+
 export const OPERATORS: string[] = Object.values(BinaryOperator)

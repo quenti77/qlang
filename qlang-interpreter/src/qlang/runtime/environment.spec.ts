@@ -24,13 +24,13 @@ describe("Interpreter", () => {
 
         expect(() => {
             env.declareVariable('a', { type: 'number', value: 43 } as NumberValue)
-        }).toThrow("Variable 'a' already declared")
+        }).toThrow("Variable 'a' déjà déclarée")
     })
 
     test('assign a value to a variable that is not declared', () => {
         expect(() => {
             env.assignVariable('a', { type: 'number', value: 42 } as NumberValue)
-        }).toThrow("Variable 'a' not declared")
+        }).toThrow("Variable 'a' non déclarée")
     })
 
     test('assign a value to a variable that is declared', () => {
@@ -43,7 +43,7 @@ describe("Interpreter", () => {
     test('lookup a variable that is not declared', () => {
         expect(() => {
             env.lookupVariable('a')
-        }).toThrow("Variable 'a' not declared")
+        }).toThrow("Variable 'a' non déclarée")
     })
 
     test('lookup a variable that is declared', () => {

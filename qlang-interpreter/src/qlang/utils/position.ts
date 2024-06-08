@@ -12,6 +12,10 @@ export class Position {
         this.content = content
     }
 
+    public get finishCol(): number {
+        return this.col + this.content.length
+    }
+
     public advance(newLine: boolean, content: string): Position {
         this.content = content
         this.index += content.length || 1

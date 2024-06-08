@@ -1,4 +1,4 @@
-import { Callable } from "@/qlang/runtime/callable"
+import { Callable, QFunction } from "@/qlang/runtime/callable"
 import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
 import {
@@ -29,6 +29,7 @@ class TailleFunction implements Callable {
 
 export const makeGlobalEnv = (): Environment => {
     const globalEnv = new Environment()
+    QFunction.counter = 0
 
     globalEnv.declareVariable('taille', {
         type: 'function',

@@ -16,7 +16,10 @@ function Title({ onExecute }: { onExecute: () => void }) {
     return (
         <div className="flex align-baseline justify-stretch">
             <p className="text-lg font-semibold flex-1">{t('code.title')}</p>
-            <button className="btn btn-sm bg-amber-400 text-gray-800 hover:bg-amber-500 dark:bg-amber-300 dark:hover:bg-amber-200" onClick={onExecute}>
+            <button
+                className="btn btn-sm bg-amber-400 text-gray-800 hover:bg-amber-500 dark:bg-amber-300 dark:hover:bg-amber-200"
+                onClick={() => onExecute()}
+            >
                 {t('code.execute')}
                 <IconExecute size="sm" />
             </button>

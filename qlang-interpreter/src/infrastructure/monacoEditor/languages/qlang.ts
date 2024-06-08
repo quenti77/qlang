@@ -65,7 +65,7 @@ export const run = (code: string): { out: string[], err: string[] } => {
 
     try {
         lexer.tokenize(code)
-        parser.setTokens(lexer.Tokens)
+        parser.setTokens(lexer.Tokens, code)
 
         const ast = parser.makeAST()
         const env = makeGlobalEnv()

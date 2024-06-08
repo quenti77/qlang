@@ -17,7 +17,7 @@ export interface Callable {
 
 export class QFunction implements Callable {
 
-    private static counter: number = 0
+    public static counter: number = 0
 
     private readonly func: FunctionStatement
     private readonly closure: Environment

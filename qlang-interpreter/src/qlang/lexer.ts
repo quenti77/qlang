@@ -110,7 +110,11 @@ export default class Lexer {
         while (this.hasMoreChars() && (this.isNumber(this.src[0]) || this.src[0] === '.')) {
             if (this.src[0] === '.') {
                 if (hasDot) {
-                    throw new IllegalCharError('.')
+                    const posStart = this.position.copy()
+                    this.addCol(token)
+                    const posEnd = this.position.copy()
+
+                    throw new IllegalCharError(posStart, posEnd, '.')
                 }
                 hasDot = true
             }
@@ -123,7 +127,7 @@ export default class Lexer {
     private processString(): void {
         this.eat()
 
-        const startPos = this.position.copy()
+        const posStart = this.position.copy()
 
         let value = ''
         while (this.src[0] !== '"') {
@@ -140,14 +144,18 @@ export default class Lexer {
                     case 'n':
                         this.nextLine()
                         break
-                    default:
-                        throw new IllegalCharError(nextChar ?? '')
+                    default: {
+                        this.addCol(currentChar)
+                        const posEnd = this.position.copy()
+                        throw new IllegalCharError(posStart, posEnd, nextChar ?? '')
+                    }
                 }
                 continue
             }
             if (currentChar === undefined) {
                 if (!this.hasMoreLines()) {
-                    throw new StringUnterminatedError()
+                    const posEnd = this.position.copy()
+                    throw new StringUnterminatedError(posStart, posEnd)
                 }
                 this.nextLine()
                 value += '\n'
@@ -156,7 +164,7 @@ export default class Lexer {
             value += currentChar
         }
 
-        this.tokens.push(createToken(TokenType.String, value, startPos))
+        this.tokens.push(createToken(TokenType.String, value, posStart))
         this.eat()
     }
 

@@ -77,12 +77,12 @@ export default class Parser {
     }
 
     private parseVariableDeclarationStatement(): Statement {
-        this.eatExactly(TokenType.Let, 'Expected "let" keyword')
+        this.eatExactly(TokenType.Let, '')
 
-        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+        const identifier = this.eatExactly(TokenType.Identifier, '').value
 
         if (this.at().type === TokenType.Equals) {
-            this.eatExactly(TokenType.Equals, 'Expected "="')
+            this.eatExactly(TokenType.Equals, '')
             return {
                 kind: 'VariableDeclarationStatement',
                 identifier,
@@ -97,7 +97,7 @@ export default class Parser {
     }
 
     private parsePrintStatement(): Statement {
-        this.eatExactly(TokenType.Print, 'Expected "ecrire" keyword')
+        this.eatExactly(TokenType.Print, '')
 
         return {
             kind: 'PrintStatement',
@@ -107,23 +107,23 @@ export default class Parser {
 
     private parseIfStatement(endNeeded: boolean = true): Statement {
         if (endNeeded) {
-            this.eatExactly(TokenType.If, 'Expected "si" keyword')
+            this.eatExactly(TokenType.If, '')
         }
         const condition = this.parseExpression()
-        this.eatExactly(TokenType.Then, 'Expected "alors" keyword')
+        this.eatExactly(TokenType.Then, '')
         const thenBranch = this.parseBlockStatement([TokenType.Else, TokenType.ElseIf])
 
         let elseBranch: Statement | undefined = undefined
         if (this.at().type === TokenType.Else) {
-            this.eatExactly(TokenType.Else, 'Expected "sinon" keyword')
+            this.eatExactly(TokenType.Else, '')
             elseBranch = this.parseBlockStatement()
         } else if (this.at().type === TokenType.ElseIf) {
-            this.eatExactly(TokenType.ElseIf, 'Expected "sinonsi" keyword')
+            this.eatExactly(TokenType.ElseIf, '')
             elseBranch = this.parseIfStatement(false)
         }
 
         if (endNeeded) {
-            this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+            this.eatExactly(TokenType.End, '')
         }
 
         return {
@@ -135,12 +135,12 @@ export default class Parser {
     }
 
     private parseWhileStatement(): Statement {
-        this.eatExactly(TokenType.While, 'Expected "tantque" keyword')
+        this.eatExactly(TokenType.While, '')
         const condition = this.parseExpression()
-        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        this.eatExactly(TokenType.Then, '')
 
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, '')
 
         return {
             kind: 'WhileStatement',
@@ -150,12 +150,12 @@ export default class Parser {
     }
 
     private parseForStatement(): Statement {
-        this.eatExactly(TokenType.For, 'Expected "pour" keyword')
-        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier')
-        this.eatExactly(TokenType.From, 'Expected "de" keyword')
+        this.eatExactly(TokenType.For, '')
+        const identifier = this.eatExactly(TokenType.Identifier, '')
+        this.eatExactly(TokenType.From, '')
         const from = this.parseExpression()
 
-        this.eatExactly(TokenType.Until, 'Expected "jusque" keyword')
+        this.eatExactly(TokenType.Until, '')
 
         let until: Expression = this.parseExpression()
         if (until.kind === 'NumericLiteral' || until.kind === 'Identifier') {
@@ -170,7 +170,7 @@ export default class Parser {
         const token = this.at().type
         let step = { kind: 'NumericLiteral', value: 1 } as Expression
         if (token === TokenType.Step) {
-            this.eatExactly(TokenType.Step, 'Expected "evol" keyword')
+            this.eatExactly(TokenType.Step, '')
             step = this.parseExpression()
         }
 
@@ -185,9 +185,9 @@ export default class Parser {
             } as BinaryExpression,
         } as AssignmentExpression
 
-        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        this.eatExactly(TokenType.Then, '')
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, '')
 
         return {
             kind: 'ForStatement',
@@ -200,29 +200,30 @@ export default class Parser {
     }
 
     private parseFunctionDeclarationStatement(): Statement {
-        this.eatExactly(TokenType.Function, 'Expected "fonction" keyword')
+        this.eatExactly(TokenType.Function, '')
         const identifier = this.at().type === TokenType.OpenParenthesis
             ? null
-            : this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+            : this.eatExactly(TokenType.Identifier, '').value
 
-        this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+        this.eatExactly(TokenType.OpenParenthesis, '')
 
         const params = []
         while (this.at().type !== TokenType.CloseParenthesis) {
             if (params.length >= 48) {
-                throw new Error('Too many parameters')
+                // TODO: throw error
+                throw new Error()
             }
-            params.push(this.eatExactly(TokenType.Identifier, 'Expected identifier').value)
+            params.push(this.eatExactly(TokenType.Identifier, '').value)
 
-            const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+            const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], '')
             if (token.type === TokenType.Comma) {
                 this.eat()
             }
         }
 
-        this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
+        this.eatExactly(TokenType.CloseParenthesis, '')
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, '')
 
         return {
             kind: 'FunctionStatement',
@@ -250,7 +251,7 @@ export default class Parser {
     }
 
     private parseReturnStatement(): Statement {
-        this.eatExactly(TokenType.Return, 'Expected "retour" keyword')
+        this.eatExactly(TokenType.Return, '')
 
         return {
             kind: 'ReturnStatement',
@@ -269,7 +270,7 @@ export default class Parser {
             return left
         }
 
-        this.eatExactly(TokenType.Equals, 'Expected "="')
+        this.eatExactly(TokenType.Equals, '')
         return {
             kind: 'AssignmentExpression',
             assignment: left,
@@ -386,7 +387,7 @@ export default class Parser {
         let expression = this.parseArrayExpression()
 
         while (this.at().type === TokenType.OpenBrackets) {
-            this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+            this.eatExactly(TokenType.OpenBrackets, '')
             if (this.at().type === TokenType.CloseBrackets) {
                 this.eat()
                 expression = {
@@ -397,7 +398,7 @@ export default class Parser {
                 break
             }
             const index = this.parseExpression()
-            this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
+            this.eatExactly(TokenType.CloseBrackets, '')
 
             expression = {
                 kind: 'MemberExpression',
@@ -414,19 +415,19 @@ export default class Parser {
             return this.parseCallExpression()
         }
 
-        this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+        this.eatExactly(TokenType.OpenBrackets, '')
 
         const elements = []
         while (this.at().type !== TokenType.CloseBrackets) {
             elements.push(this.parseExpression())
 
-            const token = this.attempt([TokenType.Comma, TokenType.CloseBrackets], 'Expected "," or "]"')
+            const token = this.attempt([TokenType.Comma, TokenType.CloseBrackets], '')
             if (token.type === TokenType.Comma) {
                 this.eat()
             }
         }
 
-        this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
+        this.eatExactly(TokenType.CloseBrackets, '')
 
         return {
             kind: 'ArrayExpression',
@@ -438,19 +439,19 @@ export default class Parser {
         let expression = this.parsePrimaryExpression()
 
         while (this.at().type === TokenType.OpenParenthesis) {
-            this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+            this.eatExactly(TokenType.OpenParenthesis, '')
 
             const args = []
             while (this.at().type !== TokenType.CloseParenthesis) {
                 args.push(this.at().type === TokenType.Function ? this.parseFunctionDeclarationStatement() : this.parseExpression())
 
-                const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+                const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], '')
                 if (token.type === TokenType.Comma) {
                     this.eat()
                 }
             }
 
-            this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
+            this.eatExactly(TokenType.CloseParenthesis, '')
 
             expression = {
                 kind: 'CallExpression',
@@ -480,12 +481,13 @@ export default class Parser {
             case TokenType.OpenParenthesis: {
                 this.eat()
                 const expression = this.parseExpression()
-                this.eatExactly(TokenType.CloseParenthesis, 'Expected closing parenthesis')
+                this.eatExactly(TokenType.CloseParenthesis, '')
 
                 return expression
             }
             default:
-                throw new Error(`Unexpected token type: ${tokenType}`)
+                // TODO: throw error
+                throw new Error()
         }
     }
 
@@ -506,6 +508,7 @@ export default class Parser {
         const token = this.eat()
 
         if (!token || token.type !== type) {
+            // TODO: throw error
             throw new Error(err)
         }
 

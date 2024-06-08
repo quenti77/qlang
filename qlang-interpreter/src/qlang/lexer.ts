@@ -109,7 +109,8 @@ export default class Lexer {
         while (this.hasMoreChars() && (this.isNumber(this.src[0]) || this.src[0] === '.')) {
             if (this.src[0] === '.') {
                 if (hasDot) {
-                    throw new Error('Invalid number')
+                    // TODO: throw error
+                    throw new Error()
                 }
                 hasDot = true
             }
@@ -141,13 +142,15 @@ export default class Lexer {
                         this.nextLine()
                         break
                     default:
-                        throw new Error(`Unknown escape sequence: \\${nextChar}`)
+                        // TODO: throw error
+                        throw new Error()
                 }
                 continue
             }
             if (currentChar === undefined) {
                 if (!this.hasMoreLines()) {
-                    throw new Error('Unterminated string')
+                    // TODO: throw error
+                    throw new Error()
                 }
                 this.nextLine()
                 value += '\n'

@@ -9,19 +9,14 @@ import {
 
 class TailleFunction implements Callable {
 
-    private closure: Environment
-
-    constructor(closure: Environment) {
-        this.closure = closure
-    }
-
     get Arity(): number {
         return 1
     }
 
     call(_: Interpreter, args: AlgebraicValue[]): AlgebraicValue {
         if (!Array.isArray(args[0].value)) {
-            throw new Error('La fonction taille prend un tableau en argument.')
+            // TODO: throw error
+            throw new Error()
         }
 
         return MK_NUMBER(args[0].value.length)
@@ -37,7 +32,7 @@ export const makeGlobalEnv = (): Environment => {
 
     globalEnv.declareVariable('taille', {
         type: 'function',
-        value: new TailleFunction(globalEnv)
+        value: new TailleFunction()
     } as FunctionValue)
 
     return globalEnv

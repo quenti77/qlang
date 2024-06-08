@@ -14,6 +14,7 @@ import {
     StringValue,
 } from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
+import { QError } from "@/qlang/utils/errors"
 
 export const LANG_ID = "qlang"
 
@@ -24,11 +25,14 @@ function isAlgebraicValue(runtimeValue: RuntimeValue): runtimeValue is Algebraic
     return 'value' in runtimeValue
 }
 
-function formatError(error: unknown): string {
+function formatError(error: unknown): string | string[] {
     if (!(error instanceof Error)) {
-        return 'Unknown error'
+        return 'Erreur inconnue'
     }
-    return error.message
+    if (!(error instanceof QError)) {
+        return error.message
+    }
+    return error.render()
 }
 
 function toStringAlgebraicValue(element: AlgebraicValue): string {
@@ -56,13 +60,13 @@ function toStringArrayValue(array: ArrayValue): string {
 }
 
 export const run = (code: string): { out: string[], err: string[] } => {
-    lexer.tokenize(code)
-    parser.setTokens(lexer.Tokens)
-
     const stdOut = new Std()
     const stdErr = new Std()
 
     try {
+        lexer.tokenize(code)
+        parser.setTokens(lexer.Tokens)
+
         const ast = parser.makeAST()
         const env = makeGlobalEnv()
         const interpreter = new Interpreter(env, stdOut, stdErr)
@@ -72,7 +76,11 @@ export const run = (code: string): { out: string[], err: string[] } => {
             stdOut.print(toStringAlgebraicValue(result))
         }
     } catch (error) {
-        stdErr.print(formatError(error))
+        let errors = formatError(error)
+        if (!Array.isArray(errors)) {
+            errors = [errors]
+        }
+        errors.forEach((err) => stdErr.print(err))
     }
 
     return { out: stdOut.Log, err: stdErr.Log }

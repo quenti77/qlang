@@ -3,16 +3,19 @@ export class Position {
     public index: number
     public line: number
     public col: number
+    public content: string
 
-    constructor(index: number, line: number, col: number) {
+    constructor(index: number, line: number, col: number, content: string) {
         this.index = index
         this.line = line
         this.col = col
+        this.content = content
     }
 
-    public advance(newLine: boolean, increment: number = 1): Position {
-        this.index += increment
-        this.col += increment
+    public advance(newLine: boolean, content: string): Position {
+        this.content = content
+        this.index += content.length || 1
+        this.col += content.length || 1
 
         if (newLine) {
             this.line++
@@ -23,7 +26,7 @@ export class Position {
     }
 
     public copy(): Position {
-        return new Position(this.index, this.line, this.col)
+        return new Position(this.index, this.line, this.col, this.content)
     }
 }
 

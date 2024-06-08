@@ -5,7 +5,7 @@ import { Position } from "./utils/position"
 export default class Lexer {
 
     private currentLine: string | undefined = undefined
-    private position: Position = new Position(0, 0, 0)
+    private position: Position = new Position(0, 0, 0, '')
 
     private lines: string[] = []
     private tokens: Token[] = []
@@ -78,8 +78,7 @@ export default class Lexer {
                     this.pushToken(TokenType.Identifier, token)
                 }
             } else {
-                this.src.shift()
-                this.position.advance(false)
+                this.position.advance(false, this.src.shift()!)
             }
         }
     }
@@ -164,19 +163,21 @@ export default class Lexer {
             value += currentChar
         }
 
+        posStart.content = value
+
         this.tokens.push(createToken(TokenType.String, value, posStart))
         this.eat()
     }
 
     private eat(): string | undefined {
         const currentChar = this.src.shift()
-        this.position.advance(false)
+        this.position.advance(false, currentChar ?? '')
 
         return currentChar
     }
 
     private addCol(char: string): void {
-        this.position.advance(false, char.length)
+        this.position.advance(false, char)
     }
 
     private pushToken(
@@ -184,8 +185,11 @@ export default class Lexer {
         value: string,
         position: Position = this.position
     ) {
-        this.tokens.push(createToken(type, value, position))
-        this.position.advance(false, value.length)
+        const tokenPosition = position.copy()
+        tokenPosition.content = value
+
+        this.tokens.push(createToken(type, value, tokenPosition))
+        this.position.advance(false, value)
     }
 
     private isIdentifier(token: string | undefined, withNumber: boolean): boolean {
@@ -213,13 +217,13 @@ export default class Lexer {
     }
 
     private nextLine(): void {
-        this.position.advance(true)
+        this.position.advance(true, '')
         this.currentLine = this.lines.shift()
         this.src = this.currentLine?.split('') ?? []
     }
 
     private reset(): void {
-        this.position = new Position(0, 0, 0)
+        this.position = new Position(0, 0, 0, '')
         this.lines = []
         this.tokens = []
         this.currentLine = undefined

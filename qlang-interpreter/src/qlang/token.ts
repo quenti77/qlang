@@ -67,7 +67,7 @@ export function createToken(type: TokenType, value: string, position: Position):
 }
 
 export function createTokenAt(type: TokenType, value: string, index: number, line: number, col: number): Token {
-    return createToken(type, value, new Position(index, line, col))
+    return createToken(type, value, new Position(index, line, col, value))
 }
 
 export const KEYWORDS: Record<string, TokenType> = {

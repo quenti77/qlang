@@ -1,3 +1,5 @@
+import { Position } from './utils/position'
+
 export enum TokenType {
     Number = 'number',
     String = 'string',
@@ -57,12 +59,15 @@ export enum BinaryOperator {
 export interface Token {
     type: TokenType
     value: string
-    line: number
-    column: number
+    position: Position
 }
 
-export function createToken(type: TokenType, value: string, line: number, column: number): Token {
-    return { type, value, line, column }
+export function createToken(type: TokenType, value: string, position: Position): Token {
+    return { type, value, position: position.copy() }
+}
+
+export function createTokenAt(type: TokenType, value: string, index: number, line: number, col: number): Token {
+    return createToken(type, value, new Position(index, line, col))
 }
 
 export const KEYWORDS: Record<string, TokenType> = {

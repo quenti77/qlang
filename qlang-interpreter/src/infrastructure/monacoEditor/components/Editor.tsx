@@ -7,9 +7,10 @@ import { ThemeContext } from '@/infrastructure/themes/ThemeProvider'
 interface EditorProps {
     defaultValue?: string
     contentChangeHandler: (content: string) => void
+    onExecute: (newCode: string) => void
 }
 
-export default function Editor({ defaultValue, contentChangeHandler }: EditorProps) {
+export default function Editor({ defaultValue, contentChangeHandler, onExecute }: EditorProps) {
     const { theme } = useContext(ThemeContext)
     const editorRef = useRef<HTMLDivElement>(null)
 
@@ -24,22 +25,32 @@ export default function Editor({ defaultValue, contentChangeHandler }: EditorPro
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    const onExecuteHandler = useCallback((event: Event) => {
+        if (event instanceof CustomEvent) {
+            onExecute(event.detail)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     useEffect(() => {
         if (editorRef.current && editor && editorRef.current.querySelector('.monaco-editor') === null) {
             editor.init(value)
             editor.removeEventListener('contentChange', onContentChangeHandler)
+            editor.removeEventListener('execute', onExecuteHandler)
             editor.addEventListener('contentChange', onContentChangeHandler)
+            editor.addEventListener('execute', onExecuteHandler)
         }
         if (editorRef.current && !editor && editorRef.current.querySelector('.monaco-editor') === null) {
             const newEditor = new CodeEditor(editorRef.current)
             newEditor.init(value)
             newEditor.setTheme(theme)
             newEditor.addEventListener('contentChange', onContentChangeHandler)
+            newEditor.addEventListener('execute', onExecuteHandler)
 
             setEditor(newEditor)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [editor, onContentChangeHandler])
+    }, [editor, onContentChangeHandler, onExecute])
 
     useEffect(() => {
         if (editor?.Current) {

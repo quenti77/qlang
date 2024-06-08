@@ -1,4 +1,4 @@
-import { editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api"
+import { editor as MonacoEditor, KeyCode, KeyMod } from "monaco-editor/esm/vs/editor/editor.api"
 import { LANG_ID } from "./languages/qlang"
 
 export default class CodeEditor extends EventTarget {
@@ -22,6 +22,19 @@ export default class CodeEditor extends EventTarget {
             this.editor.onDidChangeModelContent(() => {
                 this.value = this.editor?.getValue() || ""
                 this.dispatchEvent(new CustomEvent('contentChange', { detail: this.value }))
+            })
+            this.editor.addAction({
+                id: 'execute',
+                label: 'Execute',
+                keybindings: [KeyMod.CtrlCmd | KeyCode.Enter],
+                precondition: undefined,
+                keybindingContext: undefined,
+                contextMenuGroupId: "navigation",
+                contextMenuOrder: 1.5,
+                run: () => {
+                    this.value = this.editor?.getValue() || ""
+                    this.dispatchEvent(new CustomEvent('execute', { detail: this.value }))
+                },
             })
         } else {
             this.editor.updateOptions(this.getOptions())

@@ -1,4 +1,5 @@
 {
+  "code.execute": "実行する",
   "code.title": "コードエディター",
   "help.condition.intro": "条件は、\"true\" または \"true\" と同等のものを返す<strong>式の結果</strong>に基づいて<strong>コードを実行する</strong>方法です",
   "help.condition.title": "条件",

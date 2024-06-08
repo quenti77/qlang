@@ -2,10 +2,17 @@ import { languages, editor, type Position } from "monaco-editor"
 import { KEYWORDS } from "@/qlang/token"
 import Lexer from "@/qlang/lexer"
 import Parser from "@/qlang/parser"
-import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
 import { Std } from "@/qlang/runtime/std"
-import { AlgebraicValue, ArrayValue, NumberValue, RuntimeValue, StringValue } from "@/qlang/runtime/values"
+import { makeGlobalEnv } from "./qlangGlobals"
+import {
+    AlgebraicValue,
+    ArrayValue,
+    FunctionValue,
+    NumberValue,
+    RuntimeValue,
+    StringValue,
+} from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
 
 export const LANG_ID = "qlang"
@@ -36,6 +43,8 @@ function toStringAlgebraicValue(element: AlgebraicValue): string {
             return 'rien'
         case 'array':
             return toStringArrayValue(element as unknown as ArrayValue)
+        case 'function':
+            return (element as FunctionValue).value.toString()
         default:
             return 'inconnue'
     }
@@ -55,7 +64,7 @@ export const run = (code: string): { out: string[], err: string[] } => {
 
     try {
         const ast = parser.makeAST()
-        const env = new Environment()
+        const env = makeGlobalEnv()
         const interpreter = new Interpreter(env, stdOut, stdErr)
         const result = interpreter.evaluate(ast)
 
@@ -69,107 +78,124 @@ export const run = (code: string): { out: string[], err: string[] } => {
     return { out: stdOut.Log, err: stdErr.Log }
 }
 
+function registerLanguage() {
+    languages.register({ id: LANG_ID })
 
-languages.register({ id: LANG_ID })
-
-languages.setLanguageConfiguration(LANG_ID, {
-    brackets: [
-        ["[", "]"],
-        ["(", ")"],
-    ],
-    comments: {
-        lineComment: "rem",
-    },
-    autoClosingPairs: [
-        { open: "[", close: "]" },
-        { open: "(", close: ")" },
-        { open: '"', close: '"' },
-    ],
-    surroundingPairs: [
-        { open: '"', close: '"' },
-    ],
-    indentationRules: {
-        increaseIndentPattern: /.*\b(si|pour|tantque|pour chaque)\b.*\b(alors)\b.*/,
-        decreaseIndentPattern: /^\s*\b(sinon|sinonsi|fin)\b.*$/,
-        indentNextLinePattern: /.*\b(sinon|sinonsi)\b.*\b(alors)?\b.*/,
-    },
-})
-
-languages.setMonarchTokensProvider(LANG_ID, {
-    keywords: Array.from(Object.keys(KEYWORDS)),
-    tokenizer: {
-        root: [
-            [/rem.*/, "comment"],
-            [/[+\-/*<>=%]/, "delimiter"],
-            [
-                /[a-zA-Z_]\w*/,
-                {
-                    cases: {
-                        "@keywords": { token: "keyword.$0" },
-                    },
-                },
-            ],
-            [
-                /dec [a-zA-Z_]\w*/,
-                {
-                    cases: {
-                        "@default": "identifier",
-                    },
-                },
-            ],
-            [/\d/, "number"],
-            [/[ \t\r\n]+/, ""],
-            [/[{}()[\]]/, "bracket"],
-            [/"[^"]*"/, "string"],
-            [/'[^']*'/, "string"],
+    languages.setLanguageConfiguration(LANG_ID, {
+        brackets: [
+            ["[", "]"],
+            ["(", ")"],
         ],
-    },
-})
+        comments: {
+            lineComment: "rem",
+        },
+        autoClosingPairs: [
+            { open: "[", close: "]" },
+            { open: "(", close: ")" },
+            { open: '"', close: '"' },
+        ],
+        surroundingPairs: [
+            { open: '"', close: '"' },
+        ],
+        indentationRules: {
+            increaseIndentPattern: /.*((\b(si|pour|tantque|pour chaque)\b.*\b(alors)\b)|\bfonction.*\(.*\)).*/,
+            decreaseIndentPattern: /^\s*\b(sinon|sinonsi|fin)\b.*$/,
+            indentNextLinePattern: /.*((\b(sinon|sinonsi)\b.*\b(alors)?\b)|(fonction.*\(.*\))).*/,
+        },
+    })
 
-const extendedSuggestions = {
-    dec: `dec \${1:nom}`,
-    fonction: `fonction \${1:nom}($2)
+    languages.setMonarchTokensProvider(LANG_ID, {
+        keywords: Array.from(Object.keys(KEYWORDS)),
+        tokenizer: {
+            root: [
+                [/rem.*/, "comment"],
+                [/[+\-/*<>=%]/, "delimiter"],
+                [
+                    /[a-zA-Z_]\w*/,
+                    {
+                        cases: {
+                            "@keywords": { token: "keyword.$0" },
+                        },
+                    },
+                ],
+                [
+                    /dec [a-zA-Z_]\w*/,
+                    {
+                        cases: {
+                            "@default": "identifier",
+                        },
+                    },
+                ],
+                [/\d/, "number"],
+                [/[ \t\r\n]+/, ""],
+                [/[{}()[\]]/, "bracket"],
+                [/"[^"]*"/, "string"],
+                [/'[^']*'/, "string"],
+            ],
+        },
+    })
+
+    const extendedSuggestions = {
+        dec: `dec \${1:nom}`,
+        fonction: `fonction \${1:nom}($2)
     $3
 fin`,
-    ecrire: `ecrire $1`,
-    si: `si \${1:condition} alors
+        ecrire: `ecrire $1`,
+        si: `si \${1:condition} alors
     $2
 fin`,
-    tantque: `tantque \${1:condition} alors
+        tantque: `tantque \${1:condition} alors
     $2
 fin`,
-    pour: `pour \${1:indentifiant} de \${2:debut} jusque \${3:fin_inclus} alors
+        pour: `pour \${1:indentifiant} de \${2:debut} jusque \${3:fin_inclus} alors
     $4
 fin`,
+    }
+
+    const suggestions = Object.keys(KEYWORDS).map((label) => {
+        if (label in extendedSuggestions) {
+            return [label, extendedSuggestions[label as keyof typeof extendedSuggestions]]
+        }
+        return [label, label]
+    })
+
+    const code = [
+        'fonction fibonacci(n)',
+        '    si n <= 1 alors',
+        '        retour n',
+        '    fin',
+        '    retour fibonacci(n - 1) + fibonacci(n - 2)',
+        'fin',
+        'fibonacci(10)',
+    ]
+    suggestions.push(['test', code.join('\n')])
+
+    languages.registerCompletionItemProvider(LANG_ID, {
+        provideCompletionItems: (
+            model: ITextModel,
+            position: Position,
+        ): languages.ProviderResult<languages.CompletionList> => {
+            const word = model.getWordUntilPosition(position)
+            const range = {
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn: word.startColumn,
+                endColumn: word.endColumn,
+            }
+            return {
+                suggestions: suggestions.map(([label, insertText]) => ({
+                    label,
+                    insertText,
+                    kind: languages.CompletionItemKind.Keyword,
+                    insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                    range: range,
+                })),
+            }
+        }
+    })
+
 }
 
-const suggestions = Object.keys(KEYWORDS).map((label) => {
-    if (label in extendedSuggestions) {
-        return [label, extendedSuggestions[label as keyof typeof extendedSuggestions]]
-    }
-    return [label, label]
-})
-
-languages.registerCompletionItemProvider(LANG_ID, {
-    provideCompletionItems: (
-        model: ITextModel,
-        position: Position,
-    ): languages.ProviderResult<languages.CompletionList> => {
-        const word = model.getWordUntilPosition(position);
-        const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn,
-        };
-        return {
-            suggestions: suggestions.map(([label, insertText]) => ({
-                label,
-                insertText,
-                kind: languages.CompletionItemKind.Keyword,
-                insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
-                range: range,
-            })),
-        }
-    }
-})
+if (languages.getLanguages().find((lang) => lang.id === LANG_ID) === undefined) {
+    registerLanguage()
+}

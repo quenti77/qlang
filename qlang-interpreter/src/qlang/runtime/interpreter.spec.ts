@@ -6,17 +6,19 @@ import Interpreter from "./interpreter"
 import Environment from "./environment"
 import {
     MK_ARRAY,
+    MK_BREAK,
+    MK_CONTINUE,
+    MK_NULL,
     MK_NUMBER,
+    MK_RETURN,
     type BooleanValue,
-    type BreakValue,
-    type ContinueValue,
     type NullValue,
     type NumberValue,
-    type ReturnValue,
     type StringValue,
 } from "./values"
 import { Std } from "./std"
 import { Program, WhileStatement } from "../ast"
+import { makeGlobalEnv } from "@/infrastructure/monacoEditor/languages/qlangGlobals"
 
 describe("Interpreter", () => {
 
@@ -36,7 +38,7 @@ describe("Interpreter", () => {
     beforeEach(() => {
         lexer = new Lexer()
         parser = new Parser()
-        env = new Environment()
+        env = makeGlobalEnv()
         stdOut = new Std()
         stdErr = new Std()
 
@@ -276,9 +278,9 @@ describe("Interpreter", () => {
     })
 
     const breakStatements = [
-        { statement: 'arreter', expected: { type: 'break' } as BreakValue },
-        { statement: 'continuer', expected: { type: 'continue' } as ContinueValue },
-        { statement: 'retour 42', expected: { type: 'return', value: 42 } as ReturnValue },
+        { statement: 'arreter', expected: MK_BREAK() },
+        { statement: 'continuer', expected: MK_CONTINUE() },
+        { statement: 'retour 42', expected: MK_RETURN(MK_NUMBER(42)) },
     ]
     test.each(breakStatements)('evaluate with directly break statement in block return this', (el) => {
         const code = [
@@ -331,7 +333,7 @@ describe("Interpreter", () => {
         expect(result).toEqual(MK_NUMBER(3))
     })
 
-    test.only('evaluate array access throw an error with push syntax read', () => {
+    test('evaluate array access throw an error with push syntax read', () => {
         const ast = makeASTFromInput('[[1, 2], [3, 4]][1][]')
 
         expect(() => interpreter.evaluate(ast)).toThrowError("Access to non-numeric index")
@@ -350,5 +352,137 @@ describe("Interpreter", () => {
 
         expect(result).toEqual(MK_NUMBER(24))
         expect(env.lookupVariable('a')).toEqual(MK_ARRAY([MK_NUMBER(42), MK_NUMBER(24)]))
+    })
+
+    test('evaluate call to "taille" function returns array length', () => {
+        const ast = makeASTFromInput('taille([1, 2, 3])')
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(3))
+    })
+
+    test('evaluate call to "taille" function with non-array argument throw an error', () => {
+        const ast = makeASTFromInput('taille(42)')
+
+        expect(() => interpreter.evaluate(ast)).toThrowError("La fonction taille prend un tableau en argument")
+    })
+
+    test('evaluate call to "taille" function with multiple arguments throw an error', () => {
+        const ast = makeASTFromInput('taille(42, 24)')
+
+        expect(() => interpreter.evaluate(ast)).toThrowError("Expected 1 arguments, got 2 instead")
+    })
+
+    test('evaluate function declaration', () => {
+        const code = [
+            'fonction test()',
+            '    retour 42',
+            'fin',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toHaveProperty('type', 'function')
+        expect(env.lookupVariable('test')).not.toBeNull()
+    })
+
+    test('evaluate function call', () => {
+        const code = [
+            'fonction test()',
+            '    retour 42',
+            'fin',
+            'test()',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate function call with arguments', () => {
+        const code = [
+            'fonction test(a, b)',
+            '    retour a + b',
+            'fin',
+            'test(40, 2)',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate function call without retour statement returns null', () => {
+        const code = [
+            'fonction test()',
+            '    ecrire 42',
+            'fin',
+            'test()',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NULL())
+        expect(stdOut.Log).toEqual(['42'])
+    })
+
+    test('evaluate fibonacci function', () => {
+        const code = [
+            'fonction fibonacci(n)',
+            '    si n <= 1 alors',
+            '        retour n',
+            '    fin',
+            '    retour fibonacci(n - 1) + fibonacci(n - 2)',
+            'fin',
+            'fibonacci(10)',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(55))
+    })
+
+    test('evaluate function returning another function', () => {
+        const code = [
+            'fonction a(val)',
+            '    fonction b(mul)',
+            '        retour val * mul',
+            '    fin',
+            '    retour b',
+            'fin',
+            'a(42)(2)',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(84))
+    })
+
+    test('evaluate declaration variable with anonymous function', () => {
+        const code = [
+            'dec a = fonction()',
+            '    retour 42',
+            'fin',
+            'a()',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
+    })
+
+    test('evaluate call fonction with closure argument', () => {
+        const code = [
+            'fonction a(val)',
+            '    val(21, 2)',
+            'fin',
+            'a(fonction(a, b)',
+            '    retour a * b',
+            'fin)',
+        ]
+        const ast = makeASTFromInput(code.join('\n'))
+        const result = interpreter.evaluate(ast)
+
+        expect(result).toEqual(MK_NUMBER(42))
     })
 })

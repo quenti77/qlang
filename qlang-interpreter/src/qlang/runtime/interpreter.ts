@@ -4,7 +4,9 @@ import type {
     BinaryExpression,
     BlockStatement,
     BooleanLiteral,
+    CallExpression,
     ForStatement,
+    FunctionStatement,
     Identifier,
     IfStatement,
     MemberExpression,
@@ -20,19 +22,23 @@ import type {
 } from "../ast"
 import {
     ArrayValue,
-    BreakValue,
-    ContinueValue,
+    FunctionValue,
+    MK_ALGEBRAIC,
     MK_BOOLEAN,
+    MK_BREAK,
+    MK_CONTINUE,
+    MK_FUNCTION,
     MK_NULL,
     MK_NUMBER,
+    MK_RETURN,
     MK_STRING,
     NumberValue,
-    ReturnValue,
     type AlgebraicValue,
     type RuntimeValue,
 } from "./values"
 import Environment from "./environment"
 import { Std } from "./std"
+import { QFunction } from "./callable"
 
 export default class Interpreter {
 
@@ -58,13 +64,15 @@ export default class Interpreter {
             case 'PrintStatement':
                 return this.evaluatePrintStatement(astNode as PrintStatement)
             case 'BlockStatement':
-                return this.evaluateBlockStatement(astNode as BlockStatement)
+                return this.evaluateBlockStatement(astNode as BlockStatement, this.env)
             case 'IfStatement':
                 return this.evaluateIfStatement(astNode as IfStatement)
             case 'WhileStatement':
                 return this.evaluateWhileStatement(astNode as WhileStatement)
             case 'ForStatement':
                 return this.evaluateForStatement(astNode as ForStatement)
+            case 'FunctionStatement':
+                return this.evaluateFunctionDeclaration(astNode as FunctionStatement)
             default:
                 return this.evaluateExpression(astNode)
         }
@@ -113,25 +121,29 @@ export default class Interpreter {
         return `[${elements.join(', ')}]`
     }
 
-    private evaluateBlockStatement(blockStatement: BlockStatement): RuntimeValue {
+    public evaluateBlockStatement(blockStatement: BlockStatement, environment: Environment): RuntimeValue {
+        const previousEnv = this.env
+        this.env = environment
+
         let lastEvaluated: RuntimeValue = MK_NULL()
 
         for (const statement of blockStatement.body) {
             if (statement.kind === 'BreakStatement') {
-                return { type: 'break' } as BreakValue
+                this.env = previousEnv
+                return MK_BREAK()
             }
             if (statement.kind === 'ContinueStatement') {
-                return { type: 'continue' } as ContinueValue
+                this.env = previousEnv
+                return MK_CONTINUE()
             }
             if (statement.kind === 'ReturnStatement') {
                 const result = this.evaluate((statement as ReturnStatement).value) as AlgebraicValue
-                return {
-                    type: 'return',
-                    value: result.value,
-                } as ReturnValue
+                this.env = previousEnv
+                return MK_RETURN(result)
             }
             lastEvaluated = this.evaluate(statement)
             if (lastEvaluated.type === 'break' || lastEvaluated.type === 'continue' || lastEvaluated.type === 'return') {
+                this.env = previousEnv
                 return lastEvaluated
             }
         }
@@ -200,6 +212,17 @@ export default class Interpreter {
         return MK_NULL()
     }
 
+    private evaluateFunctionDeclaration(functionStatement: FunctionStatement): RuntimeValue {
+        const qfunction = new QFunction(functionStatement, this.env)
+        const name = qfunction.Name
+
+        const envFound = this.env.resolve(name, false)
+        if (envFound === null) {
+            this.env.declareVariable(name, MK_NULL())
+        }
+        return this.env.assignVariable(name, MK_FUNCTION(qfunction))
+    }
+
     private evaluateExpression(expression: Statement): RuntimeValue {
         switch (expression.kind) {
             case 'AssignmentExpression':
@@ -212,6 +235,8 @@ export default class Interpreter {
                 return this.evaluateArrayExpression(expression as ArrayExpression)
             case 'MemberExpression':
                 return this.evaluateMemberExpression(expression as MemberExpression)
+            case 'CallExpression':
+                return this.evaluateCallExpression(expression as CallExpression)
             case 'Identifier':
                 return this.evaluateIdentifier(expression as Identifier)
             case 'NumericLiteral':
@@ -327,6 +352,27 @@ export default class Interpreter {
         }
 
         return array.value[index]
+    }
+
+    private evaluateCallExpression(callExpression: CallExpression): RuntimeValue {
+        const expression = this.evaluateExpression(callExpression.callee)
+        if (expression.type !== 'function') {
+            throw new Error('Attempt to call non-function')
+        }
+
+        const callee = expression as FunctionValue
+        if (callExpression.arguments.length !== callee.value.Arity) {
+            throw new Error(`Expected ${callee.value.Arity} arguments, got ${callExpression.arguments.length} instead`)
+        }
+
+        const args = callExpression.arguments.map(
+            (argument) => this.attemptAlgebraicValue(this.evaluate(argument)),
+        )
+
+        const currentValue = callee.value.call(this, args)
+        return currentValue.type === 'return'
+            ? MK_ALGEBRAIC(currentValue.value)
+            : currentValue
     }
 
     private evaluateIdentifier(identifier: Identifier): RuntimeValue {

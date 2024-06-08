@@ -1,3 +1,5 @@
+import { Callable } from "./callable"
+
 export type ValueType =
     | 'null'
     | 'number'
@@ -7,6 +9,7 @@ export type ValueType =
     | 'continue'
     | 'return'
     | 'array'
+    | 'function'
 
 export interface RuntimeValue {
     type: ValueType
@@ -16,16 +19,63 @@ export interface BreakValue extends RuntimeValue {
     type: 'break'
 }
 
+export function MK_BREAK(): BreakValue {
+    return { type: 'break' }
+}
+
 export interface ContinueValue extends RuntimeValue {
     type: 'continue'
 }
 
+export function MK_CONTINUE(): ContinueValue {
+    return { type: 'continue' }
+}
+
+type AlgebraicType = 'number' | 'string' | 'boolean' | 'null' | 'array' | 'function' | 'return'
+type AlgebraicValueType = number | string | boolean | null | AlgebraicValue[] | Callable
+
 export interface AlgebraicValue extends RuntimeValue {
-    value: number | string | boolean | null | AlgebraicValue[]
+    type: AlgebraicType
+    value: number | string | boolean | null | AlgebraicValue[] | Callable
+}
+
+export function MK_ALGEBRAIC(value: AlgebraicValueType): AlgebraicValue {
+    if (typeof value === 'number') {
+        return MK_NUMBER(value)
+    }
+    if (typeof value === 'string') {
+        return MK_STRING(value)
+    }
+    if (typeof value === 'boolean') {
+        return MK_BOOLEAN(value)
+    }
+    if (value === null) {
+        return MK_NULL()
+    }
+    if (Array.isArray(value)) {
+        return MK_ARRAY(value)
+    }
+    if ('Arity' in value) {
+        return MK_FUNCTION(value)
+    }
+    throw new Error(`Unsupported algebraic value: ${value}`)
+}
+
+export interface FunctionValue extends AlgebraicValue {
+    type: 'function'
+    value: Callable
+}
+
+export function MK_FUNCTION(value: Callable): FunctionValue {
+    return { type: 'function', value }
 }
 
 export interface ReturnValue extends AlgebraicValue {
     type: 'return'
+}
+
+export function MK_RETURN(returnValue: AlgebraicValue): ReturnValue {
+    return { type: 'return', value: returnValue.value }
 }
 
 export interface ArrayValue extends AlgebraicValue {

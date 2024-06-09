@@ -22,11 +22,11 @@ export default function OutputTile({ output }: OutputTileProps) {
 
     return (
         <Tile title={t('output.title')}>
-            <div ref={listRef} className="flex-1 flex flex-col overflow-y-auto w-full p-2">
+            <div ref={listRef} className="text-base flex-1 flex flex-col overflow-y-auto w-full p-2" style={{ fontFamily: 'monospace' }}>
                 {output.map((line, index) => (
-                    <p key={index} className={line.type === 'err' ? 'text-red-700 dark:text-red-200' : 'text-green-800 dark:text-green-200'}>
+                    <pre key={index} className={line.type === 'err' ? 'text-red-700 dark:text-red-200' : 'text-green-800 dark:text-green-200'}>
                         {line.content}
-                    </p>
+                    </pre>
                 ))}
             </div>
         </Tile>

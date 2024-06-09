@@ -22,16 +22,27 @@ import type {
     VariableDeclarationStatement,
     WhileStatement,
 } from "./ast"
-import { TokenType, type Token } from "./token"
+import { TokenType, findKeywordFromToken, type Token } from "./token"
+import { InvalidSyntaxError, MaximumArgumentError } from "./utils/errors"
+import { Position } from "./utils/position"
 
 export default class Parser {
+
+    private tokenIndex: number
+    private previousToken: Token | null
+
+    private code: string
     private tokens: Token[]
 
     constructor() {
+        this.code = ''
         this.tokens = []
+        this.tokenIndex = 0
+        this.previousToken = null
     }
 
-    public setTokens(tokens: Token[]): void {
+    public setTokens(tokens: Token[], code: string): void {
+        this.code = code
         this.tokens = tokens
     }
 
@@ -41,6 +52,7 @@ export default class Parser {
             body: [],
         }
 
+        this.tokenIndex = 0
         while (this.isEOF() === false) {
             program.body.push(this.parseStatement())
         }
@@ -77,12 +89,12 @@ export default class Parser {
     }
 
     private parseVariableDeclarationStatement(): Statement {
-        this.eatExactly(TokenType.Let, 'Expected "let" keyword')
+        this.eat()
 
-        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+        const identifier = this.eatExactly(TokenType.Identifier).value
 
         if (this.at().type === TokenType.Equals) {
-            this.eatExactly(TokenType.Equals, 'Expected "="')
+            this.eat()
             return {
                 kind: 'VariableDeclarationStatement',
                 identifier,
@@ -97,7 +109,7 @@ export default class Parser {
     }
 
     private parsePrintStatement(): Statement {
-        this.eatExactly(TokenType.Print, 'Expected "ecrire" keyword')
+        this.eat()
 
         return {
             kind: 'PrintStatement',
@@ -107,23 +119,27 @@ export default class Parser {
 
     private parseIfStatement(endNeeded: boolean = true): Statement {
         if (endNeeded) {
-            this.eatExactly(TokenType.If, 'Expected "si" keyword')
+            this.eatExactly(TokenType.If)
         }
+        let posStart = this.previous().position.copy()
+
         const condition = this.parseExpression()
-        this.eatExactly(TokenType.Then, 'Expected "alors" keyword')
+        this.eatExactly(TokenType.Then, posStart)
+
+        posStart = this.previous().position.copy()
         const thenBranch = this.parseBlockStatement([TokenType.Else, TokenType.ElseIf])
 
         let elseBranch: Statement | undefined = undefined
         if (this.at().type === TokenType.Else) {
-            this.eatExactly(TokenType.Else, 'Expected "sinon" keyword')
+            this.eat()
             elseBranch = this.parseBlockStatement()
         } else if (this.at().type === TokenType.ElseIf) {
-            this.eatExactly(TokenType.ElseIf, 'Expected "sinonsi" keyword')
+            this.eat()
             elseBranch = this.parseIfStatement(false)
         }
 
         if (endNeeded) {
-            this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+            this.eatExactly(TokenType.End, posStart)
         }
 
         return {
@@ -135,12 +151,13 @@ export default class Parser {
     }
 
     private parseWhileStatement(): Statement {
-        this.eatExactly(TokenType.While, 'Expected "tantque" keyword')
+        this.eat()
+        const posStart = this.previous().position.copy()
         const condition = this.parseExpression()
-        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        this.eatExactly(TokenType.Then, posStart)
 
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, posStart)
 
         return {
             kind: 'WhileStatement',
@@ -150,13 +167,14 @@ export default class Parser {
     }
 
     private parseForStatement(): Statement {
-        this.eatExactly(TokenType.For, 'Expected "pour" keyword')
-        const identifier = this.eatExactly(TokenType.Identifier, 'Expected identifier')
-        this.eatExactly(TokenType.From, 'Expected "de" keyword')
+        this.eat()
+        const posStart = this.previous().position.copy()
+        const identifier = this.eatExactly(TokenType.Identifier, posStart)
+
+        this.eatExactly(TokenType.From, posStart)
         const from = this.parseExpression()
 
-        this.eatExactly(TokenType.Until, 'Expected "jusque" keyword')
-
+        this.eatExactly(TokenType.Until, posStart)
         let until: Expression = this.parseExpression()
         if (until.kind === 'NumericLiteral' || until.kind === 'Identifier') {
             until = {
@@ -170,7 +188,7 @@ export default class Parser {
         const token = this.at().type
         let step = { kind: 'NumericLiteral', value: 1 } as Expression
         if (token === TokenType.Step) {
-            this.eatExactly(TokenType.Step, 'Expected "evol" keyword')
+            this.eat()
             step = this.parseExpression()
         }
 
@@ -185,9 +203,9 @@ export default class Parser {
             } as BinaryExpression,
         } as AssignmentExpression
 
-        this.eatExactly(TokenType.Then, 'Expected "faire" keyword')
+        this.eatExactly(TokenType.Then, posStart)
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, posStart)
 
         return {
             kind: 'ForStatement',
@@ -200,29 +218,35 @@ export default class Parser {
     }
 
     private parseFunctionDeclarationStatement(): Statement {
-        this.eatExactly(TokenType.Function, 'Expected "fonction" keyword')
+        this.eat()
+        const posStart = this.previous().position.copy()
         const identifier = this.at().type === TokenType.OpenParenthesis
             ? null
-            : this.eatExactly(TokenType.Identifier, 'Expected identifier').value
+            : this.eatExactly(TokenType.Identifier, posStart).value
 
-        this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+        this.eatExactly(TokenType.OpenParenthesis, posStart)
 
         const params = []
         while (this.at().type !== TokenType.CloseParenthesis) {
             if (params.length >= 48) {
-                throw new Error('Too many parameters')
+                throw new MaximumArgumentError(
+                    posStart,
+                    this.at().position,
+                    `La fonction '${identifier ?? 'anonyme'}' ne peut pas avoir plus de 48 arguments`,
+                    this.code,
+                )
             }
-            params.push(this.eatExactly(TokenType.Identifier, 'Expected identifier').value)
+            params.push(this.eatExactly(TokenType.Identifier, posStart).value)
 
-            const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+            const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis])
             if (token.type === TokenType.Comma) {
                 this.eat()
             }
         }
 
-        this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
+        this.eat()
         const body = this.parseBlockStatement()
-        this.eatExactly(TokenType.End, 'Expected "fin" keyword')
+        this.eatExactly(TokenType.End, posStart)
 
         return {
             kind: 'FunctionStatement',
@@ -250,7 +274,7 @@ export default class Parser {
     }
 
     private parseReturnStatement(): Statement {
-        this.eatExactly(TokenType.Return, 'Expected "retour" keyword')
+        this.eat()
 
         return {
             kind: 'ReturnStatement',
@@ -269,7 +293,7 @@ export default class Parser {
             return left
         }
 
-        this.eatExactly(TokenType.Equals, 'Expected "="')
+        this.eat()
         return {
             kind: 'AssignmentExpression',
             assignment: left,
@@ -386,7 +410,7 @@ export default class Parser {
         let expression = this.parseArrayExpression()
 
         while (this.at().type === TokenType.OpenBrackets) {
-            this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+            this.eat()
             if (this.at().type === TokenType.CloseBrackets) {
                 this.eat()
                 expression = {
@@ -397,7 +421,7 @@ export default class Parser {
                 break
             }
             const index = this.parseExpression()
-            this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
+            this.eatExactly(TokenType.CloseBrackets, this.previous().position)
 
             expression = {
                 kind: 'MemberExpression',
@@ -413,21 +437,19 @@ export default class Parser {
         if (this.at().type !== TokenType.OpenBrackets) {
             return this.parseCallExpression()
         }
-
-        this.eatExactly(TokenType.OpenBrackets, 'Expected "["')
+        this.eat()
 
         const elements = []
         while (this.at().type !== TokenType.CloseBrackets) {
             elements.push(this.parseExpression())
 
-            const token = this.attempt([TokenType.Comma, TokenType.CloseBrackets], 'Expected "," or "]"')
+            const token = this.attempt([TokenType.Comma, TokenType.CloseBrackets])
             if (token.type === TokenType.Comma) {
                 this.eat()
             }
         }
 
-        this.eatExactly(TokenType.CloseBrackets, 'Expected "]"')
-
+        this.eat()
         return {
             kind: 'ArrayExpression',
             elements,
@@ -438,20 +460,19 @@ export default class Parser {
         let expression = this.parsePrimaryExpression()
 
         while (this.at().type === TokenType.OpenParenthesis) {
-            this.eatExactly(TokenType.OpenParenthesis, 'Expected "("')
+            this.eat()
 
             const args = []
             while (this.at().type !== TokenType.CloseParenthesis) {
                 args.push(this.at().type === TokenType.Function ? this.parseFunctionDeclarationStatement() : this.parseExpression())
 
-                const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis], 'Expected "," or ")"')
+                const token = this.attempt([TokenType.Comma, TokenType.CloseParenthesis])
                 if (token.type === TokenType.Comma) {
                     this.eat()
                 }
             }
 
-            this.eatExactly(TokenType.CloseParenthesis, 'Expected ")"')
-
+            this.eat()
             expression = {
                 kind: 'CallExpression',
                 callee: expression,
@@ -480,12 +501,20 @@ export default class Parser {
             case TokenType.OpenParenthesis: {
                 this.eat()
                 const expression = this.parseExpression()
-                this.eatExactly(TokenType.CloseParenthesis, 'Expected closing parenthesis')
+                this.eatExactly(TokenType.CloseParenthesis, this.previous().position)
 
                 return expression
             }
-            default:
-                throw new Error(`Unexpected token type: ${tokenType}`)
+            default: {
+                const posStart = this.previous().position
+                const posEnd = this.at().position
+                throw new InvalidSyntaxError(
+                    posStart,
+                    posEnd,
+                    `'${this.at().value}' non attendu, expression attendue`,
+                    this.code,
+                )
+            }
         }
     }
 
@@ -495,31 +524,64 @@ export default class Parser {
     }
 
     private at(): Token {
-        return this.tokens[0] ?? { type: TokenType.EOF, value: '', line: 0, column: 0 }
+        return this.tokens[0] ?? { type: TokenType.EOF, value: '', position: new Position(0, 0, 0, '') }
+    }
+
+    private previous(): Token {
+        return this.previousToken ?? { type: TokenType.EOF, value: '', position: new Position(0, 0, 0, '') }
     }
 
     private eat(): Token {
+        this.tokenIndex++
+        this.previousToken = this.at()
         return this.tokens.shift()!
     }
 
-    private eatExactly(type: TokenType, err: string): Token {
+    private eatExactly(type: TokenType, posStart?: Position): Token {
         const token = this.eat()
 
         if (!token || token.type !== type) {
-            throw new Error(err)
+            posStart = posStart ?? token.position
+
+            const posEnd = token.position
+            const tokensNeeded = findKeywordFromToken(type)?.join(' ou ')
+
+            if (token.type === TokenType.EOF) {
+                const posStartEOF = posStart.copy()
+                posStartEOF.content = '<EOF>'
+                throw new InvalidSyntaxError(
+                    posEnd,
+                    posStartEOF,
+                    `Fin de fichier inattendue, attendu: '${tokensNeeded}'`,
+                    this.code,
+                )
+            }
+
+            throw new InvalidSyntaxError(
+                posStart,
+                posEnd,
+                `'${posEnd.content}' non attendu, attendu: '${tokensNeeded}'`,
+                this.code,
+            )
         }
 
         return token
     }
 
-    private attempt(types: TokenType[], err: string): Token {
+    private attempt(types: TokenType[]): Token {
         const token = this.at()
 
         if (types.includes(token.type)) {
             return token
         }
 
-        throw new Error(err)
+        const typesString = types.map((type) => `'${type}'`).join(' ou ')
+        throw new InvalidSyntaxError(
+            token.position,
+            token.position,
+            `'${token.value}' non attendu, attendu: ${typesString}`,
+            this.code,
+        )
     }
 
 }

@@ -248,7 +248,8 @@ export default class Interpreter {
             case 'BooleanLiteral':
                 return MK_BOOLEAN((expression as BooleanLiteral).value)
             default:
-                throw new Error(`Unknown node type ${expression.kind}`)
+                // TODO: throw error
+                throw new Error()
         }
     }
 
@@ -262,7 +263,8 @@ export default class Interpreter {
             const memberExpression = node.assignment as MemberExpression
             const object = this.evaluateExpression(memberExpression.object) as AlgebraicValue
             if (object.type !== 'array') {
-                throw new Error('Assignment to non-array object')
+                // TODO: throw error
+                throw new Error()
             }
 
             const array = object as ArrayValue
@@ -275,19 +277,22 @@ export default class Interpreter {
 
             const property = this.evaluateExpression(memberExpression.property)
             if (property.type !== 'number') {
-                throw new Error('Assignment to non-numeric index')
+                // TODO: throw error
+                throw new Error()
             }
 
             const index = (property as NumberValue).value
             if (index < 0 || index >= array.value.length) {
-                throw new Error('Index out of bounds')
+                // TODO: throw error
+                throw new Error()
             }
 
             const value = this.attemptAlgebraicValue(this.evaluateExpression(node.value))
             return array.value[index] = value
         }
 
-        throw new Error('Invalid assignment target')
+        // TODO: throw error
+        throw new Error()
     }
 
     private evaluateUnaryExpression(unaryExpr: UnaryExpression): RuntimeValue {
@@ -333,22 +338,26 @@ export default class Interpreter {
     private evaluateMemberExpression(memberExpression: MemberExpression): RuntimeValue {
         const object = this.evaluateExpression(memberExpression.object)
         if (object.type !== 'array') {
-            throw new Error('Access to non-array object')
+            // TODO: throw error
+            throw new Error()
         }
 
         const array = object as ArrayValue
         if (memberExpression.property === null) {
-            throw new Error('Access to non-numeric index')
+            // TODO: throw error
+            throw new Error()
         }
 
         const property = this.evaluateExpression(memberExpression.property)
         if (property.type !== 'number') {
-            throw new Error('Access to non-numeric index')
+            // TODO: throw error
+            throw new Error()
         }
 
         const index = (property as NumberValue).value
         if (index < 0 || index >= array.value.length) {
-            throw new Error('Index out of bounds')
+            // TODO: throw error
+            throw new Error()
         }
 
         return array.value[index]
@@ -357,12 +366,14 @@ export default class Interpreter {
     private evaluateCallExpression(callExpression: CallExpression): RuntimeValue {
         const expression = this.evaluateExpression(callExpression.callee)
         if (expression.type !== 'function') {
-            throw new Error('Attempt to call non-function')
+            // TODO: throw error
+            throw new Error()
         }
 
         const callee = expression as FunctionValue
         if (callExpression.arguments.length !== callee.value.Arity) {
-            throw new Error(`Expected ${callee.value.Arity} arguments, got ${callExpression.arguments.length} instead`)
+            // TODO: throw error
+            throw new Error()
         }
 
         const args = callExpression.arguments.map(
@@ -416,7 +427,9 @@ export default class Interpreter {
         if (operator === '>=') {
             return MK_BOOLEAN(leftHandSide.value! >= right.value!)
         }
-        throw new Error(`Invalid operator ${operator} for logical expression`)
+
+        // TODO: throw error
+        throw new Error()
     }
 
     private evaluateAlgebraicBinaryExpression(
@@ -425,7 +438,8 @@ export default class Interpreter {
         right: AlgebraicValue,
     ): AlgebraicValue {
         if ((left.type === 'string' || right.type === 'string') && operator !== '+') {
-            throw new Error('Invalid operation between string and other type')
+            // TODO: throw error
+            throw new Error()
         }
         if ((left.type === 'string' || right.type === 'string')) {
             return MK_STRING((left.value as string) + (right.value as string))
@@ -441,7 +455,9 @@ export default class Interpreter {
         } else if (operator === '%') {
             return MK_NUMBER((left.value as number) % (right.value as number))
         }
-        throw new Error(`Invalid operator ${operator} for algebraic expression`)
+
+        // TODO: throw error
+        throw new Error()
     }
 
     private attemptAlgebraicValue(value: RuntimeValue): AlgebraicValue {
@@ -449,6 +465,7 @@ export default class Interpreter {
             return value as AlgebraicValue
         }
 
-        throw new Error('Invalid algebraic value')
+        // TODO: throw error
+        throw new Error()
     }
 }

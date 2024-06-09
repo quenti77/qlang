@@ -16,7 +16,7 @@ export default class Environment {
 
     public declareVariable(name: string, value: RuntimeValue): RuntimeValue {
         if (this.variables.has(name)) {
-            throw new Error(`Variable '${name}' already declared`)
+            throw new Error(`Variable '${name}' déjà déclarée`)
         }
 
         this.variables.set(name, value)
@@ -24,20 +24,14 @@ export default class Environment {
     }
 
     public assignVariable(name: string, value: RuntimeValue): RuntimeValue {
-        const env = this.resolve(name)
-        if (!env) {
-            throw new Error(`Variable '${name}' not declared`)
-        }
+        const env = this.resolve(name)!
         env.variables.set(name, value)
 
         return value
     }
 
     public lookupVariable(name: string): RuntimeValue {
-        const env = this.resolve(name)
-        if (!env) {
-            throw new Error(`Variable '${name}' not declared`)
-        }
+        const env = this.resolve(name)!
         return env.variables.get(name)!
     }
 
@@ -49,7 +43,7 @@ export default class Environment {
             return this.parent.resolve(name, throwError)
         }
         if (throwError) {
-            throw new Error(`Variable '${name}' not declared`)
+            throw new Error(`Variable '${name}' non déclarée`)
         }
         return null
     }

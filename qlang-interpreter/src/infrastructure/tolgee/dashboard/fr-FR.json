@@ -1,4 +1,5 @@
 {
+  "code.execute": "Exécuter",
   "code.title": "Éditeur de code",
   "help.condition.intro": "Une condition est un moyen <strong>d'exécuter du code</strong> en fonction du <strong>résultat d'une expression</strong> qui renvoi \"vrai\" ou équivalant \"vrai\"",
   "help.condition.title": "Les conditions",

@@ -1,7 +1,7 @@
 import { expect, test, describe, beforeEach } from "bun:test"
 
 import Lexer from "./lexer"
-import { TokenType, createToken, KEYWORDS, OPERATORS } from "./token"
+import { TokenType, createTokenAt, KEYWORDS, OPERATORS } from "./token"
 
 describe("Simple Lexer", () => {
 
@@ -14,8 +14,8 @@ describe("Simple Lexer", () => {
     test('tokenize float numbers', () => {
         lexer.tokenize('1.2')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Number, '1.2', 1, 1),
-            createToken(TokenType.EOF, '', 1, 4),
+            createTokenAt(TokenType.Number, '1.2', 1, 1, 1),
+            createTokenAt(TokenType.EOF, '', 4, 1, 4),
         ])
     })
 
@@ -24,16 +24,16 @@ describe("Simple Lexer", () => {
         lexer.tokenize(input)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Number, '40', 1, 1),
-            createToken(TokenType.BinaryOperator, '+', 1, 4),
-            createToken(TokenType.Number, '20', 1, 6),
-            createToken(TokenType.BinaryOperator, '*', 1, 9),
-            createToken(TokenType.Number, '60', 1, 11),
-            createToken(TokenType.BinaryOperator, '-', 1, 14),
-            createToken(TokenType.Number, '40', 1, 16),
-            createToken(TokenType.BinaryOperator, '/', 1, 19),
-            createToken(TokenType.Number, '30', 1, 21),
-            createToken(TokenType.EOF, '', 1, 23),
+            createTokenAt(TokenType.Number, '40', 1, 1, 1),
+            createTokenAt(TokenType.BinaryOperator, '+', 4, 1, 4),
+            createTokenAt(TokenType.Number, '20', 6, 1, 6),
+            createTokenAt(TokenType.BinaryOperator, '*', 9, 1, 9),
+            createTokenAt(TokenType.Number, '60', 11, 1, 11),
+            createTokenAt(TokenType.BinaryOperator, '-', 14, 1, 14),
+            createTokenAt(TokenType.Number, '40', 16, 1, 16),
+            createTokenAt(TokenType.BinaryOperator, '/', 19, 1, 19),
+            createTokenAt(TokenType.Number, '30', 21, 1, 21),
+            createTokenAt(TokenType.EOF, '', 23, 1, 23),
         ])
     })
 
@@ -42,12 +42,12 @@ describe("Simple Lexer", () => {
         lexer.tokenize(input)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.OpenParenthesis, '(', 1, 1),
-            createToken(TokenType.Number, '40', 1, 2),
-            createToken(TokenType.BinaryOperator, '+', 1, 5),
-            createToken(TokenType.Number, '20', 1, 7),
-            createToken(TokenType.CloseParenthesis, ')', 1, 9),
-            createToken(TokenType.EOF, '', 1, 10),
+            createTokenAt(TokenType.OpenParenthesis, '(', 1, 1, 1),
+            createTokenAt(TokenType.Number, '40', 2, 1, 2),
+            createTokenAt(TokenType.BinaryOperator, '+', 5, 1, 5),
+            createTokenAt(TokenType.Number, '20', 7, 1, 7),
+            createTokenAt(TokenType.CloseParenthesis, ')', 9, 1, 9),
+            createTokenAt(TokenType.EOF, '', 10, 1, 10),
         ])
     })
 
@@ -56,12 +56,12 @@ describe("Simple Lexer", () => {
         lexer.tokenize(input)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Identifier, 'abc_123', 1, 1),
-            createToken(TokenType.Equals, '=', 1, 9),
-            createToken(TokenType.Number, '41', 1, 11),
-            createToken(TokenType.BinaryOperator, '+', 1, 14),
-            createToken(TokenType.Number, '23', 1, 16),
-            createToken(TokenType.EOF, '', 1, 18),
+            createTokenAt(TokenType.Identifier, 'abc_123', 1, 1, 1),
+            createTokenAt(TokenType.Equals, '=', 9, 1, 9),
+            createTokenAt(TokenType.Number, '41', 11, 1, 11),
+            createTokenAt(TokenType.BinaryOperator, '+', 14, 1, 14),
+            createTokenAt(TokenType.Number, '23', 16, 1, 16),
+            createTokenAt(TokenType.EOF, '', 18, 1, 18),
         ])
     })
 
@@ -70,12 +70,12 @@ describe("Simple Lexer", () => {
         lexer.tokenize(input)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Identifier, '_abc', 1, 1),
-            createToken(TokenType.Equals, '=', 1, 6),
-            createToken(TokenType.Number, '41', 1, 8),
-            createToken(TokenType.BinaryOperator, '+', 1, 11),
-            createToken(TokenType.Number, '23', 1, 13),
-            createToken(TokenType.EOF, '', 1, 15),
+            createTokenAt(TokenType.Identifier, '_abc', 1, 1, 1),
+            createTokenAt(TokenType.Equals, '=', 6, 1, 6),
+            createTokenAt(TokenType.Number, '41', 8, 1, 8),
+            createTokenAt(TokenType.BinaryOperator, '+', 11, 1, 11),
+            createTokenAt(TokenType.Number, '23', 13, 1, 13),
+            createTokenAt(TokenType.EOF, '', 15, 1, 15),
         ])
     })
 
@@ -88,22 +88,22 @@ describe("Simple Lexer", () => {
         lexer.tokenize(lines.join('\n'))
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Identifier, 'a', 1, 1),
-            createToken(TokenType.Equals, '=', 1, 3),
-            createToken(TokenType.Number, '1', 1, 5),
-            createToken(TokenType.BinaryOperator, '+', 1, 7),
-            createToken(TokenType.Number, '2', 1, 9),
-            createToken(TokenType.Identifier, 'b', 2, 1),
-            createToken(TokenType.Equals, '=', 2, 3),
-            createToken(TokenType.Number, '3', 2, 5),
-            createToken(TokenType.BinaryOperator, '*', 2, 7),
-            createToken(TokenType.Number, '4', 2, 9),
-            createToken(TokenType.Identifier, 'c', 3, 1),
-            createToken(TokenType.Equals, '=', 3, 3),
-            createToken(TokenType.Identifier, 'a', 3, 5),
-            createToken(TokenType.BinaryOperator, '+', 3, 7),
-            createToken(TokenType.Identifier, 'b', 3, 9),
-            createToken(TokenType.EOF, '', 3, 10),
+            createTokenAt(TokenType.Identifier, 'a', 1, 1, 1),
+            createTokenAt(TokenType.Equals, '=', 3, 1, 3),
+            createTokenAt(TokenType.Number, '1', 5, 1, 5),
+            createTokenAt(TokenType.BinaryOperator, '+', 7, 1, 7),
+            createTokenAt(TokenType.Number, '2', 9, 1, 9),
+            createTokenAt(TokenType.Identifier, 'b', 11, 2, 1),
+            createTokenAt(TokenType.Equals, '=', 13, 2, 3),
+            createTokenAt(TokenType.Number, '3', 15, 2, 5),
+            createTokenAt(TokenType.BinaryOperator, '*', 17, 2, 7),
+            createTokenAt(TokenType.Number, '4', 19, 2, 9),
+            createTokenAt(TokenType.Identifier, 'c', 21, 3, 1),
+            createTokenAt(TokenType.Equals, '=', 23, 3, 3),
+            createTokenAt(TokenType.Identifier, 'a', 25, 3, 5),
+            createTokenAt(TokenType.BinaryOperator, '+', 27, 3, 7),
+            createTokenAt(TokenType.Identifier, 'b', 29, 3, 9),
+            createTokenAt(TokenType.EOF, '', 30, 3, 10),
         ])
     })
 
@@ -113,12 +113,12 @@ describe("Simple Lexer", () => {
         lexer.tokenize(keyword + ' + a + 2')
 
         expect(lexer.Tokens).toEqual([
-            createToken(KEYWORDS[keyword], keyword, 1, 1),
-            createToken(TokenType.BinaryOperator, '+', 1, keywordLength + 2),
-            createToken(TokenType.Identifier, 'a', 1, keywordLength + 4),
-            createToken(TokenType.BinaryOperator, '+', 1, keywordLength + 6),
-            createToken(TokenType.Number, '2', 1, keywordLength + 8),
-            createToken(TokenType.EOF, '', 1, keywordLength + 9),
+            createTokenAt(KEYWORDS[keyword], keyword, 1, 1, 1),
+            createTokenAt(TokenType.BinaryOperator, '+', keywordLength + 2, 1, keywordLength + 2),
+            createTokenAt(TokenType.Identifier, 'a', keywordLength + 4, 1, keywordLength + 4),
+            createTokenAt(TokenType.BinaryOperator, '+', keywordLength + 6, 1, keywordLength + 6),
+            createTokenAt(TokenType.Number, '2', keywordLength + 8, 1, keywordLength + 8),
+            createTokenAt(TokenType.EOF, '', keywordLength + 9, 1, keywordLength + 9),
         ])
     })
 
@@ -126,10 +126,10 @@ describe("Simple Lexer", () => {
         lexer.tokenize(`a ${operator} 2`)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Identifier, 'a', 1, 1),
-            createToken(TokenType.BinaryOperator, operator, 1, 3),
-            createToken(TokenType.Number, '2', 1, operator.length + 4),
-            createToken(TokenType.EOF, '', 1, operator.length + 5),
+            createTokenAt(TokenType.Identifier, 'a', 1, 1, 1),
+            createTokenAt(TokenType.BinaryOperator, operator, 3, 1, 3),
+            createTokenAt(TokenType.Number, '2', operator.length + 4, 1, operator.length + 4),
+            createTokenAt(TokenType.EOF, '', operator.length + 5, 1, operator.length + 5),
         ])
     })
 
@@ -137,8 +137,8 @@ describe("Simple Lexer", () => {
         lexer.tokenize('"hello world"')
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.String, 'hello world', 1, 2),
-            createToken(TokenType.EOF, '', 1, 14),
+            createTokenAt(TokenType.String, 'hello world', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 14, 1, 14),
         ])
     })
 
@@ -146,8 +146,8 @@ describe("Simple Lexer", () => {
         lexer.tokenize(`"hello \\"w\\"orld"`)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.String, 'hello "w"orld', 1, 2),
-            createToken(TokenType.EOF, '', 1, 16),
+            createTokenAt(TokenType.String, 'hello "w"orld', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 16, 1, 16),
         ])
     })
 
@@ -155,75 +155,75 @@ describe("Simple Lexer", () => {
         lexer.tokenize(`"hello \\\\world"`)
 
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.String, 'hello \\world', 1, 2),
-            createToken(TokenType.EOF, '', 1, 15),
+            createTokenAt(TokenType.String, 'hello \\world', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 15, 1, 15),
         ])
     })
 
     test("tokenize a string with escaped newlines", () => {
         lexer.tokenize(`"hello\nworld"`)
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.String, 'hello\nworld', 1, 2),
-            createToken(TokenType.EOF, '', 2, 7),
+            createTokenAt(TokenType.String, 'hello\nworld', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 15, 2, 7),
         ])
     })
 
     test("tokenize a comment line", () => {
         lexer.tokenize('rem this is a comment')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.EOF, '', 1, 22),
+            createTokenAt(TokenType.EOF, '', 22, 1, 22),
         ])
     })
 
     test("tokenize end of line comments", () => {
         lexer.tokenize('a = 1 rem this is a comment')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Identifier, 'a', 1, 1),
-            createToken(TokenType.Equals, '=', 1, 3),
-            createToken(TokenType.Number, '1', 1, 5),
-            createToken(TokenType.EOF, '', 1, 28),
+            createTokenAt(TokenType.Identifier, 'a', 1, 1, 1),
+            createTokenAt(TokenType.Equals, '=', 3, 1, 3),
+            createTokenAt(TokenType.Number, '1', 5, 1, 5),
+            createTokenAt(TokenType.EOF, '', 28, 1, 28),
         ])
     })
 
     test("tokenize unary operator", () => {
         lexer.tokenize('-1')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.UnaryOperator, '-', 1, 1),
-            createToken(TokenType.Number, '1', 1, 2),
-            createToken(TokenType.EOF, '', 1, 3),
+            createTokenAt(TokenType.UnaryOperator, '-', 1, 1, 1),
+            createTokenAt(TokenType.Number, '1', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 3, 1, 3),
         ])
     })
 
     test("tokenize unary operator with parenthesis", () => {
         lexer.tokenize('-(1 + 2)')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.UnaryOperator, '-', 1, 1),
-            createToken(TokenType.OpenParenthesis, '(', 1, 2),
-            createToken(TokenType.Number, '1', 1, 3),
-            createToken(TokenType.BinaryOperator, '+', 1, 5),
-            createToken(TokenType.Number, '2', 1, 7),
-            createToken(TokenType.CloseParenthesis, ')', 1, 8),
-            createToken(TokenType.EOF, '', 1, 9),
+            createTokenAt(TokenType.UnaryOperator, '-', 1, 1, 1),
+            createTokenAt(TokenType.OpenParenthesis, '(', 2, 1, 2),
+            createTokenAt(TokenType.Number, '1', 3, 1, 3),
+            createTokenAt(TokenType.BinaryOperator, '+', 5, 1, 5),
+            createTokenAt(TokenType.Number, '2', 7, 1, 7),
+            createTokenAt(TokenType.CloseParenthesis, ')', 8, 1, 8),
+            createTokenAt(TokenType.EOF, '', 9, 1, 9),
         ])
     })
 
     test("tokenize unary operator with binary operator", () => {
         lexer.tokenize('1 --a')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.Number, '1', 1, 1),
-            createToken(TokenType.BinaryOperator, '-', 1, 3),
-            createToken(TokenType.UnaryOperator, '-', 1, 4),
-            createToken(TokenType.Identifier, 'a', 1, 5),
-            createToken(TokenType.EOF, '', 1, 6),
+            createTokenAt(TokenType.Number, '1', 1, 1, 1),
+            createTokenAt(TokenType.BinaryOperator, '-', 3, 1, 3),
+            createTokenAt(TokenType.UnaryOperator, '-', 4, 1, 4),
+            createTokenAt(TokenType.Identifier, 'a', 5, 1, 5),
+            createTokenAt(TokenType.EOF, '', 6, 1, 6),
         ])
     })
 
     test("tokenize open and close brackets", () => {
         lexer.tokenize('[]')
         expect(lexer.Tokens).toEqual([
-            createToken(TokenType.OpenBrackets, '[', 1, 1),
-            createToken(TokenType.CloseBrackets, ']', 1, 2),
-            createToken(TokenType.EOF, '', 1, 3),
+            createTokenAt(TokenType.OpenBrackets, '[', 1, 1, 1),
+            createTokenAt(TokenType.CloseBrackets, ']', 2, 1, 2),
+            createTokenAt(TokenType.EOF, '', 3, 1, 3),
         ])
     })
 })

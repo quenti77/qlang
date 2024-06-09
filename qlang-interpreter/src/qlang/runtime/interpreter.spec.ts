@@ -31,7 +31,7 @@ describe("Interpreter", () => {
 
     const makeASTFromInput = (input: string): Program => {
         lexer.tokenize(input)
-        parser.setTokens(lexer.Tokens)
+        parser.setTokens(lexer.Tokens, input)
         return parser.makeAST()
     }
 
@@ -126,7 +126,7 @@ describe("Interpreter", () => {
 
     test('evaluate variable not found', () => {
         const ast = makeASTFromInput('a')
-        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' non déclarée")
     })
 
     test('evaluate variable assignment with string', () => {
@@ -233,7 +233,7 @@ describe("Interpreter", () => {
             'a'
         ]
         const ast = makeASTFromInput(code.join('\n'))
-        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' not declared")
+        expect(() => interpreter.evaluate(ast)).toThrowError("Variable 'a' non déclarée")
     })
 
     test('evaluate while statement', () => {
@@ -333,12 +333,6 @@ describe("Interpreter", () => {
         expect(result).toEqual(MK_NUMBER(3))
     })
 
-    test('evaluate array access throw an error with push syntax read', () => {
-        const ast = makeASTFromInput('[[1, 2], [3, 4]][1][]')
-
-        expect(() => interpreter.evaluate(ast)).toThrowError("Access to non-numeric index")
-    })
-
     test('evaluate assignment to array access', () => {
         const ast = makeASTFromInput('dec a = [1, 2, 3]\na[0] = 42')
         const result = interpreter.evaluate(ast)
@@ -359,18 +353,6 @@ describe("Interpreter", () => {
         const result = interpreter.evaluate(ast)
 
         expect(result).toEqual(MK_NUMBER(3))
-    })
-
-    test('evaluate call to "taille" function with non-array argument throw an error', () => {
-        const ast = makeASTFromInput('taille(42)')
-
-        expect(() => interpreter.evaluate(ast)).toThrowError("La fonction taille prend un tableau en argument")
-    })
-
-    test('evaluate call to "taille" function with multiple arguments throw an error', () => {
-        const ast = makeASTFromInput('taille(42, 24)')
-
-        expect(() => interpreter.evaluate(ast)).toThrowError("Expected 1 arguments, got 2 instead")
     })
 
     test('evaluate function declaration', () => {

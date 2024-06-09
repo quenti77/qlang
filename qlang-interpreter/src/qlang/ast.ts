@@ -131,7 +131,7 @@ export interface ArrayExpression extends Expression {
 export interface CallExpression extends Expression {
     kind: 'CallExpression'
     callee: Expression
-    arguments: Expression[] | FunctionStatement
+    arguments: (Expression | FunctionStatement)[]
 }
 
 export interface Literal {

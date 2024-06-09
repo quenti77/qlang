@@ -1,20 +1,23 @@
 import { TokenType, createToken, KEYWORDS, OPERATORS, type Token } from "./token"
+import { IllegalCharError, StringUnterminatedError } from "./utils/errors"
+import { Position } from "./utils/position"
 
 export default class Lexer {
 
     private currentLine: string | undefined = undefined
-    private row = 1
-    private col = 1
+    private position: Position = new Position(0, 0, 0, '')
 
     private lines: string[] = []
     private tokens: Token[] = []
     private src: string[] = []
+    private code: string = ''
 
     public get Tokens(): Token[] {
         return this.tokens
     }
 
     public tokenize(input: string): void {
+        this.code = input
         this.reset()
         this.lines = input.split('\n')
 
@@ -77,8 +80,7 @@ export default class Lexer {
                     this.pushToken(TokenType.Identifier, token)
                 }
             } else {
-                this.src.shift()
-                this.col++
+                this.position.advance(false, this.src.shift()!)
             }
         }
     }
@@ -109,7 +111,11 @@ export default class Lexer {
         while (this.hasMoreChars() && (this.isNumber(this.src[0]) || this.src[0] === '.')) {
             if (this.src[0] === '.') {
                 if (hasDot) {
-                    throw new Error('Invalid number')
+                    const posStart = this.position.copy()
+                    this.addCol(token)
+                    const posEnd = this.position.copy()
+
+                    throw new IllegalCharError(posStart, posEnd, '.', this.code)
                 }
                 hasDot = true
             }
@@ -122,8 +128,7 @@ export default class Lexer {
     private processString(): void {
         this.eat()
 
-        const startLine = this.row
-        const startColumn = this.col
+        const posStart = this.position.copy()
 
         let value = ''
         while (this.src[0] !== '"') {
@@ -140,14 +145,18 @@ export default class Lexer {
                     case 'n':
                         this.nextLine()
                         break
-                    default:
-                        throw new Error(`Unknown escape sequence: \\${nextChar}`)
+                    default: {
+                        this.addCol(currentChar)
+                        const posEnd = this.position.copy()
+                        throw new IllegalCharError(posStart, posEnd, nextChar ?? '', this.code)
+                    }
                 }
                 continue
             }
             if (currentChar === undefined) {
                 if (!this.hasMoreLines()) {
-                    throw new Error('Unterminated string')
+                    const posEnd = this.position.copy()
+                    throw new StringUnterminatedError(posStart, posEnd, this.code)
                 }
                 this.nextLine()
                 value += '\n'
@@ -156,24 +165,33 @@ export default class Lexer {
             value += currentChar
         }
 
-        this.tokens.push(createToken(TokenType.String, value, startLine, startColumn))
+        posStart.content = value
+
+        this.tokens.push(createToken(TokenType.String, value, posStart))
         this.eat()
     }
 
     private eat(): string | undefined {
         const currentChar = this.src.shift()
-        this.col++
+        this.position.advance(false, currentChar ?? '')
 
         return currentChar
     }
 
     private addCol(char: string): void {
-        this.col += char.length
+        this.position.advance(false, char)
     }
 
-    private pushToken(type: TokenType, value: string, line: number = this.row, column: number = this.col) {
-        this.tokens.push(createToken(type, value, line, column))
-        this.col += value.length
+    private pushToken(
+        type: TokenType,
+        value: string,
+        position: Position = this.position
+    ) {
+        const tokenPosition = position.copy()
+        tokenPosition.content = value
+
+        this.tokens.push(createToken(type, value, tokenPosition))
+        this.position.advance(false, value)
     }
 
     private isIdentifier(token: string | undefined, withNumber: boolean): boolean {
@@ -201,17 +219,13 @@ export default class Lexer {
     }
 
     private nextLine(): void {
-        if (this.currentLine !== undefined) {
-            this.row++
-        }
+        this.position.advance(true, '')
         this.currentLine = this.lines.shift()
         this.src = this.currentLine?.split('') ?? []
-        this.col = 1
     }
 
     private reset(): void {
-        this.row = 1
-        this.col = 1
+        this.position = new Position(0, 0, 0, '')
         this.lines = []
         this.tokens = []
         this.currentLine = undefined

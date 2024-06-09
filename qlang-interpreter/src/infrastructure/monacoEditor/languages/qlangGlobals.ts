@@ -1,4 +1,4 @@
-import { Callable } from "@/qlang/runtime/callable"
+import { Callable, QFunction } from "@/qlang/runtime/callable"
 import Environment from "@/qlang/runtime/environment"
 import Interpreter from "@/qlang/runtime/interpreter"
 import {
@@ -9,19 +9,14 @@ import {
 
 class TailleFunction implements Callable {
 
-    private closure: Environment
-
-    constructor(closure: Environment) {
-        this.closure = closure
-    }
-
     get Arity(): number {
         return 1
     }
 
     call(_: Interpreter, args: AlgebraicValue[]): AlgebraicValue {
         if (!Array.isArray(args[0].value)) {
-            throw new Error('La fonction taille prend un tableau en argument.')
+            // TODO: throw error
+            throw new Error()
         }
 
         return MK_NUMBER(args[0].value.length)
@@ -34,10 +29,11 @@ class TailleFunction implements Callable {
 
 export const makeGlobalEnv = (): Environment => {
     const globalEnv = new Environment()
+    QFunction.counter = 0
 
     globalEnv.declareVariable('taille', {
         type: 'function',
-        value: new TailleFunction(globalEnv)
+        value: new TailleFunction()
     } as FunctionValue)
 
     return globalEnv

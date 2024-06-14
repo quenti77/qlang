@@ -1,0 +1,12 @@
+
+Program             => Statement *
+
+Statement           => Expression
+
+Expression          => AdditiveExpr
+AdditiveExpr        => MultiplicativeExpr ( ('+' | '-') MultiplicativeExpr )*
+MultiplicativeExpr  => UnaryExpr ( ('*' | '/') UnaryExpr )*
+UnaryExpr           => '-'? PrimaryExpr
+PrimaryExpr         => Literal | '(' Expression ')'
+
+Literal             => Number | ...

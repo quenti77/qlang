@@ -2,7 +2,9 @@
   "name": "qlang",
   "module": "index.ts",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "ansicolor": "^2.0.3",
+    "prompts": "^2.4.2"
   },
   "peerDependencies": {
     "typescript": "^5.4.5"

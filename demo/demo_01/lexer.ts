@@ -49,6 +49,7 @@ export default class Lexer {
                 }
                 countDot++
             }
+            number += char
         }
 
         this.pushToken(TOKEN.NUMBER, number)

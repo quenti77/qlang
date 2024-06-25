@@ -5,6 +5,8 @@ import type {
     BinaryExpression,
     UnaryExpression,
     NumericLiteral,
+    VariableDeclarationStatement,
+    Identifier,
 } from './ast'
 import { BINARY_OPERATOR, TOKEN, type IToken } from './token'
 
@@ -29,7 +31,25 @@ export default class AstParser {
 
     // Parser methods order by precedence
     private parseStatement(): Statement {
-        return this.parseExpression()
+        switch (this.at().type) {
+            case TOKEN.VARIABLE_DECLARATION:
+                return this.parseVariableDeclarationStatement()
+            default:
+                return this.parseExpression()
+        }
+    }
+
+    private parseVariableDeclarationStatement(): Statement {
+        this.eat()
+        const identifier = this.eatExactly(TOKEN.IDENTIFIER).value
+
+        if (this.at().type !== TOKEN.EQUALS) {
+            return { kind: 'VariableDeclarationStatement', identifier, value: null } as VariableDeclarationStatement
+        }
+
+        this.eat()
+        const value = this.parseExpression()
+        return { kind: 'VariableDeclarationStatement', identifier, value } as VariableDeclarationStatement
     }
 
     private parseExpression(): Expression {
@@ -91,6 +111,8 @@ export default class AstParser {
         const tokenType = this.at().type
 
         switch (tokenType) {
+            case TOKEN.IDENTIFIER:
+                return { kind: 'Identifier', name: this.eat().value } as Identifier
             case TOKEN.NUMBER:
                 return { kind: 'NumericLiteral', value: parseFloat(this.eat().value) } as NumericLiteral
             case TOKEN.OPEN_PARENTHESIS:
@@ -112,11 +134,12 @@ export default class AstParser {
         return this.tokens.shift()!
     }
 
-    private eatExactly(type: TOKEN): void {
+    private eatExactly(type: TOKEN): IToken {
         const token = this.eat()
         if (token.type !== type) {
             throw new Error(`Unexpected token ${token.type} at line ${token.row}, col ${token.col}`)
         }
+        return token
     }
 
     private at(): IToken {

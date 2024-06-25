@@ -5,6 +5,9 @@ export enum TOKEN {
     BINARY_OPERATOR = 'binary_operator',
     OPEN_PARENTHESIS = 'open_parenthesis',
     CLOSE_PARENTHESIS = 'close_parenthesis',
+    VARIABLE_DECLARATION = 'variable_declaration',
+    IDENTIFIER = 'identifier',
+    EQUALS = 'equals',
     EOF = 'eof',
 }
 
@@ -16,6 +19,10 @@ export enum BINARY_OPERATOR {
     MODULUS = '%',
 }
 export const OPERATORS = Object.values(BINARY_OPERATOR)
+
+export const KEYWORDS: Record<string, TOKEN> = {
+    'dec': TOKEN.VARIABLE_DECLARATION,
+}
 
 export interface IToken {
     type: TOKEN

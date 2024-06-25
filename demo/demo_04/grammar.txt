@@ -1,12 +1,14 @@
 
 Program             => Statement *
 
-Statement           => Expression
+Statement           => VariableDeclaration | Expression
+
+VariableDeclaration => 'dec' Identifier ('=' Expression)?
 
 Expression          => AdditiveExpr
 AdditiveExpr        => MultiplicativeExpr ( ('+' | '-') MultiplicativeExpr )*
 MultiplicativeExpr  => UnaryExpr ( ('*' | '/') UnaryExpr )*
 UnaryExpr           => '-'? PrimaryExpr
-PrimaryExpr         => Literal | '(' Expression ')'
+PrimaryExpr         => Literal | '(' Expression ')' | Identifier
 
 Literal             => Number | ...

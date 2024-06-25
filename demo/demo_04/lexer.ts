@@ -1,6 +1,9 @@
 import { TOKEN, BINARY_OPERATOR, type IToken, createToken, OPERATORS } from "./token"
 
 const NUMBERS = '0123456789'
+const LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+const START_IDENTIFIERS = LETTERS + '_'
+const IDENTIFIERS = START_IDENTIFIERS + NUMBERS
 
 export default class Lexer {
 
@@ -26,6 +29,10 @@ export default class Lexer {
             this.pushToken(TOKEN.OPEN_PARENTHESIS, this.eat())
         } else if (this.code[0] === ')') {
             this.pushToken(TOKEN.CLOSE_PARENTHESIS, this.eat())
+        } else if (this.code[0] === '=') {
+            this.pushToken(TOKEN.EQUALS, this.eat())
+        } else if (START_IDENTIFIERS.includes(this.code[0])) {
+            this.processIdentifier()
         } else if (OPERATORS.includes(this.code[0] as BINARY_OPERATOR)) {
             this.pushToken(TOKEN.BINARY_OPERATOR, this.eat())
         } else if (NUMBERS.includes(this.code[0])) {
@@ -33,6 +40,16 @@ export default class Lexer {
         } else {
             this.eat()
         }
+    }
+
+    private processIdentifier(): void {
+        let identifier = this.eat()
+
+        while (IDENTIFIERS.includes(this.code[0])) {
+            identifier += this.eat()
+        }
+
+        this.pushToken(TOKEN.IDENTIFIER, identifier)
     }
 
     private processNumber(): void {

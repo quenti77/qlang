@@ -112,11 +112,12 @@ export default class AstParser {
         return this.tokens.shift()!
     }
 
-    private eatExactly(type: TOKEN): void {
+    private eatExactly(type: TOKEN): IToken {
         const token = this.eat()
         if (token.type !== type) {
             throw new Error(`Unexpected token ${token.type} at line ${token.row}, col ${token.col}`)
         }
+        return token
     }
 
     private at(): IToken {

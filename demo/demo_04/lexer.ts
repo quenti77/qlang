@@ -1,4 +1,4 @@
-import { TOKEN, BINARY_OPERATOR, type IToken, createToken, OPERATORS } from "./token"
+import { TOKEN, BINARY_OPERATOR, type IToken, createToken, OPERATORS, KEYWORDS } from "./token"
 
 const NUMBERS = '0123456789'
 const LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -49,6 +49,10 @@ export default class Lexer {
             identifier += this.eat()
         }
 
+        if (Object.keys(KEYWORDS).includes(identifier)) {
+            this.pushToken(KEYWORDS[identifier], identifier)
+            return
+        }
         this.pushToken(TOKEN.IDENTIFIER, identifier)
     }
 

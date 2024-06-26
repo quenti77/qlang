@@ -6,12 +6,14 @@ import type {
     Program,
     Statement,
     UnaryExpression,
+    VariableDeclarationStatement,
 } from "./ast"
+import type Environment from "./environment"
 import { BINARY_OPERATOR } from "./token"
 
 type ValueType = 'number' | 'null'
 
-interface RuntimeValue {
+export interface RuntimeValue {
     type: ValueType
 }
 
@@ -35,16 +37,26 @@ function MK_NULL(): NullValue {
 
 export default class Interpreter {
 
+    private env: Environment
+
+    constructor(env: Environment) {
+        this.env = env
+    }
+
     public evaluate(astNode: Statement): RuntimeValue {
         switch (astNode.kind) {
             case "Program":
                 return this.evaluateProgram(astNode as Program)
+            case "VariableDeclarationStatement":
+                return this.evaluateVariableDeclarationStatement(astNode as VariableDeclarationStatement)
             case "UnaryExpression":
                 return this.evaluateUnaryExpression(astNode as UnaryExpression)
             case "BinaryExpression":
                 return this.evaluateBinaryExpression(astNode as BinaryExpression)
             case "NumericLiteral":
                 return MK_NUMBER((astNode as NumericLiteral).value)
+            case "Identifier":
+                return this.env.lookupVariable((astNode as any).name)
             default:
                 return MK_NULL()
         }
@@ -56,6 +68,16 @@ export default class Interpreter {
             result = this.evaluate(statement)
         }
         return result
+    }
+
+    private evaluateVariableDeclarationStatement(node: VariableDeclarationStatement): RuntimeValue {
+        const variableName = node.identifier
+        const value = node.value === null
+            ? MK_NULL()
+            : this.evaluate(node.value)
+
+        this.env.declareVariable(variableName, value)
+        return value
     }
 
     private evaluateUnaryExpression(node: UnaryExpression): RuntimeValue {

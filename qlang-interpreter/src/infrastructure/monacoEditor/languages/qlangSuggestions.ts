@@ -1,5 +1,5 @@
 import { KEYWORDS } from "@/qlang/token"
-import { languages, IRange, IMarkdownString } from "monaco-editor"
+import { languages, IRange } from "monaco-editor"
 
 const extendedSuggestions = {
     dec: `dec \${1:nom}`,

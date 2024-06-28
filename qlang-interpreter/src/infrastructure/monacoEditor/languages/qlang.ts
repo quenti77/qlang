@@ -15,6 +15,7 @@ import {
 } from "@/qlang/runtime/values"
 import ITextModel = editor.ITextModel
 import { QError } from "@/qlang/utils/errors"
+import { getSuggestions } from "./qlangSuggestions"
 
 export const LANG_ID = "qlang"
 
@@ -143,41 +144,6 @@ function registerLanguage() {
         },
     })
 
-    const extendedSuggestions = {
-        dec: `dec \${1:nom}`,
-        fonction: `fonction \${1:nom}($2)
-    $3
-fin`,
-        ecrire: `ecrire $1`,
-        si: `si \${1:condition} alors
-    $2
-fin`,
-        tantque: `tantque \${1:condition} alors
-    $2
-fin`,
-        pour: `pour \${1:indentifiant} de \${2:debut} jusque \${3:fin_inclus} alors
-    $4
-fin`,
-    }
-
-    const suggestions = Object.keys(KEYWORDS).map((label) => {
-        if (label in extendedSuggestions) {
-            return [label, extendedSuggestions[label as keyof typeof extendedSuggestions]]
-        }
-        return [label, label]
-    })
-
-    const code = [
-        'fonction fibonacci(n)',
-        '    si n <= 1 alors',
-        '        retour n',
-        '    fin',
-        '    retour fibonacci(n - 1) + fibonacci(n - 2)',
-        'fin',
-        'fibonacci(10)',
-    ]
-    suggestions.push(['test', code.join('\n')])
-
     languages.registerCompletionItemProvider(LANG_ID, {
         provideCompletionItems: (
             model: ITextModel,
@@ -185,21 +151,23 @@ fin`,
         ): languages.ProviderResult<languages.CompletionList> => {
             const word = model.getWordUntilPosition(position)
             const range = {
-                startLineNumber: position.lineNumber,
+                startLineNumber: 1,
+                startColumn: 1,
                 endLineNumber: position.lineNumber,
-                startColumn: word.startColumn,
                 endColumn: word.endColumn,
             }
-            return {
-                suggestions: suggestions.map(([label, insertText]) => ({
-                    label,
-                    insertText,
-                    kind: languages.CompletionItemKind.Keyword,
-                    insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
-                    range: range,
-                })),
+            const wordRange = {
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                endColumn: word.endColumn,
+                startColumn: word.startColumn,
             }
-        }
+
+            const content = model.getValueInRange(range)
+            return {
+                suggestions: getSuggestions(wordRange, content)
+            }
+        },
     })
 
 }

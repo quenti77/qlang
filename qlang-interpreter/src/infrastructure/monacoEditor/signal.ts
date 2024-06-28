@@ -65,6 +65,7 @@ export default class CodeEditor extends EventTarget {
             lineHeight: 32,
             // https://github.com/microsoft/monaco-editor/issues/2273
             quickSuggestions: { other: true, strings: true },
+            suggestOnTriggerCharacters: true,
         } as MonacoEditor.IEditorOptions & MonacoEditor.IGlobalEditorOptions
     }
 

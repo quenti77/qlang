@@ -1,0 +1,7 @@
+.mypy_cache
+.pytest_cache
+.coverage
+
+dist/
+
+*/__pycache__

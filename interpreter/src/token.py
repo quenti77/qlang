@@ -31,3 +31,7 @@ def create_token_at(
     type: TOKEN_TYPE, value: str, index: int, line: int, column: int
 ) -> Token:
     return Token(type, value, Position(index, line, column, value))
+
+
+def create_eof_token() -> Token:
+    return Token(TOKEN_TYPE.EOF, "", Position(0, 0, 0, ""))

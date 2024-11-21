@@ -1,0 +1,23 @@
+Progam                          : Statement*
+
+-- Statements
+Statement                       : VariableDeclarationStatement
+VariableDeclarationStatement    : 'dec' Identifier ('=' (ExpressionOrFunctionDeclaration))?
+ExpressionOrFunctionDeclaration : Expression | FunctionDeclarationStatement
+FunctionDeclarationStatement    : 'fonction' Identifier? '(' Parameters? ')' BlockStatement
+Parameters                      : Identifier (',' Identifier)*
+BlockStatement                  : Statement* 'fin'
+
+-- Expressions
+Expression                      : AssignmentExpression
+AssignmentExpression            : LogicalExpression ('=' AssignmentExpression)?
+LogicalExpression               : EqualityExpression (('et' | 'ou') EqualityExpression)*
+EqualityExpression              : RelationalExpression (('==' | '!=') RelationalExpression)*
+RelationalExpression            : AdditiveExpression (('<' | '<=' | '>' | '>=') AdditiveExpression)*
+AdditiveExpression              : MultiplicativeExpression (('+' | '-') MultiplicativeExpression)*
+MultiplicativeExpression        : UnaryExpression (('*' | '/' | '%') UnaryExpression)*
+UnaryExpression                 : ('-' | '!') UnaryExpression | ArrayAccessExpression
+ArrayAccessExpression           : ArrayExpression ('[' Expression ']')*
+ArrayExpression                 : CallExpression | '[' (Expression (',' Expression?)*)? ']'
+CallExpression                  : PrimaryExpression ('(' Arguments? ')')?
+Arguments                       : ExpressionOrFunctionDeclaration (',' (ExpressionOrFunctionDeclaration))*

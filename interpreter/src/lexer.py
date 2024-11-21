@@ -79,7 +79,7 @@ class Lexer:
             else:
                 self.position.advance(False, self.src.pop(0))
 
-    def __process_operator(self: Self) -> None:
+    def __process_operator(self: Self) -> bool:
         if self.__is_begin_with_logical_operator(self.src[0]):
             return False
 

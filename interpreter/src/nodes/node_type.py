@@ -23,6 +23,6 @@ class NodeType(Enum):
     NULL_LITERAL = "NullLiteral"
     BOOLEAN_LITERAL = "BooleanLiteral"
     IDENTIFIER = "Identifier"
-    MEMBER_CALL_EXPRESSION = "MemberCallExpression"
+    MEMBER_EXPRESSION = "MemberCallExpression"
     ARRAY_EXPRESSION = "ArrayExpression"
     CALL_EXPRESSION = "CallExpression"

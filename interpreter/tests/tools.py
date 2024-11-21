@@ -1,9 +1,10 @@
 from typing import Any
+from typing import Literal
 
 
 def assert_array_equals(
     expected: list[Any], actual: list[Any], message: str = ""
-) -> None:
+) -> Literal[True] | None:
     if len(actual) != len(expected):
         raise AssertionError(
             f"{message} - Expected length {len(expected)}, got {len(actual)}"

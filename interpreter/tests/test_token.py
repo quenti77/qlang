@@ -8,7 +8,7 @@ from src.token import create_token_at
 from tests.tools import assert_array_equals
 
 
-def init() -> None:
+def init() -> Lexer:
     return Lexer()
 
 

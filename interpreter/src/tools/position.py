@@ -1,3 +1,4 @@
+# mypy: disable-error-code="return-value"
 from typing import Self
 
 

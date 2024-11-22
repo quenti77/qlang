@@ -17,10 +17,17 @@ from src.nodes.expression import StringLiteral
 from src.nodes.expression import UnaryExpression
 from src.nodes.node_type import NodeType
 from src.nodes.statement import BlockStatement
+from src.nodes.statement import BreakStatement
+from src.nodes.statement import ContinueStatement
+from src.nodes.statement import ForStatement
 from src.nodes.statement import FunctionStatement
+from src.nodes.statement import IfStatement
+from src.nodes.statement import PrintStatement
 from src.nodes.statement import Program
+from src.nodes.statement import ReturnStatement
 from src.nodes.statement import Statement
 from src.nodes.statement import VariableDeclarationStatement
+from src.nodes.statement import WhileStatement
 from src.token import Token
 from src.token import create_eof_token
 from src.tools.position import Position
@@ -58,6 +65,24 @@ class Parser:
 
         if current_token.type == TOKEN_TYPE.LET:
             return self.__parse_variable_declaration_statement()
+        elif current_token.type == TOKEN_TYPE.PRINT:
+            return self.__parse_print_statement()
+        elif current_token.type == TOKEN_TYPE.IF:
+            return self.__parse_if_statement()
+        elif current_token.type == TOKEN_TYPE.WHILE:
+            return self.__parse_while_statement()
+        elif current_token.type == TOKEN_TYPE.FOR:
+            return self.__parse_for_statement()
+        elif current_token.type == TOKEN_TYPE.FUNCTION:
+            return self.__parse_function_declaration_statement()
+        elif current_token.type == TOKEN_TYPE.BREAK:
+            self.__eat()
+            return BreakStatement(kind=NodeType.BREAK_STATEMENT)
+        elif current_token.type == TOKEN_TYPE.CONTINUE:
+            self.__eat()
+            return ContinueStatement(kind=NodeType.CONTINUE_STATEMENT)
+        elif current_token.type == TOKEN_TYPE.RETURN:
+            return self.__parse_return_statement()
 
         return self.__parse_expression()
 
@@ -86,6 +111,111 @@ class Parser:
         if self.__at().type == TOKEN_TYPE.FUNCTION:
             return self.__parse_function_declaration_statement()
         return self.__parse_expression()
+
+    def __parse_print_statement(self: Self) -> Statement:
+        self.__eat()
+
+        return PrintStatement(
+            kind=NodeType.PRINT_STATEMENT,
+            value=self.__parse_expression(),
+        )
+
+    def __parse_if_statement(self: Self, end_needed: bool = True) -> Statement:
+        if end_needed:
+            self.__eat_exactly(TOKEN_TYPE.IF, None)
+
+        pos_start = self.__previous().position.copy()
+        condition = self.__parse_expression()
+        self.__eat_exactly(TOKEN_TYPE.THEN, pos_start)
+
+        pos_start = self.__previous().position.copy()
+        then_branch = self.__parse_block_statement(
+            [TOKEN_TYPE.ELSE, TOKEN_TYPE.ELSE_IF]
+        )
+
+        else_branch: Statement | None = None
+        if self.__at().type == TOKEN_TYPE.ELSE:
+            self.__eat()
+            else_branch = self.__parse_block_statement()
+        elif self.__at().type == TOKEN_TYPE.ELSE_IF:
+            self.__eat()
+            else_branch = self.__parse_if_statement(False)
+
+        if end_needed:
+            self.__eat_exactly(TOKEN_TYPE.END, pos_start)
+
+        return IfStatement(
+            kind=NodeType.IF_STATEMENT,
+            condition=condition,
+            then_branch=then_branch,
+            else_branch=else_branch,
+        )
+
+    def __parse_while_statement(self: Self) -> Statement:
+        self.__eat()
+        pos_start = self.__previous().position.copy()
+
+        condition = self.__parse_expression()
+        self.__eat_exactly(TOKEN_TYPE.THEN, pos_start)
+
+        body = self.__parse_block_statement()
+        self.__eat_exactly(TOKEN_TYPE.END, pos_start)
+
+        return WhileStatement(
+            kind=NodeType.WHILE_STATEMENT,
+            condition=condition,
+            body=body,
+        )
+
+    def __parse_for_statement(self: Self) -> Statement:
+        self.__eat()
+        pos_start = self.__previous().position.copy()
+        identifier = self.__eat_exactly(TOKEN_TYPE.IDENTIFIER, pos_start)
+
+        self.__eat_exactly(TOKEN_TYPE.FROM, pos_start)
+        init = self.__parse_expression()
+
+        self.__eat_exactly(TOKEN_TYPE.UNTIL, pos_start)
+        until = self.__parse_expression()
+        if until.kind == NodeType.NUMERIC_LITERAL or until.kind == NodeType.IDENTIFIER:
+            until = BinaryExpression(
+                kind=NodeType.BINARY_EXPRESSION,
+                operator="<=",
+                left=Identifier(kind=NodeType.IDENTIFIER, identifier=identifier.value),
+                right=until,
+            )
+
+        token = self.__at().type
+        step: Expression = NumericLiteral(kind=NodeType.NUMERIC_LITERAL, value=1)
+        if token == TOKEN_TYPE.STEP:
+            self.__eat()
+            step = self.__parse_expression()
+
+        step = AssignmentExpression(
+            kind=NodeType.ASSIGNMENT_EXPRESSION,
+            assignment=Identifier(
+                kind=NodeType.IDENTIFIER, identifier=identifier.value
+            ),
+            value=BinaryExpression(
+                kind=NodeType.BINARY_EXPRESSION,
+                operator="+",
+                left=Identifier(kind=NodeType.IDENTIFIER, identifier=identifier.value),
+                right=step,
+            ),
+        )
+
+        self.__eat_exactly(TOKEN_TYPE.THEN, pos_start)
+        body = self.__parse_block_statement()
+        self.__eat_exactly(TOKEN_TYPE.END, pos_start)
+
+        return ForStatement(
+            kind=NodeType.FOR_STATEMENT,
+            identifier=identifier.value,
+            init=init,
+            until=until,
+            step=step,
+            body=body,
+        )
 
     def __parse_function_declaration_statement(self: Self) -> FunctionStatement:
         self.__eat()
@@ -144,6 +274,14 @@ class Parser:
             block.body.append(statement)
 
         return block
+
+    def __parse_return_statement(self: Self) -> Statement:
+        self.__eat()
+
+        return ReturnStatement(
+            kind=NodeType.RETURN_STATEMENT,
+            value=self.__parse_expression(),
+        )
 
     def __parse_expression(self: Self) -> Expression:
         return self.__parse_assignment_expression()

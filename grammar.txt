@@ -1,12 +1,27 @@
 Progam                          : Statement*
 
 -- Statements
-Statement                       : VariableDeclarationStatement
+Statement                       : VariableDeclarationStatement | PrintStatement
+                                  | IfStatement | WhileStatement | ForStatement
+                                  | FunctionDeclarationStatement | BlockStatement
+                                  | ReturnStatement | BreakStatement | ContinueStatement
+                                  | Expression
 VariableDeclarationStatement    : 'dec' Identifier ('=' (ExpressionOrFunctionDeclaration))?
 ExpressionOrFunctionDeclaration : Expression | FunctionDeclarationStatement
 FunctionDeclarationStatement    : 'fonction' Identifier? '(' Parameters? ')' BlockStatement
 Parameters                      : Identifier (',' Identifier)*
 BlockStatement                  : Statement* 'fin'
+
+PrintStatement                  : 'ecrire' Expression
+IfStatement                     : 'si' Expression 'alors' BlockStatement
+                                    ('sinonsi' BlockStatement)?
+                                    ('sinon' BlockStatement)?
+                                   'fin'
+WhileStatement                  : 'tantque' Expression 'alors' BlockStatement 'fin'
+ForStatement                    : 'pour' Identifier 'de' Expression 'jusque' Expression 'alors' BlockStatement 'fin'
+ReturnStatement                 : 'retour' Expression
+BreakStatement                  : 'arreter'
+ContinueStatement               : 'continuer'
 
 -- Expressions
 Expression                      : AssignmentExpression

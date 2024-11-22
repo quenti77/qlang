@@ -8,24 +8,24 @@ from src.nodes.expression import AssignmentExpression
 from src.nodes.expression import BinaryExpression
 from src.nodes.expression import BooleanLiteral
 from src.nodes.expression import CallExpression
-from src.nodes.expression import Expression
 from src.nodes.expression import Identifier
 from src.nodes.expression import MemberExpression
 from src.nodes.expression import NullLiteral
 from src.nodes.expression import NumericLiteral
 from src.nodes.expression import StringLiteral
 from src.nodes.expression import UnaryExpression
+from src.nodes.merged import BlockStatement
+from src.nodes.merged import Expression
+from src.nodes.merged import FunctionStatement
+from src.nodes.merged import Statement
 from src.nodes.node_type import NodeType
-from src.nodes.statement import BlockStatement
 from src.nodes.statement import BreakStatement
 from src.nodes.statement import ContinueStatement
 from src.nodes.statement import ForStatement
-from src.nodes.statement import FunctionStatement
 from src.nodes.statement import IfStatement
 from src.nodes.statement import PrintStatement
 from src.nodes.statement import Program
 from src.nodes.statement import ReturnStatement
-from src.nodes.statement import Statement
 from src.nodes.statement import VariableDeclarationStatement
 from src.nodes.statement import WhileStatement
 from src.token import Token
@@ -266,7 +266,7 @@ class Parser:
         )
 
         while (
-            self.__is_eof()
+            self.__is_eof() is False
             and self.__at().type != TOKEN_TYPE.END
             and self.__at().type not in with_condition
         ):
@@ -400,12 +400,11 @@ class Parser:
 
             if self.__at().type == TOKEN_TYPE.CLOSE_BRACKET:
                 self.__eat()
-                expression = MemberExpression(
+                return MemberExpression(
                     kind=NodeType.MEMBER_EXPRESSION,
                     object=expression,
                     property=None,
                 )
-                break
 
             index = self.__parse_expression()
             self.__eat_exactly(TOKEN_TYPE.CLOSE_BRACKET, self.__previous().position)

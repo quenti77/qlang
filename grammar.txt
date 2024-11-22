@@ -36,3 +36,4 @@ ArrayAccessExpression           : ArrayExpression ('[' Expression ']')*
 ArrayExpression                 : CallExpression | '[' (Expression (',' Expression?)*)? ']'
 CallExpression                  : PrimaryExpression ('(' Arguments? ')')?
 Arguments                       : ExpressionOrFunctionDeclaration (',' (ExpressionOrFunctionDeclaration))*
+PrimaryExpression               : Identifier | Number | String | '(' Expression ')'

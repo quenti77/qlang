@@ -1,4 +1,4 @@
-import pytest
+import pytest  # type: ignore
 
 from src.enums.keywords import KEYWORDS
 from src.enums.operators import OPERATORS

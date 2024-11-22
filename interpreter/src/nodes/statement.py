@@ -1,32 +1,15 @@
 from dataclasses import dataclass
 
-from src.nodes.expression import Expression
+from src.nodes.merged import Expression
+from src.nodes.merged import FunctionStatement
+from src.nodes.merged import Statement
 from src.nodes.node_type import NodeType
-
-
-@dataclass
-class Statement:
-    kind: NodeType
 
 
 @dataclass
 class Program(Statement):
     kind = NodeType.PROGAM
     body: list[Statement]
-
-
-@dataclass
-class BlockStatement(Statement):
-    kind = NodeType.BLOCK_STATEMENT
-    body: list[Statement]
-
-
-@dataclass
-class FunctionStatement(Statement):
-    kind = NodeType.FUNCTION_STATEMENT
-    identifier: str | None
-    parameters: list[str]
-    body: BlockStatement
 
 
 @dataclass

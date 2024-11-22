@@ -1,13 +1,8 @@
 from dataclasses import dataclass
 
+from src.nodes.merged import Expression
+from src.nodes.merged import FunctionStatement
 from src.nodes.node_type import NodeType
-from src.nodes.statement import FunctionStatement
-from src.nodes.statement import Statement
-
-
-@dataclass
-class Expression(Statement):
-    pass
 
 
 @dataclass

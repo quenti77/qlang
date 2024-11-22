@@ -9,6 +9,8 @@ safety:
 	poetry run safety scan --full-report
 test:
 	poetry run coverage run -m pytest
+test-verbose:
+	poetry run coverage run -m pytest -vv
 test-cov:
 	poetry run coverage report
 test-doc:

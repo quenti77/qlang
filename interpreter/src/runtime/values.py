@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -38,6 +39,7 @@ class ContinueValue(RuntimeValue):
 
 @dataclass
 class AlgebraicValue(RuntimeValue):
+    type: AlgebraicType
     value: None | float | bool | str | list[AlgebraicValue] | Callable
 
 
@@ -66,20 +68,21 @@ class StringValue(AlgebraicValue):
 
 
 @dataclass
-class ReturnValue(AlgebraicValue):  # type: ignore[misc]
+class ReturnValue(AlgebraicValue):
     type: AlgebraicType = AlgebraicType.RETURN
+    value: None | float | bool | str | list[AlgebraicValue] | Callable = None
 
 
 @dataclass
 class ArrayValue(AlgebraicValue):
     type: AlgebraicType = AlgebraicType.ARRAY
-    value: list[AlgebraicValue] = []
+    value: list[AlgebraicValue] = field(default_factory=list, kw_only=True)
 
 
 @dataclass
 class FunctionValue(AlgebraicValue):
-    value: Callable  # type: ignore[misc]
     type: AlgebraicType = AlgebraicType.FUNCTION
+    value: Callable = field(kw_only=True)
 
 
 def MK_BREAK() -> BreakValue:

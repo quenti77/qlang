@@ -3,14 +3,14 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Self
 
-from src.nodes.merged import FunctionStatement
-from src.runtime.values import MK_NULL
-
 
 if TYPE_CHECKING:
     from src.interpreter import Interpreter
-    from src.runtime.environment import Environment
-    from src.runtime.values import AlgebraicValue
+
+from src.nodes.merged import FunctionStatement
+from src.runtime.environment import Environment
+from src.runtime.values import MK_NULL
+from src.runtime.values import AlgebraicValue
 
 
 class Callable(ABC):
@@ -46,7 +46,7 @@ class QFunction(Callable):
         return len(self.func.parameters)
 
     def call(
-        self: Self, interpreter: Interpreter, args: list[AlgebraicValue]
+        self: Self, interpreter: "Interpreter", args: list[AlgebraicValue]
     ) -> AlgebraicValue:
         env = Environment(self.closure)
 

@@ -11,6 +11,7 @@ from src.nodes.merged import FunctionStatement
 from src.runtime.environment import Environment
 from src.runtime.values import MK_NULL
 from src.runtime.values import AlgebraicValue
+from src.runtime.values import ReturnValue
 
 
 class Callable(ABC):
@@ -54,6 +55,9 @@ class QFunction(Callable):
             env.declareVariable(param, args[i])
 
         value = interpreter.evaluate_block_statement(self.func.body, env)
+        if isinstance(value, ReturnValue):
+            return_data: ReturnValue = value
+            return return_data
         if value is AlgebraicValue:
             return value  # type: ignore
 

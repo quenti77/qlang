@@ -110,8 +110,10 @@ class Interpreter:
         self: Self, program_statement: Program
     ) -> RuntimeValue:
         last_evaluated: RuntimeValue = MK_NULL()
+        counter = 0
 
         for statement in program_statement.body:
+            counter += 1
             last_evaluated = self.evaluate(statement)
             if (
                 last_evaluated.type == AlgebraicType.BREAK
@@ -392,9 +394,9 @@ class Interpreter:
             raise Exception("Seulement les fonctions peuvent être appelées")
 
         callee: FunctionValue = func  # type: ignore
-        if len(expression.arguments) != callee.value.arity:
+        if len(expression.arguments) != callee.value.arity():
             raise Exception(
-                f"Le nombre d'arguments attendu est de {callee.value.arity}, mais {len(expression.arguments)} ont été fournis"
+                f"Le nombre d'arguments attendu est de {callee.value.arity()}, mais {len(expression.arguments)} ont été fournis"
             )
 
         args = [

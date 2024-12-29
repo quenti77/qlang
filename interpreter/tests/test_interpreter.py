@@ -58,3 +58,19 @@ def test_parenthesis_priority() -> None:
 def test_boolean(code: str, expected: RuntimeValue) -> None:
     response, _, _ = interpret(code)
     assert response == expected
+
+
+def test_function_return_function() -> None:
+    response, _, _ = interpret(
+        """
+        fonction first(val)
+            fonction second(mul)
+                retour val * mul
+            fin
+            retour second
+        fin
+
+        first(20)(30)
+        """
+    )
+    assert response == MK_NUMBER(600)

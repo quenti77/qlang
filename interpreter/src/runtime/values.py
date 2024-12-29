@@ -126,17 +126,17 @@ def MK_ALGEBRAIC_VALUE(
 ) -> AlgebraicValue:
     if value is None:
         return MK_NULL()
-    if value is float:
+    if isinstance(value, float):
         f_value: float = value  # type: ignore
         return MK_NUMBER(f_value)
-    if value is bool:
+    if isinstance(value, bool):
         return MK_BOOLEAN(bool(value))
-    if value is str:
+    if isinstance(value, str):
         return MK_STRING(str(value))
-    if value is list:
+    if isinstance(value, list):
         arr: list[AlgebraicValue] = value  # type: ignore
         return MK_ARRAY(arr.copy())
-    if value is Callable:
+    if "arity" in dir(value):
         func: Callable = value  # type: ignore
         return MK_FUNCTION(func)
     return MK_NULL()

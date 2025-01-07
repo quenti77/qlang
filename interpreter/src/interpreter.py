@@ -260,19 +260,20 @@ class Interpreter:
     def __evaluate_assignment_expression(
         self: Self, assignment_expression: AssignmentExpression
     ) -> RuntimeValue:
-        if assignment_expression.kind == NodeType.IDENTIFIER:
-            identifier: Identifier = assignment_expression  # type: ignore
+        left = assignment_expression.assignment
+        if left.kind == NodeType.IDENTIFIER:
+            identifier: Identifier = left  # type: ignore
             name = identifier.identifier
             return self.env.assignVariable(
                 name, self.evaluate(assignment_expression.value)
             )
 
-        if assignment_expression.kind != NodeType.MEMBER_EXPRESSION:
+        if left.kind != NodeType.MEMBER_EXPRESSION:
             raise Exception(
                 f"Impossible d'assigner une valeur à une expression de type '{assignment_expression.kind}'"
             )
 
-        member_expression: MemberExpression = assignment_expression  # type: ignore
+        member_expression: MemberExpression = left  # type: ignore
         object = self.__to_algebraic_value(
             self.__evaluate_expression(member_expression.object)
         )

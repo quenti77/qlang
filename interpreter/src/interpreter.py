@@ -313,7 +313,9 @@ class Interpreter:
     def __evaluate_unary_expression(
         self: Self, expression: UnaryExpression
     ) -> RuntimeValue:
-        argument = self.__to_algebraic_value(self.__evaluate_expression(expression))
+        argument = self.__to_algebraic_value(
+            self.__evaluate_expression(expression.value)
+        )
 
         if not hasattr(argument, "value"):
             return MK_NULL()
@@ -417,34 +419,56 @@ class Interpreter:
     def __evaluate_logical_expression(
         self: Self, expression: BinaryExpression
     ) -> RuntimeValue:
-        left_side = self.__to_algebraic_value(
+        left_hand_side = self.__to_algebraic_value(
             self.__evaluate_expression(expression.left)
         )
-        right_side = self.__to_algebraic_value(
+        operator = expression.operator
+
+        if operator not in ["et", "ou"]:
+            return self.__evaluate_logical_operator(
+                operator, left_hand_side, expression
+            )
+
+        if operator == "et":
+            if (
+                left_hand_side.type == AlgebraicType.BOOLEAN
+                and not left_hand_side.value
+            ):
+                return MK_BOOLEAN(False)
+
+            return MK_BOOLEAN(
+                self.__to_algebraic_value(self.evaluate(expression.right)).value
+            )
+
+        if operator == "ou":
+            if left_hand_side.type == AlgebraicType.BOOLEAN and left_hand_side.value:
+                return MK_BOOLEAN(True)
+
+            return MK_BOOLEAN(
+                self.__to_algebraic_value(self.evaluate(expression.right)).value
+            )
+
+    def __evaluate_logical_operator(
+        self: Self, operator: str, left: AlgebraicValue, expression: BinaryExpression
+    ) -> RuntimeValue:
+        right_hand_side = self.__to_algebraic_value(
             self.__evaluate_expression(expression.right)
         )
 
-        left: bool = bool(left_side.value)  # type: ignore
-        right: bool = bool(right_side.value)  # type: ignore
+        if operator == "==":
+            return MK_BOOLEAN(left.value == right_hand_side.value)
+        if operator == "!=":
+            return MK_BOOLEAN(left.value != right_hand_side.value)
+        if operator == "<":
+            return MK_BOOLEAN(left.value < right_hand_side.value)
+        if operator == "<=":
+            return MK_BOOLEAN(left.value <= right_hand_side.value)
+        if operator == ">":
+            return MK_BOOLEAN(left.value > right_hand_side.value)
+        if operator == ">=":
+            return MK_BOOLEAN(left.value >= right_hand_side.value)
 
-        if expression.operator == "et":
-            return MK_BOOLEAN(left and right)
-        if expression.operator == "ou":
-            return MK_BOOLEAN(left or right)
-        if expression.operator == "==":
-            return MK_BOOLEAN(left == right)
-        if expression.operator == "!=":
-            return MK_BOOLEAN(left != right)
-        if expression.operator == "<":
-            return MK_BOOLEAN(left < right)
-        if expression.operator == "<=":
-            return MK_BOOLEAN(left <= right)
-        if expression.operator == ">":
-            return MK_BOOLEAN(left > right)
-        if expression.operator == ">=":
-            return MK_BOOLEAN(left >= right)
-
-        return MK_NULL()
+        raise Exception(f"Opérateur logique inconnu '{operator}'")
 
     def __evaluate_arithmetic_expression(
         self: Self, operator: str, left: AlgebraicValue, right: AlgebraicValue

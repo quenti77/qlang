@@ -18,7 +18,7 @@ IfStatement                     : 'si' Expression 'alors' BlockStatement
                                     ('sinon' BlockStatement)?
                                    'fin'
 WhileStatement                  : 'tantque' Expression 'alors' BlockStatement 'fin'
-ForStatement                    : 'pour' Identifier 'de' Expression 'jusque' Expression 'alors' BlockStatement 'fin'
+ForStatement                    : 'pour' Identifier 'de' Expression 'jusque' Expression ('evol' Expression) 'alors' BlockStatement 'fin'
 ReturnStatement                 : 'retour' Expression
 BreakStatement                  : 'arreter'
 ContinueStatement               : 'continuer'

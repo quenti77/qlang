@@ -237,6 +237,33 @@ def test_loop_while() -> None:
         ("retour 42", MK_RETURN(MK_NUMBER(42))),
     ],
 )
+def test_break_program(code: str, expected: RuntimeValue) -> None:
+    code = f"""
+        {code}
+        """
+    lexer = Lexer()
+    lexer.tokenize(code)
+
+    parser = Parser()
+    parser.setTokens(lexer.tokens, code)
+    ast = parser.make_ast()
+
+    env = Environment(None)
+    stdOut = Std()
+    stdErr = Std()
+    interpreter = Interpreter(env, stdOut, stdErr)
+    print(ast)
+    assert interpreter.evaluate(ast) == expected
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("arreter", MK_BREAK()),
+        ("continuer", MK_CONTINUE()),
+        ("retour 42", MK_RETURN(MK_NUMBER(42))),
+    ],
+)
 def test_break_loop(code: str, expected: RuntimeValue) -> None:
     code = f"""
         tantque vrai alors

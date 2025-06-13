@@ -72,6 +72,13 @@ class Interpreter:
         if ast_node.kind == NodeType.FUNCTION_STATEMENT:
             return self.__evaluate_function_statement(ast_node)  # type: ignore
 
+        if ast_node.kind == NodeType.BREAK_STATEMENT:
+            return MK_BREAK()
+        if ast_node.kind == NodeType.CONTINUE_STATEMENT:
+            return MK_CONTINUE()
+        if ast_node.kind == NodeType.RETURN_STATEMENT:
+            return MK_RETURN(self.evaluate(stmt.value))  # type: ignore
+
         return self.__evaluate_expression(ast_node)  # type: ignore
 
     def evaluate_block_statement(
@@ -437,7 +444,7 @@ class Interpreter:
                 return MK_BOOLEAN(False)
 
             return MK_BOOLEAN(
-                self.__to_algebraic_value(self.evaluate(expression.right)).value
+                not not self.__to_algebraic_value(self.evaluate(expression.right)).value
             )
 
         if operator == "ou":
@@ -445,8 +452,10 @@ class Interpreter:
                 return MK_BOOLEAN(True)
 
             return MK_BOOLEAN(
-                self.__to_algebraic_value(self.evaluate(expression.right)).value
+                not not self.__to_algebraic_value(self.evaluate(expression.right)).value
             )
+
+        return MK_BOOLEAN(False)
 
     def __evaluate_logical_operator(
         self: Self, operator: str, left: AlgebraicValue, expression: BinaryExpression
@@ -459,14 +468,15 @@ class Interpreter:
             return MK_BOOLEAN(left.value == right_hand_side.value)
         if operator == "!=":
             return MK_BOOLEAN(left.value != right_hand_side.value)
+
         if operator == "<":
-            return MK_BOOLEAN(left.value < right_hand_side.value)
+            return MK_BOOLEAN(left.value < right_hand_side.value)  # type: ignore
         if operator == "<=":
-            return MK_BOOLEAN(left.value <= right_hand_side.value)
+            return MK_BOOLEAN(left.value <= right_hand_side.value)  # type: ignore
         if operator == ">":
-            return MK_BOOLEAN(left.value > right_hand_side.value)
+            return MK_BOOLEAN(left.value > right_hand_side.value)  # type: ignore
         if operator == ">=":
-            return MK_BOOLEAN(left.value >= right_hand_side.value)
+            return MK_BOOLEAN(left.value >= right_hand_side.value)  # type: ignore
 
         raise Exception(f"Opérateur logique inconnu '{operator}'")
 

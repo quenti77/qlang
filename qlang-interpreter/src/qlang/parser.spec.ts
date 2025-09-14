@@ -16,12 +16,12 @@ import type {
     NullLiteral,
     NumericLiteral,
     PrintStatement,
-    Program,
+    Program, ReadExpression,
     ReturnStatement,
     StringLiteral,
     VariableDeclarationStatement,
     WhileStatement,
-} from "./ast"
+} from './ast'
 import { OPERATORS } from "./token"
 
 describe("Parser", () => {
@@ -255,6 +255,19 @@ describe("Parser", () => {
         expect(ast).toEqual({
             kind: 'Program',
             body: [printStatement]
+        })
+    })
+
+    test("make AST read expression", () => {
+        const ast = makeASTFromInput('lire "Nom :"')
+        const readExpression = {
+            kind: 'ReadExpression',
+            value: { kind: 'StringLiteral', value: "Nom :" }
+        } as ReadExpression
+
+        expect(ast).toEqual({
+            kind: 'Program',
+            body: [readExpression]
         })
     })
 

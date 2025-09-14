@@ -13,14 +13,16 @@ import type {
     NumericLiteral,
     PrintStatement,
     Program,
+    ReadExpression,
     ReturnStatement,
     Statement,
     StringLiteral,
     UnaryExpression,
     VariableDeclarationStatement,
     WhileStatement,
-} from "../ast"
+} from '../ast'
 import {
+    type AlgebraicValue,
     ArrayValue,
     FunctionValue,
     MK_ALGEBRAIC,
@@ -33,12 +35,11 @@ import {
     MK_RETURN,
     MK_STRING,
     NumberValue,
-    type AlgebraicValue,
     type RuntimeValue,
-} from "./values"
-import Environment from "./environment"
-import { Std } from "./std"
-import { QFunction } from "./callable"
+} from './values'
+import Environment from './environment'
+import { Std } from './std'
+import { QFunction } from './callable'
 
 export default class Interpreter {
 
@@ -237,6 +238,8 @@ export default class Interpreter {
                 return this.evaluateMemberExpression(expression as MemberExpression)
             case 'CallExpression':
                 return this.evaluateCallExpression(expression as CallExpression)
+            case 'ReadExpression':
+                return this.evaluateReadExpression(expression as ReadExpression)
             case 'Identifier':
                 return this.evaluateIdentifier(expression as Identifier)
             case 'NumericLiteral':
@@ -386,9 +389,16 @@ export default class Interpreter {
             : currentValue
     }
 
+    private evaluateReadExpression(readExpr: ReadExpression): RuntimeValue {
+        const algebraicValue = this.evaluate(readExpr.value) as AlgebraicValue
+        const message = algebraicValue?.value
+        const result = prompt(message?.toString() ?? 'Input')
+
+        return result === null ? MK_NULL() : MK_STRING(result)
+    }
+
     private evaluateIdentifier(identifier: Identifier): RuntimeValue {
-        const val = this.env.lookupVariable(identifier.name)
-        return val
+        return this.env.lookupVariable(identifier.name)
     }
 
     private evaluateLogicalBinaryExpression(binaryExpr: BinaryExpression): AlgebraicValue {

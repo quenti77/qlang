@@ -13,6 +13,7 @@ export type NodeType =
     | 'ReturnStatement'
     // Expressions
     | 'AssignmentExpression'
+    | 'ReadExpression'
     | 'UnaryExpression'
     | 'BinaryExpression'
     | 'NumericLiteral'
@@ -96,6 +97,11 @@ export interface Expression extends Statement { }
 export interface AssignmentExpression extends Expression {
     kind: 'AssignmentExpression'
     assignment: Expression
+    value: Expression
+}
+
+export interface ReadExpression extends Expression {
+    kind: 'ReadExpression'
     value: Expression
 }
 

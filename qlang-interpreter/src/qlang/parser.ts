@@ -14,17 +14,17 @@ import type {
     NullLiteral,
     NumericLiteral,
     PrintStatement,
-    Program,
+    Program, ReadExpression,
     ReturnStatement,
     Statement,
     StringLiteral,
     UnaryExpression,
     VariableDeclarationStatement,
     WhileStatement,
-} from "./ast"
-import { TokenType, findKeywordFromToken, type Token } from "./token"
-import { InvalidSyntaxError, MaximumArgumentError } from "./utils/errors"
-import { Position } from "./utils/position"
+} from './ast'
+import { findKeywordFromToken, type Token, TokenType } from './token'
+import { InvalidSyntaxError, MaximumArgumentError } from './utils/errors'
+import { Position } from './utils/position'
 
 export default class Parser {
 
@@ -53,7 +53,7 @@ export default class Parser {
         }
 
         this.tokenIndex = 0
-        while (this.isEOF() === false) {
+        while (!this.isEOF()) {
             program.body.push(this.parseStatement())
         }
 
@@ -263,9 +263,9 @@ export default class Parser {
         }
 
         while (
-            this.isEOF() === false &&
+            !this.isEOF() &&
             this.at().type !== TokenType.End &&
-            withCondition.includes(this.at().type) === false
+            !withCondition.includes(this.at().type)
         ) {
             block.body.push(this.parseStatement())
         }
@@ -457,7 +457,7 @@ export default class Parser {
     }
 
     private parseCallExpression(): Expression {
-        let expression = this.parsePrimaryExpression()
+        let expression = this.parseReadExpression()
 
         while (this.at().type === TokenType.OpenParenthesis) {
             this.eat()
@@ -481,6 +481,19 @@ export default class Parser {
         }
 
         return expression
+    }
+
+    private parseReadExpression(): Expression {
+        if (this.at().type !== TokenType.Read) {
+            return this.parsePrimaryExpression()
+        }
+
+        this.eatExactly(TokenType.Read)
+
+        return {
+            kind: 'ReadExpression',
+            value: this.parseExpression()
+        } as ReadExpression
     }
 
     private parsePrimaryExpression(): Expression {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::error::QError;
 
@@ -28,14 +29,30 @@ pub trait ModuleResolver {
     fn resolve(&self, path: &str) -> Result<String, QError>;
 }
 
-/// Default resolver: reads modules straight from disk.
-#[derive(Default)]
-pub struct FsModuleResolver;
+/// Default resolver: reads modules from disk, relative to `base_dir`
+/// (typically the directory holding the entry script), the same way
+/// Node's `require` resolves relative paths.
+pub struct FsModuleResolver {
+    base_dir: PathBuf,
+}
+
+impl FsModuleResolver {
+    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        Self { base_dir: base_dir.into() }
+    }
+}
+
+impl Default for FsModuleResolver {
+    fn default() -> Self {
+        Self::new(".")
+    }
+}
 
 impl ModuleResolver for FsModuleResolver {
     fn resolve(&self, path: &str) -> Result<String, QError> {
-        fs::read_to_string(path)
-            .map_err(|err| QError::module(format!("Impossible de lire le module '{path}': {err}")))
+        let full_path = self.base_dir.join(path);
+        fs::read_to_string(&full_path)
+            .map_err(|err| QError::module(format!("Impossible de lire le module '{}': {err}", full_path.display())))
     }
 }
 

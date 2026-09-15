@@ -1,0 +1,13 @@
+[package]
+name = "qlang_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of the qlang interpreter"
+
+[lib]
+name = "qlang_rs"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]

@@ -1,0 +1,36 @@
+{
+  "name": "qlang-vscode",
+  "displayName": "qlang",
+  "description": "Coloration syntaxique et autocomplétion simple pour le langage qlang",
+  "version": "0.1.0",
+  "publisher": "quenti77",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "qlang",
+        "aliases": ["qlang", "q"],
+        "extensions": [".q"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qlang",
+        "scopeName": "source.qlang",
+        "path": "./syntaxes/qlang.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "qlang",
+        "path": "./snippets/qlang.json"
+      }
+    ]
+  },
+  "activationEvents": ["onLanguage:qlang"]
+}

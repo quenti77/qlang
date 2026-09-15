@@ -1,0 +1,42 @@
+{
+  "si": {
+    "prefix": "si",
+    "body": ["si ${1:condition} alors", "\t$0", "fin"],
+    "description": "Bloc conditionnel si"
+  },
+  "si sinon": {
+    "prefix": "sisinon",
+    "body": ["si ${1:condition} alors", "\t$2", "sinon", "\t$0", "fin"],
+    "description": "Bloc conditionnel si/sinon"
+  },
+  "tantque": {
+    "prefix": "tantque",
+    "body": ["tantque ${1:condition} alors", "\t$0", "fin"],
+    "description": "Boucle tantque"
+  },
+  "pour": {
+    "prefix": "pour",
+    "body": ["pour ${1:i} de ${2:0} jusque ${3:10} alors", "\t$0", "fin"],
+    "description": "Boucle pour"
+  },
+  "fonction": {
+    "prefix": "fonction",
+    "body": ["fonction ${1:nom}(${2:parametres})", "\t$0", "fin"],
+    "description": "Déclaration de fonction"
+  },
+  "inclure": {
+    "prefix": "inclure",
+    "body": "inclure \"${1:chemin.q}\"",
+    "description": "Inclusion d'un fichier module"
+  },
+  "dec": {
+    "prefix": "dec",
+    "body": "dec ${1:nom} = ${0:valeur}",
+    "description": "Déclaration de variable"
+  },
+  "ecrire": {
+    "prefix": "ecrire",
+    "body": "ecrire ${0:valeur}",
+    "description": "Affiche une valeur"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "qlang",
+  "scopeName": "source.qlang",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#module" },
+    { "include": "#function-declaration" },
+    { "include": "#function-call" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.qlang",
+          "match": "\\brem\\b.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.qlang",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.qlang",
+          "match": "\\\\(\\\\|\"|n)"
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.qlang",
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.qlang",
+          "match": "\\b(si|alors|sinon|sinonsi|fin|tantque|pour|de|jusque|evol|retour|arreter|continuer)\\b"
+        },
+        {
+          "name": "storage.type.qlang",
+          "match": "\\b(dec|fonction)\\b"
+        },
+        {
+          "name": "keyword.other.qlang",
+          "match": "\\b(ecrire|lire)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.qlang",
+          "match": "\\b(et|ou|non)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.qlang",
+      "match": "\\b(vrai|faux|rien)\\b"
+    },
+    "module": {
+      "name": "keyword.control.import.qlang",
+      "match": "\\binclure\\b"
+    },
+    "function-declaration": {
+      "match": "\\b(fonction)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "storage.type.qlang" },
+        "2": { "name": "entity.name.function.qlang" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.qlang" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.qlang",
+          "match": "==|!=|>=|<=|<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.qlang",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.qlang",
+          "match": "\\+|-|\\*|/|%"
+        }
+      ]
+    }
+  }
+}

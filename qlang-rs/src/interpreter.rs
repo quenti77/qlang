@@ -232,6 +232,12 @@ impl Interpreter {
                 .clone()
                 .expect("method declarations always carry an identifier");
 
+            if def.fields.contains_key(&method_name) {
+                return Err(QError::runtime(format!(
+                    "'{method_name}' est déjà utilisé comme champ de '{name}', choisissez un autre nom pour la méthode"
+                )));
+            }
+
             let method_def = Rc::new(MethodDef {
                 owner: name.to_string(),
                 visibility: method.visibility,
@@ -1475,6 +1481,27 @@ mod tests {
         .join("\n");
         let err = run(&mut interpreter, &code).unwrap_err();
         assert!(err.to_string().contains("méthode statique"));
+    }
+
+    #[test]
+    fn evaluate_method_name_colliding_with_field_name_is_an_error() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "  cacher nom",
+            "fin",
+            "dans Nom implemente",
+            "  publique nom(moi)",
+            "    retour moi.nom",
+            "  fin",
+            "fin",
+        ]
+        .join("\n");
+        let err = run(&mut interpreter, &code).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: 'nom' est déjà utilisé comme champ de 'Nom', choisissez un autre nom pour la méthode"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::environment::Environment;
 use crate::error::QError;
 use crate::lexer::Lexer;
 use crate::module::{InputSource, ModuleResolver};
-use crate::objects::{BoundMethod, Instance, MethodDef, StructDef};
+use crate::objects::{BoundMethod, FieldDef, Instance, MethodDef, StructDef};
 use crate::parser::Parser;
 use crate::stdio::Std;
 use crate::values::Value;
@@ -106,6 +106,21 @@ impl Interpreter {
         result
     }
 
+    /// Evaluates `expr` with `environment` as the current scope, restoring
+    /// the previous one afterwards - used to evaluate a struct field's
+    /// default value in the scope where the struct was declared, rather
+    /// than the caller's scope.
+    fn evaluate_expr_in_env(
+        &mut self,
+        expr: &Expr,
+        environment: Environment,
+    ) -> Result<Value, QError> {
+        let previous_env = std::mem::replace(&mut self.env, environment);
+        let result = self.evaluate_expr(expr);
+        self.env = previous_env;
+        result
+    }
+
     fn run_block_body(&mut self, body: &[Stmt]) -> Result<Value, QError> {
         let mut last = Value::Null;
         for stmt in body {
@@ -173,13 +188,20 @@ impl Interpreter {
     ) -> Result<Value, QError> {
         let mut field_map = HashMap::new();
         for field in fields {
-            field_map.insert(field.name.clone(), field.visibility);
+            field_map.insert(
+                field.name.clone(),
+                FieldDef {
+                    visibility: field.visibility,
+                    default: field.default.clone(),
+                },
+            );
         }
 
         let value = Value::Struct(Rc::new(StructDef {
             name: name.to_string(),
             fields: field_map,
             methods: std::cell::RefCell::new(HashMap::new()),
+            closure: self.env.clone(),
         }));
 
         if self.env.resolve(name, false)?.is_none() {
@@ -419,13 +441,17 @@ impl Interpreter {
                     },
                     Value::Instance(instance) => {
                         let name = self.evaluate_member_name(property.as_deref())?;
-                        let visibility =
-                            *instance.struct_def.fields.get(&name).ok_or_else(|| {
+                        let visibility = instance
+                            .struct_def
+                            .fields
+                            .get(&name)
+                            .ok_or_else(|| {
                                 QError::runtime(format!(
                                     "'{}' n'a pas de champ '{name}'",
                                     instance.struct_def.name
                                 ))
-                            })?;
+                            })?
+                            .visibility;
                         self.check_visibility(visibility, &instance.struct_def.name, &name)?;
 
                         let evaluated = self.evaluate_expr(value)?;
@@ -514,11 +540,12 @@ impl Interpreter {
         name: &str,
     ) -> Result<Value, QError> {
         if let Some(value) = instance.fields.borrow().get(name) {
-            let visibility = *instance
+            let visibility = instance
                 .struct_def
                 .fields
                 .get(name)
-                .expect("field exists in fields map");
+                .expect("field exists in fields map")
+                .visibility;
             self.check_visibility(visibility, &instance.struct_def.name, name)?;
             return Ok(value.clone());
         }
@@ -574,11 +601,16 @@ impl Interpreter {
                     def.name
                 )));
             }
-            let fields = def
-                .fields
-                .keys()
-                .map(|name| (name.clone(), Value::Null))
-                .collect();
+            let mut fields = HashMap::new();
+            for (name, field_def) in def.fields.iter() {
+                let value = match &field_def.default {
+                    Some(default_expr) => {
+                        self.evaluate_expr_in_env(default_expr, def.closure.clone())?
+                    }
+                    None => Value::Null,
+                };
+                fields.insert(name.clone(), value);
+            }
             return Ok(Value::Instance(Rc::new(Instance {
                 struct_def: def,
                 fields: std::cell::RefCell::new(fields),
@@ -1260,6 +1292,50 @@ mod tests {
         ]
         .join("\n");
         assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn evaluate_struct_field_default_value() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "  publique champ = 42",
+            "fin",
+            "Nom().champ",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(42.0));
+    }
+
+    #[test]
+    fn evaluate_struct_field_default_value_is_fresh_per_instance() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "  publique valeurs = []",
+            "fin",
+            "dec a = Nom()",
+            "dec b = Nom()",
+            "a.valeurs[] = 1",
+            "taille(b.valeurs)",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(0.0));
+    }
+
+    #[test]
+    fn evaluate_struct_field_default_value_can_be_overridden() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "  publique champ = 42",
+            "fin",
+            "dec p = Nom()",
+            "p.champ = 1",
+            "p.champ",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(1.0));
     }
 
     #[test]

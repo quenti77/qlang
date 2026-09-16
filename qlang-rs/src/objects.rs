@@ -2,23 +2,33 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{FunctionDecl, Visibility, SELF_PARAM};
+use crate::ast::{Expr, FunctionDecl, Visibility, SELF_PARAM};
 use crate::callable::Callable;
 use crate::environment::Environment;
 use crate::error::QError;
 use crate::interpreter::Interpreter;
 use crate::values::Value;
 
+/// A struct field's visibility and optional default value expression
+/// (`publique champ = valeur`), evaluated fresh for every `Nom()` call.
+pub struct FieldDef {
+    pub visibility: Visibility,
+    pub default: Option<Expr>,
+}
+
 /// Runtime definition of a `structure ... avec ... fin` declaration, shared
 /// by every instance and by the struct value itself (used for static calls
 /// and to create raw instances via `Nom()`).
 pub struct StructDef {
     pub name: String,
-    pub fields: HashMap<String, Visibility>,
+    pub fields: HashMap<String, FieldDef>,
     /// Populated later by a matching `dans Nom implemente ... fin` block, so
     /// it needs interior mutability: the struct and its impl block are two
     /// separate statements evaluated in sequence.
     pub methods: RefCell<HashMap<String, Rc<MethodDef>>>,
+    /// Environment in effect where the struct was declared, used to
+    /// evaluate field default expressions.
+    pub closure: Environment,
 }
 
 /// A method attached to a struct via an `implemente` block.

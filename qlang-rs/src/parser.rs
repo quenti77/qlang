@@ -127,9 +127,18 @@ impl Parser {
             let field_name = self
                 .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
                 .value;
+
+            let default = if self.at().token_type == TokenType::Equals {
+                self.eat();
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+
             fields.push(StructField {
                 visibility,
                 name: field_name,
+                default,
             });
         }
         self.eat_exactly(TokenType::End, Some(pos_start))?;
@@ -1181,13 +1190,31 @@ mod tests {
                 fields: vec![
                     StructField {
                         visibility: Visibility::Public,
-                        name: "champ1".to_string()
+                        name: "champ1".to_string(),
+                        default: None,
                     },
                     StructField {
                         visibility: Visibility::Hidden,
-                        name: "champ2".to_string()
+                        name: "champ2".to_string(),
+                        default: None,
                     },
                 ],
+            }]
+        );
+    }
+
+    #[test]
+    fn ast_struct_field_with_default_value() {
+        let code = ["structure Nom avec", "  publique champ = 42", "fin"].join("\n");
+        assert_eq!(
+            make_ast(&code),
+            vec![Stmt::Struct {
+                name: "Nom".to_string(),
+                fields: vec![StructField {
+                    visibility: Visibility::Public,
+                    name: "champ".to_string(),
+                    default: Some(Expr::Numeric(42.0)),
+                }],
             }]
         );
     }

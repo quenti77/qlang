@@ -19,6 +19,9 @@ pub enum Visibility {
 pub struct StructField {
     pub visibility: Visibility,
     pub name: String,
+    /// `publique champ = valeur` - evaluated fresh for every `Nom()` call,
+    /// in the scope where the struct was declared. `rien` when absent.
+    pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{FunctionDecl, Visibility};
+use crate::ast::{FunctionDecl, Visibility, SELF_PARAM};
 use crate::callable::Callable;
 use crate::environment::Environment;
 use crate::error::QError;
@@ -62,7 +62,7 @@ impl Callable for BoundMethod {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Result<Value, QError> {
         let env = Environment::new(Some(self.method.closure.clone()));
         if let Some(receiver) = &self.receiver {
-            env.declare_variable("moi", receiver.clone())?;
+            env.declare_variable(SELF_PARAM, receiver.clone())?;
         }
         for (param, arg) in self.method.function.parameters.iter().zip(args) {
             env.declare_variable(param, arg)?;

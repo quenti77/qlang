@@ -1,3 +1,8 @@
+/// Explicit receiver parameter name (Python/Go/Rust-style `self`): a method
+/// declaring it as its first parameter is an instance method, one that
+/// omits it is a static method - no separate `statique` keyword needed.
+pub const SELF_PARAM: &str = "moi";
+
 /// Field/method visibility for the `structure`/`implemente` object system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {

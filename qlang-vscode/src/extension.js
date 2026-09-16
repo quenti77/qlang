@@ -35,8 +35,7 @@ const KEYWORDS = [
     { word: 'publique', detail: 'Visibilité publique' },
     { word: 'cacher', detail: 'Visibilité privée' },
     { word: 'partager', detail: 'Visibilité protégée' },
-    { word: 'statique', detail: 'Méthode statique' },
-    { word: 'moi', detail: "Référence à l'instance courante" },
+    { word: 'moi', detail: "Paramètre explicite désignant l'instance (1er paramètre = méthode d'instance)" },
 ]
 
 const FUNCTION_DECL_RE = /\bfonction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/g

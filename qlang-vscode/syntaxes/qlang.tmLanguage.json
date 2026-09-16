@@ -75,7 +75,7 @@
         },
         {
           "name": "storage.modifier.qlang",
-          "match": "\\b(publique|cacher|partager|statique)\\b"
+          "match": "\\b(publique|cacher|partager)\\b"
         },
         {
           "name": "variable.language.qlang",

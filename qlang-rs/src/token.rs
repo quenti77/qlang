@@ -50,8 +50,6 @@ pub enum TokenType {
     Hidden,
     /// `partager` - protected visibility.
     Shared,
-    /// `statique` - marks a method as static.
-    Static,
     EOF,
 }
 
@@ -118,7 +116,6 @@ pub const KEYWORDS: &[(&str, TokenType)] = &[
     ("publique", TokenType::Public),
     ("cacher", TokenType::Hidden),
     ("partager", TokenType::Shared),
-    ("statique", TokenType::Static),
 ];
 
 pub fn lookup_keyword(word: &str) -> Option<TokenType> {

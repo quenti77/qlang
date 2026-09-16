@@ -46,7 +46,7 @@
   },
   "implemente": {
     "prefix": "implemente",
-    "body": ["dans ${1:Nom} implemente", "\tpublique ${2:methode}(${3:parametres})", "\t\t$0", "\tfin", "fin"],
-    "description": "Bloc de méthodes d'une structure"
+    "body": ["dans ${1:Nom} implemente", "\tpublique ${2:methode}(moi, ${3:parametres})", "\t\t$0", "\tfin", "fin"],
+    "description": "Bloc de méthodes d'une structure (méthode d'instance : 1er paramètre moi)"
   }
 }

@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use crate::ast::{Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility};
+use crate::ast::{
+    Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility, SELF_PARAM,
+};
 use crate::error::QError;
 use crate::position::Position;
 use crate::token::{find_keywords_from_token, Token, TokenType};
@@ -154,12 +156,6 @@ impl Parser {
 
     fn parse_method_declaration(&mut self, pos_start: &Position) -> Result<MethodDecl, QError> {
         let visibility = self.parse_visibility()?;
-        let is_static = if self.at().token_type == TokenType::Static {
-            self.eat();
-            true
-        } else {
-            false
-        };
 
         let identifier = self
             .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
@@ -179,6 +175,14 @@ impl Parser {
             }
         }
         self.eat();
+
+        // A method is an instance method when its first parameter is the
+        // explicit receiver `moi` (Python/Go/Rust-style explicit self,
+        // rather than an implicit binding + a dedicated `statique` keyword).
+        let is_static = parameters.first().map(String::as_str) != Some(SELF_PARAM);
+        if !is_static {
+            parameters.remove(0);
+        }
 
         let body = match self.parse_block_statement(&[])? {
             Stmt::Block(body) => body,
@@ -1192,10 +1196,10 @@ mod tests {
     fn ast_impl_statement() {
         let code = [
             "dans Nom implemente",
-            "  publique statique nouveau()",
+            "  publique nouveau()",
             "    retour Nom()",
             "  fin",
-            "  publique saluer()",
+            "  publique saluer(moi)",
             "    ecrire moi",
             "  fin",
             "fin",

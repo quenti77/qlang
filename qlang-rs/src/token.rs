@@ -34,8 +34,24 @@ pub enum TokenType {
     Comma,
     /// Statement introducing a module include (`inclure "chemin.q"`).
     Include,
-    #[allow(dead_code)]
+    /// `.` used for field/method access (`instance.champ`, `Nom.methode()`).
     Dot,
+    /// `structure Nom avec ... fin`.
+    Structure,
+    /// `avec` - introduces a structure's field list.
+    With,
+    /// `dans Nom implemente ... fin`.
+    In,
+    /// `implemente` - introduces an impl block's method list.
+    Implements,
+    /// `publique` - public visibility.
+    Public,
+    /// `cacher` - private visibility.
+    Hidden,
+    /// `partager` - protected visibility.
+    Shared,
+    /// `statique` - marks a method as static.
+    Static,
     EOF,
 }
 
@@ -87,6 +103,14 @@ pub const KEYWORDS: &[(&str, TokenType)] = &[
     ("non", TokenType::UnaryOperator),
     ("fonction", TokenType::Function),
     ("inclure", TokenType::Include),
+    ("structure", TokenType::Structure),
+    ("avec", TokenType::With),
+    ("dans", TokenType::In),
+    ("implemente", TokenType::Implements),
+    ("publique", TokenType::Public),
+    ("cacher", TokenType::Hidden),
+    ("partager", TokenType::Shared),
+    ("statique", TokenType::Static),
 ];
 
 pub fn lookup_keyword(word: &str) -> Option<TokenType> {

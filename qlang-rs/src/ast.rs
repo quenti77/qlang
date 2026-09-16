@@ -1,3 +1,28 @@
+/// Field/method visibility for the `structure`/`implemente` object system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    /// `publique` - accessible from anywhere.
+    Public,
+    /// `cacher` - accessible only from a method of the same structure.
+    Hidden,
+    /// `partager` - accessible only from a method of the same structure
+    /// (kept distinct from `Hidden` for future subtype support).
+    Shared,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub visibility: Visibility,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodDecl {
+    pub visibility: Visibility,
+    pub is_static: bool,
+    pub function: FunctionDecl,
+}
+
 /// An anonymous or named function declaration, usable both as a statement
 /// (`fonction nom(...) ... fin`) and as an expression (passed as an
 /// argument, or assigned to a variable).
@@ -24,6 +49,10 @@ pub enum Stmt {
     /// source file as a module and merges its top-level declarations into
     /// the current environment.
     Include(Expr),
+    /// `structure Nom avec ... fin` - declares a struct's fields.
+    Struct { name: String, fields: Vec<StructField> },
+    /// `dans Nom implemente ... fin` - attaches methods to a struct.
+    Impl { name: String, methods: Vec<MethodDecl> },
     Expr(Expr),
 }
 

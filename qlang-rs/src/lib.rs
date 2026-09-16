@@ -14,6 +14,7 @@ pub mod globals;
 pub mod interpreter;
 pub mod lexer;
 pub mod module;
+pub mod objects;
 pub mod parser;
 pub mod position;
 pub mod stdio;

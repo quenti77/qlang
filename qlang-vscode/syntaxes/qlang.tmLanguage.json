@@ -9,6 +9,8 @@
     { "include": "#keywords" },
     { "include": "#constants" },
     { "include": "#module" },
+    { "include": "#object-system" },
+    { "include": "#member-access" },
     { "include": "#function-declaration" },
     { "include": "#function-call" },
     { "include": "#operators" }
@@ -64,6 +66,28 @@
     "module": {
       "name": "keyword.control.import.qlang",
       "match": "\\binclure\\b"
+    },
+    "object-system": {
+      "patterns": [
+        {
+          "name": "storage.type.qlang",
+          "match": "\\b(structure|avec|dans|implemente)\\b"
+        },
+        {
+          "name": "storage.modifier.qlang",
+          "match": "\\b(publique|cacher|partager|statique)\\b"
+        },
+        {
+          "name": "variable.language.qlang",
+          "match": "\\bmoi\\b"
+        }
+      ]
+    },
+    "member-access": {
+      "match": "\\.\\s*([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "variable.other.property.qlang" }
+      }
     },
     "function-declaration": {
       "match": "\\b(fonction)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",

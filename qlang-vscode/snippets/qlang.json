@@ -38,5 +38,15 @@
     "prefix": "ecrire",
     "body": "ecrire ${0:valeur}",
     "description": "Affiche une valeur"
+  },
+  "structure": {
+    "prefix": "structure",
+    "body": ["structure ${1:Nom} avec", "\tpublique ${0:champ}", "fin"],
+    "description": "Déclaration d'une structure"
+  },
+  "implemente": {
+    "prefix": "implemente",
+    "body": ["dans ${1:Nom} implemente", "\tpublique ${2:methode}(${3:parametres})", "\t\t$0", "\tfin", "fin"],
+    "description": "Bloc de méthodes d'une structure"
   }
 }

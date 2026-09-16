@@ -28,6 +28,15 @@ const KEYWORDS = [
     { word: 'non', detail: 'Négation logique' },
     { word: 'fonction', detail: 'Déclare une fonction' },
     { word: 'inclure', detail: 'Inclut un fichier module' },
+    { word: 'structure', detail: 'Déclare une structure (champs)' },
+    { word: 'avec', detail: "Introduit les champs d'une structure" },
+    { word: 'dans', detail: "Introduit un bloc d'implémentation" },
+    { word: 'implemente', detail: "Introduit les méthodes d'une structure" },
+    { word: 'publique', detail: 'Visibilité publique' },
+    { word: 'cacher', detail: 'Visibilité privée' },
+    { word: 'partager', detail: 'Visibilité protégée' },
+    { word: 'statique', detail: 'Méthode statique' },
+    { word: 'moi', detail: "Référence à l'instance courante" },
 ]
 
 const FUNCTION_DECL_RE = /\bfonction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/g

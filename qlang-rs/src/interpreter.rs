@@ -1,12 +1,13 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use crate::ast::{Expr, FunctionDecl, Program, Stmt};
+use crate::ast::{Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility};
 use crate::callable::{Callable, QFunction};
 use crate::environment::Environment;
 use crate::error::QError;
 use crate::lexer::Lexer;
 use crate::module::{InputSource, ModuleResolver};
+use crate::objects::{BoundMethod, Instance, MethodDef, StructDef};
 use crate::parser::Parser;
 use crate::stdio::Std;
 use crate::values::Value;
@@ -18,6 +19,10 @@ pub struct Interpreter {
     input: Box<dyn InputSource>,
     module_resolver: Box<dyn ModuleResolver>,
     included_modules: HashSet<String>,
+    /// Names of the structs whose method body is currently executing,
+    /// innermost last - used to gate access to `cacher`/`partager` members
+    /// to code running inside a method of that same struct.
+    struct_context: Vec<String>,
 }
 
 impl Interpreter {
@@ -28,7 +33,34 @@ impl Interpreter {
         input: Box<dyn InputSource>,
         module_resolver: Box<dyn ModuleResolver>,
     ) -> Self {
-        Self { env, stdout, stderr, input, module_resolver, included_modules: HashSet::new() }
+        Self {
+            env,
+            stdout,
+            stderr,
+            input,
+            module_resolver,
+            included_modules: HashSet::new(),
+            struct_context: Vec::new(),
+        }
+    }
+
+    pub fn push_struct_context(&mut self, owner: String) {
+        self.struct_context.push(owner);
+    }
+
+    pub fn pop_struct_context(&mut self) {
+        self.struct_context.pop();
+    }
+
+    fn is_in_struct_context(&self, owner: &str) -> bool {
+        self.struct_context.last().map(|s| s.as_str()) == Some(owner)
+    }
+
+    fn check_visibility(&self, visibility: Visibility, owner: &str, member: &str) -> Result<(), QError> {
+        if visibility == Visibility::Public || self.is_in_struct_context(owner) {
+            return Ok(());
+        }
+        Err(QError::runtime(format!("'{member}' n'est pas accessible depuis l'extérieur de '{owner}'")))
     }
 
     pub fn stdout(&self) -> &Std {
@@ -111,8 +143,60 @@ impl Interpreter {
             Stmt::Continue => Ok(Value::Continue),
             Stmt::Return(expr) => Ok(Value::Return(Box::new(self.evaluate_expr(expr)?))),
             Stmt::Include(expr) => self.evaluate_include(expr),
+            Stmt::Struct { name, fields } => self.evaluate_struct_declaration(name, fields),
+            Stmt::Impl { name, methods } => self.evaluate_impl_declaration(name, methods),
             Stmt::Expr(expr) => self.evaluate_expr(expr),
         }
+    }
+
+    fn evaluate_struct_declaration(&mut self, name: &str, fields: &[StructField]) -> Result<Value, QError> {
+        let mut field_map = HashMap::new();
+        for field in fields {
+            field_map.insert(field.name.clone(), field.visibility);
+        }
+
+        let value = Value::Struct(Rc::new(StructDef {
+            name: name.to_string(),
+            fields: field_map,
+            methods: std::cell::RefCell::new(HashMap::new()),
+        }));
+
+        if self.env.resolve(name, false)?.is_none() {
+            self.env.declare_variable(name, Value::Null)?;
+        }
+        self.env.assign_variable(name, value)
+    }
+
+    fn evaluate_impl_declaration(&mut self, name: &str, methods: &[MethodDecl]) -> Result<Value, QError> {
+        let def = match self.env.lookup_variable(name)? {
+            Value::Struct(def) => def,
+            other => {
+                return Err(QError::runtime(format!(
+                    "'{name}' n'est pas une structure, reçu '{}'",
+                    other.type_name()
+                )))
+            }
+        };
+
+        for method in methods {
+            let method_name = method
+                .function
+                .identifier
+                .clone()
+                .expect("method declarations always carry an identifier");
+
+            let method_def = Rc::new(MethodDef {
+                owner: name.to_string(),
+                visibility: method.visibility,
+                is_static: method.is_static,
+                function: method.function.clone(),
+                closure: self.env.clone(),
+            });
+
+            def.methods.borrow_mut().insert(method_name, method_def);
+        }
+
+        Ok(Value::Null)
     }
 
     fn evaluate_variable_declaration(&mut self, identifier: &str, value: Option<&Expr>) -> Result<Value, QError> {
@@ -274,32 +358,45 @@ impl Interpreter {
             }
             Expr::Member { object, property } => {
                 let object_value = self.evaluate_expr(object)?;
-                let array = match object_value {
-                    Value::Array(items) => items,
-                    other => {
-                        return Err(QError::runtime(format!(
-                            "Impossible d'assigner un élément d'une valeur de type '{}'",
-                            other.type_name()
-                        )))
-                    }
-                };
 
-                match property {
-                    None => {
-                        let evaluated = self.evaluate_expr(value)?;
-                        array.borrow_mut().push(evaluated.clone());
-                        Ok(evaluated)
-                    }
-                    Some(property_expr) => {
-                        let index_value = self.evaluate_expr(property_expr)?;
-                        let index = to_index(&index_value)?;
-                        if index >= array.borrow().len() {
-                            return Err(QError::runtime(format!("Index '{index}' hors limites")));
+                match object_value {
+                    Value::Array(array) => match property {
+                        None => {
+                            let evaluated = self.evaluate_expr(value)?;
+                            array.borrow_mut().push(evaluated.clone());
+                            Ok(evaluated)
                         }
+                        Some(property_expr) => {
+                            let index_value = self.evaluate_expr(property_expr)?;
+                            let index = to_index(&index_value)?;
+                            if index >= array.borrow().len() {
+                                return Err(QError::runtime(format!("Index '{index}' hors limites")));
+                            }
+                            let evaluated = self.evaluate_expr(value)?;
+                            array.borrow_mut()[index] = evaluated.clone();
+                            Ok(evaluated)
+                        }
+                    },
+                    Value::Instance(instance) => {
+                        let name = self.evaluate_member_name(property.as_deref())?;
+                        let visibility = *instance
+                            .struct_def
+                            .fields
+                            .get(&name)
+                            .ok_or_else(|| QError::runtime(format!(
+                                "'{}' n'a pas de champ '{name}'",
+                                instance.struct_def.name
+                            )))?;
+                        self.check_visibility(visibility, &instance.struct_def.name, &name)?;
+
                         let evaluated = self.evaluate_expr(value)?;
-                        array.borrow_mut()[index] = evaluated.clone();
+                        instance.fields.borrow_mut().insert(name, evaluated.clone());
                         Ok(evaluated)
                     }
+                    other => Err(QError::runtime(format!(
+                        "Impossible d'assigner un élément d'une valeur de type '{}'",
+                        other.type_name()
+                    ))),
                 }
             }
             _ => Err(QError::runtime("Cible d'affectation invalide")),
@@ -327,30 +424,96 @@ impl Interpreter {
 
     fn evaluate_member(&mut self, object: &Expr, property: Option<&Expr>) -> Result<Value, QError> {
         let object_value = self.evaluate_expr(object)?;
-        let array = match object_value {
-            Value::Array(items) => items,
-            other => {
-                return Err(QError::runtime(format!(
-                    "Impossible d'accéder à un élément d'une valeur de type '{}'",
-                    other.type_name()
-                )))
+
+        match object_value {
+            Value::Array(items) => {
+                let property_expr = property
+                    .ok_or_else(|| QError::runtime("Accès à un élément du tableau sans index"))?;
+                let index_value = self.evaluate_expr(property_expr)?;
+                let index = to_index(&index_value)?;
+
+                let borrowed = items.borrow();
+                if index >= borrowed.len() {
+                    return Err(QError::runtime(format!("Index '{index}' hors limites")));
+                }
+                Ok(borrowed[index].clone())
             }
-        };
-
-        let property_expr = property
-            .ok_or_else(|| QError::runtime("Accès à un élément du tableau sans index"))?;
-        let index_value = self.evaluate_expr(property_expr)?;
-        let index = to_index(&index_value)?;
-
-        let borrowed = array.borrow();
-        if index >= borrowed.len() {
-            return Err(QError::runtime(format!("Index '{index}' hors limites")));
+            Value::Instance(instance) => {
+                let name = self.evaluate_member_name(property)?;
+                self.access_instance_member(&instance, &name)
+            }
+            Value::Struct(def) => {
+                let name = self.evaluate_member_name(property)?;
+                self.access_static_member(&def, &name)
+            }
+            other => Err(QError::runtime(format!(
+                "Impossible d'accéder à un élément d'une valeur de type '{}'",
+                other.type_name()
+            ))),
         }
-        Ok(borrowed[index].clone())
+    }
+
+    fn evaluate_member_name(&mut self, property: Option<&Expr>) -> Result<String, QError> {
+        let property_expr = property.ok_or_else(|| QError::runtime("Accès à un membre sans nom"))?;
+        match self.evaluate_expr(property_expr)? {
+            Value::String(name) => Ok(name),
+            other => Err(QError::runtime(format!("Nom de membre invalide, reçu '{}'", other.type_name()))),
+        }
+    }
+
+    fn access_instance_member(&mut self, instance: &Rc<Instance>, name: &str) -> Result<Value, QError> {
+        if let Some(value) = instance.fields.borrow().get(name) {
+            let visibility = *instance.struct_def.fields.get(name).expect("field exists in fields map");
+            self.check_visibility(visibility, &instance.struct_def.name, name)?;
+            return Ok(value.clone());
+        }
+
+        if let Some(method) = instance.struct_def.methods.borrow().get(name) {
+            if method.is_static {
+                return Err(QError::runtime(format!(
+                    "'{name}' est une méthode statique, appelez-la via '{}.{name}'",
+                    instance.struct_def.name
+                )));
+            }
+            self.check_visibility(method.visibility, &instance.struct_def.name, name)?;
+            return Ok(Value::Function(Rc::new(BoundMethod::new(
+                method.clone(),
+                Some(Value::Instance(instance.clone())),
+            ))));
+        }
+
+        Err(QError::runtime(format!("'{}' n'a pas de membre '{name}'", instance.struct_def.name)))
+    }
+
+    fn access_static_member(&mut self, def: &Rc<StructDef>, name: &str) -> Result<Value, QError> {
+        if let Some(method) = def.methods.borrow().get(name) {
+            if !method.is_static {
+                return Err(QError::runtime(format!(
+                    "'{name}' n'est pas une méthode statique de '{}'",
+                    def.name
+                )));
+            }
+            self.check_visibility(method.visibility, &def.name, name)?;
+            return Ok(Value::Function(Rc::new(BoundMethod::new(method.clone(), None))));
+        }
+
+        Err(QError::runtime(format!("'{}' n'a pas de méthode statique '{name}'", def.name)))
     }
 
     fn evaluate_call(&mut self, callee: &Expr, arguments: &[Expr]) -> Result<Value, QError> {
         let callee_value = self.evaluate_expr(callee)?;
+
+        if let Value::Struct(def) = callee_value {
+            if !arguments.is_empty() {
+                return Err(QError::runtime(format!(
+                    "'{}' ne prend aucun argument (utilisez une méthode statique pour un constructeur personnalisé)",
+                    def.name
+                )));
+            }
+            let fields = def.fields.keys().map(|name| (name.clone(), Value::Null)).collect();
+            return Ok(Value::Instance(Rc::new(Instance { struct_def: def, fields: std::cell::RefCell::new(fields) })));
+        }
+
         let function = match callee_value {
             Value::Function(f) => f,
             other => return Err(QError::runtime(format!("'{}' n'est pas une fonction", other.type_name()))),
@@ -486,6 +649,8 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::Array(x), Value::Array(y)) => Rc::ptr_eq(x, y),
         (Value::Function(x), Value::Function(y)) => Rc::ptr_eq(x, y),
+        (Value::Struct(x), Value::Struct(y)) => Rc::ptr_eq(x, y),
+        (Value::Instance(x), Value::Instance(y)) => Rc::ptr_eq(x, y),
         _ => false,
     }
 }
@@ -522,6 +687,8 @@ fn display_value(value: &Value) -> String {
             format!("[{}]", parts.join(", "))
         }
         Value::Function(f) => format!("<fonction #{}>", f.name()),
+        Value::Struct(def) => format!("<structure {}>", def.name),
+        Value::Instance(instance) => format!("<instance {}>", instance.struct_def.name),
         Value::Return(inner) => display_value(inner),
     }
 }
@@ -540,6 +707,8 @@ fn value_to_js_string(value: &Value) -> String {
             parts.join(",")
         }
         Value::Function(f) => format!("<fonction #{}>", f.name()),
+        Value::Struct(def) => format!("<structure {}>", def.name),
+        Value::Instance(instance) => format!("<instance {}>", instance.struct_def.name),
         Value::Break => "break".to_string(),
         Value::Continue => "continue".to_string(),
         Value::Return(inner) => value_to_js_string(inner),
@@ -872,6 +1041,125 @@ mod tests {
         let code = ["inclure \"greet.q\"", "inclure \"greet.q\""].join("\n");
         run(&mut interpreter, &code).unwrap();
         assert_eq!(interpreter.stdout().log(), ["salut"]);
+    }
+
+    #[test]
+    fn evaluate_struct_raw_instantiation_defaults_fields_to_null() {
+        let mut interpreter = make_interpreter();
+        let code = ["structure Nom avec", "  publique champ", "fin", "dec p = Nom()", "p.champ"].join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn evaluate_struct_field_assignment_and_access() {
+        let mut interpreter = make_interpreter();
+        let code = ["structure Nom avec", "  publique champ", "fin", "dec p = Nom()", "p.champ = 42", "p.champ"]
+            .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(42.0));
+    }
+
+    #[test]
+    fn evaluate_static_method_as_constructor() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Personne avec",
+            "  publique nom",
+            "fin",
+            "dans Personne implemente",
+            "  publique statique nouveau(nom)",
+            "    dec p = Personne()",
+            "    p.nom = nom",
+            "    retour p",
+            "  fin",
+            "fin",
+            "Personne.nouveau(\"Quentin\").nom",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::String("Quentin".to_string()));
+    }
+
+    #[test]
+    fn evaluate_instance_method_reads_moi() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Personne avec",
+            "  publique nom",
+            "fin",
+            "dans Personne implemente",
+            "  publique saluer()",
+            "    retour \"Bonjour \" + moi.nom",
+            "  fin",
+            "fin",
+            "dec p = Personne()",
+            "p.nom = \"Quentin\"",
+            "p.saluer()",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::String("Bonjour Quentin".to_string()));
+    }
+
+    #[test]
+    fn evaluate_hidden_field_access_from_outside_is_an_error() {
+        let mut interpreter = make_interpreter();
+        let code = ["structure Nom avec", "  cacher secret", "fin", "dec p = Nom()", "p.secret"].join("\n");
+        let err = run(&mut interpreter, &code).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: 'secret' n'est pas accessible depuis l'extérieur de 'Nom'"
+        );
+    }
+
+    #[test]
+    fn evaluate_hidden_field_access_from_own_method_is_allowed() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "  cacher secret",
+            "fin",
+            "dans Nom implemente",
+            "  publique ecrire_secret(valeur)",
+            "    moi.secret = valeur",
+            "  fin",
+            "  publique lire_secret()",
+            "    retour moi.secret",
+            "  fin",
+            "fin",
+            "dec p = Nom()",
+            "p.ecrire_secret(42)",
+            "p.lire_secret()",
+        ]
+        .join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(42.0));
+    }
+
+    #[test]
+    fn evaluate_hidden_field_assignment_from_outside_is_an_error() {
+        let mut interpreter = make_interpreter();
+        let code = ["structure Nom avec", "  cacher secret", "fin", "dec p = Nom()", "p.secret = 42"].join("\n");
+        let err = run(&mut interpreter, &code).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: 'secret' n'est pas accessible depuis l'extérieur de 'Nom'"
+        );
+    }
+
+    #[test]
+    fn evaluate_calling_static_method_as_instance_method_is_an_error() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "structure Nom avec",
+            "fin",
+            "dans Nom implemente",
+            "  publique statique creer()",
+            "    retour Nom()",
+            "  fin",
+            "fin",
+            "dec p = Nom()",
+            "p.creer()",
+        ]
+        .join("\n");
+        let err = run(&mut interpreter, &code).unwrap_err();
+        assert!(err.to_string().contains("méthode statique"));
     }
 
     #[test]

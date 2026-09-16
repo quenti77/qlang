@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::ast::{Expr, FunctionDecl, Program, Stmt};
+use crate::ast::{Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility};
 use crate::error::QError;
 use crate::position::Position;
 use crate::token::{find_keywords_from_token, Token, TokenType};
@@ -57,6 +57,8 @@ impl Parser {
             }
             TokenType::Return => self.parse_return_statement(),
             TokenType::Include => self.parse_include_statement(),
+            TokenType::Structure => self.parse_struct_statement(),
+            TokenType::In => self.parse_impl_statement(),
             _ => Ok(Stmt::Expr(self.parse_expression()?)),
         }
     }
@@ -86,6 +88,85 @@ impl Parser {
     fn parse_include_statement(&mut self) -> Result<Stmt, QError> {
         self.eat();
         Ok(Stmt::Include(self.parse_expression()?))
+    }
+
+    fn parse_visibility(&mut self) -> Result<Visibility, QError> {
+        let token = self.attempt(&[TokenType::Public, TokenType::Hidden, TokenType::Shared])?;
+        self.eat();
+        Ok(match token.token_type {
+            TokenType::Public => Visibility::Public,
+            TokenType::Hidden => Visibility::Hidden,
+            TokenType::Shared => Visibility::Shared,
+            _ => unreachable!(),
+        })
+    }
+
+    fn parse_struct_statement(&mut self) -> Result<Stmt, QError> {
+        self.eat();
+        let pos_start = self.previous().position.clone();
+        let name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        self.eat_exactly(TokenType::With, Some(pos_start.clone()))?;
+
+        let mut fields = Vec::new();
+        while self.at().token_type != TokenType::End {
+            let visibility = self.parse_visibility()?;
+            let field_name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+            fields.push(StructField { visibility, name: field_name });
+        }
+        self.eat_exactly(TokenType::End, Some(pos_start))?;
+
+        Ok(Stmt::Struct { name, fields })
+    }
+
+    fn parse_impl_statement(&mut self) -> Result<Stmt, QError> {
+        self.eat();
+        let pos_start = self.previous().position.clone();
+        let name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        self.eat_exactly(TokenType::Implements, Some(pos_start.clone()))?;
+
+        let mut methods = Vec::new();
+        while self.at().token_type != TokenType::End {
+            methods.push(self.parse_method_declaration(&pos_start)?);
+        }
+        self.eat_exactly(TokenType::End, Some(pos_start))?;
+
+        Ok(Stmt::Impl { name, methods })
+    }
+
+    fn parse_method_declaration(&mut self, pos_start: &Position) -> Result<MethodDecl, QError> {
+        let visibility = self.parse_visibility()?;
+        let is_static = if self.at().token_type == TokenType::Static {
+            self.eat();
+            true
+        } else {
+            false
+        };
+
+        let identifier = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        self.eat_exactly(TokenType::OpenParenthesis, Some(pos_start.clone()))?;
+
+        let mut parameters = Vec::new();
+        while self.at().token_type != TokenType::CloseParenthesis {
+            parameters.push(self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value);
+
+            let token = self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
+            if token.token_type == TokenType::Comma {
+                self.eat();
+            }
+        }
+        self.eat();
+
+        let body = match self.parse_block_statement(&[])? {
+            Stmt::Block(body) => body,
+            _ => unreachable!(),
+        };
+        self.eat_exactly(TokenType::End, Some(pos_start.clone()))?;
+
+        Ok(MethodDecl {
+            visibility,
+            is_static,
+            function: FunctionDecl { identifier: Some(identifier), parameters, body },
+        })
     }
 
     fn parse_if_statement(&mut self, end_needed: bool) -> Result<Stmt, QError> {
@@ -317,17 +398,46 @@ impl Parser {
     fn parse_array_access_expression(&mut self) -> Result<Expr, QError> {
         let mut expression = self.parse_array_expression()?;
 
-        while self.at().token_type == TokenType::OpenBrackets {
-            self.eat();
-            if self.at().token_type == TokenType::CloseBrackets {
+        loop {
+            if self.at().token_type == TokenType::OpenBrackets {
                 self.eat();
-                expression = Expr::Member { object: Box::new(expression), property: None };
+                if self.at().token_type == TokenType::CloseBrackets {
+                    self.eat();
+                    expression = Expr::Member { object: Box::new(expression), property: None };
+                    continue;
+                }
+                let index = self.parse_expression()?;
+                self.eat_exactly(TokenType::CloseBrackets, Some(self.previous().position.clone()))?;
+
+                expression = Expr::Member { object: Box::new(expression), property: Some(Box::new(index)) };
+            } else if self.at().token_type == TokenType::Dot {
+                self.eat();
+                let pos_start = self.previous().position.clone();
+                let name = self.eat_exactly(TokenType::Identifier, Some(pos_start))?.value;
+                expression = Expr::Member { object: Box::new(expression), property: Some(Box::new(Expr::Str(name))) };
+
+                if self.at().token_type == TokenType::OpenParenthesis {
+                    self.eat();
+                    let mut arguments = Vec::new();
+                    while self.at().token_type != TokenType::CloseParenthesis {
+                        let argument = if self.at().token_type == TokenType::Function {
+                            Expr::Function(self.parse_function_declaration()?)
+                        } else {
+                            self.parse_expression()?
+                        };
+                        arguments.push(argument);
+
+                        let token = self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
+                        if token.token_type == TokenType::Comma {
+                            self.eat();
+                        }
+                    }
+                    self.eat();
+                    expression = Expr::Call { callee: Box::new(expression), arguments };
+                }
+            } else {
                 break;
             }
-            let index = self.parse_expression()?;
-            self.eat_exactly(TokenType::CloseBrackets, Some(self.previous().position.clone()))?;
-
-            expression = Expr::Member { object: Box::new(expression), property: Some(Box::new(index)) };
         }
 
         Ok(expression)
@@ -882,6 +992,90 @@ mod tests {
                 identifier: None,
                 parameters: vec!["a".to_string()],
                 body: vec![Stmt::Print(Expr::Identifier("a".to_string()))],
+            })]
+        );
+    }
+
+    #[test]
+    fn ast_struct_statement() {
+        let code = ["structure Nom avec", "  publique champ1", "  cacher champ2", "fin"].join("\n");
+        assert_eq!(
+            make_ast(&code),
+            vec![Stmt::Struct {
+                name: "Nom".to_string(),
+                fields: vec![
+                    StructField { visibility: Visibility::Public, name: "champ1".to_string() },
+                    StructField { visibility: Visibility::Hidden, name: "champ2".to_string() },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn ast_impl_statement() {
+        let code = [
+            "dans Nom implemente",
+            "  publique statique nouveau()",
+            "    retour Nom()",
+            "  fin",
+            "  publique saluer()",
+            "    ecrire moi",
+            "  fin",
+            "fin",
+        ]
+        .join("\n");
+        assert_eq!(
+            make_ast(&code),
+            vec![Stmt::Impl {
+                name: "Nom".to_string(),
+                methods: vec![
+                    MethodDecl {
+                        visibility: Visibility::Public,
+                        is_static: true,
+                        function: FunctionDecl {
+                            identifier: Some("nouveau".to_string()),
+                            parameters: vec![],
+                            body: vec![Stmt::Return(Expr::Call {
+                                callee: Box::new(Expr::Identifier("Nom".to_string())),
+                                arguments: vec![],
+                            })],
+                        },
+                    },
+                    MethodDecl {
+                        visibility: Visibility::Public,
+                        is_static: false,
+                        function: FunctionDecl {
+                            identifier: Some("saluer".to_string()),
+                            parameters: vec![],
+                            body: vec![Stmt::Print(Expr::Identifier("moi".to_string()))],
+                        },
+                    },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn ast_member_access_with_dot() {
+        assert_eq!(
+            make_ast("moi.nom"),
+            vec![Stmt::Expr(Expr::Member {
+                object: Box::new(Expr::Identifier("moi".to_string())),
+                property: Some(Box::new(Expr::Str("nom".to_string()))),
+            })]
+        );
+    }
+
+    #[test]
+    fn ast_method_call_with_dot() {
+        assert_eq!(
+            make_ast("Nom.nouveau(42)"),
+            vec![Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Member {
+                    object: Box::new(Expr::Identifier("Nom".to_string())),
+                    property: Some(Box::new(Expr::Str("nouveau".to_string()))),
+                }),
+                arguments: vec![Expr::Numeric(42.0)],
             })]
         );
     }

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::callable::Callable;
+use crate::objects::{Instance, StructDef};
 
 /// qlang arrays are reference types (as in the original JS/TS interpreter):
 /// two variables pointing at "the same" array must observe each other's
@@ -16,6 +17,11 @@ pub enum Value {
     String(String),
     Array(ArrayRef),
     Function(Rc<dyn Callable>),
+    /// The struct itself (e.g. `Nom`), used to call it as a raw constructor
+    /// (`Nom()`) or to call a static method (`Nom.methode()`).
+    Struct(Rc<StructDef>),
+    /// An instance created via `Nom()`.
+    Instance(Rc<Instance>),
     Break,
     Continue,
     Return(Box<Value>),
@@ -34,6 +40,8 @@ impl Value {
             Value::String(_) => "string",
             Value::Array(_) => "array",
             Value::Function(_) => "function",
+            Value::Struct(_) => "structure",
+            Value::Instance(_) => "instance",
             Value::Break => "break",
             Value::Continue => "continue",
             Value::Return(_) => "return",
@@ -48,7 +56,7 @@ impl Value {
             Value::Number(n) => *n != 0.0 && !n.is_nan(),
             Value::Boolean(b) => *b,
             Value::String(s) => !s.is_empty(),
-            Value::Array(_) | Value::Function(_) => true,
+            Value::Array(_) | Value::Function(_) | Value::Struct(_) | Value::Instance(_) => true,
             Value::Break | Value::Continue => false,
             Value::Return(inner) => inner.is_truthy(),
         }
@@ -64,6 +72,8 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Array(a), Value::Array(b)) => *a.borrow() == *b.borrow(),
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            (Value::Struct(a), Value::Struct(b)) => Rc::ptr_eq(a, b),
+            (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
             (Value::Break, Value::Break) => true,
             (Value::Continue, Value::Continue) => true,
             (Value::Return(a), Value::Return(b)) => a == b,
@@ -81,6 +91,8 @@ impl std::fmt::Debug for Value {
             Value::String(s) => write!(f, "String({s:?})"),
             Value::Array(items) => write!(f, "Array({:?})", items.borrow()),
             Value::Function(func) => write!(f, "Function({})", func.name()),
+            Value::Struct(def) => write!(f, "Struct({})", def.name),
+            Value::Instance(instance) => write!(f, "Instance({})", instance.struct_def.name),
             Value::Break => write!(f, "Break"),
             Value::Continue => write!(f, "Continue"),
             Value::Return(inner) => write!(f, "Return({inner:?})"),

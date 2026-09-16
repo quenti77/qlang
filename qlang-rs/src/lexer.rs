@@ -82,6 +82,11 @@ impl Lexer {
                 }
                 let token_type = if current == "=" { TokenType::Equals } else { TokenType::BinaryOperator };
                 self.push_token(token_type, current);
+            } else if self.front() == Some('.')
+                && !self.src.get(1).map(|c| c.is_ascii_digit()).unwrap_or(false)
+            {
+                self.src.pop_front();
+                self.push_token(TokenType::Dot, ".");
             } else if self.front() == Some('.') || self.is_number(self.front()) {
                 self.process_number()?;
             } else if self.front() == Some('"') {

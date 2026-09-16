@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use crate::ast::{Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility};
+use crate::ast::{
+    Expr, FunctionDecl, MatchArm, MethodDecl, Program, Stmt, StructField, Visibility,
+};
 use crate::callable::{Callable, QFunction};
 use crate::environment::Environment;
 use crate::error::QError;
@@ -152,9 +154,11 @@ impl Interpreter {
 
     fn evaluate_stmt(&mut self, stmt: &Stmt) -> Result<Value, QError> {
         match stmt {
-            Stmt::VariableDeclaration { identifier, value } => {
-                self.evaluate_variable_declaration(identifier, value.as_ref())
-            }
+            Stmt::VariableDeclaration {
+                identifier,
+                value,
+                is_const,
+            } => self.evaluate_variable_declaration(identifier, value.as_ref(), *is_const),
             Stmt::Print(expr) => self.evaluate_print(expr),
             Stmt::Block(body) => self.run_block_body(body),
             Stmt::If {
@@ -177,7 +181,33 @@ impl Interpreter {
             Stmt::Include(expr) => self.evaluate_include(expr),
             Stmt::Struct { name, fields } => self.evaluate_struct_declaration(name, fields),
             Stmt::Impl { name, methods } => self.evaluate_impl_declaration(name, methods),
+            Stmt::Match {
+                subject,
+                arms,
+                default,
+            } => self.evaluate_match(subject, arms, default.as_deref()),
             Stmt::Expr(expr) => self.evaluate_expr(expr),
+        }
+    }
+
+    fn evaluate_match(
+        &mut self,
+        subject: &Expr,
+        arms: &[MatchArm],
+        default: Option<&Stmt>,
+    ) -> Result<Value, QError> {
+        let subject_value = self.evaluate_expr(subject)?;
+
+        for arm in arms {
+            let pattern_value = self.evaluate_expr(&arm.pattern)?;
+            if values_equal(&subject_value, &pattern_value) {
+                return self.evaluate_in_new_scope(&arm.body);
+            }
+        }
+
+        match default {
+            Some(default) => self.evaluate_in_new_scope(default),
+            None => Ok(Value::Null),
         }
     }
 
@@ -256,11 +286,16 @@ impl Interpreter {
         &mut self,
         identifier: &str,
         value: Option<&Expr>,
+        is_const: bool,
     ) -> Result<Value, QError> {
         match value {
             Some(expr) => {
                 let evaluated = self.evaluate_expr(expr)?;
-                self.env.declare_variable(identifier, evaluated.clone())?;
+                if is_const {
+                    self.env.declare_constant(identifier, evaluated.clone())?;
+                } else {
+                    self.env.declare_variable(identifier, evaluated.clone())?;
+                }
                 Ok(evaluated)
             }
             None => {
@@ -983,6 +1018,83 @@ mod tests {
             interpreter.environment().lookup_variable("c").unwrap(),
             Value::Number(42.0)
         );
+    }
+
+    #[test]
+    fn evaluate_constant_declaration() {
+        let mut interpreter = make_interpreter();
+        assert_eq!(
+            run(&mut interpreter, "constante a = 42").unwrap(),
+            Value::Number(42.0)
+        );
+        assert_eq!(
+            interpreter.environment().lookup_variable("a").unwrap(),
+            Value::Number(42.0)
+        );
+    }
+
+    #[test]
+    fn evaluate_assigning_to_a_constant_is_an_error() {
+        let mut interpreter = make_interpreter();
+        let err = run(&mut interpreter, "constante a = 42\na = 1").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Impossible de modifier la constante 'a'"
+        );
+    }
+
+    #[test]
+    fn evaluate_compound_assignment() {
+        let mut interpreter = make_interpreter();
+        assert_eq!(
+            run(&mut interpreter, "dec a = 10\na += 5\na").unwrap(),
+            Value::Number(15.0)
+        );
+        assert_eq!(
+            run(&mut interpreter, "dec b = 10\nb -= 5\nb").unwrap(),
+            Value::Number(5.0)
+        );
+    }
+
+    #[test]
+    fn evaluate_match_statement_selects_matching_case() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "dec a = 2",
+            "selon a",
+            "cas 1 alors",
+            "  ecrire \"un\"",
+            "cas 2 alors",
+            "  ecrire \"deux\"",
+            "fin",
+        ]
+        .join("\n");
+        run(&mut interpreter, &code).unwrap();
+        assert_eq!(interpreter.stdout().log(), ["deux"]);
+    }
+
+    #[test]
+    fn evaluate_match_statement_falls_back_to_default() {
+        let mut interpreter = make_interpreter();
+        let code = [
+            "selon 99",
+            "cas 1 alors",
+            "  ecrire \"un\"",
+            "sinon",
+            "  ecrire \"autre\"",
+            "fin",
+        ]
+        .join("\n");
+        run(&mut interpreter, &code).unwrap();
+        assert_eq!(interpreter.stdout().log(), ["autre"]);
+    }
+
+    #[test]
+    fn evaluate_match_statement_without_match_and_without_default_returns_null() {
+        let mut interpreter = make_interpreter();
+        let code = ["selon 99", "cas 1 alors", "  ecrire \"un\"", "fin"].join("\n");
+        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Null);
+        assert!(interpreter.stdout().log().is_empty());
     }
 
     #[test]

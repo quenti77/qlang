@@ -43,11 +43,11 @@
       "patterns": [
         {
           "name": "keyword.control.qlang",
-          "match": "\\b(si|alors|sinon|sinonsi|fin|tantque|pour|de|jusque|evol|retour|arreter|continuer)\\b"
+          "match": "\\b(si|alors|sinon|sinonsi|fin|tantque|pour|de|jusque|evol|retour|arreter|continuer|selon|cas)\\b"
         },
         {
           "name": "storage.type.qlang",
-          "match": "\\b(dec|fonction)\\b"
+          "match": "\\b(dec|constante|fonction)\\b"
         },
         {
           "name": "keyword.other.qlang",

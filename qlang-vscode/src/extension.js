@@ -5,6 +5,7 @@ const path = require('path')
 // Mirrors qlang-rs/src/token.rs KEYWORDS.
 const KEYWORDS = [
     { word: 'dec', detail: 'Déclare une variable' },
+    { word: 'constante', detail: 'Déclare une constante (non réassignable)' },
     { word: 'si', detail: 'Bloc conditionnel' },
     { word: 'alors', detail: "Introduit le corps d'un si/tantque/pour" },
     { word: 'sinon', detail: 'Branche alternative du si' },
@@ -36,10 +37,12 @@ const KEYWORDS = [
     { word: 'cacher', detail: 'Visibilité privée' },
     { word: 'partager', detail: 'Visibilité protégée' },
     { word: 'moi', detail: "Paramètre explicite désignant l'instance (1er paramètre = méthode d'instance)" },
+    { word: 'selon', detail: 'Bloc de comparaison à plusieurs cas (match)' },
+    { word: 'cas', detail: "Une branche d'un bloc selon" },
 ]
 
 const FUNCTION_DECL_RE = /\bfonction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/g
-const VARIABLE_DECL_RE = /\bdec\s+([A-Za-z_][A-Za-z0-9_]*)/g
+const VARIABLE_DECL_RE = /\b(?:dec|constante)\s+([A-Za-z_][A-Za-z0-9_]*)/g
 const FOR_VARIABLE_RE = /\bpour\s+([A-Za-z_][A-Za-z0-9_]*)/g
 const INCLUDE_RE = /\binclure\s+"([^"]+)"/g
 

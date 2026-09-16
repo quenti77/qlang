@@ -32,6 +32,14 @@ pub enum TokenType {
     Print,
     Function,
     Comma,
+    /// `+=` or `-=`, desugared by the parser into `a = a <op> b`.
+    CompoundAssign,
+    /// `constante` - like `dec` but rejects re-assignment.
+    Const,
+    /// `selon <expr> cas ... sinon ... fin`.
+    Match,
+    /// `cas` - introduces one branch of a `selon` statement.
+    Case,
     /// Statement introducing a module include (`inclure "chemin.q"`).
     Include,
     /// `.` used for field/method access (`instance.champ`, `Nom.methode()`).
@@ -116,6 +124,9 @@ pub const KEYWORDS: &[(&str, TokenType)] = &[
     ("publique", TokenType::Public),
     ("cacher", TokenType::Hidden),
     ("partager", TokenType::Shared),
+    ("constante", TokenType::Const),
+    ("selon", TokenType::Match),
+    ("cas", TokenType::Case),
 ];
 
 pub fn lookup_keyword(word: &str) -> Option<TokenType> {

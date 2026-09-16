@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::ast::{
-    Expr, FunctionDecl, MethodDecl, Program, Stmt, StructField, Visibility, SELF_PARAM,
+    Expr, FunctionDecl, MatchArm, MethodDecl, Program, Stmt, StructField, Visibility, SELF_PARAM,
 };
 use crate::error::QError;
 use crate::position::Position;
@@ -47,7 +47,9 @@ impl Parser {
     // Parser methods ordered by precedence.
     fn parse_statement(&mut self) -> Result<Stmt, QError> {
         match self.at().token_type {
-            TokenType::Let => self.parse_variable_declaration_statement(),
+            TokenType::Let => self.parse_variable_declaration_statement(false),
+            TokenType::Const => self.parse_variable_declaration_statement(true),
+            TokenType::Match => self.parse_match_statement(),
             TokenType::Print => self.parse_print_statement(),
             TokenType::If => self.parse_if_statement(true),
             TokenType::While => self.parse_while_statement(),
@@ -69,8 +71,9 @@ impl Parser {
         }
     }
 
-    fn parse_variable_declaration_statement(&mut self) -> Result<Stmt, QError> {
+    fn parse_variable_declaration_statement(&mut self, is_const: bool) -> Result<Stmt, QError> {
         self.eat();
+        let pos_start = self.previous().position.clone();
         let identifier = self.eat_exactly(TokenType::Identifier, None)?.value;
 
         if self.at().token_type == TokenType::Equals {
@@ -83,12 +86,52 @@ impl Parser {
             return Ok(Stmt::VariableDeclaration {
                 identifier,
                 value: Some(value),
+                is_const,
             });
+        }
+
+        if is_const {
+            return Err(QError::invalid_syntax(
+                pos_start,
+                self.at().position.clone(),
+                format!("'constante {identifier}' doit être initialisée avec une valeur"),
+                self.code.clone(),
+            ));
         }
 
         Ok(Stmt::VariableDeclaration {
             identifier,
             value: None,
+            is_const: false,
+        })
+    }
+
+    fn parse_match_statement(&mut self) -> Result<Stmt, QError> {
+        self.eat();
+        let pos_start = self.previous().position.clone();
+        let subject = self.parse_expression()?;
+
+        let mut arms = Vec::new();
+        while self.at().token_type == TokenType::Case {
+            self.eat();
+            let pattern = self.parse_expression()?;
+            self.eat_exactly(TokenType::Then, Some(pos_start.clone()))?;
+            let body = self.parse_block_statement(&[TokenType::Case, TokenType::Else])?;
+            arms.push(MatchArm { pattern, body });
+        }
+
+        let mut default = None;
+        if self.at().token_type == TokenType::Else {
+            self.eat();
+            default = Some(Box::new(self.parse_block_statement(&[])?));
+        }
+
+        self.eat_exactly(TokenType::End, Some(pos_start))?;
+
+        Ok(Stmt::Match {
+            subject,
+            arms,
+            default,
         })
     }
 
@@ -379,6 +422,22 @@ impl Parser {
 
     fn parse_assignment_expression(&mut self) -> Result<Expr, QError> {
         let left = self.parse_logical_expression()?;
+
+        if self.at().token_type == TokenType::CompoundAssign {
+            // `a += b` desugars to `a = a + b` at parse time; no interpreter
+            // support needed. `value[..1]` is safe: the token is always
+            // exactly the operator character followed by `=`.
+            let operator = self.eat().value[..1].to_string();
+            let value = self.parse_assignment_expression()?;
+            return Ok(Expr::Assignment {
+                target: Box::new(left.clone()),
+                value: Box::new(Expr::Binary {
+                    left: Box::new(left),
+                    right: Box::new(value),
+                    operator,
+                }),
+            });
+        }
 
         if self.at().token_type != TokenType::Equals {
             return Ok(left);
@@ -824,7 +883,8 @@ mod tests {
             make_ast("dec abc = 42"),
             vec![Stmt::VariableDeclaration {
                 identifier: "abc".to_string(),
-                value: Some(Expr::Numeric(42.0))
+                value: Some(Expr::Numeric(42.0)),
+                is_const: false,
             }]
         );
     }
@@ -840,6 +900,7 @@ mod tests {
                     right: Box::new(Expr::Numeric(2.0)),
                     operator: "+".to_string(),
                 }),
+                is_const: false,
             }]
         );
     }
@@ -850,7 +911,8 @@ mod tests {
             make_ast("dec abc"),
             vec![Stmt::VariableDeclaration {
                 identifier: "abc".to_string(),
-                value: None
+                value: None,
+                is_const: false,
             }]
         );
     }
@@ -862,13 +924,100 @@ mod tests {
             vec![
                 Stmt::VariableDeclaration {
                     identifier: "abc".to_string(),
-                    value: Some(Expr::Numeric(42.0))
+                    value: Some(Expr::Numeric(42.0)),
+                    is_const: false,
                 },
                 Stmt::Expr(Expr::Assignment {
                     target: Box::new(Expr::Identifier("abc".to_string())),
                     value: Box::new(Expr::Numeric(2.0)),
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn ast_constant_declaration() {
+        assert_eq!(
+            make_ast("constante abc = 42"),
+            vec![Stmt::VariableDeclaration {
+                identifier: "abc".to_string(),
+                value: Some(Expr::Numeric(42.0)),
+                is_const: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn ast_constant_declaration_without_value_is_an_error() {
+        assert!(try_make_ast("constante abc").is_err());
+    }
+
+    #[test]
+    fn ast_compound_assignment_is_desugared() {
+        for (operator, expected) in [("+=", "+"), ("-=", "-")] {
+            let ast = make_ast(&format!("abc {operator} 2"));
+            assert_eq!(
+                ast,
+                vec![Stmt::Expr(Expr::Assignment {
+                    target: Box::new(Expr::Identifier("abc".to_string())),
+                    value: Box::new(Expr::Binary {
+                        left: Box::new(Expr::Identifier("abc".to_string())),
+                        right: Box::new(Expr::Numeric(2.0)),
+                        operator: expected.to_string(),
+                    }),
+                })],
+                "operator {operator}"
+            );
+        }
+    }
+
+    #[test]
+    fn ast_match_statement() {
+        let code = [
+            "selon abc",
+            "cas 1 alors",
+            "  ecrire \"un\"",
+            "cas 2 alors",
+            "  ecrire \"deux\"",
+            "sinon",
+            "  ecrire \"autre\"",
+            "fin",
+        ]
+        .join("\n");
+        assert_eq!(
+            make_ast(&code),
+            vec![Stmt::Match {
+                subject: Expr::Identifier("abc".to_string()),
+                arms: vec![
+                    MatchArm {
+                        pattern: Expr::Numeric(1.0),
+                        body: Stmt::Block(vec![Stmt::Print(Expr::Str("un".to_string()))]),
+                    },
+                    MatchArm {
+                        pattern: Expr::Numeric(2.0),
+                        body: Stmt::Block(vec![Stmt::Print(Expr::Str("deux".to_string()))]),
+                    },
+                ],
+                default: Some(Box::new(Stmt::Block(vec![Stmt::Print(Expr::Str(
+                    "autre".to_string()
+                ))]))),
+            }]
+        );
+    }
+
+    #[test]
+    fn ast_match_statement_without_default() {
+        let code = ["selon abc", "cas 1 alors", "  ecrire \"un\"", "fin"].join("\n");
+        assert_eq!(
+            make_ast(&code),
+            vec![Stmt::Match {
+                subject: Expr::Identifier("abc".to_string()),
+                arms: vec![MatchArm {
+                    pattern: Expr::Numeric(1.0),
+                    body: Stmt::Block(vec![Stmt::Print(Expr::Str("un".to_string()))]),
+                }],
+                default: None,
+            }]
         );
     }
 
@@ -1075,6 +1224,7 @@ mod tests {
                         Expr::Numeric(2.0),
                         Expr::Numeric(3.0)
                     ])),
+                    is_const: false,
                 },
                 Stmt::Print(Expr::Member {
                     object: Box::new(Expr::Identifier("abc".to_string())),
@@ -1092,7 +1242,8 @@ mod tests {
             vec![
                 Stmt::VariableDeclaration {
                     identifier: "tab".to_string(),
-                    value: Some(Expr::Array(vec![]))
+                    value: Some(Expr::Array(vec![])),
+                    is_const: false,
                 },
                 Stmt::Expr(Expr::Assignment {
                     target: Box::new(Expr::Member {

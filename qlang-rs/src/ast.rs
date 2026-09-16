@@ -41,11 +41,21 @@ pub struct FunctionDecl {
     pub body: Vec<Stmt>,
 }
 
+/// One `cas <motif> alors ... fin` branch of a `selon` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Expr,
+    pub body: Stmt,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     VariableDeclaration {
         identifier: String,
         value: Option<Expr>,
+        /// `constante` instead of `dec` - the environment rejects any
+        /// later re-assignment of this name.
+        is_const: bool,
     },
     Print(Expr),
     If {
@@ -82,6 +92,12 @@ pub enum Stmt {
     Impl {
         name: String,
         methods: Vec<MethodDecl>,
+    },
+    /// `selon <expr> cas <motif> alors ... sinon ... fin`.
+    Match {
+        subject: Expr,
+        arms: Vec<MatchArm>,
+        default: Option<Box<Stmt>>,
     },
     Expr(Expr),
 }

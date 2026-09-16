@@ -34,6 +34,16 @@
     "body": "dec ${1:nom} = ${0:valeur}",
     "description": "Déclaration de variable"
   },
+  "constante": {
+    "prefix": "constante",
+    "body": "constante ${1:nom} = ${0:valeur}",
+    "description": "Déclaration de constante"
+  },
+  "selon": {
+    "prefix": "selon",
+    "body": ["selon ${1:valeur}", "cas ${2:motif} alors", "\t$0", "fin"],
+    "description": "Bloc de comparaison à plusieurs cas (match)"
+  },
   "ecrire": {
     "prefix": "ecrire",
     "body": "ecrire ${0:valeur}",

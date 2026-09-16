@@ -54,7 +54,13 @@ impl Lexer {
         }
 
         while !self.src.is_empty() {
-            if self.process_operator() {
+            if (self.front() == Some('+') || self.front() == Some('-'))
+                && self.src.get(1) == Some(&'=')
+            {
+                let operator = self.src.pop_front().unwrap();
+                self.src.pop_front();
+                self.push_token(TokenType::CompoundAssign, format!("{operator}="));
+            } else if self.process_operator() {
                 let ch = self.src.pop_front().unwrap();
                 self.push_token(TokenType::BinaryOperator, ch.to_string());
             } else if self.front() == Some('-') {
@@ -596,6 +602,22 @@ mod tests {
                 create_token_at(TokenType::EOF, "", 19, 1, 19),
             ]
         );
+    }
+
+    #[test]
+    fn tokenize_compound_assignment_operators() {
+        for operator in ["+=", "-="] {
+            assert_eq!(
+                tokenize(&format!("a {operator} 2")),
+                vec![
+                    create_token_at(TokenType::Identifier, "a", 1, 1, 1),
+                    create_token_at(TokenType::CompoundAssign, operator, 3, 1, 3),
+                    create_token_at(TokenType::Number, "2", 6, 1, 6),
+                    create_token_at(TokenType::EOF, "", 7, 1, 7),
+                ],
+                "operator {operator}"
+            );
+        }
     }
 
     #[test]

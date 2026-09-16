@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::error::QError;
@@ -8,6 +8,7 @@ use crate::values::Value;
 struct Inner {
     parent: Option<Environment>,
     variables: HashMap<String, Value>,
+    constants: HashSet<String>,
 }
 
 /// A lexical scope. Cheaply cloneable (it's a handle around shared, interior
@@ -21,6 +22,7 @@ impl Environment {
         Environment(Rc::new(RefCell::new(Inner {
             parent,
             variables: HashMap::new(),
+            constants: HashSet::new(),
         })))
     }
 
@@ -33,10 +35,23 @@ impl Environment {
         Ok(value)
     }
 
+    /// Like `declare_variable`, but marks the name as a constant: any later
+    /// `assign_variable` call targeting it is rejected.
+    pub fn declare_constant(&self, name: &str, value: Value) -> Result<Value, QError> {
+        let value = self.declare_variable(name, value)?;
+        self.0.borrow_mut().constants.insert(name.to_string());
+        Ok(value)
+    }
+
     pub fn assign_variable(&self, name: &str, value: Value) -> Result<Value, QError> {
         let env = self
             .resolve(name, true)?
             .expect("resolve with throw_error=true always returns Some or errors");
+        if env.0.borrow().constants.contains(name) {
+            return Err(QError::runtime(format!(
+                "Impossible de modifier la constante '{name}'"
+            )));
+        }
         env.0
             .borrow_mut()
             .variables
@@ -135,6 +150,19 @@ mod tests {
         let env = Environment::new(None);
         env.declare_variable("a", Value::Number(42.0)).unwrap();
 
+        assert_eq!(env.lookup_variable("a").unwrap(), Value::Number(42.0));
+    }
+
+    #[test]
+    fn assign_a_value_to_a_constant_is_an_error() {
+        let env = Environment::new(None);
+        env.declare_constant("a", Value::Number(42.0)).unwrap();
+
+        let err = env.assign_variable("a", Value::Number(43.0)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Impossible de modifier la constante 'a'"
+        );
         assert_eq!(env.lookup_variable("a").unwrap(), Value::Number(42.0));
     }
 

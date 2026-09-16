@@ -38,7 +38,9 @@ pub struct FsModuleResolver {
 
 impl FsModuleResolver {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        Self { base_dir: base_dir.into() }
+        Self {
+            base_dir: base_dir.into(),
+        }
     }
 }
 
@@ -51,8 +53,12 @@ impl Default for FsModuleResolver {
 impl ModuleResolver for FsModuleResolver {
     fn resolve(&self, path: &str) -> Result<String, QError> {
         let full_path = self.base_dir.join(path);
-        fs::read_to_string(&full_path)
-            .map_err(|err| QError::module(format!("Impossible de lire le module '{}': {err}", full_path.display())))
+        fs::read_to_string(&full_path).map_err(|err| {
+            QError::module(format!(
+                "Impossible de lire le module '{}': {err}",
+                full_path.display()
+            ))
+        })
     }
 }
 
@@ -65,7 +71,9 @@ pub struct MapModuleResolver {
 
 impl MapModuleResolver {
     pub fn new() -> Self {
-        Self { modules: HashMap::new() }
+        Self {
+            modules: HashMap::new(),
+        }
     }
 
     pub fn with_module(mut self, path: impl Into<String>, source: impl Into<String>) -> Self {

@@ -63,7 +63,11 @@ pub struct Token {
 }
 
 pub fn create_token(token_type: TokenType, value: impl Into<String>, position: &Position) -> Token {
-    Token { token_type, value: value.into(), position: position.clone() }
+    Token {
+        token_type,
+        value: value.into(),
+        position: position.clone(),
+    }
 }
 
 pub fn create_token_at(
@@ -75,7 +79,11 @@ pub fn create_token_at(
 ) -> Token {
     let value = value.into();
     let position = Position::new(index, line, col, value.clone());
-    Token { token_type, value, position }
+    Token {
+        token_type,
+        value,
+        position,
+    }
 }
 
 pub const KEYWORDS: &[(&str, TokenType)] = &[
@@ -125,5 +133,6 @@ pub fn find_keywords_from_token(token_type: TokenType) -> Vec<&'static str> {
         .collect()
 }
 
-pub const OPERATORS: &[&str] =
-    &["+", "-", "*", "/", "%", "==", "!=", ">", "<", ">=", "<=", "et", "ou"];
+pub const OPERATORS: &[&str] = &[
+    "+", "-", "*", "/", "%", "==", "!=", ">", "<", ">=", "<=", "et", "ou",
+];

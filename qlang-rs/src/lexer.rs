@@ -80,7 +80,11 @@ impl Lexer {
                 if self.front() == Some('=') {
                     current.push(self.src.pop_front().unwrap());
                 }
-                let token_type = if current == "=" { TokenType::Equals } else { TokenType::BinaryOperator };
+                let token_type = if current == "=" {
+                    TokenType::Equals
+                } else {
+                    TokenType::BinaryOperator
+                };
                 self.push_token(token_type, current);
             } else if self.front() == Some('.')
                 && !self.src.get(1).map(|c| c.is_ascii_digit()).unwrap_or(false)
@@ -148,13 +152,22 @@ impl Lexer {
         let mut token = self.src.pop_front().unwrap().to_string();
         let mut has_dot = token == ".";
 
-        while self.front().map(|c| c.is_ascii_digit() || c == '.').unwrap_or(false) {
+        while self
+            .front()
+            .map(|c| c.is_ascii_digit() || c == '.')
+            .unwrap_or(false)
+        {
             if self.front() == Some('.') {
                 if has_dot {
                     let pos_start = self.position.clone();
                     self.add_col(&token);
                     let pos_end = self.position.clone();
-                    return Err(QError::illegal_char(pos_start, pos_end, ".", self.code.clone()));
+                    return Err(QError::illegal_char(
+                        pos_start,
+                        pos_end,
+                        ".",
+                        self.code.clone(),
+                    ));
                 }
                 has_dot = true;
             }
@@ -186,14 +199,23 @@ impl Lexer {
                             self.add_col("\\");
                             let pos_end = self.position.clone();
                             let details = other.map(|c| c.to_string()).unwrap_or_default();
-                            return Err(QError::illegal_char(pos_start, pos_end, details, self.code.clone()));
+                            return Err(QError::illegal_char(
+                                pos_start,
+                                pos_end,
+                                details,
+                                self.code.clone(),
+                            ));
                         }
                     }
                 }
                 None => {
                     if !self.has_more_lines() {
                         let pos_end = self.position.clone();
-                        return Err(QError::string_unterminated(pos_start, pos_end, self.code.clone()));
+                        return Err(QError::string_unterminated(
+                            pos_start,
+                            pos_end,
+                            self.code.clone(),
+                        ));
                     }
                     self.next_line();
                     value.push('\n');
@@ -204,7 +226,8 @@ impl Lexer {
 
         let mut token_pos = pos_start;
         token_pos.content = value.clone();
-        self.tokens.push(create_token(TokenType::String, value, &token_pos));
+        self.tokens
+            .push(create_token(TokenType::String, value, &token_pos));
         self.eat();
         Ok(())
     }
@@ -225,7 +248,8 @@ impl Lexer {
         let mut token_position = self.position.clone();
         token_position.content = value.clone();
 
-        self.tokens.push(create_token(token_type, value.clone(), &token_position));
+        self.tokens
+            .push(create_token(token_type, value.clone(), &token_position));
         self.position.advance(false, &value);
     }
 
@@ -252,7 +276,12 @@ impl Lexer {
     fn next_line(&mut self) {
         self.position.advance(true, "");
         self.current_line = self.lines.pop_front();
-        self.src = self.current_line.clone().unwrap_or_default().chars().collect();
+        self.src = self
+            .current_line
+            .clone()
+            .unwrap_or_default()
+            .chars()
+            .collect();
     }
 
     fn reset(&mut self) {
@@ -385,9 +414,27 @@ mod tests {
                 tokenize(&input),
                 vec![
                     create_token_at(*token_type, *keyword, 1, 1, 1),
-                    create_token_at(TokenType::BinaryOperator, "+", keyword_len + 2, 1, keyword_len + 2),
-                    create_token_at(TokenType::Identifier, "a", keyword_len + 4, 1, keyword_len + 4),
-                    create_token_at(TokenType::BinaryOperator, "+", keyword_len + 6, 1, keyword_len + 6),
+                    create_token_at(
+                        TokenType::BinaryOperator,
+                        "+",
+                        keyword_len + 2,
+                        1,
+                        keyword_len + 2
+                    ),
+                    create_token_at(
+                        TokenType::Identifier,
+                        "a",
+                        keyword_len + 4,
+                        1,
+                        keyword_len + 4
+                    ),
+                    create_token_at(
+                        TokenType::BinaryOperator,
+                        "+",
+                        keyword_len + 6,
+                        1,
+                        keyword_len + 6
+                    ),
                     create_token_at(TokenType::Number, "2", keyword_len + 8, 1, keyword_len + 8),
                     create_token_at(TokenType::EOF, "", keyword_len + 9, 1, keyword_len + 9),
                 ],
@@ -406,7 +453,13 @@ mod tests {
                 vec![
                     create_token_at(TokenType::Identifier, "a", 1, 1, 1),
                     create_token_at(TokenType::BinaryOperator, *operator, 3, 1, 3),
-                    create_token_at(TokenType::Number, "2", operator_len + 4, 1, operator_len + 4),
+                    create_token_at(
+                        TokenType::Number,
+                        "2",
+                        operator_len + 4,
+                        1,
+                        operator_len + 4
+                    ),
                     create_token_at(TokenType::EOF, "", operator_len + 5, 1, operator_len + 5),
                 ],
                 "operator {operator}"

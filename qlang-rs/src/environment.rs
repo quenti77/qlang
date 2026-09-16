@@ -18,7 +18,10 @@ pub struct Environment(Rc<RefCell<Inner>>);
 
 impl Environment {
     pub fn new(parent: Option<Environment>) -> Self {
-        Environment(Rc::new(RefCell::new(Inner { parent, variables: HashMap::new() })))
+        Environment(Rc::new(RefCell::new(Inner {
+            parent,
+            variables: HashMap::new(),
+        })))
     }
 
     pub fn declare_variable(&self, name: &str, value: Value) -> Result<Value, QError> {
@@ -34,7 +37,10 @@ impl Environment {
         let env = self
             .resolve(name, true)?
             .expect("resolve with throw_error=true always returns Some or errors");
-        env.0.borrow_mut().variables.insert(name.to_string(), value.clone());
+        env.0
+            .borrow_mut()
+            .variables
+            .insert(name.to_string(), value.clone());
         Ok(value)
     }
 
@@ -42,7 +48,13 @@ impl Environment {
         let env = self
             .resolve(name, true)?
             .expect("resolve with throw_error=true always returns Some or errors");
-        let value = env.0.borrow().variables.get(name).cloned().expect("resolved env must hold the variable");
+        let value = env
+            .0
+            .borrow()
+            .variables
+            .get(name)
+            .cloned()
+            .expect("resolved env must hold the variable");
         Ok(value)
     }
 
@@ -83,14 +95,20 @@ mod tests {
         env.declare_variable("a", Value::Number(42.0)).unwrap();
 
         let err = env.declare_variable("a", Value::Number(43.0)).unwrap_err();
-        assert_eq!(err.to_string(), "Erreur d'exécution: Variable 'a' déjà déclarée");
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Variable 'a' déjà déclarée"
+        );
     }
 
     #[test]
     fn assign_a_value_to_an_undeclared_variable() {
         let env = Environment::new(None);
         let err = env.assign_variable("a", Value::Number(42.0)).unwrap_err();
-        assert_eq!(err.to_string(), "Erreur d'exécution: Variable 'a' non déclarée");
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Variable 'a' non déclarée"
+        );
     }
 
     #[test]
@@ -106,7 +124,10 @@ mod tests {
     fn lookup_an_undeclared_variable() {
         let env = Environment::new(None);
         let err = env.lookup_variable("a").unwrap_err();
-        assert_eq!(err.to_string(), "Erreur d'exécution: Variable 'a' non déclarée");
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Variable 'a' non déclarée"
+        );
     }
 
     #[test]

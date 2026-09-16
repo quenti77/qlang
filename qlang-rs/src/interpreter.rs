@@ -56,11 +56,18 @@ impl Interpreter {
         self.struct_context.last().map(|s| s.as_str()) == Some(owner)
     }
 
-    fn check_visibility(&self, visibility: Visibility, owner: &str, member: &str) -> Result<(), QError> {
+    fn check_visibility(
+        &self,
+        visibility: Visibility,
+        owner: &str,
+        member: &str,
+    ) -> Result<(), QError> {
         if visibility == Visibility::Public || self.is_in_struct_context(owner) {
             return Ok(());
         }
-        Err(QError::runtime(format!("'{member}' n'est pas accessible depuis l'extérieur de '{owner}'")))
+        Err(QError::runtime(format!(
+            "'{member}' n'est pas accessible depuis l'extérieur de '{owner}'"
+        )))
     }
 
     pub fn stdout(&self) -> &Std {
@@ -88,7 +95,11 @@ impl Interpreter {
     /// ends (normal completion, `arreter`/`continuer`/`retour`, or error).
     /// Used both for block statements (if/while/for bodies) and for
     /// function calls.
-    pub fn evaluate_block(&mut self, body: &[Stmt], environment: Environment) -> Result<Value, QError> {
+    pub fn evaluate_block(
+        &mut self,
+        body: &[Stmt],
+        environment: Environment,
+    ) -> Result<Value, QError> {
         let previous_env = std::mem::replace(&mut self.env, environment);
         let result = self.run_block_body(body);
         self.env = previous_env;
@@ -131,13 +142,19 @@ impl Interpreter {
             }
             Stmt::Print(expr) => self.evaluate_print(expr),
             Stmt::Block(body) => self.run_block_body(body),
-            Stmt::If { condition, then_branch, else_branch } => {
-                self.evaluate_if(condition, then_branch, else_branch.as_deref())
-            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.evaluate_if(condition, then_branch, else_branch.as_deref()),
             Stmt::While { condition, body } => self.evaluate_while(condition, body),
-            Stmt::For { identifier, from, until, step, body } => {
-                self.evaluate_for(identifier, from, until, step, body)
-            }
+            Stmt::For {
+                identifier,
+                from,
+                until,
+                step,
+                body,
+            } => self.evaluate_for(identifier, from, until, step, body),
             Stmt::Function(decl) => self.evaluate_function_declaration(decl),
             Stmt::Break => Ok(Value::Break),
             Stmt::Continue => Ok(Value::Continue),
@@ -149,7 +166,11 @@ impl Interpreter {
         }
     }
 
-    fn evaluate_struct_declaration(&mut self, name: &str, fields: &[StructField]) -> Result<Value, QError> {
+    fn evaluate_struct_declaration(
+        &mut self,
+        name: &str,
+        fields: &[StructField],
+    ) -> Result<Value, QError> {
         let mut field_map = HashMap::new();
         for field in fields {
             field_map.insert(field.name.clone(), field.visibility);
@@ -167,7 +188,11 @@ impl Interpreter {
         self.env.assign_variable(name, value)
     }
 
-    fn evaluate_impl_declaration(&mut self, name: &str, methods: &[MethodDecl]) -> Result<Value, QError> {
+    fn evaluate_impl_declaration(
+        &mut self,
+        name: &str,
+        methods: &[MethodDecl],
+    ) -> Result<Value, QError> {
         let def = match self.env.lookup_variable(name)? {
             Value::Struct(def) => def,
             other => {
@@ -199,7 +224,11 @@ impl Interpreter {
         Ok(Value::Null)
     }
 
-    fn evaluate_variable_declaration(&mut self, identifier: &str, value: Option<&Expr>) -> Result<Value, QError> {
+    fn evaluate_variable_declaration(
+        &mut self,
+        identifier: &str,
+        value: Option<&Expr>,
+    ) -> Result<Value, QError> {
         match value {
             Some(expr) => {
                 let evaluated = self.evaluate_expr(expr)?;
@@ -220,7 +249,12 @@ impl Interpreter {
         Ok(Value::Null)
     }
 
-    fn evaluate_if(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: Option<&Stmt>) -> Result<Value, QError> {
+    fn evaluate_if(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Stmt,
+        else_branch: Option<&Stmt>,
+    ) -> Result<Value, QError> {
         let condition = self.evaluate_expr(condition)?;
 
         if condition.is_truthy() {
@@ -331,7 +365,11 @@ impl Interpreter {
             Expr::Assignment { target, value } => self.evaluate_assignment(target, value),
             Expr::Read(value) => self.evaluate_read(value),
             Expr::Unary { operator, value } => self.evaluate_unary(operator, value),
-            Expr::Binary { left, right, operator } => self.evaluate_binary(left, right, operator),
+            Expr::Binary {
+                left,
+                right,
+                operator,
+            } => self.evaluate_binary(left, right, operator),
             Expr::Array(elements) => {
                 let mut values = Vec::with_capacity(elements.len());
                 for element in elements {
@@ -370,7 +408,9 @@ impl Interpreter {
                             let index_value = self.evaluate_expr(property_expr)?;
                             let index = to_index(&index_value)?;
                             if index >= array.borrow().len() {
-                                return Err(QError::runtime(format!("Index '{index}' hors limites")));
+                                return Err(QError::runtime(format!(
+                                    "Index '{index}' hors limites"
+                                )));
                             }
                             let evaluated = self.evaluate_expr(value)?;
                             array.borrow_mut()[index] = evaluated.clone();
@@ -379,14 +419,13 @@ impl Interpreter {
                     },
                     Value::Instance(instance) => {
                         let name = self.evaluate_member_name(property.as_deref())?;
-                        let visibility = *instance
-                            .struct_def
-                            .fields
-                            .get(&name)
-                            .ok_or_else(|| QError::runtime(format!(
-                                "'{}' n'a pas de champ '{name}'",
-                                instance.struct_def.name
-                            )))?;
+                        let visibility =
+                            *instance.struct_def.fields.get(&name).ok_or_else(|| {
+                                QError::runtime(format!(
+                                    "'{}' n'a pas de champ '{name}'",
+                                    instance.struct_def.name
+                                ))
+                            })?;
                         self.check_visibility(visibility, &instance.struct_def.name, &name)?;
 
                         let evaluated = self.evaluate_expr(value)?;
@@ -418,7 +457,11 @@ impl Interpreter {
         Ok(match operator {
             "-" => Value::Number(-to_number(&argument)),
             "non" => Value::Boolean(!argument.is_truthy()),
-            _ => return Err(QError::runtime(format!("Opérateur unaire '{operator}' inconnu"))),
+            _ => {
+                return Err(QError::runtime(format!(
+                    "Opérateur unaire '{operator}' inconnu"
+                )))
+            }
         })
     }
 
@@ -454,16 +497,28 @@ impl Interpreter {
     }
 
     fn evaluate_member_name(&mut self, property: Option<&Expr>) -> Result<String, QError> {
-        let property_expr = property.ok_or_else(|| QError::runtime("Accès à un membre sans nom"))?;
+        let property_expr =
+            property.ok_or_else(|| QError::runtime("Accès à un membre sans nom"))?;
         match self.evaluate_expr(property_expr)? {
             Value::String(name) => Ok(name),
-            other => Err(QError::runtime(format!("Nom de membre invalide, reçu '{}'", other.type_name()))),
+            other => Err(QError::runtime(format!(
+                "Nom de membre invalide, reçu '{}'",
+                other.type_name()
+            ))),
         }
     }
 
-    fn access_instance_member(&mut self, instance: &Rc<Instance>, name: &str) -> Result<Value, QError> {
+    fn access_instance_member(
+        &mut self,
+        instance: &Rc<Instance>,
+        name: &str,
+    ) -> Result<Value, QError> {
         if let Some(value) = instance.fields.borrow().get(name) {
-            let visibility = *instance.struct_def.fields.get(name).expect("field exists in fields map");
+            let visibility = *instance
+                .struct_def
+                .fields
+                .get(name)
+                .expect("field exists in fields map");
             self.check_visibility(visibility, &instance.struct_def.name, name)?;
             return Ok(value.clone());
         }
@@ -482,7 +537,10 @@ impl Interpreter {
             ))));
         }
 
-        Err(QError::runtime(format!("'{}' n'a pas de membre '{name}'", instance.struct_def.name)))
+        Err(QError::runtime(format!(
+            "'{}' n'a pas de membre '{name}'",
+            instance.struct_def.name
+        )))
     }
 
     fn access_static_member(&mut self, def: &Rc<StructDef>, name: &str) -> Result<Value, QError> {
@@ -494,10 +552,16 @@ impl Interpreter {
                 )));
             }
             self.check_visibility(method.visibility, &def.name, name)?;
-            return Ok(Value::Function(Rc::new(BoundMethod::new(method.clone(), None))));
+            return Ok(Value::Function(Rc::new(BoundMethod::new(
+                method.clone(),
+                None,
+            ))));
         }
 
-        Err(QError::runtime(format!("'{}' n'a pas de méthode statique '{name}'", def.name)))
+        Err(QError::runtime(format!(
+            "'{}' n'a pas de méthode statique '{name}'",
+            def.name
+        )))
     }
 
     fn evaluate_call(&mut self, callee: &Expr, arguments: &[Expr]) -> Result<Value, QError> {
@@ -510,13 +574,25 @@ impl Interpreter {
                     def.name
                 )));
             }
-            let fields = def.fields.keys().map(|name| (name.clone(), Value::Null)).collect();
-            return Ok(Value::Instance(Rc::new(Instance { struct_def: def, fields: std::cell::RefCell::new(fields) })));
+            let fields = def
+                .fields
+                .keys()
+                .map(|name| (name.clone(), Value::Null))
+                .collect();
+            return Ok(Value::Instance(Rc::new(Instance {
+                struct_def: def,
+                fields: std::cell::RefCell::new(fields),
+            })));
         }
 
         let function = match callee_value {
             Value::Function(f) => f,
-            other => return Err(QError::runtime(format!("'{}' n'est pas une fonction", other.type_name()))),
+            other => {
+                return Err(QError::runtime(format!(
+                    "'{}' n'est pas une fonction",
+                    other.type_name()
+                )))
+            }
         };
 
         if arguments.len() != function.arity() {
@@ -540,7 +616,12 @@ impl Interpreter {
         })
     }
 
-    fn evaluate_binary(&mut self, left: &Expr, right: &Expr, operator: &str) -> Result<Value, QError> {
+    fn evaluate_binary(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        operator: &str,
+    ) -> Result<Value, QError> {
         if is_logical_operator(operator) {
             return self.evaluate_logical_binary(left, right, operator);
         }
@@ -550,7 +631,12 @@ impl Interpreter {
         evaluate_algebraic_binary(operator, &left_value, &right_value)
     }
 
-    fn evaluate_logical_binary(&mut self, left: &Expr, right: &Expr, operator: &str) -> Result<Value, QError> {
+    fn evaluate_logical_binary(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        operator: &str,
+    ) -> Result<Value, QError> {
         let left_value = self.evaluate_expr(left)?;
 
         if operator == "et" {
@@ -582,13 +668,18 @@ impl Interpreter {
                     _ => unreachable!(),
                 }))
             }
-            _ => Err(QError::runtime(format!("Opérateur logique '{operator}' inconnu"))),
+            _ => Err(QError::runtime(format!(
+                "Opérateur logique '{operator}' inconnu"
+            ))),
         }
     }
 }
 
 fn is_logical_operator(operator: &str) -> bool {
-    matches!(operator, "et" | "ou" | "==" | "!=" | "<" | "<=" | ">" | ">=")
+    matches!(
+        operator,
+        "et" | "ou" | "==" | "!=" | "<" | "<=" | ">" | ">="
+    )
 }
 
 fn evaluate_algebraic_binary(operator: &str, left: &Value, right: &Value) -> Result<Value, QError> {
@@ -604,7 +695,11 @@ fn evaluate_algebraic_binary(operator: &str, left: &Value, right: &Value) -> Res
     }
 
     if left_is_string || right_is_string {
-        return Ok(Value::String(format!("{}{}", value_to_js_string(left), value_to_js_string(right))));
+        return Ok(Value::String(format!(
+            "{}{}",
+            value_to_js_string(left),
+            value_to_js_string(right)
+        )));
     }
 
     let l = to_number(left);
@@ -623,7 +718,13 @@ fn evaluate_algebraic_binary(operator: &str, left: &Value, right: &Value) -> Res
 fn to_number(value: &Value) -> f64 {
     match value {
         Value::Number(n) => *n,
-        Value::Boolean(b) => if *b { 1.0 } else { 0.0 },
+        Value::Boolean(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
         Value::String(s) => s.trim().parse::<f64>().unwrap_or(f64::NAN),
         Value::Null => 0.0,
         _ => f64::NAN,
@@ -659,7 +760,9 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
     if let (Value::String(x), Value::String(y)) = (a, b) {
         return x.cmp(y);
     }
-    to_number(a).partial_cmp(&to_number(b)).unwrap_or(std::cmp::Ordering::Equal)
+    to_number(a)
+        .partial_cmp(&to_number(b))
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 fn format_js_number(n: f64) -> String {
@@ -743,26 +846,38 @@ mod tests {
     #[test]
     fn evaluate_simple_numeric_expression() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "40 + 2").unwrap(), Value::Number(42.0));
+        assert_eq!(
+            run(&mut interpreter, "40 + 2").unwrap(),
+            Value::Number(42.0)
+        );
     }
 
     #[test]
     fn evaluate_priority_in_numeric_expression() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "40 + 2 * 2").unwrap(), Value::Number(44.0));
+        assert_eq!(
+            run(&mut interpreter, "40 + 2 * 2").unwrap(),
+            Value::Number(44.0)
+        );
     }
 
     #[test]
     fn evaluate_parenthesis_in_numeric_expression() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "(40 + 2) * 2").unwrap(), Value::Number(84.0));
+        assert_eq!(
+            run(&mut interpreter, "(40 + 2) * 2").unwrap(),
+            Value::Number(84.0)
+        );
     }
 
     #[test]
     fn evaluate_boolean_expression() {
         let mut interpreter = make_interpreter();
         assert_eq!(run(&mut interpreter, "vrai").unwrap(), Value::Boolean(true));
-        assert_eq!(run(&mut interpreter, "faux").unwrap(), Value::Boolean(false));
+        assert_eq!(
+            run(&mut interpreter, "faux").unwrap(),
+            Value::Boolean(false)
+        );
     }
 
     #[test]
@@ -779,22 +894,38 @@ mod tests {
 
         for (input, expected) in cases {
             let mut interpreter = make_interpreter();
-            assert_eq!(run(&mut interpreter, input).unwrap(), expected, "input: {input}");
+            assert_eq!(
+                run(&mut interpreter, input).unwrap(),
+                expected,
+                "input: {input}"
+            );
         }
     }
 
     #[test]
     fn evaluate_simple_variable_declaration() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = 42").unwrap(), Value::Number(42.0));
-        assert_eq!(interpreter.environment().lookup_variable("a").unwrap(), Value::Number(42.0));
+        assert_eq!(
+            run(&mut interpreter, "dec a = 42").unwrap(),
+            Value::Number(42.0)
+        );
+        assert_eq!(
+            interpreter.environment().lookup_variable("a").unwrap(),
+            Value::Number(42.0)
+        );
     }
 
     #[test]
     fn evaluate_variable_assignment() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = 40\na = 2").unwrap(), Value::Number(2.0));
-        assert_eq!(interpreter.environment().lookup_variable("a").unwrap(), Value::Number(2.0));
+        assert_eq!(
+            run(&mut interpreter, "dec a = 40\na = 2").unwrap(),
+            Value::Number(2.0)
+        );
+        assert_eq!(
+            interpreter.environment().lookup_variable("a").unwrap(),
+            Value::Number(2.0)
+        );
     }
 
     #[test]
@@ -802,16 +933,28 @@ mod tests {
         let mut interpreter = make_interpreter();
         let result = run(&mut interpreter, "dec a\ndec b\ndec c\na = b = c = 42").unwrap();
         assert_eq!(result, Value::Number(42.0));
-        assert_eq!(interpreter.environment().lookup_variable("a").unwrap(), Value::Number(42.0));
-        assert_eq!(interpreter.environment().lookup_variable("b").unwrap(), Value::Number(42.0));
-        assert_eq!(interpreter.environment().lookup_variable("c").unwrap(), Value::Number(42.0));
+        assert_eq!(
+            interpreter.environment().lookup_variable("a").unwrap(),
+            Value::Number(42.0)
+        );
+        assert_eq!(
+            interpreter.environment().lookup_variable("b").unwrap(),
+            Value::Number(42.0)
+        );
+        assert_eq!(
+            interpreter.environment().lookup_variable("c").unwrap(),
+            Value::Number(42.0)
+        );
     }
 
     #[test]
     fn evaluate_variable_not_found() {
         let mut interpreter = make_interpreter();
         let err = run(&mut interpreter, "a").unwrap_err();
-        assert_eq!(err.to_string(), "Erreur d'exécution: Variable 'a' non déclarée");
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Variable 'a' non déclarée"
+        );
     }
 
     #[test]
@@ -824,19 +967,29 @@ mod tests {
     #[test]
     fn evaluate_unary_minus_expression() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = -42\na = -a").unwrap(), Value::Number(42.0));
+        assert_eq!(
+            run(&mut interpreter, "dec a = -42\na = -a").unwrap(),
+            Value::Number(42.0)
+        );
     }
 
     #[test]
     fn evaluate_unary_not_expression() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = non vrai").unwrap(), Value::Boolean(false));
+        assert_eq!(
+            run(&mut interpreter, "dec a = non vrai").unwrap(),
+            Value::Boolean(false)
+        );
     }
 
     #[test]
     fn evaluate_if_else_if_else_statement() {
         let mut interpreter = make_interpreter();
-        run(&mut interpreter, "si faux alors\n  ecrire 42\nsinonsi faux alors\n  ecrire 24\nsinon\n  ecrire 12\nfin").unwrap();
+        run(
+            &mut interpreter,
+            "si faux alors\n  ecrire 42\nsinonsi faux alors\n  ecrire 24\nsinon\n  ecrire 12\nfin",
+        )
+        .unwrap();
         assert_eq!(interpreter.stdout().log(), ["12"]);
     }
 
@@ -853,7 +1006,13 @@ mod tests {
         .join("\n");
         run(&mut interpreter, &code).unwrap();
         assert!(interpreter.stdout().log().is_empty());
-        assert_eq!(interpreter.environment().lookup_variable("isEvaluate").unwrap(), Value::Boolean(false));
+        assert_eq!(
+            interpreter
+                .environment()
+                .lookup_variable("isEvaluate")
+                .unwrap(),
+            Value::Boolean(false)
+        );
     }
 
     #[test]
@@ -869,7 +1028,13 @@ mod tests {
         .join("\n");
         run(&mut interpreter, &code).unwrap();
         assert_eq!(interpreter.stdout().log(), ["Vous êtes majeur"]);
-        assert_eq!(interpreter.environment().lookup_variable("isEvaluate").unwrap(), Value::Boolean(false));
+        assert_eq!(
+            interpreter
+                .environment()
+                .lookup_variable("isEvaluate")
+                .unwrap(),
+            Value::Boolean(false)
+        );
     }
 
     #[test]
@@ -877,13 +1042,23 @@ mod tests {
         let mut interpreter = make_interpreter();
         let code = ["si vrai alors", "    dec a = 42", "fin", "a"].join("\n");
         let err = run(&mut interpreter, &code).unwrap_err();
-        assert_eq!(err.to_string(), "Erreur d'exécution: Variable 'a' non déclarée");
+        assert_eq!(
+            err.to_string(),
+            "Erreur d'exécution: Variable 'a' non déclarée"
+        );
     }
 
     #[test]
     fn evaluate_while_statement() {
         let mut interpreter = make_interpreter();
-        let code = ["dec i = 0", "tantque i < 3 alors", "    ecrire i", "    i = i + 1", "fin"].join("\n");
+        let code = [
+            "dec i = 0",
+            "tantque i < 3 alors",
+            "    ecrire i",
+            "    i = i + 1",
+            "fin",
+        ]
+        .join("\n");
         run(&mut interpreter, &code).unwrap();
         assert_eq!(interpreter.stdout().log(), ["0", "1", "2"]);
     }
@@ -899,7 +1074,12 @@ mod tests {
     #[test]
     fn evaluate_for_statement_with_decrement_step() {
         let mut interpreter = make_interpreter();
-        let code = ["pour i de 10 jusque i >= 0 evol -1 alors", "    ecrire i", "fin"].join("\n");
+        let code = [
+            "pour i de 10 jusque i >= 0 evol -1 alors",
+            "    ecrire i",
+            "fin",
+        ]
+        .join("\n");
         run(&mut interpreter, &code).unwrap();
         assert_eq!(
             interpreter.stdout().log(),
@@ -912,26 +1092,39 @@ mod tests {
         let mut interpreter = make_interpreter();
         assert_eq!(
             run(&mut interpreter, "[1, 2, 3]").unwrap(),
-            Value::array(vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)])
+            Value::array(vec![
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0)
+            ])
         );
     }
 
     #[test]
     fn evaluate_array_access_on_complex_array() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "[[1, 2], [3, 4]][1][0]").unwrap(), Value::Number(3.0));
+        assert_eq!(
+            run(&mut interpreter, "[[1, 2], [3, 4]][1][0]").unwrap(),
+            Value::Number(3.0)
+        );
     }
 
     #[test]
     fn evaluate_assignment_to_array_access() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = [1, 2, 3]\na[0] = 42").unwrap(), Value::Number(42.0));
+        assert_eq!(
+            run(&mut interpreter, "dec a = [1, 2, 3]\na[0] = 42").unwrap(),
+            Value::Number(42.0)
+        );
     }
 
     #[test]
     fn evaluate_push_in_array() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "dec a = []\na[] = 42\na[] = 24").unwrap(), Value::Number(24.0));
+        assert_eq!(
+            run(&mut interpreter, "dec a = []\na[] = 42\na[] = 24").unwrap(),
+            Value::Number(24.0)
+        );
         assert_eq!(
             interpreter.environment().lookup_variable("a").unwrap(),
             Value::array(vec![Value::Number(42.0), Value::Number(24.0)])
@@ -941,7 +1134,10 @@ mod tests {
     #[test]
     fn evaluate_taille_builtin() {
         let mut interpreter = make_interpreter();
-        assert_eq!(run(&mut interpreter, "taille([1, 2, 3])").unwrap(), Value::Number(3.0));
+        assert_eq!(
+            run(&mut interpreter, "taille([1, 2, 3])").unwrap(),
+            Value::Number(3.0)
+        );
     }
 
     #[test]
@@ -954,7 +1150,13 @@ mod tests {
     #[test]
     fn evaluate_function_call_with_arguments() {
         let mut interpreter = make_interpreter();
-        let code = ["fonction test(a, b)", "    retour a + b", "fin", "test(40, 2)"].join("\n");
+        let code = [
+            "fonction test(a, b)",
+            "    retour a + b",
+            "fin",
+            "test(40, 2)",
+        ]
+        .join("\n");
         assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(42.0));
     }
 
@@ -1021,7 +1223,10 @@ mod tests {
             Std::new(),
             Std::new(),
             Box::new(NoopInput),
-            Box::new(MapModuleResolver::new().with_module("math.q", "fonction double(x)\n    retour x * 2\nfin")),
+            Box::new(
+                MapModuleResolver::new()
+                    .with_module("math.q", "fonction double(x)\n    retour x * 2\nfin"),
+            ),
         );
 
         let code = ["inclure \"math.q\"", "double(21)"].join("\n");
@@ -1046,15 +1251,29 @@ mod tests {
     #[test]
     fn evaluate_struct_raw_instantiation_defaults_fields_to_null() {
         let mut interpreter = make_interpreter();
-        let code = ["structure Nom avec", "  publique champ", "fin", "dec p = Nom()", "p.champ"].join("\n");
+        let code = [
+            "structure Nom avec",
+            "  publique champ",
+            "fin",
+            "dec p = Nom()",
+            "p.champ",
+        ]
+        .join("\n");
         assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Null);
     }
 
     #[test]
     fn evaluate_struct_field_assignment_and_access() {
         let mut interpreter = make_interpreter();
-        let code = ["structure Nom avec", "  publique champ", "fin", "dec p = Nom()", "p.champ = 42", "p.champ"]
-            .join("\n");
+        let code = [
+            "structure Nom avec",
+            "  publique champ",
+            "fin",
+            "dec p = Nom()",
+            "p.champ = 42",
+            "p.champ",
+        ]
+        .join("\n");
         assert_eq!(run(&mut interpreter, &code).unwrap(), Value::Number(42.0));
     }
 
@@ -1075,7 +1294,10 @@ mod tests {
             "Personne.nouveau(\"Quentin\").nom",
         ]
         .join("\n");
-        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::String("Quentin".to_string()));
+        assert_eq!(
+            run(&mut interpreter, &code).unwrap(),
+            Value::String("Quentin".to_string())
+        );
     }
 
     #[test]
@@ -1095,13 +1317,23 @@ mod tests {
             "p.saluer()",
         ]
         .join("\n");
-        assert_eq!(run(&mut interpreter, &code).unwrap(), Value::String("Bonjour Quentin".to_string()));
+        assert_eq!(
+            run(&mut interpreter, &code).unwrap(),
+            Value::String("Bonjour Quentin".to_string())
+        );
     }
 
     #[test]
     fn evaluate_hidden_field_access_from_outside_is_an_error() {
         let mut interpreter = make_interpreter();
-        let code = ["structure Nom avec", "  cacher secret", "fin", "dec p = Nom()", "p.secret"].join("\n");
+        let code = [
+            "structure Nom avec",
+            "  cacher secret",
+            "fin",
+            "dec p = Nom()",
+            "p.secret",
+        ]
+        .join("\n");
         let err = run(&mut interpreter, &code).unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -1135,7 +1367,14 @@ mod tests {
     #[test]
     fn evaluate_hidden_field_assignment_from_outside_is_an_error() {
         let mut interpreter = make_interpreter();
-        let code = ["structure Nom avec", "  cacher secret", "fin", "dec p = Nom()", "p.secret = 42"].join("\n");
+        let code = [
+            "structure Nom avec",
+            "  cacher secret",
+            "fin",
+            "dec p = Nom()",
+            "p.secret = 42",
+        ]
+        .join("\n");
         let err = run(&mut interpreter, &code).unwrap_err();
         assert_eq!(
             err.to_string(),

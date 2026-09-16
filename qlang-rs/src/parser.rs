@@ -19,7 +19,11 @@ impl Default for Parser {
 
 impl Parser {
     pub fn new() -> Self {
-        Self { code: String::new(), tokens: VecDeque::new(), previous_token: None }
+        Self {
+            code: String::new(),
+            tokens: VecDeque::new(),
+            previous_token: None,
+        }
     }
 
     pub fn set_tokens(&mut self, tokens: Vec<Token>, code: impl Into<String>) {
@@ -74,10 +78,16 @@ impl Parser {
             } else {
                 self.parse_expression()?
             };
-            return Ok(Stmt::VariableDeclaration { identifier, value: Some(value) });
+            return Ok(Stmt::VariableDeclaration {
+                identifier,
+                value: Some(value),
+            });
         }
 
-        Ok(Stmt::VariableDeclaration { identifier, value: None })
+        Ok(Stmt::VariableDeclaration {
+            identifier,
+            value: None,
+        })
     }
 
     fn parse_print_statement(&mut self) -> Result<Stmt, QError> {
@@ -104,14 +114,21 @@ impl Parser {
     fn parse_struct_statement(&mut self) -> Result<Stmt, QError> {
         self.eat();
         let pos_start = self.previous().position.clone();
-        let name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        let name = self
+            .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+            .value;
         self.eat_exactly(TokenType::With, Some(pos_start.clone()))?;
 
         let mut fields = Vec::new();
         while self.at().token_type != TokenType::End {
             let visibility = self.parse_visibility()?;
-            let field_name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
-            fields.push(StructField { visibility, name: field_name });
+            let field_name = self
+                .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+                .value;
+            fields.push(StructField {
+                visibility,
+                name: field_name,
+            });
         }
         self.eat_exactly(TokenType::End, Some(pos_start))?;
 
@@ -121,7 +138,9 @@ impl Parser {
     fn parse_impl_statement(&mut self) -> Result<Stmt, QError> {
         self.eat();
         let pos_start = self.previous().position.clone();
-        let name = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        let name = self
+            .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+            .value;
         self.eat_exactly(TokenType::Implements, Some(pos_start.clone()))?;
 
         let mut methods = Vec::new();
@@ -142,12 +161,17 @@ impl Parser {
             false
         };
 
-        let identifier = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        let identifier = self
+            .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+            .value;
         self.eat_exactly(TokenType::OpenParenthesis, Some(pos_start.clone()))?;
 
         let mut parameters = Vec::new();
         while self.at().token_type != TokenType::CloseParenthesis {
-            parameters.push(self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value);
+            parameters.push(
+                self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+                    .value,
+            );
 
             let token = self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
             if token.token_type == TokenType::Comma {
@@ -165,7 +189,11 @@ impl Parser {
         Ok(MethodDecl {
             visibility,
             is_static,
-            function: FunctionDecl { identifier: Some(identifier), parameters, body },
+            function: FunctionDecl {
+                identifier: Some(identifier),
+                parameters,
+                body,
+            },
         })
     }
 
@@ -179,7 +207,8 @@ impl Parser {
         self.eat_exactly(TokenType::Then, Some(pos_start.clone()))?;
 
         pos_start = self.previous().position.clone();
-        let then_branch = Box::new(self.parse_block_statement(&[TokenType::Else, TokenType::ElseIf])?);
+        let then_branch =
+            Box::new(self.parse_block_statement(&[TokenType::Else, TokenType::ElseIf])?);
 
         let mut else_branch = None;
         if self.at().token_type == TokenType::Else {
@@ -194,7 +223,11 @@ impl Parser {
             self.eat_exactly(TokenType::End, Some(pos_start))?;
         }
 
-        Ok(Stmt::If { condition, then_branch, else_branch })
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn parse_while_statement(&mut self) -> Result<Stmt, QError> {
@@ -212,7 +245,9 @@ impl Parser {
     fn parse_for_statement(&mut self) -> Result<Stmt, QError> {
         self.eat();
         let pos_start = self.previous().position.clone();
-        let identifier = self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value;
+        let identifier = self
+            .eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+            .value;
 
         self.eat_exactly(TokenType::From, Some(pos_start.clone()))?;
         let from = self.parse_expression()?;
@@ -246,7 +281,13 @@ impl Parser {
         let body = Box::new(self.parse_block_statement(&[])?);
         self.eat_exactly(TokenType::End, Some(pos_start))?;
 
-        Ok(Stmt::For { identifier, from, until, step, body })
+        Ok(Stmt::For {
+            identifier,
+            from,
+            until,
+            step,
+            body,
+        })
     }
 
     fn parse_function_declaration(&mut self) -> Result<FunctionDecl, QError> {
@@ -255,7 +296,10 @@ impl Parser {
         let identifier = if self.at().token_type == TokenType::OpenParenthesis {
             None
         } else {
-            Some(self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value)
+            Some(
+                self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+                    .value,
+            )
         };
 
         self.eat_exactly(TokenType::OpenParenthesis, Some(pos_start.clone()))?;
@@ -273,7 +317,10 @@ impl Parser {
                     self.code.clone(),
                 ));
             }
-            parameters.push(self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?.value);
+            parameters.push(
+                self.eat_exactly(TokenType::Identifier, Some(pos_start.clone()))?
+                    .value,
+            );
 
             let token = self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
             if token.token_type == TokenType::Comma {
@@ -288,7 +335,11 @@ impl Parser {
         };
         self.eat_exactly(TokenType::End, Some(pos_start))?;
 
-        Ok(FunctionDecl { identifier, parameters, body })
+        Ok(FunctionDecl {
+            identifier,
+            parameters,
+            body,
+        })
     }
 
     fn parse_block_statement(&mut self, with_condition: &[TokenType]) -> Result<Stmt, QError> {
@@ -322,7 +373,10 @@ impl Parser {
 
         self.eat();
         let value = self.parse_assignment_expression()?;
-        Ok(Expr::Assignment { target: Box::new(left), value: Box::new(value) })
+        Ok(Expr::Assignment {
+            target: Box::new(left),
+            value: Box::new(value),
+        })
     }
 
     fn parse_logical_expression(&mut self) -> Result<Expr, QError> {
@@ -331,7 +385,11 @@ impl Parser {
         while self.at().value == "et" || self.at().value == "ou" {
             let operator = self.eat().value;
             let right = self.parse_equality_expression()?;
-            left = Expr::Binary { left: Box::new(left), right: Box::new(right), operator };
+            left = Expr::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
         }
 
         Ok(left)
@@ -343,7 +401,11 @@ impl Parser {
         while self.at().value == "==" || self.at().value == "!=" {
             let operator = self.eat().value;
             let right = self.parse_relational_expression()?;
-            left = Expr::Binary { left: Box::new(left), right: Box::new(right), operator };
+            left = Expr::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
         }
 
         Ok(left)
@@ -355,7 +417,11 @@ impl Parser {
         while [">", "<", ">=", "<="].contains(&self.at().value.as_str()) {
             let operator = self.eat().value;
             let right = self.parse_additive_expression()?;
-            left = Expr::Binary { left: Box::new(left), right: Box::new(right), operator };
+            left = Expr::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
         }
 
         Ok(left)
@@ -367,7 +433,11 @@ impl Parser {
         while self.at().value == "+" || self.at().value == "-" {
             let operator = self.eat().value;
             let right = self.parse_multiplicative_expression()?;
-            left = Expr::Binary { left: Box::new(left), right: Box::new(right), operator };
+            left = Expr::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
         }
 
         Ok(left)
@@ -379,7 +449,11 @@ impl Parser {
         while ["*", "/", "%"].contains(&self.at().value.as_str()) {
             let operator = self.eat().value;
             let right = self.parse_unary_expression()?;
-            left = Expr::Binary { left: Box::new(left), right: Box::new(right), operator };
+            left = Expr::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
         }
 
         Ok(left)
@@ -389,7 +463,10 @@ impl Parser {
         if self.at().token_type == TokenType::UnaryOperator {
             let operator = self.eat().value;
             let value = self.parse_unary_expression()?;
-            return Ok(Expr::Unary { operator, value: Box::new(value) });
+            return Ok(Expr::Unary {
+                operator,
+                value: Box::new(value),
+            });
         }
 
         self.parse_array_access_expression()
@@ -403,18 +480,32 @@ impl Parser {
                 self.eat();
                 if self.at().token_type == TokenType::CloseBrackets {
                     self.eat();
-                    expression = Expr::Member { object: Box::new(expression), property: None };
+                    expression = Expr::Member {
+                        object: Box::new(expression),
+                        property: None,
+                    };
                     continue;
                 }
                 let index = self.parse_expression()?;
-                self.eat_exactly(TokenType::CloseBrackets, Some(self.previous().position.clone()))?;
+                self.eat_exactly(
+                    TokenType::CloseBrackets,
+                    Some(self.previous().position.clone()),
+                )?;
 
-                expression = Expr::Member { object: Box::new(expression), property: Some(Box::new(index)) };
+                expression = Expr::Member {
+                    object: Box::new(expression),
+                    property: Some(Box::new(index)),
+                };
             } else if self.at().token_type == TokenType::Dot {
                 self.eat();
                 let pos_start = self.previous().position.clone();
-                let name = self.eat_exactly(TokenType::Identifier, Some(pos_start))?.value;
-                expression = Expr::Member { object: Box::new(expression), property: Some(Box::new(Expr::Str(name))) };
+                let name = self
+                    .eat_exactly(TokenType::Identifier, Some(pos_start))?
+                    .value;
+                expression = Expr::Member {
+                    object: Box::new(expression),
+                    property: Some(Box::new(Expr::Str(name))),
+                };
 
                 if self.at().token_type == TokenType::OpenParenthesis {
                     self.eat();
@@ -427,13 +518,17 @@ impl Parser {
                         };
                         arguments.push(argument);
 
-                        let token = self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
+                        let token =
+                            self.attempt(&[TokenType::Comma, TokenType::CloseParenthesis])?;
                         if token.token_type == TokenType::Comma {
                             self.eat();
                         }
                     }
                     self.eat();
-                    expression = Expr::Call { callee: Box::new(expression), arguments };
+                    expression = Expr::Call {
+                        callee: Box::new(expression),
+                        arguments,
+                    };
                 }
             } else {
                 break;
@@ -485,7 +580,10 @@ impl Parser {
             }
 
             self.eat();
-            expression = Expr::Call { callee: Box::new(expression), arguments };
+            expression = Expr::Call {
+                callee: Box::new(expression),
+                arguments,
+            };
         }
 
         Ok(expression)
@@ -516,7 +614,10 @@ impl Parser {
             TokenType::OpenParenthesis => {
                 self.eat();
                 let expression = self.parse_expression()?;
-                self.eat_exactly(TokenType::CloseParenthesis, Some(self.previous().position.clone()))?;
+                self.eat_exactly(
+                    TokenType::CloseParenthesis,
+                    Some(self.previous().position.clone()),
+                )?;
                 Ok(expression)
             }
             _ => {
@@ -563,7 +664,11 @@ impl Parser {
         token
     }
 
-    fn eat_exactly(&mut self, token_type: TokenType, pos_start: Option<Position>) -> Result<Token, QError> {
+    fn eat_exactly(
+        &mut self,
+        token_type: TokenType,
+        pos_start: Option<Position>,
+    ) -> Result<Token, QError> {
         let token = self.eat();
 
         if token.token_type != token_type {
@@ -585,7 +690,10 @@ impl Parser {
             return Err(QError::invalid_syntax(
                 pos_start,
                 pos_end.clone(),
-                format!("'{}' non attendu, attendu: '{tokens_needed}'", pos_end.content),
+                format!(
+                    "'{}' non attendu, attendu: '{tokens_needed}'",
+                    pos_end.content
+                ),
                 self.code.clone(),
             ));
         }
@@ -600,7 +708,11 @@ impl Parser {
             return Ok(token);
         }
 
-        let types_string = types.iter().map(|t| format!("'{t:?}'")).collect::<Vec<_>>().join(" ou ");
+        let types_string = types
+            .iter()
+            .map(|t| format!("'{t:?}'"))
+            .collect::<Vec<_>>()
+            .join(" ou ");
         Err(QError::invalid_syntax(
             token.position.clone(),
             token.position.clone(),
@@ -634,7 +746,10 @@ mod tests {
 
     #[test]
     fn ast_identifier() {
-        assert_eq!(make_ast("abc"), vec![Stmt::Expr(Expr::Identifier("abc".to_string()))]);
+        assert_eq!(
+            make_ast("abc"),
+            vec![Stmt::Expr(Expr::Identifier("abc".to_string()))]
+        );
     }
 
     #[test]
@@ -694,7 +809,10 @@ mod tests {
     fn ast_variable_declaration() {
         assert_eq!(
             make_ast("dec abc = 42"),
-            vec![Stmt::VariableDeclaration { identifier: "abc".to_string(), value: Some(Expr::Numeric(42.0)) }]
+            vec![Stmt::VariableDeclaration {
+                identifier: "abc".to_string(),
+                value: Some(Expr::Numeric(42.0))
+            }]
         );
     }
 
@@ -717,7 +835,10 @@ mod tests {
     fn ast_variable_declaration_without_value() {
         assert_eq!(
             make_ast("dec abc"),
-            vec![Stmt::VariableDeclaration { identifier: "abc".to_string(), value: None }]
+            vec![Stmt::VariableDeclaration {
+                identifier: "abc".to_string(),
+                value: None
+            }]
         );
     }
 
@@ -726,7 +847,10 @@ mod tests {
         assert_eq!(
             make_ast("dec abc = 42\nabc = 2"),
             vec![
-                Stmt::VariableDeclaration { identifier: "abc".to_string(), value: Some(Expr::Numeric(42.0)) },
+                Stmt::VariableDeclaration {
+                    identifier: "abc".to_string(),
+                    value: Some(Expr::Numeric(42.0))
+                },
                 Stmt::Expr(Expr::Assignment {
                     target: Box::new(Expr::Identifier("abc".to_string())),
                     value: Box::new(Expr::Numeric(2.0)),
@@ -737,19 +861,27 @@ mod tests {
 
     #[test]
     fn ast_string_literal() {
-        assert_eq!(make_ast("\"hello\""), vec![Stmt::Expr(Expr::Str("hello".to_string()))]);
+        assert_eq!(
+            make_ast("\"hello\""),
+            vec![Stmt::Expr(Expr::Str("hello".to_string()))]
+        );
     }
 
     #[test]
     fn ast_print_statement() {
-        assert_eq!(make_ast("ecrire 42"), vec![Stmt::Print(Expr::Numeric(42.0))]);
+        assert_eq!(
+            make_ast("ecrire 42"),
+            vec![Stmt::Print(Expr::Numeric(42.0))]
+        );
     }
 
     #[test]
     fn ast_read_expression() {
         assert_eq!(
             make_ast("lire \"Nom :\""),
-            vec![Stmt::Expr(Expr::Read(Box::new(Expr::Str("Nom :".to_string()))))]
+            vec![Stmt::Expr(Expr::Read(Box::new(Expr::Str(
+                "Nom :".to_string()
+            ))))]
         );
     }
 
@@ -790,7 +922,14 @@ mod tests {
 
     #[test]
     fn ast_if_else_if_statement() {
-        let code = ["si 42 alors", "  ecrire 42", "sinonsi 2 alors", "  ecrire 2", "fin"].join("\n");
+        let code = [
+            "si 42 alors",
+            "  ecrire 42",
+            "sinonsi 2 alors",
+            "  ecrire 2",
+            "fin",
+        ]
+        .join("\n");
         let ast = make_ast(&code);
         assert_eq!(
             ast,
@@ -820,7 +959,12 @@ mod tests {
 
     #[test]
     fn ast_for_statement() {
-        let code = ["pour abc de 1 jusque 10 evol 2 alors", "  ecrire abc", "fin"].join("\n");
+        let code = [
+            "pour abc de 1 jusque 10 evol 2 alors",
+            "  ecrire abc",
+            "fin",
+        ]
+        .join("\n");
         assert_eq!(
             make_ast(&code),
             vec![Stmt::For {
@@ -839,7 +983,9 @@ mod tests {
                         operator: "+".to_string(),
                     }),
                 },
-                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Identifier("abc".to_string()))])),
+                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Identifier(
+                    "abc".to_string()
+                ))])),
             }]
         );
     }
@@ -865,7 +1011,9 @@ mod tests {
                         operator: "+".to_string(),
                     }),
                 },
-                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Identifier("abc".to_string()))])),
+                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Identifier(
+                    "abc".to_string()
+                ))])),
             }]
         );
     }
@@ -874,7 +1022,11 @@ mod tests {
     fn ast_simple_array_expression() {
         assert_eq!(
             make_ast("[1, 2, 3]"),
-            vec![Stmt::Expr(Expr::Array(vec![Expr::Numeric(1.0), Expr::Numeric(2.0), Expr::Numeric(3.0)]))]
+            vec![Stmt::Expr(Expr::Array(vec![
+                Expr::Numeric(1.0),
+                Expr::Numeric(2.0),
+                Expr::Numeric(3.0)
+            ]))]
         );
     }
 
@@ -905,7 +1057,11 @@ mod tests {
             vec![
                 Stmt::VariableDeclaration {
                     identifier: "abc".to_string(),
-                    value: Some(Expr::Array(vec![Expr::Numeric(1.0), Expr::Numeric(2.0), Expr::Numeric(3.0)])),
+                    value: Some(Expr::Array(vec![
+                        Expr::Numeric(1.0),
+                        Expr::Numeric(2.0),
+                        Expr::Numeric(3.0)
+                    ])),
                 },
                 Stmt::Print(Expr::Member {
                     object: Box::new(Expr::Identifier("abc".to_string())),
@@ -921,9 +1077,15 @@ mod tests {
         assert_eq!(
             make_ast(&code),
             vec![
-                Stmt::VariableDeclaration { identifier: "tab".to_string(), value: Some(Expr::Array(vec![])) },
+                Stmt::VariableDeclaration {
+                    identifier: "tab".to_string(),
+                    value: Some(Expr::Array(vec![]))
+                },
                 Stmt::Expr(Expr::Assignment {
-                    target: Box::new(Expr::Member { object: Box::new(Expr::Identifier("tab".to_string())), property: None }),
+                    target: Box::new(Expr::Member {
+                        object: Box::new(Expr::Identifier("tab".to_string())),
+                        property: None
+                    }),
                     value: Box::new(Expr::Numeric(1.0)),
                 }),
             ]
@@ -934,7 +1096,10 @@ mod tests {
     fn ast_call_function_with_empty_parameters() {
         assert_eq!(
             make_ast("abc()"),
-            vec![Stmt::Expr(Expr::Call { callee: Box::new(Expr::Identifier("abc".to_string())), arguments: vec![] })]
+            vec![Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Identifier("abc".to_string())),
+                arguments: vec![]
+            })]
         );
     }
 
@@ -998,14 +1163,26 @@ mod tests {
 
     #[test]
     fn ast_struct_statement() {
-        let code = ["structure Nom avec", "  publique champ1", "  cacher champ2", "fin"].join("\n");
+        let code = [
+            "structure Nom avec",
+            "  publique champ1",
+            "  cacher champ2",
+            "fin",
+        ]
+        .join("\n");
         assert_eq!(
             make_ast(&code),
             vec![Stmt::Struct {
                 name: "Nom".to_string(),
                 fields: vec![
-                    StructField { visibility: Visibility::Public, name: "champ1".to_string() },
-                    StructField { visibility: Visibility::Hidden, name: "champ2".to_string() },
+                    StructField {
+                        visibility: Visibility::Public,
+                        name: "champ1".to_string()
+                    },
+                    StructField {
+                        visibility: Visibility::Hidden,
+                        name: "champ2".to_string()
+                    },
                 ],
             }]
         );

@@ -39,7 +39,11 @@ impl QFunction {
                 format!("anon#{n}")
             }
         };
-        Self { declaration, closure, name }
+        Self {
+            declaration,
+            closure,
+            name,
+        }
     }
 }
 

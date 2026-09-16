@@ -35,11 +35,27 @@ pub struct FunctionDecl {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    VariableDeclaration { identifier: String, value: Option<Expr> },
+    VariableDeclaration {
+        identifier: String,
+        value: Option<Expr>,
+    },
     Print(Expr),
-    If { condition: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
-    While { condition: Expr, body: Box<Stmt> },
-    For { identifier: String, from: Expr, until: Expr, step: Expr, body: Box<Stmt> },
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
+    For {
+        identifier: String,
+        from: Expr,
+        until: Expr,
+        step: Expr,
+        body: Box<Stmt>,
+    },
     Function(FunctionDecl),
     Block(Vec<Stmt>),
     Break,
@@ -50,26 +66,48 @@ pub enum Stmt {
     /// the current environment.
     Include(Expr),
     /// `structure Nom avec ... fin` - declares a struct's fields.
-    Struct { name: String, fields: Vec<StructField> },
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
+    },
     /// `dans Nom implemente ... fin` - attaches methods to a struct.
-    Impl { name: String, methods: Vec<MethodDecl> },
+    Impl {
+        name: String,
+        methods: Vec<MethodDecl>,
+    },
     Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Assignment { target: Box<Expr>, value: Box<Expr> },
+    Assignment {
+        target: Box<Expr>,
+        value: Box<Expr>,
+    },
     Read(Box<Expr>),
-    Unary { operator: String, value: Box<Expr> },
-    Binary { left: Box<Expr>, right: Box<Expr>, operator: String },
+    Unary {
+        operator: String,
+        value: Box<Expr>,
+    },
+    Binary {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        operator: String,
+    },
     Numeric(f64),
     Str(String),
     Null,
     Boolean(bool),
     Identifier(String),
-    Member { object: Box<Expr>, property: Option<Box<Expr>> },
+    Member {
+        object: Box<Expr>,
+        property: Option<Box<Expr>>,
+    },
     Array(Vec<Expr>),
-    Call { callee: Box<Expr>, arguments: Vec<Expr> },
+    Call {
+        callee: Box<Expr>,
+        arguments: Vec<Expr>,
+    },
     Function(FunctionDecl),
 }
 

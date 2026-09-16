@@ -75,6 +75,10 @@ impl Callable for BoundMethod {
     }
 
     fn name(&self) -> String {
-        format!("{}.{}", self.method.owner, self.method.function.identifier.as_deref().unwrap_or("?"))
+        format!(
+            "{}.{}",
+            self.method.owner,
+            self.method.function.identifier.as_deref().unwrap_or("?")
+        )
     }
 }

@@ -39,7 +39,12 @@ pub enum QError {
 }
 
 impl QError {
-    pub fn illegal_char(start: Position, end: Position, details: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn illegal_char(
+        start: Position,
+        end: Position,
+        details: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
         Self::IllegalChar(Box::new(SourceError {
             span: Span { start, end },
             details: details.into(),
@@ -55,7 +60,12 @@ impl QError {
         }))
     }
 
-    pub fn invalid_syntax(start: Position, end: Position, details: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn invalid_syntax(
+        start: Position,
+        end: Position,
+        details: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
         Self::InvalidSyntax(Box::new(SourceError {
             span: Span { start, end },
             details: details.into(),
@@ -63,7 +73,12 @@ impl QError {
         }))
     }
 
-    pub fn maximum_argument(start: Position, end: Position, details: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn maximum_argument(
+        start: Position,
+        end: Position,
+        details: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
         Self::MaximumArgument(Box::new(SourceError {
             span: Span { start, end },
             details: details.into(),
@@ -72,11 +87,15 @@ impl QError {
     }
 
     pub fn runtime(message: impl Into<String>) -> Self {
-        Self::Runtime { message: message.into() }
+        Self::Runtime {
+            message: message.into(),
+        }
     }
 
     pub fn module(message: impl Into<String>) -> Self {
-        Self::Module { message: message.into() }
+        Self::Module {
+            message: message.into(),
+        }
     }
 
     pub fn name(&self) -> &'static str {
@@ -119,7 +138,10 @@ impl QError {
         let mut result = format!("{}: {}\n", self.name(), self.details());
 
         if let Some(err) = self.source_error() {
-            result += &format!("Sur la line {} et colonne {}\n \n", err.span.end.line, err.span.end.col);
+            result += &format!(
+                "Sur la line {} et colonne {}\n \n",
+                err.span.end.line, err.span.end.col
+            );
             result += &with_arrows(&err.span.start, &err.span.end, &err.code);
         }
 

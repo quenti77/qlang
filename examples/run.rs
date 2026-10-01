@@ -17,5 +17,4 @@ fn main() -> () {
 
     let lex = Lexer::new();
     lex.tokenize(&file_content);
-    dbg!(lex);
 }

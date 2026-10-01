@@ -2,8 +2,9 @@ use super::Lexer;
 
 impl Lexer {
     pub fn new() -> Self {
-        Lexer {  }
+        Lexer { }
     }
 
-    pub fn tokenize(self: &Self, content: &String) -> () { dbg!(content); }
+    pub fn tokenize(self: &Self, content: &String) -> () {
+    }
 }

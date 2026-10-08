@@ -996,7 +996,27 @@ impl<'a> Interp<'a> {
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Enum(e1, v1), Value::Enum(e2, v2)) => e1 == e2 && v1 == v2,
-            (Value::Map(x), Value::Map(y)) => Rc::ptr_eq(x, y),
+            (Value::Map(x), Value::Map(y)) => {
+                if Rc::ptr_eq(x, y) {
+                    return Ok(true);
+                }
+                let xs: Vec<(Value, Value)> = x.borrow().entries.clone();
+                if xs.len() != y.borrow().len() {
+                    return Ok(false);
+                }
+                for (k, v) in &xs {
+                    let other = y.borrow().get(k).cloned();
+                    match other {
+                        Some(o) => {
+                            if !self.values_equal(v, &o, span)? {
+                                return Ok(false);
+                            }
+                        }
+                        None => return Ok(false),
+                    }
+                }
+                true
+            }
             (Value::Array(x), Value::Array(y)) => {
                 if Rc::ptr_eq(x, y) {
                     return Ok(true);
@@ -1401,6 +1421,61 @@ impl<'a> Interp<'a> {
             }
             (Value::Str(s), "len") => Value::Int(s.chars().count() as i64),
             (Value::Str(s), "is_empty") => Value::Bool(s.is_empty()),
+            (Value::Str(s), "trim_start") => Value::str(s.trim_start()),
+            (Value::Str(s), "trim_end") => Value::str(s.trim_end()),
+            (Value::Str(s), "reverse") => Value::str(&s.chars().rev().collect::<String>()),
+            (Value::Str(s), "capitalize") => {
+                let mut cs = s.chars();
+                match cs.next() {
+                    Some(first) => Value::str(&(first.to_uppercase().collect::<String>() + cs.as_str())),
+                    None => Value::Str(s.clone()),
+                }
+            }
+            (Value::Str(s), "last_index_of") => match s.rfind(str_arg(0).unwrap().as_ref()) {
+                Some(b) => Value::Int(s[..b].chars().count() as i64),
+                None => Value::None,
+            },
+            (Value::Str(s), "count") => {
+                let needle = str_arg(0).unwrap();
+                if needle.is_empty() {
+                    return self.fail("R021", "cannot count occurrences of an empty string", span);
+                }
+                Value::Int(s.matches(needle.as_ref()).count() as i64)
+            }
+            (Value::Str(s), "lines") => Value::array(s.lines().map(Value::str).collect()),
+            (Value::Str(s), "words") => Value::array(s.split_whitespace().map(Value::str).collect()),
+            (Value::Str(s), "pad_left" | "pad_right") => {
+                let fill = str_arg(1).unwrap();
+                let mut fc = fill.chars();
+                let (Some(f), None) = (fc.next(), fc.next()) else {
+                    return self.fail("R021", "the padding must be exactly one character", span);
+                };
+                let width = int_arg(0).unwrap_or(0).max(0) as usize;
+                self.guard_alloc(width, span)?;
+                let n = s.chars().count();
+                if n >= width {
+                    Value::Str(s.clone())
+                } else {
+                    let pad: String = std::iter::repeat_n(f, width - n).collect();
+                    Value::str(&if name == "pad_left" { format!("{pad}{s}") } else { format!("{s}{pad}") })
+                }
+            }
+            (Value::Str(s), "is_digit") => Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_ascii_digit())),
+            (Value::Str(s), "is_alpha") => Value::Bool(!s.is_empty() && s.chars().all(char::is_alphabetic)),
+            (Value::Str(s), "is_blank") => Value::Bool(s.chars().all(char::is_whitespace)),
+            (Value::Str(s), "code") => {
+                let mut cs = s.chars();
+                match (cs.next(), cs.next()) {
+                    (Some(c), None) => Value::Int(c as i64),
+                    _ => return self.fail("R024", "`code()` needs a string of exactly one character", span),
+                }
+            }
+            (Value::Str(_), "to_int") => self.parse_number("int", recv)?,
+            (Value::Str(_), "to_float") => self.parse_number("float", recv)?,
+            (Value::Int(n), "char") => match u32::try_from(*n).ok().and_then(char::from_u32) {
+                Some(c) => Value::str(&c.to_string()),
+                None => return self.fail("R024", format!("{n} is not a valid character code"), span),
+            },
             (Value::Str(s), "upper") => Value::str(&s.to_uppercase()),
             (Value::Str(s), "lower") => Value::str(&s.to_lowercase()),
             (Value::Str(s), "trim") => Value::str(s.trim()),

@@ -1059,12 +1059,21 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | ------------------------------- | ---------------------------------------------- |
 | `len()`, `is_empty()`           | nombre de caractères ; `bool`                  |
 | `upper()`, `lower()`, `trim()`  | une nouvelle `string`                          |
+| `trim_start()`, `trim_end()`    | retire les espaces au début / à la fin         |
+| `capitalize()`                  | première lettre en majuscule                   |
+| `reverse()`                     | les caractères dans l'ordre inverse            |
 | `contains(s)`, `starts_with(s)`, `ends_with(s)` | `bool`                         |
-| `index_of(s)`                   | indice du caractère, ou `none` (`int?`)        |
+| `index_of(s)`, `last_index_of(s)` | indice du caractère (première / dernière occurrence), ou `none` (`int?`) |
+| `count(s)`                      | nombre d'occurrences non chevauchantes de `s` (`s` non vide) |
 | `replace(a, b)`                 | remplace toutes les occurrences                |
 | `split(sep)`                    | `array<string>` (séparateur vide : les caractères) |
 | `repeat(n)`                     | répète `n` fois                                |
 | `chars()`                       | `array<string>` d'un caractère chacun          |
+| `lines()`, `words()`            | `array<string>` : les lignes ; les mots séparés par des espaces |
+| `pad_left(largeur, c)`, `pad_right(largeur, c)` | complète jusqu'à `largeur` caractères avec le caractère `c` (une seule lettre) |
+| `is_digit()`, `is_alpha()`, `is_blank()` | `bool` : que des chiffres ; que des lettres ; vide ou que des espaces (`is_digit` et `is_alpha` sont faux pour `""`) |
+| `code()`                        | code Unicode d'une chaîne d'**un seul** caractère (`"A".code()` vaut 65) |
+| `to_int()`, `to_float()`        | comme `int.parse` / `float.parse` : `int?` / `float?` |
 | `substring(début, fin)`         | caractères de `début` (inclus) à `fin` (exclu) |
 
 `sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
@@ -1076,6 +1085,7 @@ Nombres :
 
 | Méthode / constante          | Résultat                                           |
 | ---------------------------- | -------------------------------------------------- |
+| `n.char()`                   | (`int`) la chaîne d'un caractère de code `n` (`97.char()` vaut `"a"`) |
 | `x.abs()`                    | valeur absolue (`int` ou `float`)                  |
 | `x.min(y)`, `x.max(y)`       | le plus petit / grand des deux (même type)         |
 | `x.pow(y)`                   | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`) |
@@ -1147,8 +1157,14 @@ end
 - **`m[clé] += 1`** lit la valeur elle-même : c'est une erreur d'exécution si la
   clé n'existe pas (utiliser `get` dans ce cas).
 - **Partage** : comme les tableaux, un dictionnaire est une référence partagée.
-- Les dictionnaires s'affichent `{"ana": 31, "bob": 27}` et ne se comparent pas
-  avec `==`.
+- Les dictionnaires s'affichent `{"ana": 31, "bob": 27}`. Deux dictionnaires sont
+  égaux (`==`) s'ils ont les mêmes clés avec des valeurs égales, quel que soit
+  l'ordre d'insertion.
+- **Pourquoi pas de clés `float`, tableau ou structure ?** Une clé doit désigner
+  toujours la même entrée. Un tableau ou une structure est une référence partagée
+  qu'on peut modifier après l'avoir rangée (`k[0] = 99`), et un `float` n'est pas
+  exact (`0.1 + 0.2 != 0.3`). Pour des coordonnées, utilise une chaîne
+  (`m["{x},{y}"]`) ou des dictionnaires imbriqués.
 - Un littéral vide `{}` demande une annotation de type : `let m = {}` est une
   erreur. Un littéral peut s'étendre sur plusieurs lignes et finir par une
   virgule.
@@ -1241,8 +1257,8 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 - **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
   s'étoffera à l'usage.
-- **Dictionnaires :** pas de comparaison `==`, et pas de clés de type `float`,
-  tableau ou structure.
+- **Dictionnaires :** pas de clés de type `float`, tableau ou structure (voir plus
+  haut), et pas de comparaison `<`.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme
   littéral (le chiffre sans signe dépasse 64 bits).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les

@@ -350,6 +350,7 @@ impl Checker {
             (Ty::Bool, Ty::Bool) | (Ty::Str, Ty::Str) => true,
             (Ty::Enum(x), Ty::Enum(y)) => x == y,
             (Ty::Array(x), Ty::Array(y)) => self.eq_ok(x, y),
+            (Ty::Map(k1, v1), Ty::Map(k2, v2)) => self.same(k1, k2) && self.eq_ok(v1, v2),
             (Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..), _) => self.find_lang_impl(&a, Lang::Eq, std::slice::from_ref(&b)).is_some(),
             _ => false,
         }

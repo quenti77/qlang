@@ -511,7 +511,7 @@ fn maps_static_errors() {
         ("let m = { \"a\": 1 }\nm[\"a\"] = \"s\"", "cannot store"),
         ("let m = { \"a\": 1 }\nfor k in m do\nend", "m.keys()"),
         ("let m = { \"a\": 1 }\nm[] = 2", "cannot append"),
-        ("let a = { \"a\": 1 }\nlet b = { \"a\": 1 }\nprint(a == b)", "cannot compare"),
+        ("let a = { \"a\": 1 }\nprint(a < a)", "cannot apply `<`"),
         ("let m = { \"a\": 1 }\nm.nope()", "no method"),
     ] {
         let e = err(src);
@@ -579,4 +579,48 @@ fn div_and_mod_assignment() {
     // the old way still works, and `/=` on an int is still an error
     assert!(err("let n = 8\nn /= 2").starts_with("COMPILE"));
     assert!(err("let x = 7.5\nx div= 2").starts_with("COMPILE"));
+}
+
+#[test]
+fn map_equality() {
+    assert_eq!(out("let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 2, \"x\": 1 }\nprint(a == b)\nprint(a != b)"), "true\nfalse\n");
+    assert_eq!(out("let a = { \"x\": 1 }\nprint(a == { \"x\": 2 })\nprint(a == { \"x\": 1, \"z\": 0 })\nprint(a == { \"q\": 1 })"), "false\nfalse\nfalse\n");
+    assert_eq!(out("let e1: map<int, string> = {}\nlet e2: map<int, string> = {}\nprint(e1 == e2)\nlet n = { 1: [1, 2] }\nprint(n == { 1: [1, 2] })\nprint(n == { 1: [2] })"), "true\ntrue\nfalse\n");
+    // nested maps, and maps inside arrays
+    assert_eq!(out("print([{ 1: 2 }] == [{ 1: 2 }])\nprint({ \"a\": { 1: 2 } } == { \"a\": { 1: 3 } })"), "true\nfalse\n");
+    // the maps must have the same kind of keys and comparable values
+    for src in ["print({ 1: 2 } == { \"a\": 2 })", "print({ 1: 2 } == { 1: \"s\" })"] {
+        assert!(err(src).starts_with("COMPILE"), "{src}");
+    }
+}
+
+#[test]
+fn float_keys_are_refused_with_an_explanation() {
+    let e = err("let m: map<float, int> = {}");
+    assert!(e.contains("decimal numbers are not exact"), "{e}");
+    let e = err("let m = { 1.5: 2 }");
+    assert!(e.contains("cannot be a map key"), "{e}");
+}
+
+#[test]
+fn string_library() {
+    assert_eq!(out("print(\"  hi  \".trim_start() + \"|\")\nprint(\"  hi  \".trim_end() + \"|\")\nprint(\"héllo\".reverse())\nprint(\"hello world\".capitalize())\nprint(\"\".capitalize() == \"\")"), "hi  |\n  hi|\nolléh\nHello world\ntrue\n");
+    assert_eq!(out("print(\"a-b-c\".last_index_of(\"-\"))\nprint(\"abc\".last_index_of(\"z\"))\nprint(\"banana\".count(\"an\"))\nprint(\"aaa\".count(\"aa\"))"), "3\nnone\n2\n1\n");
+    assert_eq!(out("print(\"a\\nb\\r\\nc\\n\".lines())\nprint(\"  the  quick\\tfox \".words())"), "[\"a\", \"b\", \"c\"]\n[\"the\", \"quick\", \"fox\"]\n");
+    assert_eq!(out("print(\"7\".pad_left(3, \"0\"))\nprint(\"ab\".pad_right(5, \".\") + \"|\")\nprint(\"toolong\".pad_left(3, \"0\"))\nprint(\"é\".pad_left(3, \"*\"))"), "007\nab...|\ntoolong\n**é\n");
+    assert_eq!(out("print(\"123\".is_digit())\nprint(\"12a\".is_digit())\nprint(\"\".is_digit())\nprint(\"héé\".is_alpha())\nprint(\"a1\".is_alpha())\nprint(\"  \".is_blank())\nprint(\"\".is_blank())\nprint(\" x\".is_blank())"), "true\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n");
+    assert_eq!(out("print(\"A\".code())\nprint(\"é\".code())\nprint(97.char())\nprint(8364.char())"), "65\n233\na\n€\n");
+    assert_eq!(out("print(\"42\".to_int())\nprint(\"4x\".to_int())\nprint(\"2.5\".to_float())\nprint(\"x\".to_float())\nlet n = \" 12 \".to_int()\nif n != none then print(n + 1) end"), "42\nnone\n2.5\nnone\n13\n");
+    // a Caesar cipher uses code() and char()
+    assert_eq!(
+        out("fun shift(s: string, k: int) -> string\nlet out = \"\"\nfor c in s do\nlet base = 97\nout += ((c.code() - base + k) mod 26 + base).char()\nend\nout\nend\nprint(shift(\"hello\", 3))"),
+        "khoor\n"
+    );
+    assert!(err("print(\"ab\".code())").starts_with("R024"));
+    assert!(err("print((-1).char())").starts_with("R024"));
+    assert!(err("print(55296.char())").starts_with("R024"));
+    assert!(err("print(\"x\".pad_left(3, \"ab\"))").starts_with("R021"));
+    assert!(err("print(\"x\".count(\"\"))").starts_with("R021"));
+    let o = run_files(&[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")], None, Limits { max_alloc: 1000, ..Limits::default() });
+    assert!(o.error.unwrap().starts_with("R903"));
 }

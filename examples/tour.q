@@ -249,6 +249,14 @@ rest div= 5
 rest mod= 2
 print(rest)
 
+print(ages == { "bob": 27, "ana": 31, "cleo": 45 })
+
+-- strings
+print("7".pad_left(3, "0"))
+print("hello world".capitalize())
+print("one two  three".words().len())
+print("abc".reverse() + "!")
+
 -- sorting and math
 let scores = [42, 7, 19]
 scores.sort()

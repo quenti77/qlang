@@ -236,6 +236,18 @@ for name in ages.keys() do
   write("{name} ")
 end
 print("")
+for name, age in ages do
+  write("{name}={age} ")
+end
+print("")
+for i, c in "abc" do
+  write("{i}{c} ")
+end
+print("")
+let rest = 17
+rest div= 5
+rest mod= 2
+print(rest)
 
 -- sorting and math
 let scores = [42, 7, 19]

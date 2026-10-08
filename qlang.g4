@@ -41,6 +41,7 @@ assignmentExpression
 
 assignOperator
     : Assign | PlusAssign | MinusAssign | StarAssign | SlashAssign | PercentAssign
+    | IntDivAssign | ModAssign
     ;
 
 rangeExpression
@@ -216,9 +217,10 @@ variableDeclaration
 returnStatement: Return expression?;
 
 whileStatement: While expression Do block End;
-
 // for i in 0..10 step 2 do ... end      for x in items do ... end
-forStatement: For Identifier In expression (Step expression)? Do block End;
+// for i in 0..10 step 2 do ... end   for x in items do ... end
+// for i, x in items do ... end    for key, value in map do ... end
+forStatement: For Identifier (Comma Identifier)? In expression (Step expression)? Do block End;
 
 breakStatement: Break;
 
@@ -475,6 +477,8 @@ MinusAssign: '-=';
 StarAssign: '*=';
 SlashAssign: '/=';
 PercentAssign: '%=';
+IntDivAssign: 'div=';
+ModAssign: 'mod=';
 Assign: '=';
 
 DotDotEq: '..=';

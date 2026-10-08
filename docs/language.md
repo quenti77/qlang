@@ -295,7 +295,7 @@ affectation. Une `string` ne se modifie pas sur place : une opération qui la
 
 ### Affectation
 
-`=` et les opérateurs composés `+=` `-=` `*=` `/=` `%=` modifient une variable,
+`=` et les opérateurs composés `+=` `-=` `*=` `/=` `div=` `mod=` `%=` modifient une variable,
 un champ (`a.b = 1`) ou un élément (`a[i] = 1`). L'affectation est une
 expression : `a = b = 0` est valide. `x op= y` signifie `x = x op y`, et le type
 du résultat doit convenir à `x`.
@@ -306,7 +306,8 @@ a[0] = 42
 ```
 
 Attention : `/` donne toujours un `float`. Écrire `n /= 2` pour un `int` est donc
-une erreur ; on écrit `n = n div 2`.
+une erreur ; on écrit `n div= 2` (ou `n = n div 2`). `div=` s'écrit collé, sans
+espace entre `div` et `=` (de même pour `mod=`).
 
 ---
 
@@ -318,7 +319,7 @@ De la plus faible à la plus forte :
 
 | Opérateurs                                | Remarque                                                     |
 | ----------------------------------------- | ------------------------------------------------------------ |
-| `=` `+=` `-=` `*=` `/=` `%=`              | affectation, associative à droite                            |
+| `=` `+=` `-=` `*=` `/=` `div=` `mod=` `%=` | affectation, associative à droite                           |
 | `..` `..=`                                | intervalle, non associatif                                   |
 | `or`                                      |                                                              |
 | `and`                                     |                                                              |
@@ -389,7 +390,7 @@ Les opérateurs sont définis par des **traits**. `a + b` est du sucre pour
 | `-x`                     | `Neg`      | `neg`        |
 | `==` `!=`                | `Eq`       | `eq`         |
 | `<` `<=` `>` `>=`        | `Ord`      | `cmp` (renvoie un `int` : négatif, nul ou positif) |
-| `+=` `-=` `*=` `/=` `%=` | les mêmes traits | `a += b` signifie `a = a + b` |
+| `+=` `-=` `*=` `/=` `div=` `mod=` `%=` | les mêmes traits | `a += b` signifie `a = a + b` |
 | `a[i]`                   | `Index<I>` | `index`      |
 | `a[i] = v`               | `IndexSet<I, V>` | `set_index` |
 | `a[] = v`                | `Push<T>`  | `push`       |
@@ -494,12 +495,27 @@ end
 for c in "abc" do         -- parcours d'une chaîne, caractère par caractère
   print(c)
 end
+
+for i, item in items do   -- avec l'indice : 0, 1, 2…
+  print("{i}: {item}")
+end
+
+for key, value in ages do -- parcours d'un dictionnaire : clé et valeur
+  print("{key} a {value} ans")
+end
 ```
 
 - `break` quitte la boucle, `continue` passe à l'itération suivante.
 - Il n'y a pas de `loop` : écrire `while true do … end`.
 - `break` et `continue` n'ont pas d'étiquette : ils concernent la boucle la plus
   proche.
+- **Deux variables** : sur un tableau ou une chaîne, `for i, x in …` donne l'indice
+  (un `int`, à partir de 0) puis l'élément ; sur un dictionnaire, `for k, v in m`
+  donne la clé puis la valeur, dans l'ordre d'insertion. Un intervalle n'a pas de
+  deuxième variable. Boucler sur un dictionnaire avec une seule variable est une
+  erreur (clés ou valeurs ?) : écrire `for k, v in m` ou `for k in m.keys()`.
+  La boucle sur un dictionnaire travaille sur une copie de ses entrées : on peut
+  le modifier dans le corps.
 - `step` ne s'utilise qu'avec un intervalle. Un pas positif avance tant que la
   valeur est inférieure à la fin, un pas négatif tant qu'elle est supérieure. Le
   pas ne peut pas être 0. Sans `step`, le pas est 1 : `5..1` ne fait aucun tour.
@@ -1124,9 +1140,10 @@ end
 | `values()`          | `array<V>` des valeurs, dans le même ordre                  |
 | `clear()`          | vide le dictionnaire                                        |
 
-- **Parcours** : on parcourt les clés, puis on lit la valeur :
-  `for name in ages.keys() do print("{name}: {ages[name]}") end`. Boucler
-  directement sur un dictionnaire (`for x in m`) est une erreur.
+- **Parcours** : `for name, age in ages do … end` donne la clé et la valeur, dans
+  l'ordre d'insertion. On peut aussi ne parcourir que les clés
+  (`for name in ages.keys() do`). Boucler sur un dictionnaire avec une seule
+  variable (`for x in m`) est une erreur.
 - **`m[clé] += 1`** lit la valeur elle-même : c'est une erreur d'exécution si la
   clé n'existe pas (utiliser `get` dans ce cas).
 - **Partage** : comme les tableaux, un dictionnaire est une référence partagée.
@@ -1224,10 +1241,8 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 - **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
   s'étoffera à l'usage.
-- **Dictionnaires :** pas de comparaison `==`, pas de clés de type `float`, tableau
-  ou structure, et pas de parcours direct (`for k, v in m`) pour l'instant.
-- **`/=` sur des entiers :** `n /= 2` est une erreur car `/` renvoie un `float`.
-  Un opérateur `div=` pourrait être ajouté si ça gêne.
+- **Dictionnaires :** pas de comparaison `==`, et pas de clés de type `float`,
+  tableau ou structure.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme
   littéral (le chiffre sans signe dépasse 64 bits).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les

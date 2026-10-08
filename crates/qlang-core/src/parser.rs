@@ -594,13 +594,14 @@ impl<'a> Parser<'a> {
             Tok::For => {
                 self.bump();
                 let var = self.expect_ident()?;
+                let var2 = if self.eat(&Tok::Comma) { Some(self.expect_ident()?) } else { None };
                 self.expect(&Tok::In)?;
                 let iter = self.parse_expr()?;
                 let step = if self.eat(&Tok::Step) { Some(self.parse_expr()?) } else { None };
                 self.expect(&Tok::Do)?;
                 let body = self.parse_block(&[Tok::End]);
                 self.expect(&Tok::End)?;
-                StmtKind::For { var, iter, step, body }
+                StmtKind::For { var, var2, iter, step, body }
             }
             Tok::Break => {
                 self.bump();
@@ -742,7 +743,8 @@ impl<'a> Parser<'a> {
             Tok::MinusAssign => Some(Some(BinOp::Sub)),
             Tok::StarAssign => Some(Some(BinOp::Mul)),
             Tok::SlashAssign => Some(Some(BinOp::Div)),
-            Tok::PercentAssign => Some(Some(BinOp::Mod)),
+            Tok::PercentAssign | Tok::ModAssign => Some(Some(BinOp::Mod)),
+            Tok::IntDivAssign => Some(Some(BinOp::IntDiv)),
             _ => None,
         };
         if let Some(op) = op {

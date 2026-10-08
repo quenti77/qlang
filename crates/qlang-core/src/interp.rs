@@ -227,7 +227,7 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Value::Unit)
             }
-            StmtKind::For { var, iter, step, body } => {
+            StmtKind::For { var, var2, iter, step, body } => {
                 let it = self.eval(iter, env)?;
                 let step_v = match step {
                     Some(st) => match self.eval(st, env)? {
@@ -236,9 +236,12 @@ impl<'a> Interp<'a> {
                     },
                     None => None,
                 };
-                let run_body = |this: &mut Self, v: Value| -> R<bool> {
+                let run_body = |this: &mut Self, v: Value, v2: Option<Value>| -> R<bool> {
                     let scope = Scope::new(Some(env.clone()));
                     scope.define(&var.name, v);
+                    if let (Some(name), Some(second)) = (var2, v2) {
+                        scope.define(&name.name, second);
+                    }
                     match this.exec_stmts(&body.stmts, &scope) {
                         Ok(_) | Err(Ctrl::Continue) => Ok(true),
                         Err(Ctrl::Break) => Ok(false),
@@ -263,7 +266,7 @@ impl<'a> Interp<'a> {
                             if !in_range {
                                 break;
                             }
-                            if !run_body(self, Value::Int(i))? {
+                            if !run_body(self, Value::Int(i), None)? {
                                 break;
                             }
                             self.tick(s.span)?;
@@ -278,7 +281,12 @@ impl<'a> Interp<'a> {
                         loop {
                             let item = a.borrow().get(i).cloned();
                             let Some(v) = item else { break };
-                            if !run_body(self, v)? {
+                            let ok = if var2.is_some() {
+                                run_body(self, Value::Int(i as i64), Some(v))?
+                            } else {
+                                run_body(self, v, None)?
+                            };
+                            if !ok {
                                 break;
                             }
                             self.tick(s.span)?;
@@ -286,8 +294,24 @@ impl<'a> Interp<'a> {
                         }
                     }
                     Value::Str(st) => {
-                        for ch in st.chars() {
-                            if !run_body(self, Value::str(&ch.to_string()))? {
+                        for (i, ch) in st.chars().enumerate() {
+                            let c = Value::str(&ch.to_string());
+                            let ok = if var2.is_some() {
+                                run_body(self, Value::Int(i as i64), Some(c))?
+                            } else {
+                                run_body(self, c, None)?
+                            };
+                            if !ok {
+                                break;
+                            }
+                            self.tick(s.span)?;
+                        }
+                    }
+                    Value::Map(m) => {
+                        // a snapshot: the map may be changed by the loop body
+                        let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                        for (k, v) in entries {
+                            if !run_body(self, k, Some(v))? {
                                 break;
                             }
                             self.tick(s.span)?;

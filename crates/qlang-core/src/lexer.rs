@@ -72,6 +72,10 @@ pub enum Tok {
     StarAssign,
     SlashAssign,
     PercentAssign,
+    /// `div=`
+    IntDivAssign,
+    /// `mod=`
+    ModAssign,
     Assign,
     DotDotEq,
     DotDot,
@@ -165,6 +169,8 @@ impl Tok {
             Tok::StarAssign => "*=",
             Tok::SlashAssign => "/=",
             Tok::PercentAssign => "%=",
+            Tok::IntDivAssign => "div=",
+            Tok::ModAssign => "mod=",
             Tok::Assign => "=",
             Tok::DotDotEq => "..=",
             Tok::DotDot => "..",
@@ -318,7 +324,16 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
                     i += 1;
                 }
                 let word = &src[start..i];
-                let tok = keyword(word).unwrap_or_else(|| Tok::Ident(word.to_string()));
+                // `div=` and `mod=` are compound assignments (but `div ==` is not)
+                let compound = matches!(word, "div" | "mod") && b.get(i) == Some(&b'=') && b.get(i + 1) != Some(&b'=');
+                if compound {
+                    i += 1;
+                }
+                let tok = match (word, compound) {
+                    ("div", true) => Tok::IntDivAssign,
+                    ("mod", true) => Tok::ModAssign,
+                    _ => keyword(word).unwrap_or_else(|| Tok::Ident(word.to_string())),
+                };
                 push!(tok, start, i);
             }
             _ => {

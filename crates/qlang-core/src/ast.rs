@@ -177,6 +177,8 @@ pub enum StmtKind {
     While { cond: Expr, body: Block },
     For {
         var: Ident,
+        /// `for key, value in map` / `for index, item in array`
+        var2: Option<Ident>,
         iter: Expr,
         step: Option<Expr>,
         body: Block,

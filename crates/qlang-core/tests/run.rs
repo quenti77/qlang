@@ -535,3 +535,48 @@ fn braces_still_work_for_structs_and_blocks() {
     // multi-line literals, with a trailing comma
     assert_eq!(out("let m = {\n  \"a\": 1,\n  \"b\": 2,\n}\nprint(m.len())"), "2\n");
 }
+
+#[test]
+fn for_with_two_variables() {
+    // maps: key and value, in insertion order
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nfor k, v in m do\nwrite(\"{k}={v} \")\nend\nprint(\"\")"), "a=1 b=2 \n");
+    // arrays: index and item
+    assert_eq!(out("for i, x in [\"x\", \"y\", \"z\"] do\nwrite(\"{i}:{x} \")\nend\nprint(\"\")"), "0:x 1:y 2:z \n");
+    // strings: index and character
+    assert_eq!(out("for i, c in \"héy\" do\nwrite(\"{i}{c} \")\nend\nprint(\"\")"), "0h 1é 2y \n");
+    // break and continue still work; the body may change the map (the loop sees a snapshot)
+    assert_eq!(out("let m = { 1: 10, 2: 20, 3: 30 }\nfor k, v in m do\nif k == 1 then continue end\nm.remove(3)\nwrite(\"{k}:{v} \")\nif k == 2 then break end\nend\nprint(m.len())"), "2:20 2\n");
+    // each iteration has its own variables (closures)
+    assert_eq!(out("let fs: array<fun() -> int> = []\nfor i, x in [5, 6] do\nfs[] = fun() -> int\ni * 100 + x\nend\nend\nfor f in fs do\nwrite(\"{f()} \")\nend\nprint(\"\")"), "5 106 \n");
+    // typed: the value has the map's value type
+    assert_eq!(out("let m = { \"a\": 1.5 }\nfor k, v in m do\nprint(v * 2)\nend"), "3.0\n");
+    // an array of arrays, with an item that is itself a collection
+    assert_eq!(out("let rows = [[1, 2], [3]]\nfor i, r in rows do\nprint(\"{i}: {r.len()}\")\nend"), "0: 2\n1: 1\n");
+}
+
+#[test]
+fn for_with_two_variables_errors() {
+    for (src, needle) in [
+        ("for k, v in 0..3 do\nend", "with two variables"),
+        ("let m = { 1: 2 }\nfor k in m do\nend", "for key, value in m"),
+        ("for a, a in [1] do\nend", "already declared"),
+        ("for i, x in [1] step 2 do\nend", "`step`"),
+        ("for k, v in 5 do\nend", "with two variables"),
+        ("for k, in [1] do\nend", "expected"),
+    ] {
+        let e = err(src);
+        assert!(e.starts_with("COMPILE") && e.contains(needle), "for:\n{src}\nexpected {needle:?}, got:\n{e}");
+    }
+}
+
+#[test]
+fn div_and_mod_assignment() {
+    assert_eq!(out("let n = 17\nn div= 5\nprint(n)\nn mod= 2\nprint(n)\nn = 100\nn %= 7\nprint(n)"), "3\n1\n2\n");
+    assert_eq!(out("let a = [20]\na[0] div= 3\nprint(a[0])\nlet m = { \"k\": 9 }\nm[\"k\"] mod= 4\nprint(m[\"k\"])"), "6\n1\n");
+    assert_eq!(out("let x = 7.5\nx mod= 2\nprint(x)"), "1.5\n");
+    // `div ==` and `mod ==` are not compound assignments; spaces keep them apart
+    assert_eq!(out("let n = 7\nprint(n div 2 == 3)\nprint(n mod 2 == 1)"), "true\ntrue\n");
+    // the old way still works, and `/=` on an int is still an error
+    assert!(err("let n = 8\nn /= 2").starts_with("COMPILE"));
+    assert!(err("let x = 7.5\nx div= 2").starts_with("COMPILE"));
+}

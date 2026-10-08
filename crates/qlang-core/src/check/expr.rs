@@ -285,18 +285,29 @@ impl Checker {
                 self.loop_depth -= 1;
                 Ty::Unit
             }
-            StmtKind::For { var, iter, step, body } => {
+            StmtKind::For { var, var2, iter, step, body } => {
                 let it = self.expr(iter, &Want::Any);
                 let it = self.resolve(&it);
-                let elem = match &it {
-                    Ty::Range => Ty::Int,
-                    Ty::Array(t) => (**t).clone(),
-                    Ty::Str => Ty::Str,
-                    Ty::Error => Ty::Error,
-                    other => {
+                // the type of the (first, second) loop variables
+                let (elem, elem2) = match (&it, var2.is_some()) {
+                    (Ty::Range, false) => (Ty::Int, Ty::Error),
+                    (Ty::Array(t), false) => ((**t).clone(), Ty::Error),
+                    (Ty::Str, false) => (Ty::Str, Ty::Error),
+                    (Ty::Array(t), true) => (Ty::Int, (**t).clone()),
+                    (Ty::Str, true) => (Ty::Int, Ty::Str),
+                    (Ty::Map(k, v), true) => ((**k).clone(), (**v).clone()),
+                    (Ty::Error, _) => (Ty::Error, Ty::Error),
+                    (other, two) => {
                         let shown = other.show(&self.defs);
-                        self.err("T190", format!("cannot loop over `{shown}` (use a range like `0..10`, an array or a string; for a map, loop over `m.keys()`)"), iter.span);
-                        Ty::Error
+                        let msg = if two {
+                            format!("cannot loop over `{shown}` with two variables (use a map, an array or a string)")
+                        } else if matches!(other, Ty::Map(..)) {
+                            format!("a `{shown}` has keys and values: write `for key, value in m do` or `for key in m.keys() do`")
+                        } else {
+                            format!("cannot loop over `{shown}` (use a range like `0..10`, an array, a string or a map)")
+                        };
+                        self.err("T190", msg, iter.span);
+                        (Ty::Error, Ty::Error)
                     }
                 };
                 if let Some(st) = step {
@@ -311,6 +322,9 @@ impl Checker {
                 self.loop_depth += 1;
                 self.push_scope();
                 self.declare(var, Local { ty: elem, kind: LocalKind::Var, orig: None, span: var.span });
+                if let Some(v2) = var2 {
+                    self.declare(v2, Local { ty: elem2, kind: LocalKind::Var, orig: None, span: v2.span });
+                }
                 self.check_block(body, &Want::Unused);
                 self.pop_scope();
                 self.loop_depth -= 1;

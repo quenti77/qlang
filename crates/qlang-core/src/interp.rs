@@ -40,6 +40,7 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
         envs: Vec::new(),
         statics: HashMap::new(),
         frames: Vec::new(),
+        cur_call: 0,
     };
     let error = match it.run_all() {
         Ok(()) => None,
@@ -82,6 +83,8 @@ struct Interp<'a> {
     envs: Vec<Env>,
     statics: HashMap<(StructId, String), Value>,
     frames: Vec<(String, Span)>,
+    /// The call expression being evaluated (for `sum()` on empty float arrays).
+    cur_call: NodeId,
 }
 
 impl<'a> Interp<'a> {
@@ -492,6 +495,15 @@ impl<'a> Interp<'a> {
                     None => self.fail("R002", format!("static field `{n}` has no value yet"), e.span),
                 };
             }
+            Some(PathRes::BuiltinStatic(ty, name)) => {
+                return Ok(match (*ty, *name) {
+                    ("float", "PI") => Value::Float(std::f64::consts::PI),
+                    ("float", "E") => Value::Float(std::f64::consts::E),
+                    ("int", "MAX") => Value::Int(i64::MAX),
+                    ("int", "MIN") => Value::Int(i64::MIN),
+                    _ => Value::Unit,
+                });
+            }
             Some(PathRes::Fn(fid)) => return Ok(self.fn_value(*fid)),
             Some(PathRes::Global(m, n)) => {
                 return match self.envs[*m].get(n) {
@@ -553,6 +565,7 @@ impl<'a> Interp<'a> {
                     if !matches!(prog.res.paths.get(&obj.id), Some(PathRes::Module(_)) | Some(PathRes::Type(_))) {
                         let recv = self.eval(obj, env)?;
                         let argv = self.eval_args(args, env)?;
+                        self.cur_call = e.id;
                         return self.call_method(recv, name, argv, e.span);
                     }
                 }
@@ -1154,6 +1167,52 @@ impl<'a> Interp<'a> {
 
     // -------------------------------------------------------------- built-ins
 
+    /// Total order used by `sort`, `min` and `max`.
+    fn order(&mut self, a: &Value, b: &Value, span: Span) -> R<Ordering> {
+        self.tick(span)?;
+        match (a, b) {
+            (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
+            (Value::Str(x), Value::Str(y)) => Ok(x.as_ref().cmp(y.as_ref())),
+            _ => {
+                if let (Some(x), Some(y)) = (num(a), num(b)) {
+                    return Ok(x.total_cmp(&y));
+                }
+                let ord = self.prog.defs.lang(Lang::Ord);
+                match self.find_method(a, Lang::Ord.method_name(), Some(ord), Some(b)) {
+                    Some(fid) => match self.call_fid(fid, Some(a.clone()), vec![b.clone()], span)? {
+                        Value::Int(i) => Ok(i.cmp(&0)),
+                        _ => self.fail("R001", "`cmp` must return an int", span),
+                    },
+                    None => self.fail("R004", "these values cannot be ordered", span),
+                }
+            }
+        }
+    }
+
+    /// Stable merge sort, because comparing can call user code and fail.
+    fn merge_sort(&mut self, v: Vec<Value>, span: Span) -> R<Vec<Value>> {
+        if v.len() <= 1 {
+            return Ok(v);
+        }
+        let mid = v.len() / 2;
+        let left = self.merge_sort(v[..mid].to_vec(), span)?;
+        let right = self.merge_sort(v[mid..].to_vec(), span)?;
+        let mut out = Vec::with_capacity(left.len() + right.len());
+        let (mut i, mut j) = (0, 0);
+        while i < left.len() && j < right.len() {
+            if self.order(&left[i], &right[j], span)? != Ordering::Greater {
+                out.push(left[i].clone());
+                i += 1;
+            } else {
+                out.push(right[j].clone());
+                j += 1;
+            }
+        }
+        out.extend_from_slice(&left[i..]);
+        out.extend_from_slice(&right[j..]);
+        Ok(out)
+    }
+
     fn builtin_fn(&mut self, name: &str, args: Vec<Value>, span: Span) -> R<Value> {
         match name {
             "print" | "write" => {
@@ -1325,6 +1384,73 @@ impl<'a> Interp<'a> {
                 }
                 Value::str(&s.chars().skip(a as usize).take((b - a) as usize).collect::<String>())
             }
+            (Value::Array(a), "sort") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let sorted = self.merge_sort(items, span)?;
+                *a.borrow_mut() = sorted;
+                Value::Unit
+            }
+            (Value::Array(a), "min" | "max") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut best: Option<Value> = None;
+                for it in items {
+                    best = Some(match best {
+                        None => it,
+                        Some(b) => {
+                            let o = self.order(&it, &b, span)?;
+                            if (name == "min" && o == Ordering::Less) || (name == "max" && o == Ordering::Greater) { it } else { b }
+                        }
+                    });
+                }
+                best.unwrap_or(Value::None)
+            }
+            (Value::Array(a), "sum") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let all_int = items.iter().all(|v| matches!(v, Value::Int(_)));
+                if items.is_empty() {
+                    if self.prog.res.float_sums.contains(&self.cur_call) { Value::Float(0.0) } else { Value::Int(0) }
+                } else if all_int {
+                    let mut total: i64 = 0;
+                    for v in &items {
+                        if let Value::Int(n) = v {
+                            total = match total.checked_add(*n) {
+                                Some(t) => t,
+                                None => return self.fail("R010", "integer overflow", span),
+                            };
+                        }
+                    }
+                    Value::Int(total)
+                } else {
+                    Value::Float(items.iter().filter_map(num).sum())
+                }
+            }
+            (Value::Array(a), "slice") => {
+                let len = a.borrow().len();
+                let (s, e) = (int_arg(0).unwrap_or(-1), int_arg(1).unwrap_or(-1));
+                if s < 0 || e < s || e as usize > len {
+                    return self.fail("R020", format!("invalid slice {s}..{e} (length {len})"), span);
+                }
+                Value::array(a.borrow()[s as usize..e as usize].to_vec())
+            }
+            (Value::Int(x), "min" | "max") => {
+                let y = int_arg(0).unwrap_or(0);
+                Value::Int(if name == "min" { (*x).min(y) } else { (*x).max(y) })
+            }
+            (Value::Int(_), "pow") => match self.arith(BinOp::Pow, recv, &args[0], span)? {
+                Some(v) => v,
+                None => return Ok(None),
+            },
+            (Value::Int(x), "sqrt") => {
+                if *x < 0 {
+                    return self.fail("R014", "square root of a negative number", span);
+                }
+                Value::Float((*x as f64).sqrt())
+            }
+            (Value::Float(x), "min" | "max") => {
+                let y = num(&args[0]).unwrap_or(0.0);
+                Value::Float(if name == "min" { x.min(y) } else { x.max(y) })
+            }
+            (Value::Float(x), "pow") => Value::Float(x.powf(num(&args[0]).unwrap_or(0.0))),
             (Value::Int(i), "abs") => match i.checked_abs() {
                 Some(v) => Value::Int(v),
                 None => return self.fail("R010", "integer overflow", span),

@@ -156,7 +156,19 @@ impl Checker {
                     }
                 }
             }
-            TypeRef::Builtin(_) => {}
+            TypeRef::Builtin(b) => {
+                let found = match (*b, name.name.as_str()) {
+                    ("float", "PI") => Some(("float", "PI", Ty::Float)),
+                    ("float", "E") => Some(("float", "E", Ty::Float)),
+                    ("int", "MAX") => Some(("int", "MAX", Ty::Int)),
+                    ("int", "MIN") => Some(("int", "MIN", Ty::Int)),
+                    _ => None,
+                };
+                if let Some((a, n, t)) = found {
+                    self.res.paths.insert(e.id, PathRes::BuiltinStatic(a, n));
+                    return t;
+                }
+            }
         }
         if let Some(um) = self.find_user_method(ty, &name.name) {
             let f = self.defs.fns[um.fid].clone();
@@ -401,6 +413,7 @@ impl Checker {
         // built-in methods first for built-in types
         if !matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..))
             && let Some((params, ret)) = self.builtin_method(&rt, &name.name) {
+                self.check_builtin_constraint(e, &rt, &name.name, callee.span);
                 let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret };
                 return self.check_args(e.span, &sig, &[], HashMap::new(), args);
             }
@@ -615,6 +628,38 @@ impl Checker {
         }
     }
 
+    /// Built-in array methods that need something of the element type.
+    fn check_builtin_constraint(&mut self, e: &Expr, recv: &Ty, name: &str, span: Span) {
+        let Ty::Array(t) = recv else { return };
+        let t = self.resolve(t);
+        if matches!(t, Ty::Never | Ty::Error) {
+            return;
+        }
+        match name {
+            "sort" | "min" | "max" => {
+                if self.find_lang_impl(&t, Lang::Ord, std::slice::from_ref(&t)).is_none() {
+                    let shown = self.show(&t);
+                    self.err(
+                        "T260",
+                        format!("`{name}()` needs elements that can be ordered, but `{shown}` cannot (implement `Ord` for it)"),
+                        span,
+                    );
+                }
+            }
+            "sum" => match t {
+                Ty::Int => {}
+                Ty::Float => {
+                    self.res.float_sums.insert(e.id);
+                }
+                _ => {
+                    let shown = self.show(&t);
+                    self.err("T260", format!("`sum()` needs an array of numbers, not `array<{shown}>`"), span);
+                }
+            },
+            _ => {}
+        }
+    }
+
     /// Signatures of the methods the language provides on its own types.
     pub fn builtin_method(&mut self, recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
         let s = Ty::Str;
@@ -631,6 +676,10 @@ impl Checker {
             (Ty::Array(t), "index_of") => (vec![(**t).clone()], Ty::nullable(Ty::Int)),
             (Ty::Array(_), "reverse") => (vec![], Ty::Unit),
             (Ty::Array(_), "join") => (vec![s.clone()], s),
+            (Ty::Array(_), "sort") => (vec![], Ty::Unit),
+            (Ty::Array(t), "min" | "max") => (vec![], Ty::nullable((**t).clone())),
+            (Ty::Array(t), "sum") => (vec![], (**t).clone()),
+            (Ty::Array(t), "slice") => (vec![Ty::Int, Ty::Int], arr(t)),
             (Ty::Str, "len") => (vec![], Ty::Int),
             (Ty::Str, "is_empty") => (vec![], Ty::Bool),
             (Ty::Str, "upper" | "lower" | "trim") => (vec![], Ty::Str),
@@ -642,7 +691,10 @@ impl Checker {
             (Ty::Str, "chars") => (vec![], arr(&Ty::Str)),
             (Ty::Str, "substring") => (vec![Ty::Int, Ty::Int], Ty::Str),
             (Ty::Int, "abs") => (vec![], Ty::Int),
+            (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
+            (Ty::Int, "sqrt") => (vec![], Ty::Float),
             (Ty::Float, "abs" | "sqrt") => (vec![], Ty::Float),
+            (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
             (Ty::Float, "floor" | "ceil" | "round") => (vec![], Ty::Int),
             _ => return None,
         })

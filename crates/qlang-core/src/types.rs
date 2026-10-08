@@ -2,7 +2,7 @@
 
 use crate::ast::{Expr, FunDecl, NodeId, Visibility};
 use crate::span::Span;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub type StructId = usize;
@@ -461,4 +461,6 @@ pub struct Resolutions {
     pub super_calls: HashMap<NodeId, FnId>,
     /// Enum variant patterns: (match expression, case index) to variant.
     pub patterns: HashMap<(NodeId, usize), (EnumId, usize)>,
+    /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
+    pub float_sums: HashSet<NodeId>,
 }

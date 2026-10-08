@@ -415,3 +415,49 @@ fn advanced_generics() {
     assert!(o.starts_with("20\n20\n1\n[\"n1\", \"n2\", \"n3\"]\n[2, 4, 6]\n10\n"), "{o}");
     assert!(o.ends_with("true\nfalse\ntrue\n[\"hell0\", \"w0rld\"]\n"), "{o}");
 }
+
+#[test]
+fn array_sort_min_max_sum_slice() {
+    assert_eq!(out("let a = [3, 1, 2]\na.sort()\nprint(a)"), "[1, 2, 3]\n");
+    assert_eq!(out("let s = [\"pear\", \"apple\", \"fig\"]\ns.sort()\nprint(s)"), "[\"apple\", \"fig\", \"pear\"]\n");
+    assert_eq!(out("let f = [2.5, -1.0, 9.75]\nf.sort()\nprint(f)\nprint(f.min())\nprint(f.max())"), "[-1.0, 2.5, 9.75]\n-1.0\n9.75\n");
+    assert_eq!(out("print([4, 9, 2].min())\nprint([4, 9, 2].max())\nlet e: array<int> = []\nprint(e.min())"), "2\n9\nnone\n");
+    assert_eq!(out("print([1, 2, 3, 4].sum())\nprint([1.5, 2.5].sum())\nlet e: array<int> = []\nlet g: array<float> = []\nprint(e.sum())\nprint(g.sum())"), "10\n4.0\n0\n0.0\n");
+    assert_eq!(out("let a = [1, 2, 3, 4, 5]\nprint(a.slice(1, 3))\nprint(a.slice(0, 0))\nlet b = a.slice(2, 5)\nb[0] = 99\nprint(a[2])"), "[2, 3]\n[]\n3\n");
+    assert!(err("print([1, 2].slice(1, 5))").starts_with("R020"));
+    assert!(err("print([1, 2].slice(2, 1))").starts_with("R020"));
+    // the sort is stable and works on user types through Ord
+    let src = "struct P\npublic n: int\npublic tag: string\nend\nimpl Ord for P\npublic fun cmp(self, o: P) -> int\nself.n - o.n\nend\nend\nlet ps = [P { n: 2, tag: \"a\" }, P { n: 1, tag: \"b\" }, P { n: 2, tag: \"c\" }]\nps.sort()\nfor p in ps do\nwrite(p.tag)\nend\nprint(\"\")\nlet hi = ps.max()\nlet lo = ps.min()\nif hi != none and lo != none then\nprint(hi.tag)\nprint(lo.tag)\nend";
+    // equal elements keep their order (stable); max/min keep the first of equals
+    assert_eq!(out(src), "bac\na\nb\n");
+    // a lot of elements sorts quickly and correctly
+    assert_eq!(out("let a: array<int> = []\nfor i in 0..2000 do\na[] = (i * 7919) mod 2003\nend\na.sort()\nprint(a[0])\nprint(a[1999])\nlet ok = true\nfor i in 1..2000 do\nif a[i - 1] > a[i] then ok = false end\nend\nprint(ok)"), "0\n2002\ntrue\n");
+}
+
+#[test]
+fn array_helpers_reject_wrong_element_types() {
+    for src in [
+        "struct S\nend\nlet a = [S { }]\na.sort()",
+        "print([true, false].max())",
+        "print([\"a\"].sum())",
+        "let a = [1, 2]\nprint(a.slice(1))",
+    ] {
+        assert!(err(src).starts_with("COMPILE"), "expected a compile error for:\n{src}");
+    }
+    let e = err("print([\"a\"].sum())");
+    assert!(e.contains("needs an array of numbers"), "{e}");
+}
+
+#[test]
+fn number_methods_and_constants() {
+    assert_eq!(out("print(3.min(8))\nprint(3.max(8))\nprint(2.pow(10))\nprint(16.sqrt())"), "3\n8\n1024\n4.0\n");
+    assert_eq!(out("print(2.5.min(1.5))\nprint(2.5.max(1.5))\nprint(2.0.pow(0.5) > 1.41)\nprint(9.0.sqrt())"), "1.5\n2.5\ntrue\n3.0\n");
+    assert_eq!(out("print(float.PI)\nprint(float.E > 2.7)\nprint(int.MAX)\nprint(int.MIN)"), "3.141592653589793\ntrue\n9223372036854775807\n-9223372036854775808\n");
+    assert_eq!(out("let r = 2.0\nprint(float.PI * r ** 2)"), "12.566370614359172\n");
+    assert!(err("print(int.MAX + 1)").starts_with("R010"));
+    assert!(err("print((-4).sqrt())").starts_with("R014"));
+    assert!(err("print(2.pow(-1))").starts_with("R012"));
+    // not defined: mixing kinds, or unknown constants
+    assert!(err("print(3.min(2.5))").starts_with("COMPILE"));
+    assert!(err("print(float.TAU)").starts_with("COMPILE"));
+}

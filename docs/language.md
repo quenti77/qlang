@@ -1029,6 +1029,10 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `index_of(v)`      | indice de `v`, ou `none` (`int?`)                              |
 | `reverse()`        | inverse le tableau sur place                                   |
 | `join(sep)`        | assemble les éléments en une `string`                          |
+| `sort()`           | trie le tableau sur place, de façon stable (voir ci-dessous)   |
+| `min()`, `max()`   | le plus petit / grand élément, ou `none` si vide (`T?`)        |
+| `sum()`            | somme d'un tableau de nombres (`0` ou `0.0` si vide)           |
+| `slice(début, fin)` | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
 
 `string` :
 
@@ -1044,8 +1048,31 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `chars()`                       | `array<string>` d'un caractère chacun          |
 | `substring(début, fin)`         | caractères de `début` (inclus) à `fin` (exclu) |
 
-Nombres : `int.abs()`, `float.abs()`, `float.sqrt()`, et `float.floor()`,
-`float.ceil()`, `float.round()` qui renvoient un `int`.
+`sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
+chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de
+compilation. `sum` n'accepte que des tableaux d'`int` ou de `float`. `slice`
+copie les éléments : modifier le résultat ne change pas le tableau d'origine.
+
+Nombres :
+
+| Méthode / constante          | Résultat                                           |
+| ---------------------------- | -------------------------------------------------- |
+| `x.abs()`                    | valeur absolue (`int` ou `float`)                  |
+| `x.min(y)`, `x.max(y)`       | le plus petit / grand des deux (même type)         |
+| `x.pow(y)`                   | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`) |
+| `x.sqrt()`                   | racine carrée, un `float` (erreur si `x` est négatif) |
+| `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int` |
+| `float.PI`, `float.E`        | constantes mathématiques                           |
+| `int.MAX`, `int.MIN`         | plus grand / plus petit `int`                      |
+
+```
+print([3, 1, 2].max())             -- 3
+print(float.PI * 2.0 ** 2)         -- 12.566370614359172
+print(16.sqrt())                   -- 4.0
+```
+
+Ces opérations sont des méthodes et des constantes attachées aux types, pour ne
+pas réserver de noms globaux (`PI`, `min`…) que tu voudrais utiliser toi-même.
 
 Un indice hors limites (`xs[5]` pour 3 éléments, indice négatif) est une erreur
 d'exécution.
@@ -1131,8 +1158,9 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 ## 18. Points encore ouverts
 
-- **Bibliothèque standard :** elle est minimale (voir section 14) et s'étoffera
-  à l'usage : tri, `min`/`max`, maths, dictionnaires…
+- **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
+  s'étoffera à l'usage. Les dictionnaires (`map<K, V>`) manquent encore : il faut
+  décider de la syntaxe du littéral et des types qui peuvent servir de clé.
 - **`/=` sur des entiers :** `n /= 2` est une erreur car `/` renvoie un `float`.
   Un opérateur `div=` pourrait être ajouté si ça gêne.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme

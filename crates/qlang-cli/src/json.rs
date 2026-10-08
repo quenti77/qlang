@@ -18,6 +18,8 @@ struct Request {
     /// Lines for `read()`. If absent, `read` is not available.
     input: Option<Vec<String>>,
     limits: Option<LimitsRequest>,
+    /// `"check"`: compile only (no execution). Default: `"run"`.
+    mode: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -31,7 +33,7 @@ struct LimitsRequest {
 #[derive(Serialize)]
 struct Response {
     ok: bool,
-    /// `"request"`, `"compile"` or `"run"`: where it stopped (or finished).
+    /// `"request"`, `"compile"`, `"check"` or `"run"`: where it stopped (or finished).
     phase: &'static str,
     output: String,
     diagnostics: Vec<Diagnostic>,
@@ -64,14 +66,19 @@ impl Default for Ceiling {
 }
 
 pub fn handle(request: &str, ceiling: &Ceiling) -> String {
+    handle_with(request, ceiling, false)
+}
+
+pub fn handle_with(request: &str, ceiling: &Ceiling, force_check: bool) -> String {
     let resp = match serde_json::from_str::<Request>(request) {
-        Ok(req) => execute(req, ceiling),
+        Ok(req) => execute(req, ceiling, force_check),
         Err(e) => failure("request", format!("invalid request: {e}")),
     };
     serde_json::to_string(&resp).unwrap_or_else(|_| "{\"ok\":false}".to_string())
 }
 
-fn execute(req: Request, ceiling: &Ceiling) -> Response {
+fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
+    let check_only = force_check || req.mode.as_deref() == Some("check");
     let entry = match req.entry {
         Some(e) => e,
         None if req.files.len() == 1 => req.files.keys().next().unwrap().clone(),
@@ -102,6 +109,9 @@ fn execute(req: Request, ceiling: &Ceiling) -> Response {
             return Response { ok: false, phase: "compile", output: String::new(), diagnostics: e.diagnostics, steps: 0 };
         }
     };
+    if check_only {
+        return Response { ok: true, phase: "check", output: String::new(), diagnostics: program.warnings.clone(), steps: 0 };
+    }
     let result = program.run(&mut host, limits);
     let mut diagnostics = program.warnings.clone();
     let ok = result.error.is_none();
@@ -109,12 +119,12 @@ fn execute(req: Request, ceiling: &Ceiling) -> Response {
     Response { ok, phase: "run", output: host.output, diagnostics, steps: result.steps }
 }
 
-pub fn run_stdin() -> ExitCode {
+pub fn run_stdin(force_check: bool) -> ExitCode {
     let mut input = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut input) {
         eprintln!("cannot read the request: {e}");
         return ExitCode::from(66);
     }
-    println!("{}", handle(&input, &Ceiling::default()));
+    println!("{}", handle_with(&input, &Ceiling::default(), force_check));
     ExitCode::SUCCESS
 }

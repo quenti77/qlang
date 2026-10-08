@@ -1,0 +1,73 @@
+{
+  "name": "qlang",
+  "displayName": "qlang",
+  "description": "Language support for qlang: syntax highlighting, errors as you type, snippets and a Run command.",
+  "version": "0.1.0",
+  "publisher": "qlang",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages", "Snippets"],
+  "keywords": ["qlang"],
+  "repository": { "type": "git", "url": "https://github.com/quenti77/qlang" },
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "qlang",
+        "aliases": ["qlang", "QLang"],
+        "extensions": [".q"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qlang",
+        "scopeName": "source.qlang",
+        "path": "./syntaxes/qlang.tmLanguage.json"
+      }
+    ],
+    "snippets": [{ "language": "qlang", "path": "./snippets/qlang.json" }],
+    "commands": [
+      { "command": "qlang.run", "title": "qlang: Run File", "icon": "$(play)" },
+      { "command": "qlang.check", "title": "qlang: Check File" }
+    ],
+    "menus": {
+      "editor/title/run": [
+        { "command": "qlang.run", "when": "resourceLangId == qlang", "group": "navigation" }
+      ],
+      "commandPalette": [
+        { "command": "qlang.run", "when": "editorLangId == qlang" },
+        { "command": "qlang.check", "when": "editorLangId == qlang" }
+      ]
+    },
+    "configuration": {
+      "title": "qlang",
+      "properties": {
+        "qlang.path": {
+          "type": "string",
+          "default": "qlang",
+          "description": "The qlang executable (name in PATH, or a full path). Install it with `cargo install --path crates/qlang-cli` from the qlang repository."
+        },
+        "qlang.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Underline errors while you type, by running `qlang check`."
+        },
+        "qlang.diagnostics.delay": {
+          "type": "number",
+          "default": 400,
+          "minimum": 0,
+          "description": "Milliseconds to wait after you stop typing before checking."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "package": "vsce package --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.0.0"
+  }
+}

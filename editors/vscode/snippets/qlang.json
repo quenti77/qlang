@@ -1,0 +1,122 @@
+{
+  "function": {
+    "prefix": "fun",
+    "body": ["fun ${1:name}(${2:param}: ${3:int}) -> ${4:int}", "\t$0", "end"],
+    "description": "Function"
+  },
+  "procedure": {
+    "prefix": "funv",
+    "body": ["fun ${1:name}(${2})", "\t$0", "end"],
+    "description": "Function without a return value"
+  },
+  "lambda": {
+    "prefix": "lambda",
+    "body": ["fun(${1:x}: ${2:int}) -> ${3:int}", "\t$0", "end"],
+    "description": "Anonymous function"
+  },
+  "if": {
+    "prefix": "if",
+    "body": ["if ${1:condition} then", "\t$0", "end"],
+    "description": "if"
+  },
+  "ifelse": {
+    "prefix": "ifelse",
+    "body": ["if ${1:condition} then", "\t$2", "else", "\t$0", "end"],
+    "description": "if / else"
+  },
+  "elseif": {
+    "prefix": "elseif",
+    "body": ["elseif ${1:condition} then", "\t$0"],
+    "description": "elseif branch"
+  },
+  "while": {
+    "prefix": "while",
+    "body": ["while ${1:condition} do", "\t$0", "end"],
+    "description": "while loop"
+  },
+  "for range": {
+    "prefix": "for",
+    "body": ["for ${1:i} in ${2:0}..${3:10} do", "\t$0", "end"],
+    "description": "for loop over a range"
+  },
+  "for each": {
+    "prefix": "foreach",
+    "body": ["for ${1:item} in ${2:items} do", "\t$0", "end"],
+    "description": "for loop over an array, a string"
+  },
+  "for index": {
+    "prefix": "fori",
+    "body": ["for ${1:i}, ${2:item} in ${3:items} do", "\t$0", "end"],
+    "description": "for loop with the index"
+  },
+  "for map": {
+    "prefix": "formap",
+    "body": ["for ${1:key}, ${2:value} in ${3:map} do", "\t$0", "end"],
+    "description": "for loop over a map"
+  },
+  "match": {
+    "prefix": "match",
+    "body": ["match ${1:value}", "\tcase ${2:0} then", "\t\t$3", "\telse", "\t\t$0", "end"],
+    "description": "match"
+  },
+  "struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name}", "\tpublic ${2:field}: ${3:int}", "end"],
+    "description": "Structure"
+  },
+  "impl": {
+    "prefix": "impl",
+    "body": [
+      "impl ${1:Name}",
+      "\tpublic fun new(${2}) -> ${1:Name}",
+      "\t\t${1:Name} { $3 }",
+      "\tend",
+      "end"
+    ],
+    "description": "impl block with a constructor"
+  },
+  "method": {
+    "prefix": "method",
+    "body": ["public fun ${1:name}(self${2}) -> ${3:int}", "\t$0", "end"],
+    "description": "Method with self"
+  },
+  "trait": {
+    "prefix": "trait",
+    "body": ["trait ${1:Name}", "\tfun ${2:method}(self) -> ${3:int}", "end"],
+    "description": "Trait"
+  },
+  "impl trait": {
+    "prefix": "impltrait",
+    "body": ["impl ${1:Trait} for ${2:Type}", "\tpublic fun ${3:method}(self) -> ${4:int}", "\t\t$0", "\tend", "end"],
+    "description": "Implement a trait"
+  },
+  "enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name}", "\t${2:First}", "\t${3:Second}", "end"],
+    "description": "Enumeration"
+  },
+  "let": { "prefix": "let", "body": "let ${1:name} = $0", "description": "Variable" },
+  "const": { "prefix": "const", "body": "const ${1:NAME} = $0", "description": "Constant" },
+  "print": { "prefix": "print", "body": "print($0)", "description": "Print a line" },
+  "import": {
+    "prefix": "import",
+    "body": "import ${1:name} from \"${2:file.q}\"",
+    "description": "Import names from a module"
+  },
+  "import module": {
+    "prefix": "importmod",
+    "body": "import \"${1:file.q}\" as ${2:name}",
+    "description": "Import a whole module"
+  },
+  "export": { "prefix": "export", "body": "export ${1:name}", "description": "Export names" },
+  "read number": {
+    "prefix": "readint",
+    "body": ["let ${1:n} = int.parse(read())", "if ${1:n} == none then", "\tprint(\"not a number\")", "end"],
+    "description": "Read a number"
+  },
+  "doc comment": {
+    "prefix": "doc",
+    "body": ["--\"", "  $0", "--\""],
+    "description": "Documentation comment"
+  }
+}

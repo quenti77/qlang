@@ -197,6 +197,21 @@ délai d'attente. Le serveur HTTP (`qlang serve`) est minimal : pas de TLS, pas 
 connexions persistantes, 16 connexions simultanées au plus. Placez-le derrière un
 proxy inverse et ne l'exposez pas directement à Internet.
 
+## Éditeur : VS Code
+
+Une extension (coloration, erreurs soulignées pendant la frappe grâce au vrai compilateur,
+bouton ▶ pour exécuter, snippets) est dans [`editors/vscode`](editors/vscode) :
+
+```sh
+cargo install --path crates/qlang-cli                  # le programme `qlang`
+cd editors/vscode && npm install && npm run package    # crée qlang-0.1.0.vsix
+code --install-extension qlang-0.1.0.vsix
+```
+
+Pour les éditeurs, `qlang check --json` lit la même requête JSON que `run --json` mais ne fait que
+vérifier le programme (réponse avec `"phase": "check"`) ; `"mode": "check"` dans la requête fait la
+même chose avec `run --json`.
+
 ## Développement
 
 ```sh

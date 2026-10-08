@@ -1,0 +1,19 @@
+{
+  "comments": {
+    "lineComment": "--",
+    "blockComment": ["--(", "--)"]
+  },
+  "brackets": [["(", ")"], ["[", "]"], ["{", "}"]],
+  "autoClosingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "[", "close": "]" },
+    { "open": "{", "close": "}" },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [["(", ")"], ["[", "]"], ["{", "}"], ["\"", "\""]],
+  "wordPattern": "[A-Za-z_][A-Za-z0-9_]*",
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*((public|private|protected|static|override)\\s+)*(fun|struct|impl|trait|enum|match|while|for|if|elseif)\\b(?!.*\\bend\\s*$).*$|^\\s*(else|case)\\b(?!.*\\bend\\s*$).*$|.*\\b(then|do)\\s*$|^.*=\\s*(fun|if|match)\\b(?!.*\\bend\\s*$).*$",
+    "decreaseIndentPattern": "^\\s*(end|else|elseif|case)\\b.*$"
+  }
+}

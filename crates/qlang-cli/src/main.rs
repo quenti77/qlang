@@ -16,6 +16,7 @@ qlang - a small, readable language
 USAGE:
     qlang run <file.q> [--max-steps N]   run a program
     qlang check <file.q>                 check a program without running it
+    qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
     qlang serve [--port 8080] [--bind 127.0.0.1]
                                          serve the JSON protocol over HTTP (POST /run)
@@ -41,12 +42,15 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("run") => {
             let rest: Vec<&str> = it.collect();
             if rest.contains(&"--json") {
-                json::run_stdin()
+                json::run_stdin(false)
             } else {
                 run_file(&rest, true)
             }
         }
-        Some("check") => run_file(&it.collect::<Vec<_>>(), false),
+        Some("check") => {
+            let rest: Vec<&str> = it.collect();
+            if rest.contains(&"--json") { json::run_stdin(true) } else { run_file(&rest, false) }
+        }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
         Some("--version") | Some("-V") => {
             println!("qlang {}", env!("CARGO_PKG_VERSION"));

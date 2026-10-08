@@ -59,6 +59,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Dépendance à l'environnement](#dépendance-à-lenvironnement)
     - [Fonctions prédéfinies](#fonctions-prédéfinies)
     - [Méthodes prédéfinies](#méthodes-prédéfinies)
+    - [Dictionnaires](#dictionnaires)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -124,8 +125,10 @@ d'être écrit.
 | `string`   | `"texte"`                               | non modifiable   |
 | `T?`       | `int?`, `string?`                       | `T` ou `none`    |
 | `array<T>` | `[1, 2, 3]`                             | tableau de `T`   |
+| `map<K, V>` | `{ "a": 1, "b": 2 }`                   | dictionnaire     |
 
-Les types de base s'écrivent en minuscules. Les types que tu définis
+Les types de base s'écrivent en minuscules. Les dictionnaires sont décrits dans
+la [section 14](#dictionnaires). Les types que tu définis
 (`struct`, `trait`, `enum`) prennent une majuscule par convention.
 
 ### Nombres
@@ -1074,6 +1077,67 @@ print(16.sqrt())                   -- 4.0
 Ces opérations sont des méthodes et des constantes attachées aux types, pour ne
 pas réserver de noms globaux (`PI`, `min`…) que tu voudrais utiliser toi-même.
 
+### Dictionnaires
+
+Un dictionnaire (`map<K, V>`) associe des valeurs à des **clés**. Les clés sont
+des `int`, des `string`, des `bool` ou des valeurs d'une énumération : des types
+qui se comparent par valeur. Les clés gardent leur **ordre d'insertion**.
+
+```
+let ages = { "ana": 31, "bob": 27 }
+let empty: map<string, int> = {}      -- le type vient de l'annotation
+
+ages["cleo"] = 45                     -- ajoute ou remplace
+print(ages["ana"])                    -- 31
+print(ages["zed"])                    -- none : la clé n'existe pas
+```
+
+**Lire une clé absente donne `none`** : `ages["ana"]` a le type `int?`, comme
+`pop()` ou `int.parse`. Il faut donc vérifier avant d'utiliser la valeur, ou
+fournir une valeur par défaut avec `get` :
+
+```
+let a = ages["ana"]
+if a != none then
+  print(a + 1)
+end
+
+print(ages.get("zed", 0) + 1)         -- 1
+```
+
+Compter des éléments devient simple avec `get` :
+
+```
+let counts: map<string, int> = {}
+for w in words do
+  counts[w] = counts.get(w, 0) + 1
+end
+```
+
+| Méthode            | Résultat                                                    |
+| ------------------ | ----------------------------------------------------------- |
+| `len()`, `is_empty()` | nombre de clés ; `bool`                                  |
+| `has(clé)`         | `bool`                                                      |
+| `get(clé, défaut)` | la valeur, ou `défaut` si la clé est absente (type `V`)     |
+| `remove(clé)`      | retire la clé et renvoie sa valeur, ou `none` (`V?`)        |
+| `keys()`           | `array<K>` des clés, dans l'ordre d'insertion               |
+| `values()`          | `array<V>` des valeurs, dans le même ordre                  |
+| `clear()`          | vide le dictionnaire                                        |
+
+- **Parcours** : on parcourt les clés, puis on lit la valeur :
+  `for name in ages.keys() do print("{name}: {ages[name]}") end`. Boucler
+  directement sur un dictionnaire (`for x in m`) est une erreur.
+- **`m[clé] += 1`** lit la valeur elle-même : c'est une erreur d'exécution si la
+  clé n'existe pas (utiliser `get` dans ce cas).
+- **Partage** : comme les tableaux, un dictionnaire est une référence partagée.
+- Les dictionnaires s'affichent `{"ana": 31, "bob": 27}` et ne se comparent pas
+  avec `==`.
+- Un littéral vide `{}` demande une annotation de type : `let m = {}` est une
+  erreur. Un littéral peut s'étendre sur plusieurs lignes et finir par une
+  virgule.
+- `map` désigne le type dans les annotations (`map<string, int>`), mais reste
+  utilisable comme nom de fonction ou de variable.
+
 Un indice hors limites (`xs[5]` pour 3 éléments, indice négatif) est une erreur
 d'exécution.
 
@@ -1150,7 +1214,7 @@ environnement, l'exécution est bornée :
 | étapes d'évaluation | 100 000 000 | `R900` (boucle infinie ?) |
 | appels imbriqués    | 1 000       | `R901` (récursion infinie ?) |
 | sortie affichée     | 10 Mo       | `R902` |
-| taille d'un tableau (éléments) ou d'une chaîne (octets) | 10 000 000 | `R903` |
+| taille d'un tableau ou dictionnaire (éléments) ou d'une chaîne (octets) | 10 000 000 | `R903` |
 
 Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
@@ -1159,8 +1223,9 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 ## 18. Points encore ouverts
 
 - **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
-  s'étoffera à l'usage. Les dictionnaires (`map<K, V>`) manquent encore : il faut
-  décider de la syntaxe du littéral et des types qui peuvent servir de clé.
+  s'étoffera à l'usage.
+- **Dictionnaires :** pas de comparaison `==`, pas de clés de type `float`, tableau
+  ou structure, et pas de parcours direct (`for k, v in m`) pour l'instant.
 - **`/=` sur des entiers :** `n /= 2` est une erreur car `/` renvoie un `float`.
   Un opérateur `div=` pourrait être ajouté si ça gêne.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme

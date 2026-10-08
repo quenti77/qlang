@@ -224,6 +224,27 @@ print((2 + 3) as string + "!")
 print(int.parse("42"))
 print(int.parse("nope"))
 
+-- maps
+let ages = { "ana": 31, "bob": 27 }
+ages["cleo"] = 45
+let bob = ages["bob"]
+if bob != none then
+  print("bob is {bob}")
+end
+print(ages.get("zed", -1))
+for name in ages.keys() do
+  write("{name} ")
+end
+print("")
+
+-- sorting and math
+let scores = [42, 7, 19]
+scores.sort()
+print(scores)
+print(scores.max())
+print(scores.sum())
+print(float.PI > 3.14)
+
 -- modules
 print(add(1, 2))
 print(minus(5, 3))

@@ -1102,6 +1102,30 @@ impl<'a> Parser<'a> {
                 let (items, end) = r?;
                 Ok(self.mk(span.to(end), ExprKind::Array(items)))
             }
+            Tok::LBrace => {
+                self.bump();
+                self.nl.push(false);
+                let r: PResult<(Vec<(Expr, Expr)>, Span)> = (|| {
+                    let mut items = Vec::new();
+                    while !self.at(&Tok::RBrace) {
+                        let k = self.parse_expr()?;
+                        if !self.at(&Tok::Colon) {
+                            return self.unexpected("`:` and a value after the key");
+                        }
+                        self.bump();
+                        let v = self.parse_expr()?;
+                        items.push((k, v));
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                    let end = self.expect(&Tok::RBrace)?;
+                    Ok((items, end))
+                })();
+                self.nl.pop();
+                let (items, end) = r?;
+                Ok(self.mk(span.to(end), ExprKind::Map(items)))
+            }
             Tok::If => self.parse_if(),
             Tok::Match => self.parse_match(),
             Tok::Fun => {

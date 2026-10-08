@@ -46,6 +46,7 @@ impl Checker {
             },
             Ty::Nullable(x) => Ty::nullable(self.resolve(x)),
             Ty::Array(x) => Ty::Array(Box::new(self.resolve(x))),
+            Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|p| self.resolve(p)).collect(), Box::new(self.resolve(r))),
             Ty::Struct(id, a) => Ty::Struct(*id, a.iter().map(|x| self.resolve(x)).collect()),
             Ty::Trait(id, a) => Ty::Trait(*id, a.iter().map(|x| self.resolve(x)).collect()),
@@ -57,6 +58,7 @@ impl Checker {
         match self.resolve(t) {
             Ty::Infer(m) => m == n,
             Ty::Nullable(x) | Ty::Array(x) => self.occurs(n, &x),
+            Ty::Map(k, v) => self.occurs(n, &k) || self.occurs(n, &v),
             Ty::Fn(ps, r) => ps.iter().any(|p| self.occurs(n, p)) || self.occurs(n, &r),
             Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(|x| self.occurs(n, x)),
             _ => false,
@@ -95,6 +97,7 @@ impl Checker {
             (Ty::Nullable(a), Ty::Nullable(b)) => self.assignable(a, b),
             (_, Ty::Nullable(b)) => self.assignable(&f, b),
             (Ty::Array(a), Ty::Array(b)) => self.same(a, b),
+            (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
             (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
                 pa.len() == pb.len()
                     && pa.iter().zip(pb.iter()).all(|(a, b)| self.assignable(b, a))
@@ -124,6 +127,7 @@ impl Checker {
             (_, Ty::Infer(y)) => self.bind(*y, &a),
             (Ty::Nullable(x), Ty::Nullable(y)) => self.same(x, y),
             (Ty::Array(x), Ty::Array(y)) => self.same(x, y),
+            (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
             (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
                 pa.len() == pb.len() && pa.iter().zip(pb.iter()).all(|(x, y)| self.same(x, y)) && self.same(ra, rb)
             }
@@ -307,6 +311,8 @@ impl Checker {
                 let arg = arg?;
                 match &ty {
                     Ty::Array(t) if arg == Ty::Int => Some((**t).clone()),
+                    // a missing key gives `none`
+                    Ty::Map(k, v) if self.assignable(&arg, k) => Some(Ty::nullable((**v).clone())),
                     Ty::Str if arg == Ty::Int => Some(Ty::Str),
                     _ => None,
                 }
@@ -315,6 +321,7 @@ impl Checker {
                 let (i, v) = (arg?, self.resolve(args.get(1)?));
                 match &ty {
                     Ty::Array(t) if i == Ty::Int && self.assignable(&v, t) => Some(Ty::Unit),
+                    Ty::Map(k, mv) if self.assignable(&i, k) && self.assignable(&v, mv) => Some(Ty::Unit),
                     _ => None,
                 }
             }

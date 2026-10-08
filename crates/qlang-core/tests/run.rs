@@ -461,3 +461,77 @@ fn number_methods_and_constants() {
     assert!(err("print(3.min(2.5))").starts_with("COMPILE"));
     assert!(err("print(float.TAU)").starts_with("COMPILE"));
 }
+
+#[test]
+fn maps_basics() {
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m)\nprint(m.len())\nprint(m[\"a\"])\nprint(m[\"zz\"])"), "{\"a\": 1, \"b\": 2}\n2\n1\nnone\n");
+    assert_eq!(out("let m: map<string, int> = {}\nprint(m)\nprint(m.is_empty())\nm[\"x\"] = 5\nm[\"x\"] = 6\nprint(m)"), "{}\ntrue\n{\"x\": 6}\n");
+    // a missing key gives none, so the value must be checked before use
+    assert_eq!(out("let ages = { \"ana\": 31 }\nlet a = ages[\"ana\"]\nif a != none then print(a + 1) end\nlet b = ages[\"bob\"]\nprint(b == none)"), "32\ntrue\n");
+    assert_eq!(out("let m = { 1: \"one\", 2: \"two\" }\nprint(m[2])\nlet b = { true: 1, false: 0 }\nprint(b[true])"), "two\n1\n");
+}
+
+#[test]
+fn maps_methods() {
+    let src = "let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.has(\"b\"))\nprint(m.has(\"z\"))\nprint(m.get(\"z\", -1))\nprint(m.get(\"a\", -1))\nprint(m.remove(\"b\"))\nprint(m.remove(\"b\"))\nprint(m.keys())\nprint(m.values())\nprint(m)\nm.clear()\nprint(m.len())";
+    assert_eq!(out(src), "true\nfalse\n-1\n1\n2\nnone\n[\"a\", \"c\"]\n[1, 3]\n{\"a\": 1, \"c\": 3}\n0\n");
+    // insertion order is kept, and removal keeps lookups correct
+    assert_eq!(out("let m: map<int, string> = {}\nm[5] = \"e\"\nm[1] = \"a\"\nm[9] = \"i\"\nm.remove(1)\nm[7] = \"g\"\nprint(m.keys())\nprint(m[9])\nprint(m[7])\nprint(m[5])"), "[5, 9, 7]\ni\ng\ne\n");
+}
+
+#[test]
+fn maps_counting_and_loops() {
+    let src = "let words = \"the cat and the dog and the bird\".split(\" \")\nlet counts: map<string, int> = {}\nfor w in words do\ncounts[w] = counts.get(w, 0) + 1\nend\nfor w in counts.keys() do\nwrite(\"{w}={counts[w]} \")\nend\nprint(\"\")";
+    assert_eq!(out(src), "the=3 cat=1 and=2 dog=1 bird=1 \n");
+    // `m[k] += 1` works when the key exists, and is an error when it does not
+    assert_eq!(out("let m = { \"n\": 1 }\nm[\"n\"] += 5\nprint(m[\"n\"])"), "6\n");
+    assert!(err("let m: map<string, int> = {}\nm[\"n\"] += 1").starts_with("R022"));
+}
+
+#[test]
+fn maps_are_shared_and_typed() {
+    assert_eq!(out("fun add(m: map<string, int>)\nm[\"k\"] = 1\nend\nlet m: map<string, int> = {}\nadd(m)\nprint(m)\nlet n = m\nn[\"j\"] = 2\nprint(m.len())"), "{\"k\": 1}\n2\n");
+    assert_eq!(out("enum C\nR\nG\nend\nlet m = { C.R: \"red\", C.G: \"green\" }\nprint(m[C.G])\nprint(m)"), "green\n{C.R: \"red\", C.G: \"green\"}\n");
+    assert_eq!(out("let m: map<string, int?> = { \"a\": none, \"b\": 2 }\nprint(m)"), "{\"a\": none, \"b\": 2}\n");
+    assert_eq!(out("let nested = { \"xs\": [1, 2], \"ys\": [3] }\nprint(nested[\"xs\"])\nlet inner = nested[\"ys\"]\nif inner != none then print(inner.len()) end"), "[1, 2]\n1\n");
+    assert_eq!(out("fun f<K, V>(m: map<K, V>) -> int\nm.len()\nend\nprint(f({ 1: \"a\" }))\nprint(f({ \"x\": 1.5, \"y\": 2.5 }))"), "1\n2\n");
+}
+
+#[test]
+fn maps_static_errors() {
+    for (src, needle) in [
+        ("let m = {}", "cannot infer"),
+        ("let m: map<float, int> = {}", "cannot be a map key"),
+        ("let m: map<array<int>, int> = {}", "cannot be a map key"),
+        ("let m = { [1]: 2 }", "cannot be a map key"),
+        ("let m = { \"a\": 1, 2: 3 }", "same type"),
+        ("let m = { \"a\": 1, \"b\": \"x\" }", "same type"),
+        ("let m = { \"a\": 1 }\nlet x: int = m[\"a\"]", "may be `none`"),
+        ("let m = { \"a\": 1 }\nm[1] = 2", "cannot set an element"),
+        ("let m = { \"a\": 1 }\nm[\"a\"] = \"s\"", "cannot store"),
+        ("let m = { \"a\": 1 }\nfor k in m do\nend", "m.keys()"),
+        ("let m = { \"a\": 1 }\nm[] = 2", "cannot append"),
+        ("let a = { \"a\": 1 }\nlet b = { \"a\": 1 }\nprint(a == b)", "cannot compare"),
+        ("let m = { \"a\": 1 }\nm.nope()", "no method"),
+    ] {
+        let e = err(src);
+        assert!(e.starts_with("COMPILE") && e.contains(needle), "for:\n{src}\nexpected an error containing {needle:?}, got:\n{e}");
+    }
+}
+
+#[test]
+fn maps_limits() {
+    let o = run_files(&[("main.q", "let m: map<int, int> = {}\nlet i = 0\nwhile true do\nm[i] = i\ni += 1\nend")], None, Limits { max_alloc: 500, ..Limits::default() });
+    assert!(o.error.unwrap().starts_with("R903"));
+}
+
+#[test]
+fn braces_still_work_for_structs_and_blocks() {
+    // a struct literal and a map literal can share a program and a line
+    assert_eq!(
+        out("struct P\npublic x: int\nend\nlet m = { \"p\": P { x: 1 } }\nlet p = m[\"p\"]\nif p != none then print(p.x) end\nprint({ 1: P { x: 2 } }[1] != none)"),
+        "1\ntrue\n"
+    );
+    // multi-line literals, with a trailing comma
+    assert_eq!(out("let m = {\n  \"a\": 1,\n  \"b\": 2,\n}\nprint(m.len())"), "2\n");
+}

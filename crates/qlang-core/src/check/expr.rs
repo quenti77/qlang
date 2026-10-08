@@ -219,6 +219,14 @@ impl Checker {
                                 );
                                 Ty::Error
                             }
+                            Ty::Map(k, _) if **k == Ty::Never => {
+                                self.err(
+                                    "T170",
+                                    format!("cannot infer the types of `{0}`: write `let {0}: map<key, value> = {{}}`", name.name),
+                                    init.span,
+                                );
+                                Ty::Error
+                            }
                             Ty::Array(inner) if **inner == Ty::Never => {
                                 self.err(
                                     "T170",
@@ -287,7 +295,7 @@ impl Checker {
                     Ty::Error => Ty::Error,
                     other => {
                         let shown = other.show(&self.defs);
-                        self.err("T190", format!("cannot loop over `{shown}` (use a range like `0..10`, an array or a string)"), iter.span);
+                        self.err("T190", format!("cannot loop over `{shown}` (use a range like `0..10`, an array or a string; for a map, loop over `m.keys()`)"), iter.span);
                         Ty::Error
                     }
                 };
@@ -365,6 +373,7 @@ impl Checker {
                 Ty::Error
             }
             ExprKind::Array(items) => self.check_array(items, want),
+            ExprKind::Map(items) => self.check_map(items, want),
             ExprKind::StructLit(lit) => self.check_struct_lit(e, lit, want),
             ExprKind::Unary(op, inner) => {
                 let t = self.expr(inner, &Want::Any);
@@ -507,6 +516,60 @@ impl Checker {
         }
         let map: HashMap<ParamId, Ty> = own.iter().cloned().zip(targs.iter().map(|t| self.resolve_type(t))).collect();
         Ty::Fn(def.params.iter().map(|p| p.subst(&map)).collect(), Box::new(def.ret.subst(&map)))
+    }
+
+    fn check_map(&mut self, items: &[(Expr, Expr)], want: &Want) -> Ty {
+        let hint = match want.expected().map(|t| self.resolve(t)) {
+            Some(Ty::Map(k, v)) => Some((*k, *v)),
+            Some(Ty::Nullable(inner)) => match *inner {
+                Ty::Map(k, v) => Some((*k, *v)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if items.is_empty() {
+            return match hint {
+                Some((k, v)) => Ty::Map(Box::new(k), Box::new(v)),
+                None => Ty::Map(Box::new(Ty::Never), Box::new(Ty::Never)),
+            };
+        }
+        let (mut kt, mut vt): (Option<Ty>, Option<Ty>) = (None, None);
+        for (k, v) in items {
+            for (is_key, x) in [(true, k), (false, v)] {
+                let slot = if is_key { &kt } else { &vt };
+                let h = hint.as_ref().map(|(hk, hv)| if is_key { hk.clone() } else { hv.clone() });
+                let w = match (slot, &h) {
+                    (Some(t), _) => Want::Exp(t.clone()),
+                    (None, Some(h)) => Want::Exp(h.clone()),
+                    _ => Want::Any,
+                };
+                let t = self.expr(x, &w);
+                let t = self.require_value(t, x.span);
+                let merged = match slot.clone() {
+                    None => match &h {
+                        Some(h) if self.assignable(&t, h) => h.clone(),
+                        _ => t,
+                    },
+                    Some(prev) => match self.join(&prev, &t) {
+                        Some(j) => j,
+                        None => {
+                            let (a, b) = (self.show(&prev), self.show(&t));
+                            let what = if is_key { "keys" } else { "values" };
+                            self.err("T009", format!("map {what} must have the same type: found `{a}` and `{b}`"), x.span);
+                            prev
+                        }
+                    },
+                };
+                if is_key {
+                    kt = Some(merged);
+                } else {
+                    vt = Some(merged);
+                }
+            }
+        }
+        let (kt, vt) = (kt.unwrap(), vt.unwrap());
+        self.check_key_type(&kt, items[0].0.span);
+        Ty::Map(Box::new(kt), Box::new(vt))
     }
 
     fn check_array(&mut self, items: &[Expr], want: &Want) -> Ty {
@@ -687,7 +750,11 @@ impl Checker {
                             self.expr(value, &Want::Any);
                             return Ty::Error;
                         };
-                        let elem = read.ret();
+                        // `m[k] += 1` on a map reads the value itself (an error at run time if absent)
+                        let elem = match self.resolve(&bt) {
+                            Ty::Map(_, v) => *v,
+                            _ => read.ret(),
+                        };
                         let vt = self.expr(value, &Want::Any);
                         let res = self.binop_type(bop, &elem, &vt, e.span);
                         return self.finish_index_assign(e, &bt, &it, &res, value.span);

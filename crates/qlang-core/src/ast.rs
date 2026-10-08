@@ -296,6 +296,8 @@ pub enum ExprKind {
     SelfVal,
     Super,
     Array(Vec<Expr>),
+    /// `{ key: value, ... }`
+    Map(Vec<(Expr, Expr)>),
     StructLit(Box<StructLit>),
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),

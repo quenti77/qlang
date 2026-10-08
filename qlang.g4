@@ -101,6 +101,7 @@ primaryExpression
     | Super
     | '(' Newline* expression Newline* ')'
     | arrayLiteral
+    | mapLiteral
     | structLiteral
     | ifExpression
     | matchExpression
@@ -121,6 +122,13 @@ arrayLiteral
     ;
 
 // Point { x: 1, y: 2 }   Savings { ..Account.new(id), rate: 0.02 }
+// { "a": 1, "b": 2 }   ou {} (le type vient de l'annotation : map<string, int>)
+mapLiteral
+    : '{' Newline* (mapEntry (Comma Newline* mapEntry)* Comma? Newline*)? '}'
+    ;
+
+mapEntry: expression Colon expression;
+
 structLiteral
     : Identifier typeArguments? '{' Newline*
       (structLiteralItem (Comma Newline* structLiteralItem)* Comma? Newline*)? '}'

@@ -17,11 +17,85 @@ pub enum Value {
     Str(Rc<str>),
     /// Arrays and structs are shared: copying a value copies the reference.
     Array(Rc<RefCell<Vec<Value>>>),
+    /// Keys keep their insertion order.
+    Map(Rc<RefCell<MapObj>>),
     Struct(Rc<StructObj>),
     Enum(EnumId, usize),
     /// `start..end` or `start..=end` (the flag is "inclusive").
     Range(i64, i64, bool),
     Func(Rc<FuncVal>),
+}
+
+/// A map key: only types compared by value can be keys.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum KeyVal {
+    Int(i64),
+    Str(Rc<str>),
+    Bool(bool),
+    Enum(EnumId, usize),
+}
+
+impl KeyVal {
+    pub fn of(v: &Value) -> Option<KeyVal> {
+        Some(match v {
+            Value::Int(i) => KeyVal::Int(*i),
+            Value::Str(s) => KeyVal::Str(s.clone()),
+            Value::Bool(b) => KeyVal::Bool(*b),
+            Value::Enum(e, i) => KeyVal::Enum(*e, *i),
+            _ => return None,
+        })
+    }
+}
+
+/// An insertion-ordered map.
+#[derive(Default)]
+pub struct MapObj {
+    pub entries: Vec<(Value, Value)>,
+    index: HashMap<KeyVal, usize>,
+}
+
+impl MapObj {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn get(&self, k: &Value) -> Option<&Value> {
+        let i = *self.index.get(&KeyVal::of(k)?)?;
+        Some(&self.entries[i].1)
+    }
+
+    /// Insert or replace; false if `k` cannot be a key.
+    pub fn insert(&mut self, k: Value, v: Value) -> bool {
+        let Some(key) = KeyVal::of(&k) else { return false };
+        match self.index.get(&key) {
+            Some(&i) => self.entries[i].1 = v,
+            None => {
+                self.index.insert(key, self.entries.len());
+                self.entries.push((k, v));
+            }
+        }
+        true
+    }
+
+    pub fn remove(&mut self, k: &Value) -> Option<Value> {
+        let i = self.index.remove(&KeyVal::of(k)?)?;
+        let (_, v) = self.entries.remove(i);
+        for slot in self.index.values_mut() {
+            if *slot > i {
+                *slot -= 1;
+            }
+        }
+        Some(v)
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.index.clear();
+    }
 }
 
 pub struct StructObj {

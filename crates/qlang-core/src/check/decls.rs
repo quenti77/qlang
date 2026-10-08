@@ -3,6 +3,8 @@
 use super::*;
 use crate::ast::{Ident, ImportKind, StmtKind, TypeExpr, TypeExprKind, TypeParam, Visibility};
 
+/// Names of types that cannot be redefined. `map` is deliberately absent: it names a
+/// type only in type positions, and `map`/`filter`/`reduce` are common function names.
 const BUILTIN_TYPES: [&str; 6] = ["int", "float", "bool", "string", "array", "range"];
 pub(crate) const BUILTIN_FNS: [&str; 5] = ["print", "write", "read", "panic", "assert"];
 
@@ -244,6 +246,16 @@ impl Checker {
                 }
                 return t;
             }
+            if name == "map" {
+                if args.len() != 2 {
+                    self.err("T121", "`map` takes two type arguments: `map<string, int>`", span);
+                    return Ty::Error;
+                }
+                let k = self.resolve_type(&args[0]);
+                let v = self.resolve_type(&args[1]);
+                self.check_key_type(&k, args[0].span);
+                return Ty::Map(Box::new(k), Box::new(v));
+            }
             if name == "array" {
                 if args.len() != 1 {
                     self.err("T121", "`array` takes exactly one type argument: `array<int>`", span);
@@ -255,6 +267,15 @@ impl Checker {
         }
         let Some(item) = self.lookup_path_item(path, "type") else { return Ty::Error };
         self.item_to_type(item, path, args, span)
+    }
+
+    /// Map keys must be compared by value: int, string, bool or enum.
+    pub(crate) fn check_key_type(&mut self, k: &Ty, span: Span) {
+        let k = self.resolve(k);
+        if !matches!(k, Ty::Int | Ty::Str | Ty::Bool | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)) {
+            let shown = self.show(&k);
+            self.err("T270", format!("`{shown}` cannot be a map key (use int, string, bool or an enum)"), span);
+        }
     }
 
     pub(crate) fn item_to_type(&mut self, item: ItemRef, path: &[Ident], args: &[TypeExpr], span: Span) -> Ty {

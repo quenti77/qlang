@@ -31,6 +31,8 @@ pub enum Ty {
     Range,
     Nullable(Box<Ty>),
     Array(Box<Ty>),
+    /// `map<K, V>`: keys are int, string, bool or enum values.
+    Map(Box<Ty>, Box<Ty>),
     Fn(Vec<Ty>, Box<Ty>),
     Struct(StructId, Vec<Ty>),
     Enum(EnumId),
@@ -69,6 +71,7 @@ impl Ty {
             Ty::Param(p) => map.get(p).cloned().unwrap_or_else(|| self.clone()),
             Ty::Nullable(t) => Ty::nullable(t.subst(map)),
             Ty::Array(t) => Ty::Array(Box::new(t.subst(map))),
+            Ty::Map(k, v) => Ty::Map(Box::new(k.subst(map)), Box::new(v.subst(map))),
             Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|p| p.subst(map)).collect(), Box::new(r.subst(map))),
             Ty::Struct(id, args) => Ty::Struct(*id, args.iter().map(|a| a.subst(map)).collect()),
             Ty::Trait(id, args) => Ty::Trait(*id, args.iter().map(|a| a.subst(map)).collect()),
@@ -80,6 +83,7 @@ impl Ty {
         match self {
             Ty::Infer(_) => true,
             Ty::Nullable(t) | Ty::Array(t) => t.contains_infer(),
+            Ty::Map(k, v) => k.contains_infer() || v.contains_infer(),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_infer) || r.contains_infer(),
             Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_infer),
             _ => false,
@@ -90,6 +94,7 @@ impl Ty {
         match self {
             Ty::Param(_) => true,
             Ty::Nullable(t) | Ty::Array(t) => t.contains_param(),
+            Ty::Map(k, v) => k.contains_param() || v.contains_param(),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_param) || r.contains_param(),
             Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_param),
             _ => false,
@@ -112,6 +117,7 @@ impl Ty {
                 _ => format!("{}?", t.show(defs)),
             },
             Ty::Array(t) => format!("array<{}>", t.show(defs)),
+            Ty::Map(k, v) => format!("map<{}, {}>", k.show(defs), v.show(defs)),
             Ty::Fn(ps, r) => {
                 let ps: Vec<String> = ps.iter().map(|p| p.show(defs)).collect();
                 if **r == Ty::Unit {

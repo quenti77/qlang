@@ -69,6 +69,7 @@ enum Place {
     Field(Rc<StructObj>, String),
     Static(StructId, String),
     Elem(Rc<RefCell<Vec<Value>>>, usize),
+    MapEntry(Rc<RefCell<MapObj>>, Value),
     UserIndex(Value, Value),
     Append(Value),
 }
@@ -351,6 +352,18 @@ impl<'a> Interp<'a> {
                     out.push(self.eval(it, env)?);
                 }
                 Ok(Value::array(out))
+            }
+            ExprKind::Map(items) => {
+                let mut m = MapObj::default();
+                for (k, v) in items {
+                    let kv = self.eval(k, env)?;
+                    let vv = self.eval(v, env)?;
+                    self.guard_alloc(m.len() + 1, e.span)?;
+                    if !m.insert(kv, vv) {
+                        return self.fail("R023", "this value cannot be used as a map key", k.span);
+                    }
+                }
+                Ok(Value::Map(Rc::new(RefCell::new(m))))
             }
             ExprKind::StructLit(lit) => self.eval_struct_lit(e, lit, env),
             ExprKind::Unary(op, inner) => {
@@ -654,6 +667,7 @@ impl<'a> Interp<'a> {
             (Value::None, Ty::NoneT | Ty::Nullable(_)) => true,
             (_, Ty::Nullable(inner)) => self.value_matches_ty(v, inner),
             (Value::Array(_), Ty::Array(_)) => true,
+            (Value::Map(_), Ty::Map(..)) => true,
             (Value::Struct(o), Ty::Struct(sid, _)) => defs.is_subclass(o.def, *sid),
             (Value::Struct(o), Ty::Trait(tid, _)) => {
                 let classes: Vec<StructId> = defs.ancestry(o.def, &[]).into_iter().map(|(s, _)| s).collect();
@@ -776,6 +790,14 @@ impl<'a> Interp<'a> {
                     parts.push(self.repr(it, span)?);
                 }
                 format!("[{}]", parts.join(", "))
+            }
+            Value::Map(m) => {
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                let mut parts = Vec::with_capacity(entries.len());
+                for (k, v) in &entries {
+                    parts.push(format!("{}: {}", self.repr(k, span)?, self.repr(v, span)?));
+                }
+                format!("{{{}}}", parts.join(", "))
             }
             Value::Enum(e, vi) => {
                 let d = &self.prog.defs.enums[*e];
@@ -950,6 +972,7 @@ impl<'a> Interp<'a> {
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Enum(e1, v1), Value::Enum(e2, v2)) => e1 == e2 && v1 == v2,
+            (Value::Map(x), Value::Map(y)) => Rc::ptr_eq(x, y),
             (Value::Array(x), Value::Array(y)) => {
                 if Rc::ptr_eq(x, y) {
                     return Ok(true);
@@ -995,6 +1018,7 @@ impl<'a> Interp<'a> {
                     None => self.fail("R020", format!("index {i} is out of bounds (length {})", a.len()), span),
                 }
             }
+            (Value::Map(m), k) => Ok(m.borrow().get(k).cloned().unwrap_or(Value::None)),
             (Value::Str(s), Value::Int(i)) => match usize::try_from(*i).ok().and_then(|u| s.chars().nth(u)) {
                 Some(c) => Ok(Value::str(&c.to_string())),
                 None => self.fail("R020", format!("index {i} is out of bounds (length {})", s.chars().count()), span),
@@ -1027,6 +1051,7 @@ impl<'a> Interp<'a> {
                 let b = self.eval(base, env)?;
                 let i = self.eval(idx, env)?;
                 match (&b, &i) {
+                    (Value::Map(m), _) => Ok(Place::MapEntry(m.clone(), i)),
                     (Value::Array(a), Value::Int(n)) => {
                         let len = a.borrow().len();
                         match usize::try_from(*n).ok().filter(|u| *u < len) {
@@ -1061,6 +1086,10 @@ impl<'a> Interp<'a> {
                 None => self.fail("R002", format!("static field `{n}` has no value yet"), span),
             },
             Place::Elem(a, i) => Ok(a.borrow()[*i].clone()),
+            Place::MapEntry(m, k) => match m.borrow().get(k) {
+                Some(v) => Ok(v.clone()),
+                None => self.fail("R022", "this key is not in the map (use `get(key, default)` or check `has(key)` first)", span),
+            },
             Place::UserIndex(b, i) => self.index_get(b, i, span),
             Place::Append(_) => self.fail("R003", "`x[]` cannot be read", span),
         }
@@ -1087,6 +1116,13 @@ impl<'a> Interp<'a> {
             }
             Place::Elem(a, i) => {
                 a.borrow_mut()[*i] = v;
+            }
+            Place::MapEntry(m, k) => {
+                let len = m.borrow().len();
+                self.guard_alloc(len + 1, span)?;
+                if !m.borrow_mut().insert(k.clone(), v) {
+                    return self.fail("R023", "this value cannot be used as a map key", span);
+                }
             }
             Place::UserIndex(b, i) => match b {
                 Value::Array(a) => {
@@ -1384,6 +1420,17 @@ impl<'a> Interp<'a> {
                 }
                 Value::str(&s.chars().skip(a as usize).take((b - a) as usize).collect::<String>())
             }
+            (Value::Map(m), "len") => Value::Int(m.borrow().len() as i64),
+            (Value::Map(m), "is_empty") => Value::Bool(m.borrow().is_empty()),
+            (Value::Map(m), "clear") => {
+                m.borrow_mut().clear();
+                Value::Unit
+            }
+            (Value::Map(m), "has") => Value::Bool(m.borrow().get(&args[0]).is_some()),
+            (Value::Map(m), "get") => m.borrow().get(&args[0]).cloned().unwrap_or_else(|| args[1].clone()),
+            (Value::Map(m), "remove") => m.borrow_mut().remove(&args[0]).unwrap_or(Value::None),
+            (Value::Map(m), "keys") => Value::array(m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()),
+            (Value::Map(m), "values") => Value::array(m.borrow().entries.iter().map(|(_, v)| v.clone()).collect()),
             (Value::Array(a), "sort") => {
                 let items: Vec<Value> = a.borrow().clone();
                 let sorted = self.merge_sort(items, span)?;

@@ -1,0 +1,8 @@
+[package]
+name = "qlang-core"
+version.workspace = true
+edition.workspace = true
+description = "Lexer, parser, type checker and interpreter for the qlang language (no I/O)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

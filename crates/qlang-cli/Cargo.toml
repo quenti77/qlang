@@ -1,0 +1,13 @@
+[package]
+name = "qlang-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "qlang"
+path = "src/main.rs"
+
+[dependencies]
+qlang-core = { path = "../qlang-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -65,3 +65,13 @@ test('snippets have a prefix and a body, and tabstops are well formed', () => {
     assert.ok(!/\$\{\d+:[^}]*$/m.test(body.replace(/\$\{\d+:[^}]*\}/g, '')), `${name}: unbalanced placeholder`);
   }
 });
+
+test('the executable path cannot be set by a downloaded project', () => {
+  const pkg = read('package.json');
+  const caps = pkg.capabilities.untrustedWorkspaces;
+  assert.strictEqual(caps.supported, 'limited');
+  assert.ok(caps.restrictedConfigurations.includes('qlang.path'));
+  assert.ok(caps.description.length > 20, 'a reason is shown to the user');
+  // `machine` scope: the setting is only read from user (or remote machine) settings
+  assert.strictEqual(pkg.contributes.configuration.properties['qlang.path'].scope, 'machine');
+});

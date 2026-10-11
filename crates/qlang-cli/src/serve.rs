@@ -61,17 +61,38 @@ pub fn serve(args: &[&str]) -> ExitCode {
             let _ = respond(stream, 503, "{\"error\":\"server busy\"}");
             continue;
         }
-        active.fetch_add(1, Ordering::SeqCst);
-        let active = active.clone();
+        let slot = Slot::take(&active);
         let spawned = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-            handle_connection(stream);
-            active.fetch_sub(1, Ordering::SeqCst);
+            // the slot is freed when the thread ends, whatever happens (including a panic)
+            let _slot = slot;
+            let reply = stream.try_clone();
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_connection(stream)));
+            if outcome.is_err()
+                && let Ok(s) = reply {
+                    let _ = respond(s, 500, "{\"error\":\"internal error\"}");
+                }
         });
         if spawned.is_err() {
             eprintln!("cannot start a worker thread");
         }
     }
     ExitCode::SUCCESS
+}
+
+/// One of the limited connection slots. Freed on drop, so a panicking worker cannot leak it.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(counter: &Arc<AtomicUsize>) -> Slot {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Slot(counter.clone())
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 fn respond(mut stream: TcpStream, status: u16, body: &str) -> std::io::Result<()> {
@@ -81,6 +102,7 @@ fn respond(mut stream: TcpStream, status: u16, body: &str) -> std::io::Result<()
         404 => "Not Found",
         405 => "Method Not Allowed",
         413 => "Payload Too Large",
+        500 => "Internal Server Error",
         503 => "Service Unavailable",
         _ => "Error",
     };
@@ -152,4 +174,34 @@ fn handle_connection(mut stream: TcpStream) {
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_slot_is_freed_even_when_the_worker_panics() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let slot = Slot::take(&counter);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        let worker = std::thread::spawn(move || {
+            let _slot = slot;
+            panic!("worker failed");
+        });
+        assert!(worker.join().is_err());
+        assert_eq!(counter.load(Ordering::SeqCst), 0, "the slot leaked");
+    }
+
+    #[test]
+    fn slots_count_up_and_down() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let a = Slot::take(&counter);
+        let b = Slot::take(&counter);
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        drop(a);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        drop(b);
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
 }

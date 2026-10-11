@@ -51,7 +51,7 @@ impl Checker {
         };
         if let Some(prev) = target.get(&name.name)
             && prev.orig.is_none() && name.name != "_" {
-                self.diags.push(Diagnostic::error(
+                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T150",
                     format!("`{}` is already declared in this scope", name.name),
                     name.span,

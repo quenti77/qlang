@@ -624,3 +624,105 @@ fn string_library() {
     let o = run_files(&[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")], None, Limits { max_alloc: 1000, ..Limits::default() });
     assert!(o.error.unwrap().starts_with("R903"));
 }
+
+// ---------------------------------------------------------------- hardening
+
+#[test]
+fn printing_cyclic_or_deep_values_does_not_crash() {
+    // a structure that points to itself: printing stops at a fixed depth
+    let o = out("struct Node\npublic next: Node?\nend\nlet n = Node { next: none }\nn.next = n\nprint(\"built\")\nlet s = n as string\nprint(s.len() > 100)\nprint(s.ends_with(\"...\" + \" }\".repeat(1)) or s.contains(\"...\"))");
+    assert!(o.starts_with("built\ntrue\ntrue"), "{o}");
+    // a very long linked list prints without a stack overflow
+    let src = "struct Node\npublic v: int\npublic next: Node?\nend\nlet head = Node { v: 0, next: none }\nlet cur = head\nfor i in 1..5000 do\nlet n = Node { v: i, next: none }\ncur.next = n\ncur = n\nend\nprint((head as string).contains(\"...\"))";
+    assert_eq!(out(src), "true\n");
+    // two links to itself would print 2^64 nodes: the size limit stops it with an error
+    let o = run_files(
+        &[("main.q", "struct T\npublic a: T?\npublic b: T?\nend\nlet t = T { a: none, b: none }\nt.a = t\nt.b = t\nprint(t)")],
+        None,
+        Limits { max_alloc: 100_000, ..Limits::default() },
+    );
+    assert!(o.error.unwrap().starts_with("R903"));
+}
+
+#[test]
+fn trait_methods_that_share_a_builtin_name_reach_the_users_impl() {
+    // `contains` exists on strings; through a generic bound the user's own `contains` is meant
+    let src = "trait Probe\nfun contains(self, n: int) -> bool\nend\nimpl Probe for string\npublic fun contains(self, n: int) -> bool\nn > 0\nend\nend\nfun f<T: Probe>(x: T) -> bool\nx.contains(5)\nend\nprint(f(\"abc\"))\nprint(\"abc\".contains(\"b\"))";
+    assert_eq!(out(src), "true\ntrue\n");
+    // same with arrays and a different arity
+    let src = "trait Pushy\nfun push(self) -> int\nend\nimpl Pushy for array<int>\npublic fun push(self) -> int\n42\nend\nend\nfun g<T: Pushy>(x: T) -> int\nx.push()\nend\nlet a = [1]\nprint(g(a))\na.push(2)\nprint(a)";
+    assert_eq!(out(src), "42\n[1, 2]\n");
+}
+
+#[test]
+fn internal_panics_become_errors() {
+    use qlang_core::host::Host;
+    struct Exploding;
+    impl Host for Exploding {
+        fn print(&mut self, _text: &str) {
+            panic!("the host blew up");
+        }
+    }
+    let result = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| {
+            let mut host = MemoryHost::new();
+            let prog = compile("main.q", "print(1)", &mut host).ok().unwrap();
+            let mut bad = Exploding;
+            let r = prog.run(&mut bad, Limits::default());
+            r.error.map(|d| (d.code, d.message))
+        })
+        .unwrap()
+        .join()
+        .expect("the panic must not escape `run`");
+    let (code, message) = result.expect("an error is reported");
+    assert_eq!(code, "X999");
+    assert!(message.contains("the host blew up") && message.contains("bug in qlang"), "{message}");
+}
+
+#[test]
+fn builtin_work_is_charged_to_the_step_budget() {
+    // 20 000 `contains` calls on 100 000 elements: ~2 billion element visits. With the work
+    // charged, the step limit stops it quickly; before, it ran for minutes.
+    let src = "let big: array<int> = []\nfor i in 0..100_000 do\nbig[] = i\nend\nlet n = 0\nwhile n < 20_000 do\nbig.contains(-1)\nn += 1\nend\nprint(n)";
+    let start = std::time::Instant::now();
+    let o = run_files(&[("main.q", src)], None, Limits { max_steps: 3_000_000, ..Limits::default() });
+    assert!(o.error.unwrap().starts_with("R900"));
+    assert!(start.elapsed().as_secs() < 10, "the limit should stop it quickly: {:?}", start.elapsed());
+    // string building by repeated concatenation is charged too
+    let src = "let s = \"x\".repeat(1_000_000)\nlet n = 0\nwhile n < 100_000 do\nlet t = s + s\nn += 1\nend";
+    let start = std::time::Instant::now();
+    let o = run_files(&[("main.q", src)], None, Limits { max_steps: 3_000_000, ..Limits::default() });
+    assert!(o.error.unwrap().starts_with("R900"));
+    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+    // a normal program is not affected
+    assert_eq!(out("let a = [1, 2, 3]\nprint(a.contains(3))\nprint(\"hello\".upper())"), "true\nHELLO\n");
+}
+
+#[test]
+fn a_huge_broken_file_gives_a_short_error_list() {
+    let mut host = MemoryHost::new();
+    let src = "@".repeat(300_000);
+    let start = std::time::Instant::now();
+    let e = match compile("main.q", &src, &mut host) {
+        Ok(_) => panic!("expected errors"),
+        Err(e) => e,
+    };
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert!(e.diagnostics.len() <= 101, "{} diagnostics", e.diagnostics.len());
+    assert!(e.diagnostics.last().unwrap().message.contains("too many errors"));
+    // type errors are capped as well
+    let many: String = (0..500).map(|i| format!("let v{i}: int = \"x\"\n")).collect();
+    let e = match compile("main.q", &many, &mut host) {
+        Ok(_) => panic!("expected errors"),
+        Err(e) => e,
+    };
+    assert!(e.diagnostics.len() <= 101, "{}", e.diagnostics.len());
+    assert!(e.diagnostics.iter().any(|d| d.message.contains("too many errors")));
+    // a few errors are all kept, in order
+    let e = match compile("main.q", "let a: int = \"x\"\nlet b: int = \"y\"", &mut host) {
+        Ok(_) => panic!("expected errors"),
+        Err(e) => e,
+    };
+    assert_eq!(e.diagnostics.len(), 2);
+}

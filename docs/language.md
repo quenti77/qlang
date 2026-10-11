@@ -1234,8 +1234,10 @@ indique l'étape :
 | `T`     | noms et types (nom inconnu, type incompatible, visibilité…) |
 | `R`     | exécution (division par zéro, indice hors limites, `panic`…) |
 | `J`     | requête JSON invalide (voir le README)             |
+| `X`     | erreur interne : un bug de qlang (à signaler)      |
 
-Le compilateur signale **plusieurs erreurs à la fois** quand il le peut. Les
+Le compilateur signale **plusieurs erreurs à la fois** quand il le peut, jusqu'à
+100 : au-delà, il l'indique (`too many errors`) au lieu de tout lister. Les
 erreurs de syntaxe sont signalées seules ; les erreurs de types viennent après.
 Une erreur d'exécution affiche aussi la pile des appels.
 
@@ -1248,6 +1250,17 @@ environnement, l'exécution est bornée :
 | appels imbriqués    | 1 000       | `R901` (récursion infinie ?) |
 | sortie affichée     | 10 Mo       | `R902` |
 | taille d'un tableau ou dictionnaire (éléments) ou d'une chaîne (octets) | 10 000 000 | `R903` |
+
+Le temps passé dans les opérations prédéfinies compte aussi : chercher dans un
+tableau (`contains`, `index_of`), le trier, l'assembler (`join`), copier une
+chaîne (`+`, `replace`, `split`…) coûte environ une étape pour 4 éléments (ou 32
+octets). Une boucle qui fouille un très grand tableau à chaque tour atteint donc
+la limite d'étapes, comme n'importe quelle boucle trop longue.
+
+Afficher une valeur (`print`, interpolation, `as string`) descend au plus de 64
+niveaux dans les tableaux et structures : en dessous, elle affiche `...`. Cela
+évite qu'une structure qui se contient elle-même (`n.next = n`) ne boucle sans
+fin.
 
 Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
@@ -1267,3 +1280,9 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Méthodes par défaut dans les traits** et traits qui en exigent d'autres :
   non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
+- **Commentaires de documentation** (`--" … --"`) : ils sont pour l'instant ignorés,
+  comme les autres commentaires. À prévoir : les rattacher à la déclaration qui
+  suit (fonction, structure, `impl`, `trait`, énumération, champ, méthode), les
+  garder dans l'arbre et le `Program`, puis s'en servir dans l'éditeur (survol,
+  complétion) et pour générer une page de documentation. Il faudra choisir le
+  format du texte : texte libre, ou un format léger du type `@param` / `@return`.

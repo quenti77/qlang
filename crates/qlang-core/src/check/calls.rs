@@ -452,6 +452,7 @@ impl Checker {
                 for (p, a) in td.tparams.iter().zip(targs2.iter()) {
                     map.insert(*p, a.clone());
                 }
+                self.res.trait_calls.insert(e.id);
                 let cs = CallSig {
                     name: name.name.clone(),
                     tparams: sig.tparams.clone(),

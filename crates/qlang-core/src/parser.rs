@@ -112,7 +112,7 @@ impl<'a> Parser<'a> {
     }
 
     fn error_at<T>(&mut self, code: &str, msg: impl Into<String>, span: Span) -> PResult<T> {
-        self.diags.push(Diagnostic::error(code, msg, span));
+        crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span));
         Err(())
     }
 
@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
             return true;
         }
         let span = self.peek_span();
-        self.diags.push(Diagnostic::error(
+        crate::diag::push_capped(&mut self.diags, Diagnostic::error(
             "P002",
             format!("unexpected {}; expected the end of the line", t.describe()),
             span,
@@ -1297,7 +1297,7 @@ impl<'a> Parser<'a> {
                         _ => {
                             let width = raw.get(i + 1..).and_then(|r| r.chars().next()).map_or(0, char::len_utf8);
                             let s = Span::new(self.file, base + i, base + i + 1 + width);
-                            self.diags.push(Diagnostic::error(
+                            crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                                 "P020",
                                 "unknown escape sequence (allowed: \\n \\t \\r \\0 \\\\ \\\" \\{ \\})",
                                 s,
@@ -1328,7 +1328,7 @@ impl<'a> Parser<'a> {
                     }
                     if j >= rb.len() {
                         let s = Span::new(self.file, base + i, base + i + 1);
-                        self.diags.push(Diagnostic::error(
+                        crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                             "P021",
                             "unterminated `{` in string (write `\\{` for a literal brace)",
                             s,
@@ -1339,7 +1339,7 @@ impl<'a> Parser<'a> {
                     let inner_base = base + i + 1;
                     if inner.trim().is_empty() {
                         let s = Span::new(self.file, base + i, base + j + 1);
-                        self.diags.push(Diagnostic::error("P022", "empty `{}` in string (write `\\{\\}` for literal braces)", s));
+                        crate::diag::push_capped(&mut self.diags, Diagnostic::error("P022", "empty `{}` in string (write `\\{\\}` for literal braces)", s));
                     } else if let Some(e) = self.parse_interpolation(inner, inner_base) {
                         if !cur.is_empty() {
                             parts.push(StrPart::Lit(std::mem::take(&mut cur)));
@@ -1369,7 +1369,7 @@ impl<'a> Parser<'a> {
         if e.is_ok() && !sub.at(&Tok::Eof) {
             let found = sub.peek();
             let span = sub.peek_span();
-            sub.diags.push(Diagnostic::error(
+            crate::diag::push_capped(&mut sub.diags, Diagnostic::error(
                 "P023",
                 format!("unexpected {} in string interpolation", found.describe()),
                 span,

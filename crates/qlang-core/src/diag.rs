@@ -3,6 +3,17 @@
 use crate::span::{Location, SourceMap, Span};
 use serde::Serialize;
 
+/// At most this many diagnostics are reported; the rest is summarised. A huge broken
+/// file must not turn into millions of messages.
+pub const MAX_DIAGNOSTICS: usize = 100;
+
+/// Collect a diagnostic unless far more than needed were already collected.
+pub fn push_capped(diags: &mut Vec<Diagnostic>, d: Diagnostic) {
+    if diags.len() < MAX_DIAGNOSTICS * 2 {
+        diags.push(d);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {

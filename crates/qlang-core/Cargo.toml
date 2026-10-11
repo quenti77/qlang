@@ -2,6 +2,7 @@
 name = "qlang-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Lexer, parser, type checker and interpreter for the qlang language (no I/O)"
 
 [dependencies]

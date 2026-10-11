@@ -1,0 +1,4 @@
+# The interpreter recurses (up to 1000 nested calls). A native thread has megabytes of stack,
+# but WebAssembly defaults to 1 MiB: give it 16 MiB.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=16777216"]

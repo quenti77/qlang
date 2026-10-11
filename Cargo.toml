@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/qlang-core", "crates/qlang-cli"]
+members = ["crates/qlang-core", "crates/qlang-cli", "crates/qlang-wasm"]
 
 [workspace.package]
 version = "0.2.0"
@@ -8,3 +8,10 @@ edition = "2024"
 # let-chains (`if let ... && let ...`) need 1.88
 rust-version = "1.88"
 license = "MIT"
+
+# The browser build: speed and size matter more than build time.
+[profile.wasm]
+inherits = "release"
+lto = true
+codegen-units = 1
+strip = true

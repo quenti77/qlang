@@ -10,6 +10,7 @@ pub mod host;
 pub mod interp;
 pub mod lexer;
 pub mod parser;
+pub mod protocol;
 pub mod span;
 pub mod types;
 pub mod value;

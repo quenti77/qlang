@@ -31,6 +31,7 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 | `qlang-aarch64-unknown-linux-musl.tar.gz` | Linux arm64 (statique)                   |
 | `qlang-aarch64-apple-darwin.tar.gz`       | macOS Apple Silicon                      |
 | `qlang-x86_64-apple-darwin.tar.gz`        | macOS Intel                              |
+| `qlang.wasm`, `qlang.mjs`                 | qlang pour le navigateur (WebAssembly)   |
 | `qlang.vsix`                              | extension VS Code                        |
 | `SHA256SUMS`                              | sommes de contrôle de tous les fichiers  |
 

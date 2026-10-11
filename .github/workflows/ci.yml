@@ -32,6 +32,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace
 
+  wasm:
+    name: WebAssembly build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --profile wasm --target wasm32-unknown-unknown -p qlang-wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test crates/qlang-wasm/test/*.test.mjs
+
   extension:
     name: VS Code extension
     runs-on: ubuntu-latest

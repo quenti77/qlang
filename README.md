@@ -259,6 +259,7 @@ proxy inverse et ne l'exposez pas directement à Internet.
 ## Éditeur : VS Code
 
 Une extension (coloration, erreurs soulignées pendant la frappe grâce au vrai compilateur,
+infobulles avec types et documentation, autocomplétion, aide à la saisie des paramètres,
 bouton ▶ pour exécuter, snippets) est dans [`editors/vscode`](editors/vscode) :
 
 ```sh
@@ -271,6 +272,15 @@ puis `cd editors/vscode && npm install && npm run package` et `code --install-ex
 Pour les éditeurs, `qlang check --json` lit la même requête JSON que `run --json` mais ne fait que
 vérifier le programme (réponse avec `"phase": "check"`) ; `"mode": "check"` dans la requête fait la
 même chose avec `run --json`.
+
+Avec `"info": true` dans la requête, la réponse contient aussi ce que le compilateur a appris du
+programme, pour les éditeurs : le type de chaque expression (`exprs`), les variables et leur portée
+(`locals`), les définitions (`items`), les noms visibles de chaque fichier (`globals`) et les membres
+de chaque type rencontré (`members` pour `valeur.`, `statics` pour `Type.` et `module.`). Les
+informations sont fournies même si le programme contient des erreurs de types ; elles manquent
+seulement si le fichier ne peut pas être analysé (erreur de syntaxe) ou si les déclarations sont
+fausses. La documentation des méthodes prédéfinies vient du compilateur ; celle de vos fonctions,
+structures et méthodes est lue par l'extension dans les commentaires `--" … --"` qui les précèdent.
 
 ## Développement
 

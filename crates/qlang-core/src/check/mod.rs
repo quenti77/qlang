@@ -3,9 +3,13 @@
 
 mod body;
 mod calls;
+mod catalog;
+mod info;
 mod decls;
 mod expr;
 mod unify;
+
+pub use info::{ExprInfo, Info, ItemInfo, LocalInfo, Member};
 
 use crate::ast::{self, Item};
 use crate::diag::{Diagnostic, MAX_DIAGNOSTICS, Severity};
@@ -30,12 +34,16 @@ pub struct Program {
     pub defs: Defs,
     pub res: Resolutions,
     pub warnings: Vec<Diagnostic>,
+    /// For editors; only when asked for (see [`CompileOptions`]).
+    pub info: Option<Info>,
 }
 
 /// Compilation failed. Diagnostics carry resolved locations.
 pub struct CompileError {
     pub diagnostics: Vec<Diagnostic>,
     pub sources: SourceMap,
+    /// What the checker learned before stopping (only when asked for).
+    pub info: Option<Box<Info>>,
 }
 
 impl CompileError {
@@ -47,12 +55,24 @@ impl CompileError {
 /// Compile the program whose entry file is `entry` with text `source`.
 /// Imported modules are requested from `host`.
 pub fn compile(entry: &str, source: &str, host: &mut dyn Host) -> Result<Program, CompileError> {
+    compile_with(entry, source, host, &CompileOptions::default())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompileOptions {
+    /// Also collect the types of expressions, local variables and members (for editors).
+    pub info: bool,
+}
+
+/// Like [`compile`], with options.
+pub fn compile_with(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {
     // A bug in the compiler must not take the caller down with it (a server, an editor).
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_inner(entry, source, host))) {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_inner(entry, source, host, options))) {
         Ok(result) => result,
         Err(payload) => Err(CompileError {
             diagnostics: vec![internal_error(&payload)],
             sources: SourceMap::default(),
+            info: None,
         }),
     }
 }
@@ -67,7 +87,7 @@ pub(crate) fn internal_error(payload: &Box<dyn std::any::Any + Send>) -> Diagnos
     Diagnostic::error("X999", format!("internal error: {detail} (this is a bug in qlang, please report it)"), Span::default())
 }
 
-fn compile_inner(entry: &str, source: &str, host: &mut dyn Host) -> Result<Program, CompileError> {
+fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {
     let caps = host.capabilities();
     let mut loader = Loader {
         host,
@@ -84,14 +104,18 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host) -> Result<Progr
 
     let has_errors = |d: &[Diagnostic]| d.iter().any(|x| x.severity == Severity::Error);
     if has_errors(&diags) {
-        return Err(finish_error(diags, sources));
+        return Err(finish_error(diags, sources, None));
     }
 
     let mut ck = Checker::new(sources, modules, caps);
+    if options.info {
+        ck.collect = Some(info::Collector::default());
+    }
     ck.run();
     diags.append(&mut ck.diags);
+    let info = if options.info { ck.build_info() } else { None };
     if has_errors(&diags) {
-        return Err(finish_error(diags, ck.sources));
+        return Err(finish_error(diags, ck.sources, info));
     }
     for d in &mut diags {
         d.resolve(&ck.sources);
@@ -106,10 +130,11 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host) -> Result<Progr
         defs: ck.defs,
         res: ck.res,
         warnings: diags,
+        info,
     })
 }
 
-fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap) -> CompileError {
+fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap, info: Option<Info>) -> CompileError {
     // stable order: by file then position
     diags.sort_by_key(|d| (d.span.file, d.span.start));
     if diags.len() > MAX_DIAGNOSTICS {
@@ -124,7 +149,7 @@ fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap) -> CompileError 
     for d in &mut diags {
         d.resolve(&sources);
     }
-    CompileError { diagnostics: diags, sources }
+    CompileError { diagnostics: diags, sources, info: info.map(Box::new) }
 }
 
 // ------------------------------------------------------------------ loading
@@ -263,6 +288,8 @@ pub(crate) struct Checker {
     /// The method being checked (for `super`).
     pub cur_fn: Option<FnId>,
     pub subst: Vec<Option<Ty>>,
+    /// Set when an editor asked for [`Info`].
+    pub collect: Option<info::Collector>,
 }
 
 impl Checker {
@@ -285,6 +312,7 @@ impl Checker {
             cur_self: None,
             cur_fn: None,
             subst: Vec::new(),
+            collect: None,
         }
     }
 

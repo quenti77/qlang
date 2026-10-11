@@ -43,6 +43,15 @@ impl Checker {
         self.scopes.pop();
     }
 
+    /// For editors: `Type` or `module` written alone (as in `Type.|`) still has members.
+    fn record_head(&mut self, e: &Expr) {
+        if self.collecting() {
+            let before = self.diags.len();
+            let _ = self.try_head(e);
+            self.diags.truncate(before);
+        }
+    }
+
     pub fn declare(&mut self, name: &Ident, local: Local) {
         let m = self.cur_mod;
         let target = match self.scopes.last_mut() {
@@ -58,7 +67,17 @@ impl Checker {
                 ));
                 return;
             }
-        target.insert(name.name.clone(), local);
+        target.insert(name.name.clone(), local.clone());
+        if self.collect.is_some() {
+            // a variable can be used from here to the end of its function (or file)
+            let scope = match self.cur_fn.and_then(|f| self.defs.fns[f].decl.clone()) {
+                Some(d) => d.span,
+                None => Span { file: name.span.file, start: 0, end: u32::MAX },
+            };
+            if let Some(c) = &mut self.collect {
+                c.local(name, &local, scope);
+            }
+        }
     }
 
     /// A variable visible here: locals first, then top-level variables.
@@ -356,7 +375,11 @@ impl Checker {
 
     pub fn expr(&mut self, e: &Expr, want: &Want) -> Ty {
         let t = self.expr_inner(e, want);
-        self.resolve(&t)
+        let t = self.resolve(&t);
+        if let Some(c) = &mut self.collect {
+            c.expr(e, t.clone());
+        }
+        t
     }
 
     fn expr_inner(&mut self, e: &Expr, want: &Want) -> Ty {
@@ -483,6 +506,7 @@ impl Checker {
                 }
             },
             Some(ItemRef::Struct(_)) => {
+                self.record_head(e);
                 self.err(
                     "T154",
                     format!("`{name}` is a type, not a value (build one with `{name} {{ ... }}` or call its methods like `{name}.new(...)`)"),
@@ -491,14 +515,17 @@ impl Checker {
                 Ty::Error
             }
             Some(ItemRef::Enum(_)) | Some(ItemRef::Trait(_)) => {
+                self.record_head(e);
                 self.err("T154", format!("`{name}` is a type, not a value"), e.span);
                 Ty::Error
             }
             Some(ItemRef::Module(_)) => {
+                self.record_head(e);
                 self.err("T154", format!("`{name}` is a module: use `{name}.something`"), e.span);
                 Ty::Error
             }
             None => {
+                self.record_head(e);
                 if decls::BUILTIN_FNS.contains(&name) {
                     self.err("T155", format!("`{name}` is a built-in function: call it as `{name}(...)`"), e.span);
                 } else {

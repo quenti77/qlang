@@ -26,6 +26,31 @@ impl Checker {
 
     /// If `e` names a type or a module (and not a variable), say which.
     pub fn try_head(&mut self, e: &Expr) -> Option<Head> {
+        let head = self.try_head_inner(e);
+        if self.collecting() {
+            match &head {
+                Some(Head::Type(_, tref)) => {
+                    let key = match tref {
+                        TypeRef::Struct(id) => self.defs.structs[*id].name.clone(),
+                        TypeRef::Enum(id) => self.defs.enums[*id].name.clone(),
+                        TypeRef::Builtin(b) => b.to_string(),
+                    };
+                    if let Some(c) = &mut self.collect {
+                        c.head(e, Ty::Unit, format!("type {key}"), super::info::StaticKey::Type(tref.clone()));
+                    }
+                }
+                Some(Head::Module(m)) => {
+                    if let Some(c) = &mut self.collect {
+                        c.head(e, Ty::Unit, format!("module {m}"), super::info::StaticKey::Module(*m));
+                    }
+                }
+                _ => {}
+            }
+        }
+        head
+    }
+
+    fn try_head_inner(&mut self, e: &Expr) -> Option<Head> {
         match &e.kind {
             ExprKind::Ident(name, targs) => {
                 if self.lookup_var(name).is_some() {

@@ -6,12 +6,14 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const lib = require('./lib');
+const intel = require('./intel');
 
 let collection;
 let warnedMissingBinary = false;
 const timers = new Map(); // document uri -> pending check
 const published = new Map(); // entry uri -> uris that carry its diagnostics
 let runTerminal;
+const analyses = new Map(); // document uri -> { version, info, entry, root } of the last check
 
 function settings() {
   return vscode.workspace.getConfiguration('qlang');
@@ -40,6 +42,13 @@ function activate(context) {
     })
   );
   vscode.workspace.textDocuments.forEach((d) => schedule(d, 0));
+
+  const qlang = { language: 'qlang', scheme: 'file' };
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(qlang, { provideHover }),
+    vscode.languages.registerCompletionItemProvider(qlang, { provideCompletionItems }, '.'),
+    vscode.languages.registerSignatureHelpProvider(qlang, { provideSignatureHelp }, '(', ',')
+  );
 }
 
 function deactivate() {
@@ -51,6 +60,7 @@ function clear(doc) {
   const key = doc.uri.toString();
   if (timers.has(key)) clearTimeout(timers.get(key));
   timers.delete(key);
+  analyses.delete(key);
   for (const uri of published.get(key) || []) collection.delete(vscode.Uri.parse(uri));
   published.delete(key);
 }
@@ -131,13 +141,116 @@ function runQlang(args, stdin, cwd) {
   });
 }
 
-async function check(doc) {
+/**
+ * Ask the compiler about `doc` (or about `text`, a variant of it). The response carries the
+ * diagnostics and what editors need: types, variables, members.
+ */
+async function analyse(doc, text) {
   const root = rootFor(doc);
   const entry = lib.relativePosix(root, doc.uri.fsPath);
-  const files = lib.collectFiles(entry, doc.getText(), (rel) => readFileText(root, rel));
-  const response = await runQlang(['check', '--json'], lib.buildRequest(entry, files), root);
-  if (!response) return;
-  publish(doc, root, entry, response);
+  const files = lib.collectFiles(entry, text === undefined ? doc.getText() : text, (rel) => readFileText(root, rel));
+  const response = await runQlang(['check', '--json'], lib.buildRequest(entry, files, true), root);
+  return response ? { response, entry, root, info: response.info || null } : null;
+}
+
+async function check(doc) {
+  const version = doc.version;
+  const a = await analyse(doc);
+  if (!a) return;
+  if (a.info) analyses.set(doc.uri.toString(), { version, info: a.info, entry: a.entry, root: a.root });
+  publish(doc, a.root, a.entry, a.response);
+}
+
+/** What the last check learned, re-checking first if the document changed since. */
+async function currentInfo(doc) {
+  const known = analyses.get(doc.uri.toString());
+  if (known && known.version === doc.version) return known;
+  const version = doc.version;
+  const a = await analyse(doc);
+  if (a && a.info) {
+    const fresh = { version, info: a.info, entry: a.entry, root: a.root };
+    analyses.set(doc.uri.toString(), fresh);
+    return fresh;
+  }
+  return known || null; // the code does not compile far enough: the previous answer is better than none
+}
+
+function linesReader(root) {
+  const cache = new Map();
+  return (rel) => {
+    if (!cache.has(rel)) {
+      const text = readFileText(root, rel);
+      cache.set(rel, text === null ? null : text.split('\n'));
+    }
+    return cache.get(rel);
+  };
+}
+
+function provideHover(doc, pos) {
+  return currentInfo(doc).then((a) => {
+    if (!a) return undefined;
+    const h = intel.hoverAt(a.info, a.entry, pos.line, pos.character, doc.lineAt(pos.line).text, linesReader(a.root));
+    if (!h) return undefined;
+    return new vscode.Hover(new vscode.MarkdownString(h.markdown), new vscode.Range(h.range.line, h.range.start, h.range.line, h.range.end));
+  });
+}
+
+const COMPLETION_KIND = {
+  field: vscode.CompletionItemKind.Field,
+  method: vscode.CompletionItemKind.Method,
+  function: vscode.CompletionItemKind.Function,
+  variable: vscode.CompletionItemKind.Variable,
+  param: vscode.CompletionItemKind.Variable,
+  keyword: vscode.CompletionItemKind.Keyword,
+  type: vscode.CompletionItemKind.TypeParameter,
+  struct: vscode.CompletionItemKind.Struct,
+  enum: vscode.CompletionItemKind.Enum,
+  variant: vscode.CompletionItemKind.EnumMember,
+  constant: vscode.CompletionItemKind.Constant,
+  trait: vscode.CompletionItemKind.Interface,
+  module: vscode.CompletionItemKind.Module,
+};
+
+function toCompletion(item, range) {
+  const c = new vscode.CompletionItem(item.label, COMPLETION_KIND[item.kind]);
+  c.detail = item.detail;
+  if (item.doc) c.documentation = new vscode.MarkdownString(item.doc);
+  c.sortText = item.sort;
+  if (range) c.range = range;
+  return c;
+}
+
+async function provideCompletionItems(doc, pos) {
+  const text = doc.lineAt(pos.line).text;
+  const access = intel.memberAccessAt(text, pos.character);
+  if (access) {
+    // `value.par|`: ask the compiler about the code without `.par`, so that it still compiles
+    const a = await analyse(doc, intel.blank(doc.getText(), pos.line, access.dot, pos.character));
+    if (!a || !a.info) return undefined;
+    const expr = intel.receiverAt(a.info, a.entry, pos.line, access.dot);
+    const range = new vscode.Range(pos.line, access.start, pos.line, pos.character);
+    return intel.memberCompletions(a.info, expr, text.slice(0, access.dot), linesReader(a.root)).map((i) => toCompletion(i, range));
+  }
+  const a = await currentInfo(doc);
+  if (!a) return undefined;
+  return intel.nameCompletions(a.info, a.entry, pos.line, pos.character, linesReader(a.root)).map((i) => toCompletion(i));
+}
+
+async function provideSignatureHelp(doc, pos) {
+  const text = doc.lineAt(pos.line).text;
+  const call = intel.callAt(text, pos.character);
+  if (!call) return undefined;
+  const a = await analyse(doc, intel.blank(doc.getText(), pos.line, call.open, pos.character));
+  if (!a || !a.info) return undefined;
+  const sig = intel.signatureFor(a.info, a.entry, pos.line, text, call, linesReader(a.root));
+  if (!sig) return undefined;
+  const info = new vscode.SignatureInformation(sig.label, sig.doc ? new vscode.MarkdownString(sig.doc) : undefined);
+  info.parameters = sig.parameters.map((p) => new vscode.ParameterInformation(p));
+  const help = new vscode.SignatureHelp();
+  help.signatures = [info];
+  help.activeSignature = 0;
+  help.activeParameter = Math.min(sig.activeParam, Math.max(0, sig.parameters.length - 1));
+  return help;
 }
 
 const SEVERITY = {

@@ -1289,9 +1289,11 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Méthodes par défaut dans les traits** et traits qui en exigent d'autres :
   non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Commentaires de documentation** (`--" … --"`) : ils sont pour l'instant ignorés,
-  comme les autres commentaires. À prévoir : les rattacher à la déclaration qui
-  suit (fonction, structure, `impl`, `trait`, énumération, champ, méthode), les
-  garder dans l'arbre et le `Program`, puis s'en servir dans l'éditeur (survol,
-  complétion) et pour générer une page de documentation. Il faudra choisir le
-  format du texte : texte libre, ou un format léger du type `@param` / `@return`.
+- **Commentaires de documentation** (`--" … --"`) : pour le langage, ce sont des
+  commentaires comme les autres (ignorés par le compilateur). Seule l'extension
+  VS Code les lit : elle affiche, au survol et dans l'autocomplétion, le
+  commentaire placé juste au-dessus d'une fonction, d'une structure, d'une
+  méthode, d'un champ… (texte libre). À prévoir : les rattacher à la déclaration
+  dans l'arbre et le `Program` (au lieu de les chercher dans le texte), pour
+  générer une page de documentation. Il faudra choisir le format du texte : texte
+  libre, ou un format léger du type `@param` / `@return`.

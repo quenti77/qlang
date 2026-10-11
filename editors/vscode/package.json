@@ -4,6 +4,7 @@
   "description": "Language support for qlang: syntax highlighting, errors as you type, snippets and a Run command.",
   "version": "0.1.0",
   "publisher": "qlang",
+  "license": "MIT",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Programming Languages", "Snippets"],
   "keywords": ["qlang"],
@@ -71,7 +72,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "vsce package --allow-missing-repository --skip-license"
+    "package": "vsce package --allow-missing-repository"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.0.0",

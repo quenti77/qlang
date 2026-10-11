@@ -1024,15 +1024,15 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 
 ### Fonctions prédéfinies
 
-| Fonction            | Rôle                                                            |
-| ------------------- | --------------------------------------------------------------- |
-| `print(x)`          | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
-| `write(x)`          | affiche `x` sans retour à la ligne                              |
-| `read()`            | lit une ligne et renvoie une `string` (sans le retour à la ligne) |
-| `panic(message)`    | arrête le programme avec une erreur                             |
-| `assert(cond, message?)` | arrête le programme si `cond` est faux                     |
-| `int.parse(s)`      | renvoie un `int?` : `none` si `s` n'est pas un entier valide    |
-| `float.parse(s)`    | renvoie un `float?`                                             |
+| Fonction                 | Rôle                                                                  |
+| ------------------------ | --------------------------------------------------------------------- |
+| `print(x)`               | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
+| `write(x)`               | affiche `x` sans retour à la ligne                                    |
+| `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
+| `panic(message)`         | arrête le programme avec une erreur                                   |
+| `assert(cond, message?)` | arrête le programme si `cond` est faux                                |
+| `int.parse(s)`           | renvoie un `int?` : `none` si `s` n'est pas un entier valide          |
+| `float.parse(s)`         | renvoie un `float?`                                                   |
 
 `print` et `write` acceptent n'importe quelle valeur (voir
 [Conversions](#conversions)) : les tableaux s'affichent `[1, 2, 3]`, les
@@ -1045,45 +1045,45 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 
 `array<T>` :
 
-| Méthode            | Résultat                                                       |
-| ------------------ | -------------------------------------------------------------- |
-| `len()`, `is_empty()` | taille ; `int` et `bool`                                    |
-| `push(v)`          | ajoute à la fin (comme `xs[] = v`)                             |
-| `pop()`            | retire et renvoie le dernier élément, ou `none` si vide (`T?`) |
-| `insert(i, v)`     | insère `v` à l'indice `i` (0 à `len()`)                        |
-| `remove(i)`        | retire et renvoie l'élément d'indice `i`                       |
-| `clear()`          | vide le tableau                                                |
-| `contains(v)`      | `bool`                                                         |
-| `index_of(v)`      | indice de `v`, ou `none` (`int?`)                              |
-| `reverse()`        | inverse le tableau sur place                                   |
-| `join(sep)`        | assemble les éléments en une `string`                          |
-| `sort()`           | trie le tableau sur place, de façon stable (voir ci-dessous)   |
-| `min()`, `max()`   | le plus petit / grand élément, ou `none` si vide (`T?`)        |
-| `sum()`            | somme d'un tableau de nombres (`0` ou `0.0` si vide)           |
-| `slice(début, fin)` | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
+| Méthode               | Résultat                                                         |
+| --------------------- | ---------------------------------------------------------------- |
+| `len()`, `is_empty()` | taille ; `int` et `bool`                                         |
+| `push(v)`             | ajoute à la fin (comme `xs[] = v`)                               |
+| `pop()`               | retire et renvoie le dernier élément, ou `none` si vide (`T?`)   |
+| `insert(i, v)`        | insère `v` à l'indice `i` (0 à `len()`)                          |
+| `remove(i)`           | retire et renvoie l'élément d'indice `i`                         |
+| `clear()`             | vide le tableau                                                  |
+| `contains(v)`         | `bool`                                                           |
+| `index_of(v)`         | indice de `v`, ou `none` (`int?`)                                |
+| `reverse()`           | inverse le tableau sur place                                     |
+| `join(sep)`           | assemble les éléments en une `string`                            |
+| `sort()`              | trie le tableau sur place, de façon stable (voir ci-dessous)     |
+| `min()`, `max()`      | le plus petit / grand élément, ou `none` si vide (`T?`)          |
+| `sum()`               | somme d'un tableau de nombres (`0` ou `0.0` si vide)             |
+| `slice(début, fin)`   | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
 
 `string` :
 
-| Méthode                         | Résultat                                       |
-| ------------------------------- | ---------------------------------------------- |
-| `len()`, `is_empty()`           | nombre de caractères ; `bool`                  |
-| `upper()`, `lower()`, `trim()`  | une nouvelle `string`                          |
-| `trim_start()`, `trim_end()`    | retire les espaces au début / à la fin         |
-| `capitalize()`                  | première lettre en majuscule                   |
-| `reverse()`                     | les caractères dans l'ordre inverse            |
-| `contains(s)`, `starts_with(s)`, `ends_with(s)` | `bool`                         |
-| `index_of(s)`, `last_index_of(s)` | indice du caractère (première / dernière occurrence), ou `none` (`int?`) |
-| `count(s)`                      | nombre d'occurrences non chevauchantes de `s` (`s` non vide) |
-| `replace(a, b)`                 | remplace toutes les occurrences                |
-| `split(sep)`                    | `array<string>` (séparateur vide : les caractères) |
-| `repeat(n)`                     | répète `n` fois                                |
-| `chars()`                       | `array<string>` d'un caractère chacun          |
-| `lines()`, `words()`            | `array<string>` : les lignes ; les mots séparés par des espaces |
-| `pad_left(largeur, c)`, `pad_right(largeur, c)` | complète jusqu'à `largeur` caractères avec le caractère `c` (une seule lettre) |
-| `is_digit()`, `is_alpha()`, `is_blank()` | `bool` : que des chiffres ; que des lettres ; vide ou que des espaces (`is_digit` et `is_alpha` sont faux pour `""`) |
-| `code()`                        | code Unicode d'une chaîne d'**un seul** caractère (`"A".code()` vaut 65) |
-| `to_int()`, `to_float()`        | comme `int.parse` / `float.parse` : `int?` / `float?` |
-| `substring(début, fin)`         | caractères de `début` (inclus) à `fin` (exclu) |
+| Méthode                                         | Résultat                                                                                                             |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `len()`, `is_empty()`                           | nombre de caractères ; `bool`                                                                                        |
+| `upper()`, `lower()`, `trim()`                  | une nouvelle `string`                                                                                                |
+| `trim_start()`, `trim_end()`                    | retire les espaces au début / à la fin                                                                               |
+| `capitalize()`                                  | première lettre en majuscule                                                                                         |
+| `reverse()`                                     | les caractères dans l'ordre inverse                                                                                  |
+| `contains(s)`, `starts_with(s)`, `ends_with(s)` | `bool`                                                                                                               |
+| `index_of(s)`, `last_index_of(s)`               | indice du caractère (première / dernière occurrence), ou `none` (`int?`)                                             |
+| `count(s)`                                      | nombre d'occurrences non chevauchantes de `s` (`s` non vide)                                                         |
+| `replace(a, b)`                                 | remplace toutes les occurrences                                                                                      |
+| `split(sep)`                                    | `array<string>` (séparateur vide : les caractères)                                                                   |
+| `repeat(n)`                                     | répète `n` fois                                                                                                      |
+| `chars()`                                       | `array<string>` d'un caractère chacun                                                                                |
+| `lines()`, `words()`                            | `array<string>` : les lignes ; les mots séparés par des espaces                                                      |
+| `pad_left(largeur, c)`, `pad_right(largeur, c)` | complète jusqu'à `largeur` caractères avec le caractère `c` (une seule lettre)                                       |
+| `is_digit()`, `is_alpha()`, `is_blank()`        | `bool` : que des chiffres ; que des lettres ; vide ou que des espaces (`is_digit` et `is_alpha` sont faux pour `""`) |
+| `code()`                                        | code Unicode d'une chaîne d'**un seul** caractère (`"A".code()` vaut 65)                                             |
+| `to_int()`, `to_float()`                        | comme `int.parse` / `float.parse` : `int?` / `float?`                                                                |
+| `substring(début, fin)`                         | caractères de `début` (inclus) à `fin` (exclu)                                                                       |
 
 `sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
 chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de
@@ -1092,16 +1092,16 @@ copie les éléments : modifier le résultat ne change pas le tableau d'origine.
 
 Nombres :
 
-| Méthode / constante          | Résultat                                           |
-| ---------------------------- | -------------------------------------------------- |
-| `n.char()`                   | (`int`) la chaîne d'un caractère de code `n` (`97.char()` vaut `"a"`) |
-| `x.abs()`                    | valeur absolue (`int` ou `float`)                  |
-| `x.min(y)`, `x.max(y)`       | le plus petit / grand des deux (même type)         |
-| `x.pow(y)`                   | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`) |
-| `x.sqrt()`                   | racine carrée, un `float` (erreur si `x` est négatif) |
-| `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int` |
-| `float.PI`, `float.E`        | constantes mathématiques                           |
-| `int.MAX`, `int.MIN`         | plus grand / plus petit `int`                      |
+| Méthode / constante                  | Résultat                                                              |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| `n.char()`                           | (`int`) la chaîne d'un caractère de code `n` (`97.char()` vaut `"a"`) |
+| `x.abs()`                            | valeur absolue (`int` ou `float`)                                     |
+| `x.min(y)`, `x.max(y)`               | le plus petit / grand des deux (même type)                            |
+| `x.pow(y)`                           | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`)       |
+| `x.sqrt()`                           | racine carrée, un `float` (erreur si `x` est négatif)                 |
+| `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int`                         |
+| `float.PI`, `float.E`                | constantes mathématiques                                              |
+| `int.MAX`, `int.MIN`                 | plus grand / plus petit `int`                                         |
 
 ```
 print([3, 1, 2].max())             -- 3
@@ -1149,15 +1149,15 @@ for w in words do
 end
 ```
 
-| Méthode            | Résultat                                                    |
-| ------------------ | ----------------------------------------------------------- |
-| `len()`, `is_empty()` | nombre de clés ; `bool`                                  |
-| `has(clé)`         | `bool`                                                      |
-| `get(clé, défaut)` | la valeur, ou `défaut` si la clé est absente (type `V`)     |
-| `remove(clé)`      | retire la clé et renvoie sa valeur, ou `none` (`V?`)        |
-| `keys()`           | `array<K>` des clés, dans l'ordre d'insertion               |
-| `values()`          | `array<V>` des valeurs, dans le même ordre                  |
-| `clear()`          | vide le dictionnaire                                        |
+| Méthode               | Résultat                                                |
+| --------------------- | ------------------------------------------------------- |
+| `len()`, `is_empty()` | nombre de clés ; `bool`                                 |
+| `has(clé)`            | `bool`                                                  |
+| `get(clé, défaut)`    | la valeur, ou `défaut` si la clé est absente (type `V`) |
+| `remove(clé)`         | retire la clé et renvoie sa valeur, ou `none` (`V?`)    |
+| `keys()`              | `array<K>` des clés, dans l'ordre d'insertion           |
+| `values()`            | `array<V>` des valeurs, dans le même ordre              |
+| `clear()`             | vide le dictionnaire                                    |
 
 - **Parcours** : `for name, age in ages do … end` donne la clé et la valeur, dans
   l'ordre d'insertion. On peut aussi ne parcourir que les clés
@@ -1236,14 +1236,14 @@ prédéfinie (`print`, `write`, `read`, `panic`, `assert`).
 position (fichier, ligne, colonne) et parfois des notes. Le préfixe du code
 indique l'étape :
 
-| Préfixe | Étape                                              |
-| ------- | -------------------------------------------------- |
-| `L`     | lecture du texte (caractère inconnu, chaîne non terminée…) |
-| `P`     | syntaxe (il manque un `end`, expression attendue…) |
-| `T`     | noms et types (nom inconnu, type incompatible, visibilité…) |
+| Préfixe | Étape                                                        |
+| ------- | ------------------------------------------------------------ |
+| `L`     | lecture du texte (caractère inconnu, chaîne non terminée…)   |
+| `P`     | syntaxe (il manque un `end`, expression attendue…)           |
+| `T`     | noms et types (nom inconnu, type incompatible, visibilité…)  |
 | `R`     | exécution (division par zéro, indice hors limites, `panic`…) |
-| `J`     | requête JSON invalide (voir le README)             |
-| `X`     | erreur interne : un bug de qlang (à signaler)      |
+| `J`     | requête JSON invalide (voir le README)                       |
+| `X`     | erreur interne : un bug de qlang (à signaler)                |
 
 Le compilateur signale **plusieurs erreurs à la fois** quand il le peut, jusqu'à
 100 : au-delà, il l'indique (`too many errors`) au lieu de tout lister. Les
@@ -1253,12 +1253,12 @@ Une erreur d'exécution affiche aussi la pile des appels.
 **Limites d'exécution.** Pour qu'un programme ne puisse pas bloquer son
 environnement, l'exécution est bornée :
 
-| Limite       | Par défaut   | Erreur |
-| ------------ | ------------ | ------ |
-| étapes d'évaluation | 100 000 000 | `R900` (boucle infinie ?) |
-| appels imbriqués    | 1 000       | `R901` (récursion infinie ?) |
-| sortie affichée     | 10 Mo       | `R902` |
-| taille d'un tableau ou dictionnaire (éléments) ou d'une chaîne (octets) | 10 000 000 | `R903` |
+| Limite                                                                  | Par défaut  | Erreur                       |
+| ----------------------------------------------------------------------- | ----------- | ---------------------------- |
+| étapes d'évaluation                                                     | 100 000 000 | `R900` (boucle infinie ?)    |
+| appels imbriqués                                                        | 1 000       | `R901` (récursion infinie ?) |
+| sortie affichée                                                         | 10 Mo       | `R902`                       |
+| taille d'un tableau ou dictionnaire (éléments) ou d'une chaîne (octets) | 10 000 000  | `R903`                       |
 
 Le temps passé dans les opérations prédéfinies compte aussi : chercher dans un
 tableau (`contains`, `index_of`), le trier, l'assembler (`join`), copier une

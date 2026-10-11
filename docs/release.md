@@ -25,14 +25,14 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 
 ## Ce que contient une release
 
-| Fichier                                | Contenu                                    |
-| -------------------------------------- | ------------------------------------------ |
-| `qlang-x86_64-unknown-linux-musl.tar.gz` | Linux x86_64 (statique, sans dépendance)  |
-| `qlang-aarch64-unknown-linux-musl.tar.gz` | Linux arm64 (statique)                    |
-| `qlang-aarch64-apple-darwin.tar.gz`    | macOS Apple Silicon                        |
-| `qlang-x86_64-apple-darwin.tar.gz`     | macOS Intel                                |
-| `qlang.vsix`                           | extension VS Code                          |
-| `SHA256SUMS`                           | sommes de contrôle de tous les fichiers    |
+| Fichier                                   | Contenu                                  |
+| ----------------------------------------- | ---------------------------------------- |
+| `qlang-x86_64-unknown-linux-musl.tar.gz`  | Linux x86_64 (statique, sans dépendance) |
+| `qlang-aarch64-unknown-linux-musl.tar.gz` | Linux arm64 (statique)                   |
+| `qlang-aarch64-apple-darwin.tar.gz`       | macOS Apple Silicon                      |
+| `qlang-x86_64-apple-darwin.tar.gz`        | macOS Intel                              |
+| `qlang.vsix`                              | extension VS Code                        |
+| `SHA256SUMS`                              | sommes de contrôle de tous les fichiers  |
 
 Les noms ne contiennent pas le numéro de version : l'adresse
 `https://github.com/quenti77/qlang/releases/latest/download/<fichier>` désigne toujours la

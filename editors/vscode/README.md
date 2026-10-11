@@ -60,8 +60,8 @@ works because the unfinished `.name` is left out when asking.
 ```sh
 cd editors/vscode
 npm install
-npm run package                            # creates qlang-0.3.0.vsix
-code --install-extension qlang-0.3.0.vsix  # add --profile <name> to choose a profile
+npm run package                            # creates qlang-0.4.0.vsix
+code --install-extension qlang-0.4.0.vsix  # add --profile <name> to choose a profile
 ```
 
 To try it without installing: open `editors/vscode` in VS Code and press F5.

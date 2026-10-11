@@ -246,3 +246,7 @@ Organisation du cœur (`crates/qlang-core/src`) :
 | `interp.rs`          | exécution (`value.rs` pour les valeurs)                              |
 | `diag.rs`, `span.rs` | erreurs et positions                                                 |
 | `host.rs`            | l'interface avec l'extérieur, les limites                            |
+
+## Licence
+
+[MIT](LICENSE).

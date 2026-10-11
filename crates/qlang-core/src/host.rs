@@ -16,6 +16,10 @@ pub enum HostError {
 pub struct Capabilities {
     /// `read()` is available.
     pub read: bool,
+    /// `time.now()` is available (the host has a clock).
+    pub time: bool,
+    /// `random` and the generators of `uuid` and `ulid` are available.
+    pub random: bool,
 }
 
 pub trait Host {
@@ -25,6 +29,16 @@ pub trait Host {
     /// Read one line of input (without its newline). `Ok(None)` is end of input.
     fn read_line(&mut self) -> Result<Option<String>, HostError> {
         Err(HostError::Unsupported("read"))
+    }
+
+    /// The current time: milliseconds since 1970-01-01 00:00:00 UTC.
+    fn now_ms(&mut self) -> Result<i64, HostError> {
+        Err(HostError::Unsupported("time"))
+    }
+
+    /// 64 random bits. Hosts that offer a seed return the same sequence for the same seed.
+    fn random_u64(&mut self) -> Result<u64, HostError> {
+        Err(HostError::Unsupported("random"))
     }
 
     /// Source text of a module, for `import`. `path` is already normalised.
@@ -75,6 +89,10 @@ pub struct MemoryHost {
     pub input: std::collections::VecDeque<String>,
     pub files: std::collections::HashMap<String, String>,
     pub allow_read: bool,
+    /// The clock, in milliseconds since 1970. `None`: there is no clock.
+    pub clock: Option<i64>,
+    /// State of the random generator. `None`: there is no randomness.
+    pub seed: Option<u64>,
 }
 
 impl MemoryHost {
@@ -111,6 +129,26 @@ impl Host for MemoryHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: self.allow_read }
+        Capabilities { read: self.allow_read, time: self.clock.is_some(), random: self.seed.is_some() }
     }
+
+    fn now_ms(&mut self) -> Result<i64, HostError> {
+        self.clock.ok_or(HostError::Unsupported("time"))
+    }
+
+    fn random_u64(&mut self) -> Result<u64, HostError> {
+        match &mut self.seed {
+            Some(state) => Ok(splitmix64(state)),
+            None => Err(HostError::Unsupported("random")),
+        }
+    }
+}
+
+/// A small deterministic generator (SplitMix64), for hosts that replay a seed.
+pub fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

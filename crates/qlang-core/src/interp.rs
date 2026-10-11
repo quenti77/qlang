@@ -6,6 +6,7 @@
 use crate::ast::*;
 use crate::check::Program;
 use crate::diag::Diagnostic;
+use crate::ids;
 use crate::host::{Host, HostError, Limits};
 use crate::span::Span;
 use crate::types::*;
@@ -43,6 +44,7 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
         cur_call: 0,
         fmt_depth: 0,
         fmt_nodes: 0,
+        last_ulid: 0,
     };
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
@@ -94,6 +96,8 @@ struct Interp<'a> {
     /// Nesting and size of the value being converted to text (cycles, huge values).
     fmt_depth: usize,
     fmt_nodes: usize,
+    /// The last `ulid` made by `ulid.new()`, to keep the next ones in order.
+    last_ulid: u128,
 }
 
 /// Deeper values print as `...` (this also stops cyclic structures).
@@ -567,6 +571,7 @@ impl<'a> Interp<'a> {
                     ("float", "E") => Value::Float(std::f64::consts::E),
                     ("int", "MAX") => Value::Int(i64::MAX),
                     ("int", "MIN") => Value::Int(i64::MIN),
+                    ("uuid", "NIL") => Value::Uuid(0),
                     _ => Value::Unit,
                 });
             }
@@ -615,9 +620,9 @@ impl<'a> Interp<'a> {
                         let argv = self.eval_args(args, env)?;
                         return self.builtin_fn(name, argv, e.span);
                     }
-                    Some(PathRes::BuiltinStatic(ty, "parse")) => {
+                    Some(PathRes::BuiltinStatic(ty, name)) => {
                         let argv = self.eval_args(args, env)?;
-                        return self.parse_number(ty, &argv[0]);
+                        return self.static_call(ty, name, argv, e.span);
                     }
                     _ => {}
                 }
@@ -722,6 +727,7 @@ impl<'a> Interp<'a> {
             (_, Ty::Error | Ty::Param(_) | Ty::Infer(_)) => true,
             (Value::Int(_), Ty::Int) | (Value::Float(_), Ty::Float) | (Value::Bool(_), Ty::Bool) => true,
             (Value::Str(_), Ty::Str) | (Value::Range(..), Ty::Range) => true,
+            (Value::Uuid(_), Ty::Uuid) | (Value::Ulid(_), Ty::Ulid) => true,
             (Value::None, Ty::NoneT | Ty::Nullable(_)) => true,
             (_, Ty::Nullable(inner)) => self.value_matches_ty(v, inner),
             (Value::Array(_), Ty::Array(_)) => true,
@@ -857,6 +863,8 @@ impl<'a> Interp<'a> {
             Value::Int(i) => i.to_string(),
             Value::Float(f) => fmt_float(*f),
             Value::Bool(b) => b.to_string(),
+            Value::Uuid(u) => ids::format_uuid(*u),
+            Value::Ulid(u) => ids::format_ulid(*u),
             Value::None => "none".to_string(),
             Value::Unit => String::new(),
             Value::Array(a) => {
@@ -939,6 +947,7 @@ impl<'a> Interp<'a> {
                 }
                 let ord = match (&l, &r) {
                     (Value::Str(a), Value::Str(b)) => Some(a.as_ref().cmp(b.as_ref())),
+                    (Value::Uuid(a), Value::Uuid(b)) | (Value::Ulid(a), Value::Ulid(b)) => Some(a.cmp(b)),
                     _ => match self.find_method(&l, Lang::Ord.method_name(), Some(prog.defs.lang(Lang::Ord)), Some(&r)) {
                         Some(fid) => match self.call_fid(fid, Some(l.clone()), vec![r.clone()], span)? {
                             Value::Int(i) => Some(i.cmp(&0)),
@@ -1048,6 +1057,7 @@ impl<'a> Interp<'a> {
             (Value::Int(x), Value::Int(y)) => x == y,
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Str(x), Value::Str(y)) => x == y,
+            (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => x == y,
             (Value::Enum(e1, v1), Value::Enum(e2, v2)) => e1 == e2 && v1 == v2,
             (Value::Map(x), Value::Map(y)) => {
                 if Rc::ptr_eq(x, y) {
@@ -1312,6 +1322,7 @@ impl<'a> Interp<'a> {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
             (Value::Str(x), Value::Str(y)) => Ok(x.as_ref().cmp(y.as_ref())),
+            (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => Ok(x.cmp(y)),
             _ => {
                 if let (Some(x), Some(y)) = (num(a), num(b)) {
                     return Ok(x.total_cmp(&y));
@@ -1386,6 +1397,76 @@ impl<'a> Interp<'a> {
                 }
             },
         }
+    }
+
+    /// A function of a built-in type: `int.parse`, `uuid.v4`, `time.now`, `random.int`...
+    /// Not inlined: it would make the frame of `eval_call` (used by every recursion) bigger.
+    #[inline(never)]
+    fn static_call(&mut self, ty: &str, name: &str, args: Vec<Value>, span: Span) -> R<Value> {
+        let text = |v: &Value| match v {
+            Value::Str(s) => s.to_string(),
+            _ => String::new(),
+        };
+        Ok(match (ty, name) {
+            ("int" | "float", "parse") => return self.parse_number(ty, &args[0]),
+            ("uuid", "parse") => ids::parse_uuid(&text(&args[0])).map_or(Value::None, Value::Uuid),
+            ("ulid", "parse") => ids::parse_ulid(&text(&args[0])).map_or(Value::None, Value::Ulid),
+            ("time", "now") => Value::Int(self.now(span)?),
+            ("uuid", "v4") => Value::Uuid(ids::uuid_v4(self.random_bits(span)?)),
+            ("uuid", "v7") => {
+                let now = self.now(span)?;
+                Value::Uuid(ids::uuid_v7(now as u128, self.random_bits(span)?))
+            }
+            ("ulid", "at") => {
+                let Value::Int(t) = args[0] else { return Ok(Value::None) };
+                if !(0..=ids::TIME_MASK as i64).contains(&t) {
+                    return self.fail("R061", "a ulid can only hold a time between 0 and 281 474 976 710 655 milliseconds", span);
+                }
+                Value::Ulid(ids::make_ulid(t as u128, self.random_bits(span)?))
+            }
+            ("ulid", "new") => {
+                let now = self.now(span)?.max(0) as u128;
+                let mut id = ids::make_ulid(now, self.random_bits(span)?);
+                // the same millisecond (or a clock that went back): count up from the last one
+                if id <= self.last_ulid && self.last_ulid < u128::MAX {
+                    id = self.last_ulid + 1;
+                }
+                self.last_ulid = id;
+                Value::Ulid(id)
+            }
+            ("random", "float") => Value::Float((self.random(span)? >> 11) as f64 / (1u64 << 53) as f64),
+            ("random", "int") => {
+                let (Value::Int(lo), Value::Int(hi)) = (&args[0], &args[1]) else { return Ok(Value::None) };
+                if lo > hi {
+                    return self.fail("R062", format!("random.int needs min <= max, found {lo} and {hi}"), span);
+                }
+                let width = (*hi as i128 - *lo as i128 + 1) as u128;
+                let draw = self.random_bits(span)? % width;
+                Value::Int((*lo as i128 + draw as i128) as i64)
+            }
+            _ => Value::Unit,
+        })
+    }
+
+    fn now(&mut self, span: Span) -> R<i64> {
+        match self.host.now_ms() {
+            Ok(t) => Ok(t),
+            Err(HostError::Unsupported(_)) => self.fail("R060", "the time is not available in this environment", span),
+            Err(HostError::Other(m)) => self.fail("R060", format!("cannot read the time: {m}"), span),
+        }
+    }
+
+    fn random(&mut self, span: Span) -> R<u64> {
+        match self.host.random_u64() {
+            Ok(r) => Ok(r),
+            Err(HostError::Unsupported(_)) => self.fail("R063", "randomness is not available in this environment", span),
+            Err(HostError::Other(m)) => self.fail("R063", format!("cannot get random numbers: {m}"), span),
+        }
+    }
+
+    /// 128 random bits.
+    fn random_bits(&mut self, span: Span) -> R<u128> {
+        Ok(((self.random(span)? as u128) << 64) | self.random(span)? as u128)
     }
 
     fn parse_number(&mut self, ty: &str, v: &Value) -> R<Value> {
@@ -1491,6 +1572,8 @@ impl<'a> Interp<'a> {
                 self.guard_alloc(joined.len(), span)?;
                 Value::str(&joined)
             }
+            (Value::Uuid(u), "version") => Value::Int(ids::uuid_version(*u)),
+            (Value::Ulid(u), "time") => Value::Int(ids::ulid_time(*u)),
             (Value::Str(s), "len") => Value::Int(s.chars().count() as i64),
             (Value::Str(s), "is_empty") => Value::Bool(s.is_empty()),
             (Value::Str(s), "trim_start") => Value::str(s.trim_start()),

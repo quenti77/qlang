@@ -309,6 +309,8 @@ impl Checker {
             Ty::Array(_) => builtin(self, "array", &mut out),
             Ty::Map(..) => builtin(self, "map", &mut out),
             Ty::Str => builtin(self, "string", &mut out),
+            Ty::Uuid => builtin(self, "uuid", &mut out),
+            Ty::Ulid => builtin(self, "ulid", &mut out),
             Ty::Int => builtin(self, "int", &mut out),
             Ty::Float => builtin(self, "float", &mut out),
             Ty::Struct(sid, args) => {

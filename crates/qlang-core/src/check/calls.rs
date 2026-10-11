@@ -69,6 +69,11 @@ impl Checker {
                             "float" => (Ty::Float, "float"),
                             "bool" => (Ty::Bool, "bool"),
                             "string" => (Ty::Str, "string"),
+                            "uuid" => (Ty::Uuid, "uuid"),
+                            "ulid" => (Ty::Ulid, "ulid"),
+                            // namespaces: they only hold functions
+                            "time" => (Ty::Unit, "time"),
+                            "random" => (Ty::Unit, "random"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -187,6 +192,7 @@ impl Checker {
                     ("float", "E") => Some(("float", "E", Ty::Float)),
                     ("int", "MAX") => Some(("int", "MAX", Ty::Int)),
                     ("int", "MIN") => Some(("int", "MIN", Ty::Int)),
+                    ("uuid", "NIL") => Some(("uuid", "NIL", Ty::Uuid)),
                     _ => None,
                 };
                 if let Some((a, n, t)) = found {
@@ -513,10 +519,19 @@ impl Checker {
     fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr]) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin(b) = tref {
-            if name.name == "parse" && (*b == "int" || *b == "float") {
-                self.res.paths.insert(callee.id, PathRes::BuiltinStatic(if *b == "int" { "int" } else { "float" }, "parse"));
-                let ret = Ty::nullable(if *b == "int" { Ty::Int } else { Ty::Float });
-                let sig = CallSig { name: format!("{b}.parse"), tparams: vec![], params: vec![Ty::Str], ret };
+            if let Some((fname, params, ret, needs)) = static_fn(b, &name.name) {
+                self.res.paths.insert(callee.id, PathRes::BuiltinStatic(b, fname));
+                let missing = match needs {
+                    Needs::Time if !self.caps.time => Some("there is no clock"),
+                    Needs::Random if !self.caps.random => Some("there is no source of randomness"),
+                    Needs::TimeAndRandom if !self.caps.time => Some("there is no clock"),
+                    Needs::TimeAndRandom if !self.caps.random => Some("there is no source of randomness"),
+                    _ => None,
+                };
+                if let Some(why) = missing {
+                    self.err("T250", format!("`{b}.{fname}` is not available in this environment ({why})"), e.span);
+                }
+                let sig = CallSig { name: format!("{b}.{fname}"), tparams: vec![], params, ret };
                 return self.check_args(e.span, &sig, &[], HashMap::new(), args);
             }
             self.err("T161", format!("`{b}` has no static member `{}`", name.name), name.span);
@@ -736,6 +751,8 @@ impl Checker {
             (Ty::Str, "repeat") => (vec![Ty::Int], Ty::Str),
             (Ty::Str, "chars") => (vec![], arr(&Ty::Str)),
             (Ty::Str, "substring") => (vec![Ty::Int, Ty::Int], Ty::Str),
+            (Ty::Uuid, "version") => (vec![], Ty::Int),
+            (Ty::Ulid, "time") => (vec![], Ty::Int),
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),
@@ -745,6 +762,33 @@ impl Checker {
             _ => return None,
         })
     }
+}
+
+/// What a built-in static function needs from the environment.
+#[derive(Clone, Copy)]
+enum Needs {
+    Nothing,
+    Time,
+    Random,
+    TimeAndRandom,
+}
+
+/// The static functions of the built-in types: (name, parameters, result, needs).
+fn static_fn(owner: &str, name: &str) -> Option<(&'static str, Vec<Ty>, Ty, Needs)> {
+    Some(match (owner, name) {
+        ("int", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Int), Needs::Nothing),
+        ("float", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Float), Needs::Nothing),
+        ("uuid", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Uuid), Needs::Nothing),
+        ("uuid", "v4") => ("v4", vec![], Ty::Uuid, Needs::Random),
+        ("uuid", "v7") => ("v7", vec![], Ty::Uuid, Needs::TimeAndRandom),
+        ("ulid", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Ulid), Needs::Nothing),
+        ("ulid", "new") => ("new", vec![], Ty::Ulid, Needs::TimeAndRandom),
+        ("ulid", "at") => ("at", vec![Ty::Int], Ty::Ulid, Needs::Random),
+        ("time", "now") => ("now", vec![], Ty::Int, Needs::Time),
+        ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
+        ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),
+        _ => return None,
+    })
 }
 
 fn callee_name(callee: &Expr) -> String {

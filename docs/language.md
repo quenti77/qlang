@@ -60,6 +60,8 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Fonctions prédéfinies](#fonctions-prédéfinies)
     - [Méthodes prédéfinies](#méthodes-prédéfinies)
     - [Dictionnaires](#dictionnaires)
+    - [Heure et aléatoire](#heure-et-aléatoire)
+    - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1048,6 +1050,9 @@ Le langage ne lit et n'écrit rien lui-même : `print`, `read` et `import` passe
 par l'**environnement d'exécution** (le terminal, un serveur web…).
 
 - `print` est toujours disponible.
+- `time.now()`, `random.…`, `uuid.v4()`, `uuid.v7()`, `ulid.new()` et
+  `ulid.at()` dépendent aussi de l'environnement (une horloge, une source
+  d'aléatoire) : voir [Heure et aléatoire](#heure-et-aléatoire).
 - `read` **dépend de l'environnement**. Dans un terminal, il lit le clavier. Dans
   un environnement sans clavier (par exemple un serveur web), il peut être
   absent : l'appeler est alors une erreur de compilation (« `read` n'est pas
@@ -1218,6 +1223,79 @@ d'exécution.
 
 ---
 
+### Heure et aléatoire
+
+Le cœur du langage ne lit ni l'horloge ni le hasard : comme `read`, ils viennent
+de l'**environnement**. Un programme qui les appelle alors qu'ils manquent est
+refusé **avant** d'être exécuté (erreur `T250`).
+
+| Appel                  | Résultat                                                                 |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `time.now()`           | l'heure courante, un `int` : millisecondes depuis le 1er janvier 1970 UTC |
+| `random.int(min, max)` | un `int` au hasard entre `min` et `max`, **les deux inclus**             |
+| `random.float()`       | un `float` au hasard dans `[0, 1[`                                       |
+
+```
+let de = random.int(1, 6)
+print("Le dé donne {de}")
+print(time.now())           -- par exemple 1791725184727
+```
+
+`random.int(3, 1)` est une erreur (`R062`) : `min` doit être inférieur ou égal
+à `max`.
+
+Dans un terminal, `qlang run programme.q --seed 42` fixe la graine : le même
+programme donne alors **les mêmes nombres** (pratique pour reproduire un
+résultat). Sans `--seed`, la graine vient du système. Ce hasard n'est **pas
+cryptographique** : ne l'utilisez pas pour des mots de passe ou des jetons de
+sécurité.
+
+`time` et `random` sont des noms prédéfinis, mais une variable ou une fonction
+du même nom reste possible : `let time = 5` fonctionne, et `time` désigne alors
+cette variable.
+
+### Identifiants : `uuid` et `ulid`
+
+Deux types pour identifier une chose de façon unique. Tous deux font 128 bits et
+sont distincts de `string` : on ne peut pas passer l'un pour l'autre.
+
+| Type   | Forme                                     | Ce qu'il contient                               |
+| ------ | ----------------------------------------- | ----------------------------------------------- |
+| `uuid` | `550e8400-e29b-41d4-a716-446655440000`    | 128 bits (version 4 : 122 bits aléatoires)      |
+| `ulid` | `01ARYZ6S41TSV4RRFFQ69G5FAV` (26 lettres) | l'heure (48 bits) puis du hasard (80 bits)      |
+
+Un `ulid` commence par l'**heure de création** en millisecondes (48 bits) : trier
+des `ulid` les range donc dans l'ordre de création. Les 80 bits suivants sont
+aléatoires. Deux `ulid.new()` dans la même milliseconde restent dans l'ordre
+(le second est le premier plus 1).
+
+| Appel                  | Résultat                                                                  |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `uuid.v4()`            | un `uuid` aléatoire (version 4)                                           |
+| `uuid.v7()`            | un `uuid` de version 7 : l'heure puis du hasard, donc triable par date    |
+| `uuid.parse(texte)`    | un `uuid?` : `none` si le texte n'est pas valide (majuscules acceptées)   |
+| `uuid.NIL`             | le `uuid` rempli de zéros                                                 |
+| `u.version()`          | la version du `uuid` (un `int`)                                           |
+| `ulid.new()`           | un `ulid` pour l'instant présent                                          |
+| `ulid.at(ms)`          | un `ulid` pour l'heure `ms` (millisecondes depuis 1970), avec du hasard   |
+| `ulid.parse(texte)`    | un `ulid?` : `none` si le texte n'est pas valide                          |
+| `id.time()`            | l'heure stockée dans le `ulid`, en millisecondes depuis 1970 (un `int`)   |
+
+```
+let id = ulid.new()
+print("{id} créé à {id.time()}")     -- 01M4NJ99PQPPWW6K8BZY81A0M0 créé à 1791725184727
+
+let a = ulid.at(1000)
+let b = ulid.at(2000)
+print(a < b)                         -- true : on compare, on trie
+let commandes: map<ulid, string> = {}
+commandes[a] = "première"            -- un ulid ou un uuid peut être une clé
+```
+
+Les `uuid` et `ulid` se comparent avec `==`, `<`… et se trient ; ils
+s'affichent et s'interpolent sous leur forme texte (`id as string` donne cette
+chaîne). Pour l'inverse, `uuid.parse` et `ulid.parse` vérifient le texte.
+
 ## 15. Fins de ligne
 
 Il n'y a pas de `;`. **Une instruction se termine à la fin de la ligne.** La
@@ -1256,7 +1334,7 @@ and or not div mod
 true false none self super
 ```
 
-`int`, `float`, `bool`, `string`, `array` et `range` **ne sont pas** des
+`int`, `float`, `bool`, `string`, `uuid`, `ulid`, `array` et `range` **ne sont pas** des
 mots-clés : ce sont des noms de types ordinaires, mais on ne peut pas définir un
 type ou une fonction qui porte l'un de ces noms, ni celui d'une fonction
 prédéfinie (`print`, `write`, `read`, `panic`, `assert`).

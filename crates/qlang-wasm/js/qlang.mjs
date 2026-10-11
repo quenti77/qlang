@@ -6,7 +6,7 @@
 //   answer.output                                      // "42\n"
 //
 // The request and the answer are those of `qlang run --json` (see the README): `files`,
-// `entry`, `input` (the lines `read()` returns), `limits`, `mode: "check"`, `info: true`.
+// `entry`, `input` (the lines `read()` returns), `now` (milliseconds since 1970, for `time.now()`), `seed` (for `random`, `uuid` and `ulid`), `limits`, `mode: "check"`, `info: true`.
 //
 // Run it in a Web Worker: the limits (steps, depth, output, memory) stop runaway programs, but
 // only a worker you can terminate protects the page from a bug in the module itself. After

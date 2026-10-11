@@ -22,6 +22,10 @@ pub enum Ty {
     Float,
     Bool,
     Str,
+    /// A 128-bit universally unique identifier.
+    Uuid,
+    /// A 128-bit identifier sortable by creation time.
+    Ulid,
     /// The type of expressions without a value.
     Unit,
     /// The type of the `none` literal.
@@ -108,6 +112,8 @@ impl Ty {
             Ty::Float => "float".into(),
             Ty::Bool => "bool".into(),
             Ty::Str => "string".into(),
+            Ty::Uuid => "uuid".into(),
+            Ty::Ulid => "ulid".into(),
             Ty::Unit => "no value".into(),
             Ty::NoneT => "none".into(),
             Ty::Never => "never".into(),

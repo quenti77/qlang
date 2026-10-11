@@ -68,3 +68,16 @@ test('garbage requests get an answer, not a crash', { skip }, () => {
   assert.strictEqual(qlang.handle('not json').ok, false);
   assert.strictEqual(qlang.handle('{"files":{}}').ok, false);
 });
+
+test('the time and the seed come from the request', { skip }, () => {
+  const files = { 'main.q': 'print(time.now())\nprint(random.int(1, 1000))\nprint(ulid.new().time())' };
+  const a = qlang.handle({ files, now: 1700000000000, seed: 5 });
+  const b = qlang.handle({ files, now: 1700000000000, seed: 5 });
+  assert.strictEqual(a.ok, true, JSON.stringify(a.diagnostics));
+  assert.strictEqual(a.output, b.output);
+  assert.ok(a.output.startsWith('1700000000000\n'));
+  assert.ok(a.output.endsWith('1700000000000\n'));
+  const none = qlang.handle({ files });
+  assert.strictEqual(none.ok, false);
+  assert.strictEqual(none.diagnostics[0].code, 'T250');
+});

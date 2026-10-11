@@ -15,6 +15,8 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(Rc<str>),
+    Uuid(u128),
+    Ulid(u128),
     /// Arrays and structs are shared: copying a value copies the reference.
     Array(Rc<RefCell<Vec<Value>>>),
     /// Keys keep their insertion order.
@@ -32,6 +34,8 @@ pub enum KeyVal {
     Int(i64),
     Str(Rc<str>),
     Bool(bool),
+    Uuid(u128),
+    Ulid(u128),
     Enum(EnumId, usize),
 }
 
@@ -41,6 +45,8 @@ impl KeyVal {
             Value::Int(i) => KeyVal::Int(*i),
             Value::Str(s) => KeyVal::Str(s.clone()),
             Value::Bool(b) => KeyVal::Bool(*b),
+            Value::Uuid(u) => KeyVal::Uuid(*u),
+            Value::Ulid(u) => KeyVal::Ulid(*u),
             Value::Enum(e, i) => KeyVal::Enum(*e, *i),
             _ => return None,
         })

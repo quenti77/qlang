@@ -172,7 +172,7 @@
       "patterns": [
         {
           "name": "support.type.builtin.qlang",
-          "match": "\\b(int|float|bool|string|array|map|range)\\b(?=\\s*(?:<|\\?|,|\\)|=|$|\\.|\\[))"
+          "match": "\\b(int|float|bool|string|uuid|ulid|array|map|range)\\b(?=\\s*(?:<|\\?|,|\\)|=|$|\\.|\\[))"
         },
         {
           "name": "entity.name.type.qlang",

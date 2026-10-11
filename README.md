@@ -122,6 +122,8 @@ pub trait Host {
     fn print(&mut self, text: &str);                        // sortie
     fn read_line(&mut self) -> Result<Option<String>, HostError>;   // entrée (facultative)
     fn load_module(&mut self, path: &str) -> Result<String, String>; // import
+    fn now_ms(&mut self) -> Result<i64, HostError>;         // horloge (facultative)
+    fn random_u64(&mut self) -> Result<u64, HostError>;     // hasard (facultatif)
     fn capabilities(&self) -> Capabilities;                 // ce que l'hôte sait faire
 }
 ```
@@ -129,8 +131,11 @@ pub trait Host {
 - Le terminal branche `stdout`, `stdin` et le disque ; un serveur web branche un
   tampon, des entrées pré-fournies et des fichiers en mémoire ; les tests
   utilisent `MemoryHost`.
-- `read()` est **facultatif** : si l'hôte ne le propose pas (`capabilities().read`
-  est faux), un programme qui l'appelle est refusé **avant** d'être exécuté.
+- `read()`, `time.now()` et le hasard (`random`, `uuid.v4()`, `ulid.new()`…) sont
+  **facultatifs** : si l'hôte ne les propose pas (`capabilities().read`, `.time`,
+  `.random` faux), un programme qui les appelle est refusé **avant** d'être
+  exécuté. Ainsi le cœur reste déterministe : `MemoryHost` fournit une horloge
+  et une graine fixes pour les tests.
 - Les erreurs sont des **données** (`Diagnostic` : code, message, position,
   notes), jamais du texte déjà affiché. Elles se sérialisent en JSON.
 - L'exécution est bornée par des `Limits` (étapes, profondeur d'appels, taille
@@ -176,6 +181,8 @@ Requête :
     "math.q": "fun add(a: int, b: int) -> int\n  a + b\nend\nexport add"
   },
   "input": ["hello"],
+  "now": 1791725184727,
+  "seed": 42,
   "limits": { "max_steps": 1000000, "max_depth": 200, "max_output": 100000, "max_alloc": 100000 }
 }
 ```
@@ -183,6 +190,12 @@ Requête :
 - `entry` : fichier principal (facultatif s'il n'y a qu'un fichier, sinon `main.q`).
 - `input` : lignes pour `read()`. **S'il est absent, `read` n'est pas disponible**
   et un programme qui l'appelle est refusé à la compilation.
+- `now` : l'heure en millisecondes depuis 1970, pour `time.now()` et les
+  `uuid.v7()` / `ulid.new()`. **Absent, il n'y a pas d'horloge.**
+- `seed` : graine du hasard (`random`, `uuid.v4()`, `ulid.…`) : la même graine
+  donne les mêmes nombres. **Absente, il n'y a pas de hasard** : un serveur
+  décide lui-même quoi fournir (une graine tirée au sort pour chaque requête,
+  par exemple).
 - `limits` : facultatif ; le serveur applique de toute façon ses propres plafonds.
 
 Réponse :

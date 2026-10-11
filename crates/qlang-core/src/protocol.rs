@@ -16,6 +16,10 @@ struct Request {
     files: HashMap<String, String>,
     /// Lines for `read()`. If absent, `read` is not available.
     input: Option<Vec<String>>,
+    /// The current time in milliseconds since 1970, for `time.now()`. If absent, there is no clock.
+    now: Option<i64>,
+    /// Seed of the random generator (same seed, same numbers). If absent, there is no randomness.
+    seed: Option<u64>,
     limits: Option<LimitsRequest>,
     /// `"check"`: compile only (no execution). Default: `"run"`.
     mode: Option<String>,
@@ -91,7 +95,7 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
     let Some(source) = req.files.get(&entry).cloned() else {
         return failure("request", format!("the entry file \"{entry}\" is not in `files`"));
     };
-    let mut host = MemoryHost { files: req.files, allow_read: req.input.is_some(), ..MemoryHost::default() };
+    let mut host = MemoryHost { files: req.files, allow_read: req.input.is_some(), clock: req.now, seed: req.seed, ..MemoryHost::default() };
     if let Some(lines) = req.input {
         host.input = lines.into();
     }

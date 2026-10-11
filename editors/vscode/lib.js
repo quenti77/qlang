@@ -68,9 +68,11 @@ function collectFiles(entryRel, entryText, readText, limit = 200) {
 }
 
 /** The JSON request understood by `qlang check --json`. */
-function buildRequest(entry, files) {
+function buildRequest(entry, files, info = false) {
   // `input: []` allows `read()`: the editor runs programs in a terminal with a keyboard
-  return JSON.stringify({ entry, files, input: [] });
+  const request = { entry, files, input: [] };
+  if (info) request.info = true; // types, variables and members, for tooltips and completion
+  return JSON.stringify(request);
 }
 
 function severityName(s) {

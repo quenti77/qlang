@@ -1,0 +1,121 @@
+//! Documentation of what the language provides on its own types, for editors.
+//!
+//! The signatures are not written here: the checker knows them (`builtin_method`), and a
+//! test makes sure every method listed below exists there. Only the parameter names and
+//! the explanation live in this file.
+
+/// (name, parameter names, explanation)
+pub type Entry = (&'static str, &'static str, &'static str);
+
+pub const ARRAY: &[Entry] = &[
+    ("len", "", "Number of elements."),
+    ("is_empty", "", "`true` if there is no element."),
+    ("push", "value", "Adds `value` at the end (same as `xs[] = value`)."),
+    ("pop", "", "Removes and returns the last element, or `none` if the array is empty."),
+    ("insert", "index, value", "Inserts `value` at `index` (0 to `len()`)."),
+    ("remove", "index", "Removes and returns the element at `index`."),
+    ("clear", "", "Removes every element."),
+    ("contains", "value", "`true` if `value` is in the array."),
+    ("index_of", "value", "Index of the first `value`, or `none`."),
+    ("reverse", "", "Reverses the array in place."),
+    ("join", "separator", "Joins the elements into one string."),
+    ("sort", "", "Sorts the array in place (stable). Elements must be comparable."),
+    ("min", "", "Smallest element, or `none` if empty."),
+    ("max", "", "Largest element, or `none` if empty."),
+    ("sum", "", "Sum of an array of numbers (`0` or `0.0` if empty)."),
+    ("slice", "start, end", "New array of the elements from `start` (included) to `end` (excluded)."),
+];
+
+pub const MAP: &[Entry] = &[
+    ("len", "", "Number of keys."),
+    ("is_empty", "", "`true` if there is no key."),
+    ("clear", "", "Removes every key."),
+    ("has", "key", "`true` if `key` is present."),
+    ("get", "key, default", "The value of `key`, or `default` if the key is absent."),
+    ("remove", "key", "Removes `key` and returns its value, or `none`."),
+    ("keys", "", "The keys, in insertion order."),
+    ("values", "", "The values, in the same order as `keys()`."),
+];
+
+pub const STRING: &[Entry] = &[
+    ("len", "", "Number of characters."),
+    ("is_empty", "", "`true` for the empty string."),
+    ("upper", "", "Upper-case copy."),
+    ("lower", "", "Lower-case copy."),
+    ("trim", "", "Copy without the spaces at both ends."),
+    ("trim_start", "", "Copy without the spaces at the start."),
+    ("trim_end", "", "Copy without the spaces at the end."),
+    ("capitalize", "", "Copy with the first letter in upper case."),
+    ("reverse", "", "The characters in the opposite order."),
+    ("contains", "text", "`true` if `text` appears in the string."),
+    ("starts_with", "text", "`true` if the string starts with `text`."),
+    ("ends_with", "text", "`true` if the string ends with `text`."),
+    ("index_of", "text", "Index of the first occurrence of `text`, or `none`."),
+    ("last_index_of", "text", "Index of the last occurrence of `text`, or `none`."),
+    ("count", "text", "Number of non-overlapping occurrences of `text` (not empty)."),
+    ("replace", "from, to", "Replaces every occurrence of `from` with `to`."),
+    ("split", "separator", "Splits the string (an empty separator gives the characters)."),
+    ("repeat", "times", "The string repeated `times` times."),
+    ("chars", "", "The characters, as strings of one character."),
+    ("lines", "", "The lines."),
+    ("words", "", "The words, separated by spaces."),
+    ("pad_left", "width, fill", "Completes on the left up to `width` characters with `fill` (one letter)."),
+    ("pad_right", "width, fill", "Completes on the right up to `width` characters with `fill` (one letter)."),
+    ("is_digit", "", "`true` if there are only digits (false for `\"\"`)."),
+    ("is_alpha", "", "`true` if there are only letters (false for `\"\"`)."),
+    ("is_blank", "", "`true` if empty or only spaces."),
+    ("code", "", "Unicode code of a one-character string (`\"A\".code()` is 65)."),
+    ("to_int", "", "The integer written in the string, or `none`."),
+    ("to_float", "", "The number written in the string, or `none`."),
+    ("substring", "start, end", "Characters from `start` (included) to `end` (excluded)."),
+];
+
+pub const INT: &[Entry] = &[
+    ("char", "", "The one-character string whose code is this number (`97.char()` is `\"a\"`)."),
+    ("abs", "", "Absolute value."),
+    ("min", "other", "The smaller of the two."),
+    ("max", "other", "The larger of the two."),
+    ("pow", "exponent", "Same as `x ** exponent`."),
+    ("sqrt", "", "Square root, as a float (error if negative)."),
+];
+
+pub const FLOAT: &[Entry] = &[
+    ("abs", "", "Absolute value."),
+    ("min", "other", "The smaller of the two."),
+    ("max", "other", "The larger of the two."),
+    ("pow", "exponent", "Same as `x ** exponent`."),
+    ("sqrt", "", "Square root (error if negative)."),
+    ("floor", "", "Rounds down, as an int."),
+    ("ceil", "", "Rounds up, as an int."),
+    ("round", "", "Rounds to the nearest, as an int."),
+];
+
+/// Static members of the built-in types: (type, kind, name, detail, explanation).
+pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
+    ("int", "function", "parse", "parse(text: string) -> int?", "The integer written in `text`, or `none` if it is not valid."),
+    ("int", "constant", "MAX", "MAX: int", "The largest `int`."),
+    ("int", "constant", "MIN", "MIN: int", "The smallest `int`."),
+    ("float", "function", "parse", "parse(text: string) -> float?", "The number written in `text`, or `none` if it is not valid."),
+    ("float", "constant", "PI", "PI: float", "The constant π."),
+    ("float", "constant", "E", "E: float", "Euler's number."),
+];
+
+/// Built-in functions: (name, signature, explanation).
+pub const FUNCTIONS: &[(&str, &str, &str)] = &[
+    ("print", "print(value)", "Shows `value` followed by a new line (`print()` prints an empty line)."),
+    ("write", "write(value)", "Shows `value` without a new line."),
+    ("read", "read() -> string", "Reads a line and returns it without the new line. Not available everywhere (a web server has no keyboard)."),
+    ("panic", "panic(message: string)", "Stops the program with an error."),
+    ("assert", "assert(condition: bool, message?: string)", "Stops the program if `condition` is false."),
+];
+
+pub fn methods(owner: &str) -> &'static [Entry] {
+    match owner {
+        "array" => ARRAY,
+        "map" => MAP,
+        "string" => STRING,
+        "int" => INT,
+        "float" => FLOAT,
+        _ => &[],
+    }
+}

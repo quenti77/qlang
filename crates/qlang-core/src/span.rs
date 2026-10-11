@@ -41,7 +41,7 @@ pub struct SourceMap {
 }
 
 /// A resolved human-readable location (1-based lines and columns).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Location {
     pub file: String,
     pub line: u32,

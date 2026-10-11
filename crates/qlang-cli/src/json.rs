@@ -1,7 +1,7 @@
 //! The JSON protocol: one request in, one response out. No disk access:
 //! imported modules come from the request itself.
 
-use qlang_core::check::compile;
+use qlang_core::check::{CompileOptions, Info, compile_with};
 use qlang_core::diag::Diagnostic;
 use qlang_core::host::{Limits, MemoryHost};
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,8 @@ struct Request {
     limits: Option<LimitsRequest>,
     /// `"check"`: compile only (no execution). Default: `"run"`.
     mode: Option<String>,
+    /// Also answer what an editor needs: types, local variables, members.
+    info: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -38,6 +40,8 @@ struct Response {
     output: String,
     diagnostics: Vec<Diagnostic>,
     steps: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    info: Option<Info>,
 }
 
 fn failure(phase: &'static str, message: String) -> Response {
@@ -47,6 +51,7 @@ fn failure(phase: &'static str, message: String) -> Response {
         output: String::new(),
         diagnostics: vec![Diagnostic::error("J001", message, Default::default())],
         steps: 0,
+        info: None,
     }
 }
 
@@ -103,20 +108,21 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
     limits.max_output = limits.max_output.min(ceiling.max_output);
     limits.max_alloc = limits.max_alloc.min(ceiling.max_alloc);
 
-    let program = match compile(&entry, &source, &mut host) {
+    let options = CompileOptions { info: req.info.unwrap_or(false) };
+    let program = match compile_with(&entry, &source, &mut host, &options) {
         Ok(p) => p,
         Err(e) => {
-            return Response { ok: false, phase: "compile", output: String::new(), diagnostics: e.diagnostics, steps: 0 };
+            return Response { ok: false, phase: "compile", output: String::new(), diagnostics: e.diagnostics, steps: 0, info: e.info.map(|i| *i) };
         }
     };
     if check_only {
-        return Response { ok: true, phase: "check", output: String::new(), diagnostics: program.warnings.clone(), steps: 0 };
+        return Response { ok: true, phase: "check", output: String::new(), diagnostics: program.warnings.clone(), steps: 0, info: program.info };
     }
     let result = program.run(&mut host, limits);
     let mut diagnostics = program.warnings.clone();
     let ok = result.error.is_none();
     diagnostics.extend(result.error);
-    Response { ok, phase: "run", output: host.output, diagnostics, steps: result.steps }
+    Response { ok, phase: "run", output: host.output, diagnostics, steps: result.steps, info: None }
 }
 
 pub fn run_stdin(force_check: bool) -> ExitCode {

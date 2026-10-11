@@ -7,6 +7,14 @@ Support for the [qlang](../../README.md) language in VS Code (files ending in `.
 - **Errors as you type**: the file is checked by the real qlang compiler (`qlang check --json`),
   so you see the same errors as in the terminal, underlined in the editor and listed in the
   Problems panel. Errors inside imported modules are shown in those files.
+- **Tooltips**: hover a name to see its type (`names: array<string>`), a function or method
+  signature, and the documentation written above it in a `--" … --"` comment. Built-in methods
+  (`len`, `push`, `split`…) are explained too.
+- **Completion**: after a `.`, the fields and methods of the value's type (only the public ones, all
+  of them on `self`), the variants and static functions after `Type.`, and the contents of a module
+  after `module.`. Elsewhere: variables in scope, the names of the file (including imports), built-in
+  functions, keywords and types.
+- **Parameter hints**: typing `(` or `,` in a call shows the signature with the current parameter.
 - **Run**: the ▶ button in the editor title bar (or the command **qlang: Run File**) saves the file
   and runs it in a terminal, where `read()` works with your keyboard.
 - **Snippets**: `fun`, `if`, `ifelse`, `for`, `foreach`, `fori`, `formap`, `while`, `match`, `struct`,
@@ -33,6 +41,11 @@ If `qlang` is not in your `PATH`, set **qlang.path** in the settings to its full
 `qlang.path` is only read from your **user** settings (machine scope), never from a project's
 `.vscode/settings.json`, and it is listed as a restricted setting for untrusted workspaces: a
 downloaded project cannot choose which program the extension runs.
+
+Tooltips and completion come from the compiler itself (`qlang check --json` with `"info": true`),
+so they follow the real types, including inferred ones. They need a file the compiler can read: with a
+syntax error elsewhere in the file the previous answer is used, and completion after a `.` still
+works because the unfinished `.name` is left out when asking.
 
 ## Settings
 

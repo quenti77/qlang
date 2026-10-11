@@ -12,17 +12,26 @@ const binary = ['target/release/qlang', 'target/debug/qlang'].map((p) => path.jo
 
 /** A fake `vscode` module, recording what the extension does. */
 function fakeVscode(config) {
-  const log = { diagnostics: new Map(), commands: {}, terminals: [], warnings: [], messages: [] };
+  const log = { diagnostics: new Map(), commands: {}, terminals: [], warnings: [], messages: [], providers: {} };
   class Position { constructor(line, character) { this.line = line; this.character = character; } }
   class Range { constructor(sl, sc, el, ec) { this.start = new Position(sl, sc); this.end = new Position(el, ec); } }
   class Location { constructor(uri, pos) { this.uri = uri; this.range = pos; } }
   class Diagnostic { constructor(range, message, severity) { this.range = range; this.message = message; this.severity = severity; } }
   class DiagnosticRelatedInformation { constructor(location, message) { this.location = location; this.message = message; } }
+  class MarkdownString { constructor(value) { this.value = value; } }
+  class Hover { constructor(contents, range) { this.contents = contents; this.range = range; } }
+  class CompletionItem { constructor(label, kind) { this.label = label; this.kind = kind; } }
+  class SignatureInformation { constructor(label, documentation) { this.label = label; this.documentation = documentation; } }
+  class ParameterInformation { constructor(label) { this.label = label; } }
+  class SignatureHelp {}
+  const kinds = ['Field', 'Method', 'Function', 'Variable', 'Keyword', 'TypeParameter', 'Struct', 'Enum', 'EnumMember', 'Constant', 'Interface', 'Module'];
   const uriOf = (fsPath) => ({ scheme: 'file', fsPath, toString: () => 'file://' + fsPath });
   const listeners = {};
   const on = (name) => (fn) => { (listeners[name] = listeners[name] || []).push(fn); return { dispose() {} }; };
   const vscode = {
     Position, Range, Location, Diagnostic, DiagnosticRelatedInformation,
+    MarkdownString, Hover, CompletionItem, SignatureInformation, ParameterInformation, SignatureHelp,
+    CompletionItemKind: Object.fromEntries(kinds.map((k, i) => [k, i])),
     DiagnosticSeverity: { Error: 0, Warning: 1 },
     Uri: { file: uriOf, parse: (s) => uriOf(s.replace(/^file:\/\//, '')) },
     languages: {
@@ -31,6 +40,9 @@ function fakeVscode(config) {
         delete: (uri) => log.diagnostics.delete(uri.fsPath),
         dispose() {},
       }),
+      registerHoverProvider: (_, p) => { log.providers.hover = p; return { dispose() {} }; },
+      registerCompletionItemProvider: (_, p) => { log.providers.completion = p; return { dispose() {} }; },
+      registerSignatureHelpProvider: (_, p) => { log.providers.signature = p; return { dispose() {} }; },
     },
     commands: {
       registerCommand: (id, fn) => { log.commands[id] = fn; return { dispose() {} }; },
@@ -59,7 +71,8 @@ function fakeVscode(config) {
     },
   };
   const makeDoc = (fsPath, text) => ({
-    languageId: 'qlang', uri: uriOf(fsPath), getText: () => text, save: async () => true,
+    languageId: 'qlang', uri: uriOf(fsPath), version: 1, getText: () => text, save: async () => true,
+    lineAt: (n) => ({ text: text.split('\n')[n] }),
   });
   return { vscode, log, listeners, makeDoc };
 }
@@ -176,5 +189,39 @@ test('other languages and disabled diagnostics are left alone', { skip }, async 
   ext.activate({ subscriptions: [] });
   await new Promise((r) => setTimeout(r, 400));
   assert.strictEqual(log.diagnostics.size, 0, 'nothing published when disabled');
+  ext.deactivate();
+});
+
+test('tooltips, completion and signature help work through the extension', { skip }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qlang-ext-'));
+  const mainPath = path.join(dir, 'main.q');
+  const { vscode, log, makeDoc } = fakeVscode({ path: binary, 'diagnostics.delay': 10 });
+  const ext = loadExtension(vscode);
+  ext.activate({ subscriptions: [] });
+  assert.ok(log.providers.hover && log.providers.completion && log.providers.signature);
+
+  const base = '--" Adds numbers. --"\nfun add(a: int, b: int) -> int\n  return a + b\nend\nlet xs = [1, 2]\nprint(add(1, 2))\n';
+  const doc = makeDoc(mainPath, base);
+  const at = (line, character) => ({ line, character });
+  vscode.workspace.textDocuments.push(doc); // an open editor is read before the disk
+
+  // hover on `add` in `print(add(1, 2))`
+  const hover = await log.providers.hover.provideHover(doc, at(5, 8));
+  assert.match(hover.contents.value, /fun add\(a: int, b: int\) -> int/);
+  assert.match(hover.contents.value, /Adds numbers\./);
+  assert.deepStrictEqual([hover.range.start.character, hover.range.end.character], [6, 9]);
+
+  // `xs.pu|` offers the methods of an array
+  const items = await log.providers.completion.provideCompletionItems(makeDoc(mainPath, base + 'xs.pu\n'), at(6, 5));
+  const push = items.find((i) => i.label === 'push');
+  assert.strictEqual(push.detail, 'push(value: int)');
+  assert.deepStrictEqual([push.range.start.character, push.range.end.character], [3, 5]);
+  assert.ok(items.some((i) => i.label === 'len'));
+
+  // `add(1, |` shows the signature with the second parameter active
+  const help = await log.providers.signature.provideSignatureHelp(makeDoc(mainPath, base + 'add(1, \n'), at(6, 7));
+  assert.strictEqual(help.signatures[0].label, 'add(a: int, b: int) -> int');
+  assert.strictEqual(help.activeParameter, 1);
+  assert.strictEqual(help.signatures[0].parameters.length, 2);
   ext.deactivate();
 });

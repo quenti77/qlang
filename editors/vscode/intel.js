@@ -181,9 +181,12 @@ function nameCompletions(info, file, line, col) {
   for (const k of Object.keys(KEYWORDS)) {
     add({ label: k, kind: 'keyword', detail: 'keyword', doc: KEYWORDS[k], sort: '3' + k });
   }
-  for (const t of ['int', 'float', 'bool', 'string', 'array', 'map']) {
+  for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'array', 'map']) {
     add({ label: t, kind: 'type', detail: 'type', sort: '4' + t });
   }
+  // `time.now()` and `random.int(1, 6)`: namespaces of the language
+  add({ label: 'time', kind: 'module', detail: 'namespace', doc: 'The clock: `time.now()`.', sort: '4time' });
+  add({ label: 'random', kind: 'module', detail: 'namespace', doc: 'Random numbers: `random.int(1, 6)`, `random.float()`.', sort: '4random' });
   return [...out.values()];
 }
 

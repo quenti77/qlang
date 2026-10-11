@@ -70,6 +70,14 @@ pub const STRING: &[Entry] = &[
     ("substring", "start, end", "Characters from `start` (included) to `end` (excluded)."),
 ];
 
+pub const UUID: &[Entry] = &[
+    ("version", "", "The version of the uuid (4 for `uuid.v4()`, 7 for `uuid.v7()`)."),
+];
+
+pub const ULID: &[Entry] = &[
+    ("time", "", "The creation time stored in the ulid: milliseconds since 1970 (48 bits)."),
+];
+
 pub const INT: &[Entry] = &[
     ("char", "", "The one-character string whose code is this number (`97.char()` is `\"a\"`)."),
     ("abs", "", "Absolute value."),
@@ -98,6 +106,16 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
     ("float", "function", "parse", "parse(text: string) -> float?", "The number written in `text`, or `none` if it is not valid."),
     ("float", "constant", "PI", "PI: float", "The constant π."),
     ("float", "constant", "E", "E: float", "Euler's number."),
+    ("uuid", "function", "v4", "v4() -> uuid", "A new random uuid (version 4). Needs a source of randomness."),
+    ("uuid", "function", "v7", "v7() -> uuid", "A new uuid (version 7): the current time followed by random bits, so the uuids sort in creation order."),
+    ("uuid", "function", "parse", "parse(text: string) -> uuid?", "The uuid written in `text` (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`), or `none` if it is not valid."),
+    ("uuid", "constant", "NIL", "NIL: uuid", "The uuid made only of zeros."),
+    ("ulid", "function", "new", "new() -> ulid", "A new ulid: the current time (48 bits) followed by 80 random bits. Two ulids made in the same millisecond still sort in creation order."),
+    ("ulid", "function", "at", "at(time: int) -> ulid", "A new ulid for the given time (milliseconds since 1970), with random bits."),
+    ("ulid", "function", "parse", "parse(text: string) -> ulid?", "The ulid written in `text` (26 characters), or `none` if it is not valid."),
+    ("time", "function", "now", "now() -> int", "The current time: milliseconds since 1970-01-01 00:00:00 UTC. Needs a clock."),
+    ("random", "function", "int", "int(min: int, max: int) -> int", "A random integer from `min` to `max`, both included. Needs a source of randomness."),
+    ("random", "function", "float", "float() -> float", "A random number from 0 (included) to 1 (excluded). Needs a source of randomness."),
 ];
 
 /// Built-in functions: (name, signature, explanation).
@@ -114,6 +132,8 @@ pub fn methods(owner: &str) -> &'static [Entry] {
         "array" => ARRAY,
         "map" => MAP,
         "string" => STRING,
+        "uuid" => UUID,
+        "ulid" => ULID,
         "int" => INT,
         "float" => FLOAT,
         _ => &[],

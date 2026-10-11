@@ -7,6 +7,7 @@ pub mod ast;
 pub mod check;
 pub mod diag;
 pub mod host;
+pub mod ids;
 pub mod interp;
 pub mod lexer;
 pub mod parser;

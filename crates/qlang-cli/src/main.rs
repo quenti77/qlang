@@ -14,9 +14,10 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N] [--root DIR]
+    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N]
                                          run a program (imports may live anywhere, or only
-                                         under DIR with --root)
+                                         under DIR with --root; the same --seed gives the
+                                         same random numbers)
     qlang check <file.q>                 check a program without running it
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
@@ -73,6 +74,19 @@ fn real_main(args: Vec<String>) -> ExitCode {
 /// user can read (like `require` in Node), unless `--root` confines them to a directory.
 struct TerminalHost {
     root: Option<PathBuf>,
+    /// State of the random generator: `--seed N`, or taken from the system.
+    rng: u64,
+}
+
+/// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
+fn system_entropy() -> u64 {
+    use std::io::Read;
+    let mut bytes = [0u8; 8];
+    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok() {
+        return u64::from_le_bytes(bytes);
+    }
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new().build_hasher().finish()
 }
 
 impl Host for TerminalHost {
@@ -112,14 +126,24 @@ impl Host for TerminalHost {
             .unwrap_or_else(|_| path.to_string())
     }
 
+    fn now_ms(&mut self) -> Result<i64, HostError> {
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+        since.map(|d| d.as_millis() as i64).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn random_u64(&mut self) -> Result<u64, HostError> {
+        Ok(qlang_core::host::splitmix64(&mut self.rng))
+    }
+
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: true }
+        Capabilities { read: true, time: true, random: true }
     }
 }
 
 fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut file: Option<&str> = None;
     let mut root: Option<PathBuf> = None;
+    let mut seed: Option<u64> = None;
     let mut limits = Limits::default();
     let mut i = 0;
     while i < args.len() {
@@ -130,6 +154,16 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                     Some(n) => limits.max_steps = n,
                     None => {
                         eprintln!("--max-steps needs a number");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--seed" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse().ok()) {
+                    Some(n) => seed = Some(n),
+                    None => {
+                        eprintln!("--seed needs a number");
                         return ExitCode::from(64);
                     }
                 }
@@ -168,7 +202,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             eprintln!("{file} is outside of --root {}", root.display());
             return ExitCode::from(64);
         }
-    let mut host = TerminalHost { root };
+    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy) };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,
         Err(e) => {

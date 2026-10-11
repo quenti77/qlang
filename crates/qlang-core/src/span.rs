@@ -1,6 +1,5 @@
 //! Positions in source files.
 
-use std::path::Path;
 
 /// A byte range in one source file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -115,18 +114,35 @@ impl SourceMap {
     }
 }
 
+/// Split a path into its root (`""`, `"/"` or a drive like `"C:/"`) and the rest.
+/// Backslashes must already have been turned into `/`.
+fn split_root(path: &str) -> (&str, &str) {
+    let b = path.as_bytes();
+    if path.starts_with('/') {
+        ("/", path.trim_start_matches('/'))
+    } else if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        let end = if b.get(2) == Some(&b'/') { 3 } else { 2 };
+        (&path[..end], &path[end..])
+    } else {
+        ("", path)
+    }
+}
+
 /// Resolve an `import` path relative to the importing file.
 ///
-/// The result is normalised (`.` and inner `..` removed). A relative importer may reach
-/// outside its own directory: the result then starts with `..` (`../lib/x.q`). Whether
-/// that file may be read is for the host to decide. Absolute import paths are refused,
-/// and so is any path that would go above the root of an absolute importer.
+/// Import paths always use `/` (on every system) and are never absolute: `/x.q`, `C:/x.q`
+/// and anything with a backslash are refused. The result is normalised (`.` and inner `..`
+/// removed). A relative importer may reach outside its own directory: the result then starts
+/// with `..` (`../lib/x.q`). Whether that file may be read is for the host to decide.
+/// Nothing can go above the root of an absolute importer. The importer may be written with
+/// `\` (a Windows path); the result then uses `/`.
 pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> {
-    if import_path.is_empty() || import_path.starts_with('/') {
+    if import_path.is_empty() || import_path.contains('\\') || split_root(import_path).0 != "" {
         return None;
     }
-    let absolute = importer.starts_with('/');
-    let dir = Path::new(importer).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let importer = importer.replace('\\', "/");
+    let (root, rest) = split_root(&importer);
+    let dir = rest.rfind('/').map_or("", |i| &rest[..i]);
     let joined = if dir.is_empty() { import_path.to_string() } else { format!("{dir}/{import_path}") };
     let mut parts: Vec<&str> = Vec::new();
     for part in joined.split('/') {
@@ -136,7 +152,7 @@ pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> 
                 Some(&last) if last != ".." => {
                     parts.pop();
                 }
-                _ if absolute => return None,
+                _ if !root.is_empty() => return None,
                 _ => parts.push(".."),
             },
             p => parts.push(p),
@@ -145,8 +161,7 @@ pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> 
     if parts.is_empty() || parts.last() == Some(&"..") {
         return None;
     }
-    let joined = parts.join("/");
-    Some(if absolute { format!("/{joined}") } else { joined })
+    Some(format!("{root}{}", parts.join("/")))
 }
 
 #[cfg(test)]
@@ -180,5 +195,19 @@ mod tests {
         assert_eq!(r("main.q", "dir/.."), None);
         assert_eq!(r("/home/me/main.q", "../../../../x.q"), None, "above the root of the file system");
         assert_eq!(r("/home/me/main.q", "../lib/x.q").as_deref(), Some("/home/lib/x.q"));
+    }
+
+    #[test]
+    fn windows_paths_are_understood() {
+        // an importer written the Windows way: the drive is the root, `..` stays under it
+        assert_eq!(r("C:\\proj\\main.q", "lib/x.q").as_deref(), Some("C:/proj/lib/x.q"));
+        assert_eq!(r("C:\\proj\\app\\main.q", "../lib/x.q").as_deref(), Some("C:/proj/lib/x.q"));
+        assert_eq!(r("C:\\main.q", "../x.q"), None, "above the drive root");
+        assert_eq!(r("examples\\tour.q", "tour_math.q").as_deref(), Some("examples/tour_math.q"));
+        // import paths use `/` everywhere and are never absolute
+        assert_eq!(r("main.q", "lib\\x.q"), None);
+        assert_eq!(r("main.q", "C:/x.q"), None);
+        assert_eq!(r("main.q", "C:x.q"), None);
+        assert_eq!(r("main.q", "\\\\server\\share\\x.q"), None);
     }
 }

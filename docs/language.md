@@ -991,8 +991,8 @@ print(math.add(1, 2))
 - `import "chemin" as m` importe tout le module sous un alias.
 - Un type exporté se note `math.Point` : `math.Point { x: 1, y: 2 }`.
 - Le chemin est relatif au fichier qui importe : `"math.q"`, `"lib/math.q"` ou
-  `"../shared/math.q"` (on peut remonter dans les dossiers). Les chemins absolus
-  sont refusés : un programme ne dépend pas de l'endroit où il est rangé. Seuls
+  `"../shared/math.q"` (on peut remonter dans les dossiers). On écrit toujours `/`,
+  même sous Windows (`\` est refusé). Les chemins absolus (`/x.q`, `C:/x.q`) sont refusés : un programme ne dépend pas de l'endroit où il est rangé. Seuls
   les fichiers `.q` peuvent être importés.
 - Qui a le droit de lire quoi dépend de l'**environnement d'exécution**, pas du
   langage : dans un terminal, `qlang run` lit tout fichier `.q` lisible (comme

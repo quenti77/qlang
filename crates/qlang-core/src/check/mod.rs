@@ -162,7 +162,7 @@ impl Loader<'_> {
                 crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T100",
                     format!(
-                        "cannot import \"{}\": use a path relative to this file (`./x.q`, `../lib/x.q`), not an absolute one",
+                        "cannot import \"{}\": use a path relative to this file, written with `/` (`./x.q`, `../lib/x.q`), not an absolute one",
                         imp.path
                     ),
                     imp.path_span,

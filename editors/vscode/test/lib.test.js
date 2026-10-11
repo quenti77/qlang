@@ -27,6 +27,9 @@ test('resolveImport follows the compiler rules', () => {
   assert.strictEqual(lib.resolveImport('main.q', ''), null);
   assert.strictEqual(lib.resolveImport('main.q', '..'), null);
   assert.strictEqual(lib.resolveImport('main.q', 'dir/..'), null);
+  assert.strictEqual(lib.resolveImport('main.q', 'C:/x.q'), null); // a Windows drive
+  assert.strictEqual(lib.resolveImport('main.q', 'C:x.q'), null);
+  assert.strictEqual(lib.resolveImport('main.q', 'lib\\x.q'), null); // a backslash
 });
 
 test('collectFiles reads modules above the entry file', () => {

@@ -54,3 +54,27 @@ test('every example in the repository checks cleanly', { skip: !binary && 'build
     assert.strictEqual(res.ok, true, `${f}: ${JSON.stringify(res.diagnostics)}`);
   }
 });
+
+test('the editor and the terminal agree on imports that go up a folder', { skip: !binary && 'build qlang first (cargo build)' }, () => {
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qlang-agree-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'common.q'), 'fun helper() -> int\n  7\nend\nexport helper\n');
+    const main = 'import helper from "../common.q"\nprint(helper())\n';
+    fs.writeFileSync(path.join(dir, 'sub', 'main.q'), main);
+    // what the extension does: paths relative to the project root, files read from the disk
+    const read = (rel) => {
+      try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return null; }
+    };
+    const files = lib.collectFiles('sub/main.q', main, read);
+    assert.deepStrictEqual(Object.keys(files).sort(), ['common.q', 'sub/main.q']);
+    assert.strictEqual(check('sub/main.q', files).ok, true);
+    // what the Run button does: `cd sub && qlang run main.q`
+    const run = cp.spawnSync(binary, ['run', 'main.q'], { cwd: path.join(dir, 'sub'), encoding: 'utf8' });
+    assert.strictEqual(run.status, 0, run.stderr);
+    assert.strictEqual(run.stdout, '7\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

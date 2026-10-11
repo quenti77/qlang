@@ -6,6 +6,7 @@
 use crate::ast::*;
 use crate::check::Program;
 use crate::diag::Diagnostic;
+use crate::datetime;
 use crate::ids;
 use crate::host::{Host, HostError, Limits};
 use crate::span::Span;
@@ -727,7 +728,7 @@ impl<'a> Interp<'a> {
             (_, Ty::Error | Ty::Param(_) | Ty::Infer(_)) => true,
             (Value::Int(_), Ty::Int) | (Value::Float(_), Ty::Float) | (Value::Bool(_), Ty::Bool) => true,
             (Value::Str(_), Ty::Str) | (Value::Range(..), Ty::Range) => true,
-            (Value::Uuid(_), Ty::Uuid) | (Value::Ulid(_), Ty::Ulid) => true,
+            (Value::Uuid(_), Ty::Uuid) | (Value::Ulid(_), Ty::Ulid) | (Value::DateTime(_), Ty::DateTime) => true,
             (Value::None, Ty::NoneT | Ty::Nullable(_)) => true,
             (_, Ty::Nullable(inner)) => self.value_matches_ty(v, inner),
             (Value::Array(_), Ty::Array(_)) => true,
@@ -865,6 +866,7 @@ impl<'a> Interp<'a> {
             Value::Bool(b) => b.to_string(),
             Value::Uuid(u) => ids::format_uuid(*u),
             Value::Ulid(u) => ids::format_ulid(*u),
+            Value::DateTime(t) => datetime::to_iso(*t),
             Value::None => "none".to_string(),
             Value::Unit => String::new(),
             Value::Array(a) => {
@@ -948,6 +950,7 @@ impl<'a> Interp<'a> {
                 let ord = match (&l, &r) {
                     (Value::Str(a), Value::Str(b)) => Some(a.as_ref().cmp(b.as_ref())),
                     (Value::Uuid(a), Value::Uuid(b)) | (Value::Ulid(a), Value::Ulid(b)) => Some(a.cmp(b)),
+                    (Value::DateTime(a), Value::DateTime(b)) => Some(a.cmp(b)),
                     _ => match self.find_method(&l, Lang::Ord.method_name(), Some(prog.defs.lang(Lang::Ord)), Some(&r)) {
                         Some(fid) => match self.call_fid(fid, Some(l.clone()), vec![r.clone()], span)? {
                             Value::Int(i) => Some(i.cmp(&0)),
@@ -1021,6 +1024,8 @@ impl<'a> Interp<'a> {
                     None => overflow(self),
                 }
             }
+            // the time between two instants, in milliseconds
+            (Value::DateTime(a), Value::DateTime(b)) if op == BinOp::Sub => Ok(Some(Value::Int(a - b))),
             (Value::Str(a), Value::Str(b)) if op == BinOp::Add => {
                 self.guard_alloc(a.len() + b.len(), span)?;
                 self.charge_bytes(a.len() + b.len(), span)?;
@@ -1058,6 +1063,7 @@ impl<'a> Interp<'a> {
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => x == y,
+            (Value::DateTime(x), Value::DateTime(y)) => x == y,
             (Value::Enum(e1, v1), Value::Enum(e2, v2)) => e1 == e2 && v1 == v2,
             (Value::Map(x), Value::Map(y)) => {
                 if Rc::ptr_eq(x, y) {
@@ -1323,6 +1329,7 @@ impl<'a> Interp<'a> {
             (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
             (Value::Str(x), Value::Str(y)) => Ok(x.as_ref().cmp(y.as_ref())),
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => Ok(x.cmp(y)),
+            (Value::DateTime(x), Value::DateTime(y)) => Ok(x.cmp(y)),
             _ => {
                 if let (Some(x), Some(y)) = (num(a), num(b)) {
                     return Ok(x.total_cmp(&y));
@@ -1412,6 +1419,23 @@ impl<'a> Interp<'a> {
             ("uuid", "parse") => ids::parse_uuid(&text(&args[0])).map_or(Value::None, Value::Uuid),
             ("ulid", "parse") => ids::parse_ulid(&text(&args[0])).map_or(Value::None, Value::Ulid),
             ("time", "now") => Value::Int(self.now(span)?),
+            ("datetime", "now") => Value::DateTime(self.now(span)?.clamp(datetime::MIN_MS, datetime::MAX_MS)),
+            ("datetime", "parse") => datetime::parse(&text(&args[0])).map_or(Value::None, Value::DateTime),
+            ("datetime", "at") => {
+                let Value::Int(ms) = args[0] else { return Ok(Value::None) };
+                if !datetime::in_range(ms) {
+                    return self.fail("R064", "a datetime must be between the years 1 and 9999", span);
+                }
+                Value::DateTime(ms)
+            }
+            ("datetime", "of") => {
+                let n: Vec<i64> = args.iter().map(|a| if let Value::Int(i) = a { *i } else { 0 }).collect();
+                let at = |i: usize| n.get(i).copied().unwrap_or(0);
+                match datetime::from_parts(at(0), at(1), at(2), at(3), at(4), at(5), 0) {
+                    Some(t) => Value::DateTime(t),
+                    None => return self.fail("R064", format!("this date does not exist: {}", n.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")), span),
+                }
+            }
             ("uuid", "v4") => Value::Uuid(ids::uuid_v4(self.random_bits(span)?)),
             ("uuid", "v7") => {
                 let now = self.now(span)?;
@@ -1446,6 +1470,50 @@ impl<'a> Interp<'a> {
             }
             _ => Value::Unit,
         })
+    }
+
+    #[inline(never)]
+    fn datetime_method(&mut self, t: i64, name: &str, args: &[Value], span: Span) -> R<Option<Value>> {
+        let p = datetime::parts(t);
+        let n = match args.first() {
+            Some(Value::Int(n)) => *n,
+            _ => 0,
+        };
+        let moved = |this: &mut Self, r: Option<i64>| -> R<Option<Value>> {
+            match r.filter(|ms| datetime::in_range(*ms)) {
+                Some(ms) => Ok(Some(Value::DateTime(ms))),
+                None => this.fail("R065", "the result is out of the years 1 to 9999", span),
+            }
+        };
+        Ok(Some(match name {
+            "year" => Value::Int(p.year),
+            "month" => Value::Int(p.month),
+            "day" => Value::Int(p.day),
+            "hour" => Value::Int(p.hour),
+            "minute" => Value::Int(p.minute),
+            "second" => Value::Int(p.second),
+            "weekday" => Value::Int(datetime::weekday(t)),
+            "ms" => Value::Int(t),
+            "start_of_day" => Value::DateTime(datetime::start_of_day(t)),
+            "add_years" => return moved(self, n.checked_mul(12).and_then(|m| datetime::add_months(t, m))),
+            "add_months" => return moved(self, datetime::add_months(t, n)),
+            "add_days" => return moved(self, n.checked_mul(datetime::DAY_MS).and_then(|d| t.checked_add(d))),
+            "add_hours" => return moved(self, n.checked_mul(3_600_000).and_then(|d| t.checked_add(d))),
+            "add_minutes" => return moved(self, n.checked_mul(60_000).and_then(|d| t.checked_add(d))),
+            "add_seconds" => return moved(self, n.checked_mul(1000).and_then(|d| t.checked_add(d))),
+            "days_until" => match args.first() {
+                Some(Value::DateTime(o)) => Value::Int((datetime::start_of_day(*o) - datetime::start_of_day(t)) / datetime::DAY_MS),
+                _ => return Ok(None),
+            },
+            "format" => match args.first() {
+                Some(Value::Str(pattern)) => {
+                    self.guard_alloc(pattern.len() * 4, span)?;
+                    Value::str(&datetime::format(t, pattern))
+                }
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        }))
     }
 
     fn now(&mut self, span: Span) -> R<i64> {
@@ -1572,6 +1640,10 @@ impl<'a> Interp<'a> {
                 self.guard_alloc(joined.len(), span)?;
                 Value::str(&joined)
             }
+            (Value::DateTime(t), _) => match self.datetime_method(*t, name, args, span)? {
+                Some(v) => v,
+                None => return Ok(None),
+            },
             (Value::Uuid(u), "version") => Value::Int(ids::uuid_version(*u)),
             (Value::Ulid(u), "time") => Value::Int(ids::ulid_time(*u)),
             (Value::Str(s), "len") => Value::Int(s.chars().count() as i64),

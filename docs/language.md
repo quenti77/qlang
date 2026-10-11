@@ -62,6 +62,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Dictionnaires](#dictionnaires)
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
+    - [Dates et heures : `datetime`](#dates-et-heures--datetime)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1050,7 +1051,7 @@ Le langage ne lit et n'écrit rien lui-même : `print`, `read` et `import` passe
 par l'**environnement d'exécution** (le terminal, un serveur web…).
 
 - `print` est toujours disponible.
-- `time.now()`, `random.…`, `uuid.v4()`, `uuid.v7()`, `ulid.new()` et
+- `time.now()`, `datetime.now()`, `random.…`, `uuid.v4()`, `uuid.v7()`, `ulid.new()` et
   `ulid.at()` dépendent aussi de l'environnement (une horloge, une source
   d'aléatoire) : voir [Heure et aléatoire](#heure-et-aléatoire).
 - `read` **dépend de l'environnement**. Dans un terminal, il lit le clavier. Dans
@@ -1296,6 +1297,57 @@ Les `uuid` et `ulid` se comparent avec `==`, `<`… et se trient ; ils
 s'affichent et s'interpolent sous leur forme texte (`id as string` donne cette
 chaîne). Pour l'inverse, `uuid.parse` et `ulid.parse` vérifient le texte.
 
+### Dates et heures : `datetime`
+
+Un `datetime` est un **instant** : une date et une heure, toujours en **UTC** (pas de fuseau
+horaire, donc les mêmes résultats partout). Il va de l'an 1 à l'an 9999. C'est un type à part,
+comme `uuid` : il se compare (`<`, `==`), se trie et peut être une clé de dictionnaire.
+
+| Appel                                         | Résultat                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------ |
+| `datetime.now()`                              | l'instant présent (a besoin d'une horloge, comme `time.now()`)                 |
+| `datetime.of(2026, 10, 11)`                   | le 11 octobre 2026 à minuit                                                    |
+| `datetime.of(2026, 10, 11, 14, 30, 0)`        | avec l'heure : heure, minute, seconde                                          |
+| `datetime.parse(texte)`                       | un `datetime?` : `none` si le texte est invalide (voir ci-dessous)             |
+| `datetime.at(ms)`                             | l'instant `ms` millisecondes après le 1er janvier 1970                         |
+| `d.year()` `d.month()` `d.day()`              | année, mois (1 à 12), jour du mois                                             |
+| `d.hour()` `d.minute()` `d.second()`          | heure (0 à 23), minute, seconde                                                |
+| `d.weekday()`                                 | jour de la semaine : 1 = lundi, 7 = dimanche                                   |
+| `d.ms()`                                      | millisecondes depuis 1970 (un `int`)                                           |
+| `d.add_days(n)`                               | `n` jours plus tard (`n` peut être négatif) ; aussi `add_years`, `add_months`, `add_hours`, `add_minutes`, `add_seconds` |
+| `d.start_of_day()`                            | minuit du même jour                                                            |
+| `b - a`                                       | le temps écoulé de `a` à `b`, en **millisecondes** (un `int`)                  |
+| `a.days_until(b)`                             | le nombre de jours entre le jour de `a` et celui de `b`                        |
+| `d.format("DD/MM/YYYY")`                      | le texte selon un modèle                                                       |
+
+```
+let rendu = datetime.of(2026, 10, 11, 14, 30, 0)
+print(rendu)                          -- 2026-10-11T14:30:00Z
+print(rendu.add_days(30).format("DD/MM/YYYY"))   -- 10/11/2026
+print(rendu.weekday())                -- 7 (dimanche)
+
+let fin = datetime.of(2026, 12, 25)
+print(rendu.days_until(fin))          -- 75
+print((fin - rendu) div 3_600_000)    -- les heures qui restent
+
+let d = datetime.parse("2026-10-11 14:30")
+if d != none then
+  print(d.hour())
+end
+```
+
+- **Affichage** : un `datetime` s'affiche au format ISO 8601, `2026-10-11T14:30:00Z`
+  (avec `.123` avant le `Z` s'il y a des millisecondes). `"{d}"` et `d as string` donnent ce texte.
+- **`format`** reconnaît `YYYY` (année), `MM` (mois), `DD` (jour), `HH` (heure), `mm` (minute),
+  `ss` (seconde) et `SSS` (millisecondes). Les autres caractères sont gardés tels quels :
+  `d.format("YYYY-MM-DD à HH:mm")`.
+- **`parse`** lit `AAAA-MM-JJ`, éventuellement suivi de `T` ou d'un espace puis de `HH:MM`,
+  `HH:MM:SS` ou `HH:MM:SS.mmm`, et d'un `Z` facultatif. Une date seule est minuit.
+- **`add_months` et `add_years`** : un jour qui n'existe pas dans le nouveau mois devient son
+  dernier jour (31 janvier + 1 mois = 28 ou 29 février).
+- **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
+  sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
 ## 15. Fins de ligne
 
 Il n'y a pas de `;`. **Une instruction se termine à la fin de la ligne.** La
@@ -1334,7 +1386,7 @@ and or not div mod
 true false none self super
 ```
 
-`int`, `float`, `bool`, `string`, `uuid`, `ulid`, `array` et `range` **ne sont pas** des
+`int`, `float`, `bool`, `string`, `uuid`, `ulid`, `datetime`, `array` et `range` **ne sont pas** des
 mots-clés : ce sont des noms de types ordinaires, mais on ne peut pas définir un
 type ou une fonction qui porte l'un de ces noms, ni celui d'une fonction
 prédéfinie (`print`, `write`, `read`, `panic`, `assert`).

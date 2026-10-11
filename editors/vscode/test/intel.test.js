@@ -49,13 +49,12 @@ const SOURCE = [
 ].join('\n');
 
 const lines = SOURCE.split('\n');
-const linesOf = (f) => (f === 'main.q' ? lines : null);
 
 function hover(info, line, needle, nth = 0) {
   let col = -1;
   for (let i = 0; i <= nth; i++) col = lines[line].indexOf(needle, col + 1);
   assert.ok(col >= 0, `${needle} not on line ${line}`);
-  return intel.hoverAt(info, 'main.q', line, col, lines[line], linesOf);
+  return intel.hoverAt(info, 'main.q', line, col, lines[line]);
 }
 
 test('hover shows types, signatures and documentation', { skip }, () => {
@@ -82,7 +81,7 @@ test('hover shows types, signatures and documentation', { skip }, () => {
   assert.match(hover(info, 21, 'Point').markdown, /A point on the plane\./);
   assert.match(hover(info, 23, 'print').markdown, /print\(value\)/);
   assert.match(hover(info, 16, 'fun').markdown, /Declares a function/);
-  assert.strictEqual(intel.hoverAt(info, 'main.q', 20, 0, '', linesOf), null);
+  assert.strictEqual(intel.hoverAt(info, 'main.q', 20, 0, ''), null);
 });
 
 test('completion after a dot offers the members of the type', { skip }, () => {
@@ -95,25 +94,25 @@ test('completion after a dot offers the members of the type', { skip }, () => {
   const info = analyse({ 'main.q': intel.blank(typed, line, access.dot, lineText.length) });
   const expr = intel.receiverAt(info, 'main.q', line, access.dot);
   assert.strictEqual(expr.type, 'array<string>');
-  const items = intel.memberCompletions(info, expr, 'names', linesOf);
+  const items = intel.memberCompletions(info, expr, 'names');
   const push = items.find((i) => i.label === 'push');
   assert.strictEqual(push.detail, 'push(value: string)');
   assert.ok(items.some((i) => i.label === 'len'));
 
   // a structure: fields first, only the public ones from outside
   const p = analyse({ 'main.q': intel.blank(SOURCE + '\np.', lines.length, 1, 2) });
-  const members = intel.memberCompletions(p, intel.receiverAt(p, 'main.q', lines.length, 1), 'p', linesOf);
+  const members = intel.memberCompletions(p, intel.receiverAt(p, 'main.q', lines.length, 1), 'p');
   assert.deepStrictEqual(members.map((m) => m.label), ['x', 'y', 'norm']);
 });
 
 test('completion without a dot offers variables in scope, names and keywords', { skip }, () => {
   const info = analyse({ 'main.q': SOURCE });
-  const inside = intel.nameCompletions(info, 'main.q', 18, 12, linesOf).map((i) => i.label);
+  const inside = intel.nameCompletions(info, 'main.q', 18, 12).map((i) => i.label);
   assert.ok(['a', 'b', 'total'].every((n) => inside.includes(n)), 'variables of the function');
   assert.ok(inside.includes('names'), 'top-level variables are visible in functions');
-  const early = intel.nameCompletions(info, 'main.q', 17, 4, linesOf).map((i) => i.label);
+  const early = intel.nameCompletions(info, 'main.q', 17, 4).map((i) => i.label);
   assert.ok(early.includes('a') && !early.includes('total'), '`total` is not declared yet');
-  const top = intel.nameCompletions(info, 'main.q', 25, 0, linesOf);
+  const top = intel.nameCompletions(info, 'main.q', 25, 0);
   const labels = top.map((i) => i.label);
   assert.ok(['p', 'names', 'add', 'Point', 'print', 'while', 'int'].every((n) => labels.includes(n)));
   assert.ok(!labels.includes('total'), 'a variable of a function is not visible outside');
@@ -138,7 +137,7 @@ test('signature help finds the signature and the active parameter', { skip }, ()
   const call = intel.callAt(text, text.length);
   assert.deepStrictEqual(call, { open: 3, name: 'add', activeParam: 1 });
   const info = analyse({ 'main.q': intel.blank(typed, line, call.open, text.length) });
-  const sig = intel.signatureFor(info, 'main.q', line, text, call, linesOf);
+  const sig = intel.signatureFor(info, 'main.q', line, text, call);
   assert.strictEqual(sig.label, 'add(a: int, b: int) -> int');
   assert.deepStrictEqual(sig.parameters, ['a: int', 'b: int']);
   assert.strictEqual(sig.doc, 'Adds two numbers.');
@@ -149,7 +148,7 @@ test('signature help finds the signature and the active parameter', { skip }, ()
   const text2 = 'names.insert(1, ';
   const call2 = intel.callAt(text2, text2.length);
   const info2 = analyse({ 'main.q': intel.blank(typed2, line, call2.open, text2.length) });
-  const sig2 = intel.signatureFor(info2, 'main.q', line, text2, call2, linesOf);
+  const sig2 = intel.signatureFor(info2, 'main.q', line, text2, call2);
   assert.strictEqual(sig2.label, 'insert(index: int, value: string)');
 });
 
@@ -160,8 +159,5 @@ test('the helpers on their own', () => {
   assert.strictEqual(intel.callAt('print(f(1), "a,b", [1, 2], ', 28).activeParam, 3);
   assert.strictEqual(intel.callAt('let xs = [1, ', 13), null);
   assert.deepStrictEqual(intel.parameters('f(a: map<string, int>, b: fun(int) -> int) -> int'), ['a: map<string, int>', 'b: fun(int) -> int']);
-  assert.strictEqual(intel.docAbove(['--" one --"', 'fun f()'], 1), 'one');
-  assert.strictEqual(intel.docAbove(['--"', ' a', ' b', '--"', 'fun f()'], 4), 'a\nb');
-  assert.strictEqual(intel.docAbove(['-- not a doc', 'fun f()'], 1), null);
   assert.strictEqual(intel.blank('ab.cd\nx', 0, 2, 5), 'ab   \nx');
 });

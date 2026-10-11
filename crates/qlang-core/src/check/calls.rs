@@ -345,6 +345,9 @@ impl Checker {
     fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[Expr]) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
+        if let Some(c) = &mut self.collect {
+            c.expr(callee, Ty::Fn(def.params.clone(), Box::new(def.ret.clone())));
+        }
         let own: Vec<ParamId> = def.scope_params.iter().rev().take(def.own_tparams).rev().map(|(_, p)| *p).collect();
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         let sig = CallSig { name: def.name.clone(), tparams: own, params: def.params.clone(), ret: def.ret.clone() };

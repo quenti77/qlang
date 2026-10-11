@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux, macOS and
-# Windows, their checksums, and the VS Code extension. Changes to the release files
+# Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux and macOS, their
+# checksums, and the VS Code extension. (No Windows build for now: it is compiled from the
+# sources, but the tests still run on Windows in ci.yml.) Changes to the release files
 # build everything on the pull request too (nothing is published then).
 on:
   push:
@@ -11,7 +12,6 @@ on:
       - .github/workflows/release.yml
       - scripts/**
       - install.sh
-      - install.ps1
       - Cargo.toml
       - editors/vscode/package.json
 
@@ -53,7 +53,6 @@ jobs:
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
           - { target: aarch64-apple-darwin, os: macos-14 }
           - { target: x86_64-apple-darwin, os: macos-14 }
-          - { target: x86_64-pc-windows-msvc, os: windows-latest }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

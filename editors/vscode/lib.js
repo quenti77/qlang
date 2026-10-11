@@ -19,7 +19,8 @@ function relativePosix(root, file) {
  * `..`. Absolute paths and empty paths are refused (null).
  */
 function resolveImport(importerRel, importPath) {
-  if (importPath === '' || importPath.startsWith('/')) return null;
+  // import paths use `/` everywhere and are never absolute (`/x.q`, `C:/x.q`, `lib\\x.q`)
+  if (importPath === '' || importPath.includes('\\') || importPath.startsWith('/') || /^[A-Za-z]:/.test(importPath)) return null;
   const parts = [];
   const dir = importerRel.includes('/') ? importerRel.slice(0, importerRel.lastIndexOf('/')) : '';
   const joined = (dir ? dir + '/' : '') + importPath;

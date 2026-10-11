@@ -256,6 +256,13 @@ délai d'attente. Le serveur HTTP (`qlang serve`) est minimal : pas de TLS, pas 
 connexions persistantes, 16 connexions simultanées au plus. Placez-le derrière un
 proxy inverse et ne l'exposez pas directement à Internet.
 
+## Navigateur : WebAssembly
+
+`crates/qlang-wasm` compile `qlang-core` en WebAssembly (`qlang.wasm`, environ 700 ko, publié avec
+chaque release avec son enveloppe JavaScript `qlang.mjs`). Même protocole JSON que `run --json`,
+sans serveur : de quoi faire tourner du qlang dans une page web, dans un Web Worker. Voir
+[`crates/qlang-wasm`](crates/qlang-wasm/README.md).
+
 ## Éditeur : VS Code
 
 Une extension (coloration, erreurs soulignées pendant la frappe grâce au vrai compilateur,

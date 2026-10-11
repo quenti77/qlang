@@ -37,6 +37,14 @@ name = "qlang-core"
 version = "0.2.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "qlang-wasm"
+version = "0.2.0"
+dependencies = [
+ "qlang-core",
 ]
 
 [[package]]

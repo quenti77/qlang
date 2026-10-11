@@ -1,0 +1,13 @@
+[package]
+name = "qlang-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "qlang for the browser: the JSON protocol of qlang-core, as a WebAssembly module"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qlang-core = { path = "../qlang-core" }

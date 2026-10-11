@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux and macOS, their
-# checksums, and the VS Code extension. (No Windows build for now: it is compiled from the
+# checksums, the browser build (qlang.wasm) and the VS Code extension. (No Windows build for now: it is compiled from the
 # sources, but the tests still run on Windows in ci.yml.) Changes to the release files
 # build everything on the pull request too (nothing is published then).
 on:
@@ -11,6 +11,8 @@ on:
     paths:
       - .github/workflows/release.yml
       - scripts/**
+      - crates/qlang-wasm/**
+      - .cargo/**
       - install.sh
       - Cargo.toml
       - editors/vscode/package.json
@@ -82,6 +84,31 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  wasm:
+    name: Build for the browser
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --profile wasm --target wasm32-unknown-unknown -p qlang-wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test crates/qlang-wasm/test/*.test.mjs
+      - run: |
+          mkdir -p dist
+          cp target/wasm32-unknown-unknown/wasm/qlang_wasm.wasm dist/qlang.wasm
+          cp crates/qlang-wasm/js/qlang.mjs dist/qlang.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wasm
+          path: dist/*
+          if-no-files-found: error
+
   extension:
     name: Package the VS Code extension
     needs: version
@@ -108,7 +135,7 @@ jobs:
   publish:
     name: Publish the release
     if: github.ref_type == 'tag'
-    needs: [build, extension]
+    needs: [build, wasm, extension]
     runs-on: ubuntu-latest
     permissions:
       contents: write

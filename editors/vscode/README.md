@@ -55,5 +55,5 @@ npm test      # grammar, helpers, extension logic (against a fake VS Code) and t
 
 Layout: `syntaxes/` the TextMate grammar, `language-configuration.json` comments, brackets and
 indentation, `snippets/`, `lib.js` pure helpers (imports, request, diagnostics), `extension.js`
-the VS Code part. Import paths are resolved like the compiler does: relative to the importing
-file, inside the workspace folder.
+the VS Code part. Import paths are resolved like the compiler does: relative to the importing file, and they may
+go up (`../lib/x.q`), so the editor and the terminal agree.

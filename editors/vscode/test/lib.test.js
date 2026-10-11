@@ -14,8 +14,25 @@ test('resolveImport follows the compiler rules', () => {
   assert.strictEqual(lib.resolveImport('lib/a.q', 'b.q'), 'lib/b.q');
   assert.strictEqual(lib.resolveImport('lib/a.q', '../c.q'), 'c.q');
   assert.strictEqual(lib.resolveImport('lib/a.q', './sub/../b.q'), 'lib/b.q');
-  assert.strictEqual(lib.resolveImport('main.q', '../x.q'), null); // leaves the project
+  assert.strictEqual(lib.resolveImport('app/main.q', '../lib/x.q'), 'lib/x.q');
+  // an import may leave the project folder; the host decides if the file can be read
+  assert.strictEqual(lib.resolveImport('main.q', '../x.q'), '../x.q');
+  assert.strictEqual(lib.resolveImport('../x.q', 'y.q'), '../y.q');
+  assert.strictEqual(lib.resolveImport('../x.q', '../z.q'), '../../z.q');
+  assert.strictEqual(lib.resolveImport('a/b/main.q', '../../../x.q'), '../x.q');
+  // the same file written two ways has the same name
+  assert.strictEqual(lib.resolveImport('sub/main.q', '../sub/other.q'), lib.resolveImport('sub/main.q', 'other.q'));
+  // refused
   assert.strictEqual(lib.resolveImport('main.q', '/etc/x.q'), null); // absolute
+  assert.strictEqual(lib.resolveImport('main.q', ''), null);
+  assert.strictEqual(lib.resolveImport('main.q', '..'), null);
+  assert.strictEqual(lib.resolveImport('main.q', 'dir/..'), null);
+});
+
+test('collectFiles reads modules above the entry file', () => {
+  const disk = { '../shared/x.q': 'import y from "y.q"', '../shared/y.q': 'fun y() end' };
+  const files = lib.collectFiles('main.q', 'import x from "../shared/x.q"', (p) => disk[p] ?? null);
+  assert.deepStrictEqual(Object.keys(files).sort(), ['../shared/x.q', '../shared/y.q', 'main.q']);
 });
 
 test('importPaths finds both import forms and ignores other strings', () => {

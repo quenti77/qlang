@@ -14,24 +14,26 @@ function relativePosix(root, file) {
 }
 
 /**
- * Resolve an import path like the qlang compiler does: relative to the importing
- * file, never absolute, never leaving the project. Returns null if invalid.
+ * Resolve an import path like the qlang compiler does: relative to the importing file.
+ * A path may go up and out of the project (`../shared/x.q`); the result then starts with
+ * `..`. Absolute paths and empty paths are refused (null).
  */
 function resolveImport(importerRel, importPath) {
-  if (importPath.startsWith('/')) return null;
+  if (importPath === '' || importPath.startsWith('/')) return null;
   const parts = [];
   const dir = importerRel.includes('/') ? importerRel.slice(0, importerRel.lastIndexOf('/')) : '';
   const joined = (dir ? dir + '/' : '') + importPath;
   for (const part of joined.split('/')) {
     if (part === '' || part === '.') continue;
     if (part === '..') {
-      if (parts.length === 0) return null;
-      parts.pop();
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
+      else parts.push('..');
     } else {
       parts.push(part);
     }
   }
-  return parts.length ? parts.join('/') : null;
+  if (parts.length === 0 || parts[parts.length - 1] === '..') return null;
+  return parts.join('/');
 }
 
 /** Import paths written in a source text (`import a from "x.q"`, `import "x.q" as m`). */

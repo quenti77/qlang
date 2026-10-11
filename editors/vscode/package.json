@@ -9,6 +9,13 @@
   "keywords": ["qlang"],
   "repository": { "type": "git", "url": "https://github.com/quenti77/qlang" },
   "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The path of the qlang executable is only taken from your user settings in an untrusted workspace: a downloaded project must not be able to choose which program runs.",
+      "restrictedConfigurations": ["qlang.path"]
+    }
+  },
   "contributes": {
     "languages": [
       {
@@ -45,6 +52,7 @@
         "qlang.path": {
           "type": "string",
           "default": "qlang",
+          "scope": "machine",
           "description": "The qlang executable (name in PATH, or a full path). Install it with `cargo install --path crates/qlang-cli` from the qlang repository."
         },
         "qlang.diagnostics.enabled": {

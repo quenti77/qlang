@@ -24,6 +24,10 @@ cargo install --path crates/qlang-cli     # installs `qlang` in ~/.cargo/bin
 
 If `qlang` is not in your `PATH`, set **qlang.path** in the settings to its full path.
 
+`qlang.path` is only read from your **user** settings (machine scope), never from a project's
+`.vscode/settings.json`, and it is listed as a restricted setting for untrusted workspaces: a
+downloaded project cannot choose which program the extension runs.
+
 ## Settings
 
 | Setting                     | Default | Meaning                                              |

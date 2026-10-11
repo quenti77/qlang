@@ -1,0 +1,134 @@
+name: Release
+
+# Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux, macOS and
+# Windows, their checksums, and the VS Code extension. Changes to the release files
+# build everything on the pull request too (nothing is published then).
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/**
+      - install.sh
+      - install.ps1
+      - Cargo.toml
+      - editors/vscode/package.json
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Versions agree
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          extension=$(node -p "require('./editors/vscode/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Cargo workspace: $version, VS Code extension: $extension"
+          if [ "$version" != "$extension" ]; then
+            echo "::error::The VS Code extension version ($extension) differs from the Cargo version ($version)"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the version $version in Cargo.toml"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release -p qlang-cli --target ${{ matrix.target }}
+      - name: Run the program once (when the runner can)
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          exe=target/${{ matrix.target }}/release/qlang
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          "$exe" --version
+          printf 'print(6 * 7)\n' > smoke.q
+          "$exe" run smoke.q
+      - name: Package
+        shell: bash
+        run: scripts/package-release.sh ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  extension:
+    name: Package the VS Code extension
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          npx vsce package --allow-missing-repository -o "$GITHUB_WORKSPACE/dist/qlang.vsix"
+        working-directory: editors/vscode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-vsix
+          path: dist/qlang.vsix
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    if: github.ref_type == 'tag'
+    needs: [build, extension]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "qlang ${GITHUB_REF_NAME#v}" \
+            --generate-notes

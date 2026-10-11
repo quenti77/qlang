@@ -280,6 +280,10 @@ impl Checker {
                 if lang == Lang::Add && ty == Ty::Str && arg == Ty::Str {
                     return Some(Ty::Str);
                 }
+                // the time between two instants, in milliseconds
+                if lang == Lang::Sub && ty == Ty::DateTime && arg == Ty::DateTime {
+                    return Some(Ty::Int);
+                }
                 let (l_int, r_int) = Self::numeric_pair(&ty, &arg)?;
                 let both_int = l_int && r_int;
                 match lang {
@@ -301,7 +305,7 @@ impl Checker {
             }
             Lang::Ord => {
                 let arg = arg?;
-                if Self::numeric_pair(&ty, &arg).is_some() || (matches!(ty, Ty::Str | Ty::Uuid | Ty::Ulid) && ty == arg) {
+                if Self::numeric_pair(&ty, &arg).is_some() || (matches!(ty, Ty::Str | Ty::Uuid | Ty::Ulid | Ty::DateTime) && ty == arg) {
                     Some(Ty::Bool)
                 } else {
                     None
@@ -347,7 +351,7 @@ impl Checker {
             (Ty::Nullable(x), Ty::Nullable(y)) => self.eq_ok(x, y),
             (Ty::Nullable(x), y) | (y, Ty::Nullable(x)) => self.eq_ok(x, y),
             (Ty::Int | Ty::Float, Ty::Int | Ty::Float) => true,
-            (Ty::Bool, Ty::Bool) | (Ty::Str, Ty::Str) | (Ty::Uuid, Ty::Uuid) | (Ty::Ulid, Ty::Ulid) => true,
+            (Ty::Bool, Ty::Bool) | (Ty::Str, Ty::Str) | (Ty::Uuid, Ty::Uuid) | (Ty::Ulid, Ty::Ulid) | (Ty::DateTime, Ty::DateTime) => true,
             (Ty::Enum(x), Ty::Enum(y)) => x == y,
             (Ty::Array(x), Ty::Array(y)) => self.eq_ok(x, y),
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => self.same(k1, k2) && self.eq_ok(v1, v2),

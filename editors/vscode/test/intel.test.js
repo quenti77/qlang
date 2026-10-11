@@ -175,3 +175,13 @@ test('uuid, ulid, time and random: members and static functions', { skip }, () =
   assert.deepStrictEqual(statics(4, 10), ['now']);
   assert.deepStrictEqual(statics(5, 12).sort(), ['float', 'int']);
 });
+
+test('datetime: members and static functions', { skip }, () => {
+  const src = ['let d = datetime.of(2026, 10, 11)', 'print(d.year())', 'print(datetime.)'].join('\n');
+  const info = analyse({ 'main.q': intel.blank(src, 2, 14, 15) });
+  const d = info.exprs.find((e) => e.type === 'datetime');
+  const members = intel.memberCompletions(info, d, 'd').map((m) => m.label);
+  assert.ok(['year', 'add_days', 'format', 'weekday'].every((n) => members.includes(n)));
+  const statics = intel.memberCompletions(info, intel.receiverAt(info, 'main.q', 2, 14), 'x').map((m) => m.label);
+  assert.deepStrictEqual(statics.sort(), ['at', 'now', 'of', 'parse']);
+});

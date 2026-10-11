@@ -17,6 +17,8 @@ pub enum Value {
     Str(Rc<str>),
     Uuid(u128),
     Ulid(u128),
+    /// Milliseconds since 1970 (UTC).
+    DateTime(i64),
     /// Arrays and structs are shared: copying a value copies the reference.
     Array(Rc<RefCell<Vec<Value>>>),
     /// Keys keep their insertion order.
@@ -36,6 +38,7 @@ pub enum KeyVal {
     Bool(bool),
     Uuid(u128),
     Ulid(u128),
+    DateTime(i64),
     Enum(EnumId, usize),
 }
 
@@ -47,6 +50,7 @@ impl KeyVal {
             Value::Bool(b) => KeyVal::Bool(*b),
             Value::Uuid(u) => KeyVal::Uuid(*u),
             Value::Ulid(u) => KeyVal::Ulid(*u),
+            Value::DateTime(t) => KeyVal::DateTime(*t),
             Value::Enum(e, i) => KeyVal::Enum(*e, *i),
             _ => return None,
         })

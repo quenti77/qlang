@@ -78,6 +78,26 @@ pub const ULID: &[Entry] = &[
     ("time", "", "The creation time stored in the ulid: milliseconds since 1970 (48 bits)."),
 ];
 
+pub const DATETIME: &[Entry] = &[
+    ("year", "", "The year (1 to 9999)."),
+    ("month", "", "The month, from 1 (January) to 12."),
+    ("day", "", "The day of the month, from 1."),
+    ("hour", "", "The hour, from 0 to 23."),
+    ("minute", "", "The minute, from 0 to 59."),
+    ("second", "", "The second, from 0 to 59."),
+    ("weekday", "", "The day of the week: 1 is Monday, 7 is Sunday."),
+    ("ms", "", "Milliseconds since 1970-01-01 00:00:00 UTC (can be negative before 1970)."),
+    ("add_years", "n", "The same moment `n` years later (`n` can be negative). 29 February becomes 28 February in a common year."),
+    ("add_months", "n", "The same moment `n` months later. A day that does not exist in the new month becomes its last day (31 January + 1 month = 28 or 29 February)."),
+    ("add_days", "n", "The same moment `n` days later."),
+    ("add_hours", "n", "The moment `n` hours later."),
+    ("add_minutes", "n", "The moment `n` minutes later."),
+    ("add_seconds", "n", "The moment `n` seconds later."),
+    ("start_of_day", "", "Midnight of the same day."),
+    ("days_until", "other", "Number of calendar days from the day of this moment to the day of `other` (negative if `other` is earlier)."),
+    ("format", "pattern", "Text following `pattern`: `YYYY` year, `MM` month, `DD` day, `HH` hour, `mm` minute, `ss` second, `SSS` milliseconds. Other characters are kept: `\"DD/MM/YYYY\"`."),
+];
+
 pub const INT: &[Entry] = &[
     ("char", "", "The one-character string whose code is this number (`97.char()` is `\"a\"`)."),
     ("abs", "", "Absolute value."),
@@ -113,6 +133,10 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
     ("ulid", "function", "new", "new() -> ulid", "A new ulid: the current time (48 bits) followed by 80 random bits. Two ulids made in the same millisecond still sort in creation order."),
     ("ulid", "function", "at", "at(time: int) -> ulid", "A new ulid for the given time (milliseconds since 1970), with random bits."),
     ("ulid", "function", "parse", "parse(text: string) -> ulid?", "The ulid written in `text` (26 characters), or `none` if it is not valid."),
+    ("datetime", "function", "now", "now() -> datetime", "The current moment. Needs a clock."),
+    ("datetime", "function", "of", "of(year: int, month: int, day: int) -> datetime", "The moment `year`-`month`-`day` at midnight, or with the time too: `of(year, month, day, hour, minute, second)`. An error if the date does not exist."),
+    ("datetime", "function", "at", "at(ms: int) -> datetime", "The moment `ms` milliseconds after 1970-01-01 00:00:00 UTC."),
+    ("datetime", "function", "parse", "parse(text: string) -> datetime?", "The moment written in `text` (`2026-10-11`, `2026-10-11T14:30:00Z`, `2026-10-11 14:30`), or `none` if it is not valid."),
     ("time", "function", "now", "now() -> int", "The current time: milliseconds since 1970-01-01 00:00:00 UTC. Needs a clock."),
     ("random", "function", "int", "int(min: int, max: int) -> int", "A random integer from `min` to `max`, both included. Needs a source of randomness."),
     ("random", "function", "float", "float() -> float", "A random number from 0 (included) to 1 (excluded). Needs a source of randomness."),
@@ -134,6 +158,7 @@ pub fn methods(owner: &str) -> &'static [Entry] {
         "string" => STRING,
         "uuid" => UUID,
         "ulid" => ULID,
+        "datetime" => DATETIME,
         "int" => INT,
         "float" => FLOAT,
         _ => &[],

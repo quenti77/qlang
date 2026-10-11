@@ -71,6 +71,7 @@ impl Checker {
                             "string" => (Ty::Str, "string"),
                             "uuid" => (Ty::Uuid, "uuid"),
                             "ulid" => (Ty::Ulid, "ulid"),
+                            "datetime" => (Ty::DateTime, "datetime"),
                             // namespaces: they only hold functions
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
@@ -519,7 +520,7 @@ impl Checker {
     fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr]) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin(b) = tref {
-            if let Some((fname, params, ret, needs)) = static_fn(b, &name.name) {
+            if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
                 self.res.paths.insert(callee.id, PathRes::BuiltinStatic(b, fname));
                 let missing = match needs {
                     Needs::Time if !self.caps.time => Some("there is no clock"),
@@ -753,6 +754,11 @@ impl Checker {
             (Ty::Str, "substring") => (vec![Ty::Int, Ty::Int], Ty::Str),
             (Ty::Uuid, "version") => (vec![], Ty::Int),
             (Ty::Ulid, "time") => (vec![], Ty::Int),
+            (Ty::DateTime, "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms") => (vec![], Ty::Int),
+            (Ty::DateTime, "add_years" | "add_months" | "add_days" | "add_hours" | "add_minutes" | "add_seconds") => (vec![Ty::Int], Ty::DateTime),
+            (Ty::DateTime, "start_of_day") => (vec![], Ty::DateTime),
+            (Ty::DateTime, "days_until") => (vec![Ty::DateTime], Ty::Int),
+            (Ty::DateTime, "format") => (vec![Ty::Str], Ty::Str),
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),
@@ -774,7 +780,7 @@ enum Needs {
 }
 
 /// The static functions of the built-in types: (name, parameters, result, needs).
-fn static_fn(owner: &str, name: &str) -> Option<(&'static str, Vec<Ty>, Ty, Needs)> {
+fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec<Ty>, Ty, Needs)> {
     Some(match (owner, name) {
         ("int", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Int), Needs::Nothing),
         ("float", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Float), Needs::Nothing),
@@ -784,6 +790,12 @@ fn static_fn(owner: &str, name: &str) -> Option<(&'static str, Vec<Ty>, Ty, Need
         ("ulid", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Ulid), Needs::Nothing),
         ("ulid", "new") => ("new", vec![], Ty::Ulid, Needs::TimeAndRandom),
         ("ulid", "at") => ("at", vec![Ty::Int], Ty::Ulid, Needs::Random),
+        ("datetime", "now") => ("now", vec![], Ty::DateTime, Needs::Time),
+        // 3 arguments: a day; 6: a day and a time
+        ("datetime", "of") if nargs == 6 => ("of", vec![Ty::Int; 6], Ty::DateTime, Needs::Nothing),
+        ("datetime", "of") => ("of", vec![Ty::Int; 3], Ty::DateTime, Needs::Nothing),
+        ("datetime", "at") => ("at", vec![Ty::Int], Ty::DateTime, Needs::Nothing),
+        ("datetime", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::DateTime), Needs::Nothing),
         ("time", "now") => ("now", vec![], Ty::Int, Needs::Time),
         ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
         ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),

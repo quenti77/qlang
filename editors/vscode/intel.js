@@ -181,7 +181,7 @@ function nameCompletions(info, file, line, col) {
   for (const k of Object.keys(KEYWORDS)) {
     add({ label: k, kind: 'keyword', detail: 'keyword', doc: KEYWORDS[k], sort: '3' + k });
   }
-  for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'array', 'map']) {
+  for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'datetime', 'array', 'map']) {
     add({ label: t, kind: 'type', detail: 'type', sort: '4' + t });
   }
   // `time.now()` and `random.int(1, 6)`: namespaces of the language

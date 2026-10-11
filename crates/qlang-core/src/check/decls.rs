@@ -5,7 +5,7 @@ use crate::ast::{Ident, ImportKind, StmtKind, TypeExpr, TypeExprKind, TypeParam,
 
 /// Names of types that cannot be redefined. `map` is deliberately absent: it names a
 /// type only in type positions, and `map`/`filter`/`reduce` are common function names.
-const BUILTIN_TYPES: [&str; 8] = ["int", "float", "bool", "string", "uuid", "ulid", "array", "range"];
+const BUILTIN_TYPES: [&str; 9] = ["int", "float", "bool", "string", "uuid", "ulid", "datetime", "array", "range"];
 pub(crate) const BUILTIN_FNS: [&str; 5] = ["print", "write", "read", "panic", "assert"];
 
 impl Checker {
@@ -239,6 +239,7 @@ impl Checker {
                 "string" => Some(Ty::Str),
                 "uuid" => Some(Ty::Uuid),
                 "ulid" => Some(Ty::Ulid),
+                "datetime" => Some(Ty::DateTime),
                 "range" => Some(Ty::Range),
                 _ => None,
             };
@@ -282,9 +283,9 @@ impl Checker {
             );
             return;
         }
-        if !matches!(k, Ty::Int | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)) {
+        if !matches!(k, Ty::Int | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)) {
             let shown = self.show(&k);
-            self.err("T270", format!("`{shown}` cannot be a map key (use int, string, bool, uuid, ulid or an enum)"), span);
+            self.err("T270", format!("`{shown}` cannot be a map key (use int, string, bool, uuid, ulid, datetime or an enum)"), span);
         }
     }
 

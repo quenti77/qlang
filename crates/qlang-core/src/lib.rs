@@ -5,6 +5,7 @@
 
 pub mod ast;
 pub mod check;
+pub mod datetime;
 pub mod diag;
 pub mod host;
 pub mod ids;

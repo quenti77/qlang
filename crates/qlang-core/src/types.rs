@@ -26,6 +26,8 @@ pub enum Ty {
     Uuid,
     /// A 128-bit identifier sortable by creation time.
     Ulid,
+    /// An instant, in UTC.
+    DateTime,
     /// The type of expressions without a value.
     Unit,
     /// The type of the `none` literal.
@@ -114,6 +116,7 @@ impl Ty {
             Ty::Str => "string".into(),
             Ty::Uuid => "uuid".into(),
             Ty::Ulid => "ulid".into(),
+            Ty::DateTime => "datetime".into(),
             Ty::Unit => "no value".into(),
             Ty::NoneT => "none".into(),
             Ty::Never => "never".into(),

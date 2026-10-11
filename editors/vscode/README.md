@@ -16,11 +16,15 @@ Support for the [qlang](../../README.md) language in VS Code (files ending in `.
 
 ## Requirements
 
-The extension calls the `qlang` program. Build and install it from the repository:
+The extension calls the `qlang` program. Install it (and update it) with the installer of the
+repository, which also installs this extension:
 
 ```sh
-cargo install --path crates/qlang-cli     # installs `qlang` in ~/.cargo/bin
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode
 ```
+
+On Windows, use `install.ps1` (see the repository README). From the sources:
+`cargo install --path crates/qlang-cli`.
 
 If `qlang` is not in your `PATH`, set **qlang.path** in the settings to its full path.
 

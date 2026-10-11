@@ -25,12 +25,58 @@ print(7 div 2)             -- 3
 - **Un tour de toutes les fonctionnalités** : [`examples/tour.q`](examples/tour.q).
 - **La grammaire** : [`qlang.g4`](qlang.g4), à titre indicatif.
 
-## Utilisation
+## Installation
 
-Il faut Rust 1.88 ou plus récent (`rustup update`).
+Pas besoin de Rust : on télécharge un programme déjà compilé (Linux, macOS, Windows).
+
+**Linux et macOS**
 
 ```sh
-cargo build --release            # produit target/release/qlang
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
+```
+
+**Windows** (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/quenti77/qlang/main/install.ps1 | iex
+```
+
+Le programme `qlang` est installé dans `~/.local/bin` (Linux, macOS) ou dans
+`%LOCALAPPDATA%\Programs\qlang` (Windows), et le script dit s'il faut l'ajouter au `PATH`.
+Chaque téléchargement est vérifié avec la somme de contrôle (`SHA256SUMS`) publiée avec la
+version.
+
+**Mettre à jour** : relancer la même commande. Elle indique `Updated: qlang 0.1.0 -> qlang 0.2.0`,
+ou `Already up to date`.
+
+**Options** (Linux et macOS ; sous Windows, télécharger le script et utiliser `-Version`,
+`-VsCode`, `-Profile`, `-Dir`) :
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --version 0.1.0
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode --profile Rust
+```
+
+`--vscode` installe aussi l'extension VS Code (il faut la commande `code`) ; `--dir` choisit le
+dossier d'installation.
+
+**Désinstaller** : supprimer le fichier `qlang` (et l'extension dans VS Code).
+
+**Sans script** : les programmes, `SHA256SUMS` et l'extension (`qlang.vsix`) sont aussi sur la page
+[Releases](https://github.com/quenti77/qlang/releases) du dépôt.
+
+**Depuis les sources** (Rust 1.88 ou plus récent, `rustup update`) :
+
+```sh
+cargo install --git https://github.com/quenti77/qlang qlang-cli          # installer ou mettre à jour avec --force
+```
+
+## Utilisation
+
+
+```sh
+cargo build --release            # produit target/release/qlang (depuis les sources)
 
 qlang run examples/tour.q        # exécute un programme
 qlang check examples/tour.q      # vérifie sans exécuter
@@ -215,10 +261,11 @@ Une extension (coloration, erreurs soulignées pendant la frappe grâce au vrai 
 bouton ▶ pour exécuter, snippets) est dans [`editors/vscode`](editors/vscode) :
 
 ```sh
-cargo install --path crates/qlang-cli                  # le programme `qlang`
-cd editors/vscode && npm install && npm run package    # crée qlang-0.1.0.vsix
-code --install-extension qlang-0.1.0.vsix
+curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode
 ```
+
+(le programme `qlang` et l'extension ; ou, depuis les sources : `cargo install --path crates/qlang-cli`,
+puis `cd editors/vscode && npm install && npm run package` et `code --install-extension qlang-*.vsix`).
 
 Pour les éditeurs, `qlang check --json` lit la même requête JSON que `run --json` mais ne fait que
 vérifier le programme (réponse avec `"phase": "check"`) ; `"mode": "check"` dans la requête fait la

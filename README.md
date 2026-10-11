@@ -27,30 +27,31 @@ print(7 div 2)             -- 3
 
 ## Installation
 
-Pas besoin de Rust : on télécharge un programme déjà compilé (Linux, macOS, Windows).
-
-**Linux et macOS**
+Pas besoin de Rust : on télécharge un programme déjà compilé (Linux et macOS).
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
 ```
 
-**Windows** (PowerShell)
+Le programme `qlang` est installé dans `~/.local/bin`, et le script dit s'il faut l'ajouter au
+`PATH`. Chaque téléchargement est vérifié avec la somme de contrôle (`SHA256SUMS`) publiée avec
+la version.
+
+**Windows** : il n'y a pas de programme précompilé pour l'instant. Il faut le compiler :
+installer Rust ([rustup.rs](https://rustup.rs), version 1.88 ou plus récente), puis
 
 ```powershell
-irm https://raw.githubusercontent.com/quenti77/qlang/main/install.ps1 | iex
+cargo install --git https://github.com/quenti77/qlang qlang-cli
 ```
 
-Le programme `qlang` est installé dans `~/.local/bin` (Linux, macOS) ou dans
-`%LOCALAPPDATA%\Programs\qlang` (Windows), et le script dit s'il faut l'ajouter au `PATH`.
-Chaque téléchargement est vérifié avec la somme de contrôle (`SHA256SUMS`) publiée avec la
-version.
+(`--force` pour mettre à jour). L'extension VS Code (`qlang.vsix`, sur la page
+[Releases](https://github.com/quenti77/qlang/releases)) s'installe avec
+`code --install-extension qlang.vsix`.
 
 **Mettre à jour** : relancer la même commande. Elle indique `Updated: qlang 0.1.0 -> qlang 0.2.0`,
 ou `Already up to date`.
 
-**Options** (Linux et macOS ; sous Windows, télécharger le script et utiliser `-Version`,
-`-VsCode`, `-Profile`, `-Dir`) :
+**Options** :
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --version 0.1.0

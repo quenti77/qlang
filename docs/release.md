@@ -17,11 +17,10 @@ Une version se publie en poussant un tag. Tout le reste est automatique
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-4. Le workflow compile `qlang` pour Linux (x86_64 et arm64, statique), macOS (arm64 et
-   Intel) et Windows, empaquette l'extension VS Code, calcule `SHA256SUMS` et crée la
+4. Le workflow compile `qlang` pour Linux (x86_64 et arm64, statique) et macOS (arm64 et
+   Intel), empaquette l'extension VS Code, calcule `SHA256SUMS` et crée la
    release GitHub avec ses notes générées. Cinq à dix minutes.
-5. Vérifier la release sur la page *Releases*, puis essayer `install.sh` (ou
-   `install.ps1`) sur une machine propre : la commande doit afficher
+5. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
    `Updated: qlang A -> qlang X.Y.Z`.
 
 ## Ce que contient une release
@@ -32,7 +31,6 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 | `qlang-aarch64-unknown-linux-musl.tar.gz` | Linux arm64 (statique)                    |
 | `qlang-aarch64-apple-darwin.tar.gz`    | macOS Apple Silicon                        |
 | `qlang-x86_64-apple-darwin.tar.gz`     | macOS Intel                                |
-| `qlang-x86_64-pc-windows-msvc.zip`     | Windows 64 bits                            |
 | `qlang.vsix`                           | extension VS Code                          |
 | `SHA256SUMS`                           | sommes de contrôle de tous les fichiers    |
 
@@ -43,7 +41,7 @@ dernière version, ce qui permet aux scripts d'installation de ne pas interroger
 ## Essayer sans publier
 
 Une pull request qui touche aux fichiers de publication (`release.yml`, `scripts/`,
-`install.sh`, `install.ps1`, la version) lance les mêmes compilations pour toutes les
+`install.sh`, la version) lance les mêmes compilations pour toutes les
 plateformes, sans rien publier. `scripts/test-install.sh` teste `install.sh` contre une fausse
 release construite avec le binaire local :
 
@@ -51,10 +49,20 @@ release construite avec le binaire local :
 cargo build --release && scripts/test-install.sh
 ```
 
+## Windows
+
+Pas de programme précompilé pour l'instant : les utilisateurs Windows compilent `qlang` avec
+Rust (voir le README). Les tests tournent quand même sur Windows dans la CI (`ci.yml`), ce qui
+a déjà fait corriger la gestion des chemins.
+
+Pour proposer un jour un programme Windows : remettre
+`{ target: x86_64-pc-windows-msvc, os: windows-latest }` dans la matrice de `release.yml`
+(`scripts/package-release.sh` sait déjà faire le `.zip`), écrire un script d'installation
+PowerShell (l'ancien `install.ps1` est dans l'historique git, il n'a jamais été exécuté) et
+le tester sur une vraie machine Windows.
+
 ## Pas encore fait
 
-- Le script Windows (`install.ps1`) n'a pas été exécuté pendant son écriture (pas de PowerShell
-  sur la machine de développement) ; la compilation Windows est vérifiée par la CI.
 - Les binaires ne sont pas signés (macOS peut demander une confirmation au premier lancement :
   `xattr -d com.apple.quarantine ~/.local/bin/qlang`).
 - Publication sur la Marketplace de VS Code ou sur crates.io : non faite.

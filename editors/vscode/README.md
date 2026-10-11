@@ -23,7 +23,9 @@ repository, which also installs this extension:
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode
 ```
 
-On Windows, use `install.ps1` (see the repository README). From the sources:
+On Windows there is no prebuilt program yet: install Rust and run
+`cargo install --git https://github.com/quenti77/qlang qlang-cli` (the extension itself, `qlang.vsix`,
+is on the Releases page: `code --install-extension qlang.vsix`). From a checkout:
 `cargo install --path crates/qlang-cli`.
 
 If `qlang` is not in your `PATH`, set **qlang.path** in the settings to its full path.

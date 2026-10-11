@@ -990,8 +990,17 @@ print(math.add(1, 2))
   facultatif.
 - `import "chemin" as m` importe tout le module sous un alias.
 - Un type exporté se note `math.Point` : `math.Point { x: 1, y: 2 }`.
-- Le chemin est relatif au fichier qui importe, doit rester dans le projet
-  (pas de chemin absolu, pas de `..` qui sort du dossier du programme).
+- Le chemin est relatif au fichier qui importe : `"math.q"`, `"lib/math.q"` ou
+  `"../shared/math.q"` (on peut remonter dans les dossiers). Les chemins absolus
+  sont refusés : un programme ne dépend pas de l'endroit où il est rangé. Seuls
+  les fichiers `.q` peuvent être importés.
+- Qui a le droit de lire quoi dépend de l'**environnement d'exécution**, pas du
+  langage : dans un terminal, `qlang run` lit tout fichier `.q` lisible (comme
+  `require` en Node), et `--root dossier` limite les imports à ce dossier ; dans
+  le protocole JSON/HTTP, il n'y a pas de disque, les modules sont les fichiers de
+  la requête.
+- Un même fichier atteint par deux chemins (`a.q`, `../d/a.q`, un lien symbolique)
+  est un seul module.
 - Un module est exécuté une seule fois, avant le fichier qui l'importe, quel que
   soit le nombre d'imports. Les imports circulaires sont refusés.
 - On ne peut pas modifier depuis un autre fichier une variable exportée.

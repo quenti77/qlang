@@ -116,9 +116,13 @@ impl SourceMap {
 }
 
 /// Resolve an `import` path relative to the importing file.
-/// Returns `None` if the path is absolute or would escape the root directory.
+///
+/// The result is normalised (`.` and inner `..` removed). A relative importer may reach
+/// outside its own directory: the result then starts with `..` (`../lib/x.q`). Whether
+/// that file may be read is for the host to decide. Absolute import paths are refused,
+/// and so is any path that would go above the root of an absolute importer.
 pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> {
-    if import_path.starts_with('/') {
+    if import_path.is_empty() || import_path.starts_with('/') {
         return None;
     }
     let absolute = importer.starts_with('/');
@@ -128,15 +132,53 @@ pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> 
     for part in joined.split('/') {
         match part {
             "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
+            ".." => match parts.last() {
+                Some(&last) if last != ".." => {
+                    parts.pop();
+                }
+                _ if absolute => return None,
+                _ => parts.push(".."),
+            },
             p => parts.push(p),
         }
     }
-    if parts.is_empty() {
+    if parts.is_empty() || parts.last() == Some(&"..") {
         return None;
     }
     let joined = parts.join("/");
     Some(if absolute { format!("/{joined}") } else { joined })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_module_path as r;
+
+    #[test]
+    fn imports_are_relative_to_the_importing_file() {
+        assert_eq!(r("main.q", "math.q").as_deref(), Some("math.q"));
+        assert_eq!(r("lib/a.q", "b.q").as_deref(), Some("lib/b.q"));
+        assert_eq!(r("lib/a.q", "../c.q").as_deref(), Some("c.q"));
+        assert_eq!(r("lib/a.q", "./sub/../b.q").as_deref(), Some("lib/b.q"));
+        assert_eq!(r("app/main.q", "../lib/x.q").as_deref(), Some("lib/x.q"));
+    }
+
+    #[test]
+    fn a_relative_importer_may_go_outside_its_directory() {
+        assert_eq!(r("main.q", "../x.q").as_deref(), Some("../x.q"));
+        assert_eq!(r("../x.q", "y.q").as_deref(), Some("../y.q"));
+        assert_eq!(r("../x.q", "../z.q").as_deref(), Some("../../z.q"));
+        assert_eq!(r("a/b/main.q", "../../../x.q").as_deref(), Some("../x.q"));
+        // the same file written two ways has the same name
+        assert_eq!(r("sub/main.q", "../sub/other.q"), r("sub/main.q", "other.q"));
+    }
+
+    #[test]
+    fn absolute_paths_and_nonsense_are_refused() {
+        assert_eq!(r("main.q", "/etc/x.q"), None);
+        assert_eq!(r("main.q", ""), None);
+        assert_eq!(r("main.q", ".."), None);
+        assert_eq!(r("main.q", "dir/.."), None);
+        assert_eq!(r("/home/me/main.q", "../../../../x.q"), None, "above the root of the file system");
+        assert_eq!(r("/home/me/main.q", "../lib/x.q").as_deref(), Some("/home/lib/x.q"));
+    }
 }

@@ -78,7 +78,8 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host) -> Result<Progr
         loading: Vec::new(),
         next_id: 0,
     };
-    loader.load(entry, source.to_string());
+    let entry_key = loader.host.canonical_path(entry);
+    loader.load(entry, entry_key, source.to_string());
     let Loader { sources, mut diags, modules, .. } = loader;
 
     let has_errors = |d: &[Diagnostic]| d.iter().any(|x| x.severity == Severity::Error);
@@ -148,9 +149,10 @@ struct Loader<'h> {
 }
 
 impl Loader<'_> {
-    fn load(&mut self, path: &str, text: String) -> usize {
+    /// `key` identifies the module (see `Host::canonical_path`); `path` is how it is named.
+    fn load(&mut self, path: &str, key: String, text: String) -> usize {
         let file = self.sources.add(path, &text);
-        self.loading.push(path.to_string());
+        self.loading.push(key.clone());
         let (ast, next_id) = parse_module_from(&text, file, self.next_id, &mut self.diags);
         self.next_id = next_id;
         let mut imports = HashMap::new();
@@ -159,12 +161,16 @@ impl Loader<'_> {
             let Some(target) = resolve_module_path(path, &imp.path) else {
                 crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T100",
-                    format!("cannot import \"{}\": the path must be relative and stay inside the project", imp.path),
+                    format!(
+                        "cannot import \"{}\": use a path relative to this file (`./x.q`, `../lib/x.q`), not an absolute one",
+                        imp.path
+                    ),
                     imp.path_span,
                 ));
                 continue;
             };
-            if self.loading.contains(&target) {
+            let target_key = self.host.canonical_path(&target);
+            if self.loading.contains(&target_key) {
                 crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T101",
                     format!("circular import of \"{}\"", imp.path),
@@ -172,13 +178,13 @@ impl Loader<'_> {
                 ));
                 continue;
             }
-            if let Some(&m) = self.done.get(&target) {
+            if let Some(&m) = self.done.get(&target_key) {
                 imports.insert(idx, m);
                 continue;
             }
             match self.host.load_module(&target) {
                 Ok(src) => {
-                    let m = self.load(&target, src);
+                    let m = self.load(&target, target_key, src);
                     imports.insert(idx, m);
                 }
                 Err(e) => crate::diag::push_capped(&mut self.diags, Diagnostic::error(
@@ -191,7 +197,7 @@ impl Loader<'_> {
         self.loading.pop();
         let idx = self.modules.len();
         self.modules.push(Loaded { path: path.to_string(), file, ast: Rc::new(ast), imports });
-        self.done.insert(path.to_string(), idx);
+        self.done.insert(key, idx);
         idx
     }
 }

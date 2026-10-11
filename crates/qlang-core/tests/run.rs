@@ -244,8 +244,11 @@ fn module_errors() {
     assert!(o.error.unwrap().contains("not exported"));
     let o = run_files(&[("main.q", "import a from \"a.q\"\n"), ("a.q", "import b from \"b.q\"\nexport b\nfun a()\nend"), ("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b")], None, Limits::default());
     assert!(o.error.unwrap().contains("circular"));
+    // absolute paths are refused; a path going up is looked up like any other
+    let o = run_files(&[("main.q", "import a from \"/etc/x.q\"\n")], None, Limits::default());
+    assert!(o.error.unwrap().contains("not an absolute one"));
     let o = run_files(&[("main.q", "import a from \"../x.q\"\n")], None, Limits::default());
-    assert!(o.error.unwrap().contains("must be relative"));
+    assert!(o.error.unwrap().contains("not found"));
     // paths are relative to the importing file
     let o = run_files(
         &[("main.q", "import f from \"lib/a.q\"\nprint(f())"), ("lib/a.q", "import g from \"b.q\"\nfun f() -> int\ng() + 1\nend\nexport f"), ("lib/b.q", "fun g() -> int\n41\nend\nexport g")],
@@ -725,4 +728,55 @@ fn a_huge_broken_file_gives_a_short_error_list() {
         Err(e) => e,
     };
     assert_eq!(e.diagnostics.len(), 2);
+}
+
+#[test]
+fn imports_may_go_up_and_down() {
+    // `app/main.q` uses a library next to its folder; the library imports its neighbour
+    let o = run_files(
+        &[
+            ("app/main.q", "import f from \"../lib/f.q\"\nprint(f())"),
+            ("lib/f.q", "import g from \"g.q\"\nfun f() -> int\n  g() + 1\nend\nexport f"),
+            ("lib/g.q", "fun g() -> int\n  41\nend\nexport g"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "42\n");
+    // a module above the entry file's directory (a virtual name in a request)
+    let o = run_files(
+        &[("main.q", "import v from \"../shared.q\"\nprint(v)"), ("../shared.q", "const v = 7\nexport v")],
+        None,
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "7\n");
+}
+
+#[test]
+fn a_module_reached_by_two_paths_is_loaded_once() {
+    let o = run_files(
+        &[
+            ("sub/main.q", "import a from \"other.q\"\nimport \"../sub/other.q\" as again\nprint(a() + again.a())"),
+            ("sub/other.q", "print(\"loading\")\nfun a() -> int\n  1\nend\nexport a"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "loading\n2\n");
+}
+
+#[test]
+fn circular_imports_are_found_through_different_spellings() {
+    let o = run_files(
+        &[
+            ("d/a.q", "import b from \"../d/b.q\"\nfun a()\nend\nexport a"),
+            ("d/b.q", "import a from \"a.q\"\nfun b()\nend\nexport b"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert!(o.error.unwrap().contains("circular"));
 }

@@ -48,8 +48,13 @@ error[T002]: expected `string`, found `int`
 ```
 
 Code de sortie : `0` succès, `1` erreur de compilation, `2` erreur d'exécution.
-Les `import` ne peuvent lire que des fichiers situés dans le dossier du fichier
-principal.
+Les `import` peuvent remonter dans les dossiers (`import f from "../lib/f.q"`, comme
+`require` en Node) mais ne lisent que des fichiers `.q`, et jamais de chemin absolu.
+`--root dossier` limite les imports à ce dossier :
+
+```sh
+qlang run app/main.q --root .      # les imports restent dans le dossier courant
+```
 
 ## Architecture
 
@@ -191,7 +196,8 @@ Ou, avec le serveur HTTP : `POST http://127.0.0.1:8080/run` avec la même requê
 
 ### Sécurité
 
-Le protocole JSON n'accède pas au disque et borne le temps de calcul (étapes,
+Le protocole JSON n'accède pas au disque (un `../x.q` n'y est qu'un nom de fichier
+de la requête) et borne le temps de calcul (étapes,
 y compris le travail des méthodes prédéfinies), la récursion, la sortie, la taille
 des tableaux et chaînes, et le nombre d'erreurs renvoyées (100 au plus). Un bug
 interne du compilateur ou de l'interpréteur est renvoyé comme une erreur `X999`

@@ -70,6 +70,8 @@ pub struct Param {
 
 #[derive(Debug)]
 pub struct FunDecl {
+    /// The documentation comment (`--" ... --"`) right above it.
+    pub doc: Option<Rc<str>>,
     pub id: NodeId,
     pub span: Span,
     pub name: Option<Ident>,
@@ -91,6 +93,7 @@ pub enum Visibility {
 
 #[derive(Debug)]
 pub struct FieldDecl {
+    pub doc: Option<Rc<str>>,
     pub vis: Option<Visibility>,
     pub is_static: bool,
     pub name: Ident,
@@ -100,6 +103,7 @@ pub struct FieldDecl {
 
 #[derive(Debug)]
 pub struct StructDecl {
+    pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
     pub tparams: Vec<TypeParam>,
@@ -126,6 +130,7 @@ pub struct ImplDecl {
 
 #[derive(Debug)]
 pub struct TraitDecl {
+    pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
     pub tparams: Vec<TypeParam>,
@@ -134,9 +139,12 @@ pub struct TraitDecl {
 
 #[derive(Debug)]
 pub struct EnumDecl {
+    pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
     pub variants: Vec<Ident>,
+    /// The documentation comment of each variant (same order as `variants`).
+    pub variant_docs: Vec<Option<Rc<str>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -168,6 +176,8 @@ pub struct Stmt {
 #[derive(Debug)]
 pub enum StmtKind {
     Let {
+        /// The documentation comment right above it.
+        doc: Option<Rc<str>>,
         is_const: bool,
         name: Ident,
         ty: Option<TypeExpr>,

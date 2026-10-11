@@ -175,21 +175,10 @@ async function currentInfo(doc) {
   return known || null; // the code does not compile far enough: the previous answer is better than none
 }
 
-function linesReader(root) {
-  const cache = new Map();
-  return (rel) => {
-    if (!cache.has(rel)) {
-      const text = readFileText(root, rel);
-      cache.set(rel, text === null ? null : text.split('\n'));
-    }
-    return cache.get(rel);
-  };
-}
-
 function provideHover(doc, pos) {
   return currentInfo(doc).then((a) => {
     if (!a) return undefined;
-    const h = intel.hoverAt(a.info, a.entry, pos.line, pos.character, doc.lineAt(pos.line).text, linesReader(a.root));
+    const h = intel.hoverAt(a.info, a.entry, pos.line, pos.character, doc.lineAt(pos.line).text);
     if (!h) return undefined;
     return new vscode.Hover(new vscode.MarkdownString(h.markdown), new vscode.Range(h.range.line, h.range.start, h.range.line, h.range.end));
   });
@@ -229,11 +218,11 @@ async function provideCompletionItems(doc, pos) {
     if (!a || !a.info) return undefined;
     const expr = intel.receiverAt(a.info, a.entry, pos.line, access.dot);
     const range = new vscode.Range(pos.line, access.start, pos.line, pos.character);
-    return intel.memberCompletions(a.info, expr, text.slice(0, access.dot), linesReader(a.root)).map((i) => toCompletion(i, range));
+    return intel.memberCompletions(a.info, expr, text.slice(0, access.dot)).map((i) => toCompletion(i, range));
   }
   const a = await currentInfo(doc);
   if (!a) return undefined;
-  return intel.nameCompletions(a.info, a.entry, pos.line, pos.character, linesReader(a.root)).map((i) => toCompletion(i));
+  return intel.nameCompletions(a.info, a.entry, pos.line, pos.character).map((i) => toCompletion(i));
 }
 
 async function provideSignatureHelp(doc, pos) {
@@ -242,7 +231,7 @@ async function provideSignatureHelp(doc, pos) {
   if (!call) return undefined;
   const a = await analyse(doc, intel.blank(doc.getText(), pos.line, call.open, pos.character));
   if (!a || !a.info) return undefined;
-  const sig = intel.signatureFor(a.info, a.entry, pos.line, text, call, linesReader(a.root));
+  const sig = intel.signatureFor(a.info, a.entry, pos.line, text, call);
   if (!sig) return undefined;
   const info = new vscode.SignatureInformation(sig.label, sig.doc ? new vscode.MarkdownString(sig.doc) : undefined);
   info.parameters = sig.parameters.map((p) => new vscode.ParameterInformation(p));

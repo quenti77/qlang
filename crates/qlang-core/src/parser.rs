@@ -8,7 +8,7 @@
 
 use crate::ast::*;
 use crate::diag::Diagnostic;
-use crate::lexer::{Tok, Token, lex};
+use crate::lexer::{Tok, Token, lex, lex_with_docs};
 use crate::span::Span;
 use std::rc::Rc;
 
@@ -24,6 +24,9 @@ pub struct Parser<'a> {
     pos: usize,
     nl: Vec<bool>,
     next_id: u32,
+    /// Documentation comments not attached yet, by the line where they end: (end offset, text).
+    docs: std::collections::HashMap<usize, (usize, Rc<str>)>,
+    line_starts: Vec<usize>,
     /// Current nesting of expressions, blocks and types (bounded).
     depth: u32,
     pub diags: Vec<Diagnostic>,
@@ -37,8 +40,13 @@ pub fn parse_module(src: &str, file: u32, diags: &mut Vec<Diagnostic>) -> Module
 /// Parse a whole file with node ids starting at `first_id`, so that several
 /// files can share one id space. Returns the module and the next free id.
 pub fn parse_module_from(src: &str, file: u32, first_id: u32, diags: &mut Vec<Diagnostic>) -> (Module, u32) {
-    let toks = lex(src, file, 0, diags);
+    let mut docs = Vec::new();
+    let toks = lex_with_docs(src, file, 0, diags, &mut docs);
     let mut p = Parser::new(src, file, toks, first_id);
+    for d in docs {
+        let line = p.line_of(d.end.saturating_sub(1));
+        p.docs.insert(line, (d.end, Rc::from(d.text.as_str())));
+    }
     let m = p.parse_items();
     diags.append(&mut p.diags);
     (m, p.next_id)
@@ -53,9 +61,31 @@ impl<'a> Parser<'a> {
             pos: 0,
             nl: vec![true],
             next_id,
+            docs: std::collections::HashMap::new(),
+            line_starts: std::iter::once(0).chain(src.match_indices('\n').map(|(i, _)| i + 1)).collect(),
             depth: 0,
             diags: Vec::new(),
         }
+    }
+
+    // ------------------------------------------------------------------ docs
+
+    fn line_of(&self, offset: usize) -> usize {
+        self.line_starts.partition_point(|&s| s <= offset) - 1
+    }
+
+    /// The documentation comment that ends on the line above the declaration starting at
+    /// `start` (or earlier on its own line), if there is one. A comment documents one declaration.
+    fn take_doc(&mut self, start: Span) -> Option<Rc<str>> {
+        let line = self.line_of(start.start as usize);
+        for key in [line.wrapping_sub(1), line] {
+            if let Some((end, _)) = self.docs.get(&key)
+                && *end <= start.start as usize
+            {
+                return self.docs.remove(&key).map(|(_, text)| text);
+            }
+        }
+        None
     }
 
     // ---------------------------------------------------------------- tokens
@@ -357,7 +387,9 @@ impl<'a> Parser<'a> {
             (None, self.prev_span())
         };
         let id = self.fresh_id();
+        let doc = if named { self.take_doc(start) } else { None };
         Ok(FunDecl {
+            doc,
             id,
             span: start.to(end_span),
             name,
@@ -389,6 +421,7 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self) -> PResult<StructDecl> {
         let start = self.expect(&Tok::Struct)?;
+        let doc = self.take_doc(start);
         let name = self.expect_ident()?;
         let tparams = if self.at(&Tok::Lt) { self.parse_type_params()? } else { Vec::new() };
         let parent = if self.eat(&Tok::Extends) { Some(self.parse_type()?) } else { None };
@@ -413,10 +446,12 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.expect(&Tok::End)?;
-        Ok(StructDecl { span: start.to(end), name, tparams, parent, fields })
+        Ok(StructDecl { doc, span: start.to(end), name, tparams, parent, fields })
     }
 
     fn parse_field(&mut self) -> PResult<FieldDecl> {
+        let first = self.peek_span();
+        let doc = self.take_doc(first);
         let vis = self.parse_visibility();
         let is_static = self.eat(&Tok::Static);
         let name = self.expect_ident()?;
@@ -428,7 +463,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        Ok(FieldDecl { vis, is_static, name, ty, default })
+        Ok(FieldDecl { doc, vis, is_static, name, ty, default })
     }
 
     fn parse_impl(&mut self) -> PResult<ImplDecl> {
@@ -476,6 +511,7 @@ impl<'a> Parser<'a> {
 
     fn parse_trait(&mut self) -> PResult<TraitDecl> {
         let start = self.expect(&Tok::Trait)?;
+        let doc = self.take_doc(start);
         let name = self.expect_ident()?;
         let tparams = if self.at(&Tok::Lt) { self.parse_type_params()? } else { Vec::new() };
         let mut sigs = Vec::new();
@@ -504,22 +540,27 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.expect(&Tok::End)?;
-        Ok(TraitDecl { span: start.to(end), name, tparams, sigs })
+        Ok(TraitDecl { doc, span: start.to(end), name, tparams, sigs })
     }
 
     fn parse_enum(&mut self) -> PResult<EnumDecl> {
         let start = self.expect(&Tok::Enum)?;
+        let doc = self.take_doc(start);
         let name = self.expect_ident()?;
         let mut variants = Vec::new();
+        let mut variant_docs = Vec::new();
         loop {
             self.skip_newlines();
             if self.at(&Tok::End) || self.at(&Tok::Eof) {
                 break;
             }
             let before = self.pos;
+            let first = self.peek_span();
+            let variant_doc = self.take_doc(first);
             match self.expect_ident() {
                 Ok(v) => {
                     variants.push(v);
+                    variant_docs.push(variant_doc);
                     if !self.end_of_stmt(&[Tok::End]) {
                         self.sync(&[Tok::End]);
                     }
@@ -531,7 +572,7 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.expect(&Tok::End)?;
-        Ok(EnumDecl { span: start.to(end), name, variants })
+        Ok(EnumDecl { doc, span: start.to(end), name, variants, variant_docs })
     }
 
     // ---------------------------------------------------------------- blocks
@@ -631,6 +672,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_let(&mut self) -> PResult<StmtKind> {
+        let first = self.peek_span();
+        let doc = self.take_doc(first);
         let is_const = self.bump().tok == Tok::Const;
         let name = self.expect_ident()?;
         let ty = if self.eat(&Tok::Colon) { Some(self.parse_type()?) } else { None };
@@ -648,7 +691,7 @@ impl<'a> Parser<'a> {
         self.bump();
         self.skip_newlines();
         let init = self.parse_expr()?;
-        Ok(StmtKind::Let { is_const, name, ty, init })
+        Ok(StmtKind::Let { doc, is_const, name, ty, init })
     }
 
     // ----------------------------------------------------------------- types

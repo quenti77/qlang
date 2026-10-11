@@ -246,9 +246,41 @@ fn keyword(s: &str) -> Option<Tok> {
     })
 }
 
+/// A documentation comment (`--" ... --"`) with its text cleaned up, and where it ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DocComment {
+    /// Byte offset just after the closing `--"`.
+    pub end: usize,
+    pub text: String,
+}
+
+/// The text of a documentation comment: no blank first and last lines, the common indentation
+/// removed. `--" one line --"` gives `one line`.
+pub fn clean_doc(raw: &str) -> String {
+    let mut lines: Vec<&str> = raw.lines().collect();
+    let first = lines.first().map(|l| l.trim_start()).unwrap_or("");
+    let rest = &lines[lines.len().min(1)..];
+    let indent = rest.iter().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0);
+    let mut out: Vec<String> = vec![first.trim_end().to_string()];
+    out.extend(rest.iter().map(|l| if l.len() >= indent { l[indent..].trim_end().to_string() } else { l.trim().to_string() }));
+    lines.clear();
+    while out.first().is_some_and(|l| l.is_empty()) {
+        out.remove(0);
+    }
+    while out.last().is_some_and(|l| l.is_empty()) {
+        out.pop();
+    }
+    out.join("\n")
+}
+
 /// Lex `src`. `base` is the offset of `src` inside its file (non-zero when
 /// lexing the inside of a string interpolation).
 pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Vec<Token> {
+    lex_with_docs(src, file, base, diags, &mut Vec::new())
+}
+
+/// Like [`lex`], and the documentation comments are collected in `docs`.
+pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>, docs: &mut Vec<DocComment>) -> Vec<Token> {
     let b = src.as_bytes();
     let mut toks: Vec<Token> = Vec::new();
     let mut i = 0usize;
@@ -280,7 +312,10 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
                     }
                 },
                 Some(b'"') => match src[i + 3..].find("--\"") {
-                    Some(p) => i = i + 3 + p + 3,
+                    Some(p) => {
+                        docs.push(DocComment { end: base + i + 3 + p + 3, text: clean_doc(&src[i + 3..i + 3 + p]) });
+                        i = i + 3 + p + 3;
+                    }
                     None => {
                         crate::diag::push_capped(diags, Diagnostic::error("L003", "unterminated documentation comment (missing `--\"`)", span(i, i + 3)));
                         i = b.len();

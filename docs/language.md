@@ -108,6 +108,39 @@ let x = 1 -- ou en fin de ligne
 - Attention : `a --b` est un commentaire. Pour soustraire un nombre négatif,
   écrire `a - -b`.
 
+### Commentaires de documentation
+
+Un commentaire `--" … --"` placé **juste au-dessus** d'une déclaration (sans ligne vide
+entre les deux) la **documente**. Le programme s'exécute comme avec n'importe quel
+commentaire, mais le compilateur garde le texte et le rattache à la déclaration : les
+éditeurs l'affichent au survol et dans l'autocomplétion.
+
+```
+--" Distance entre deux points, en ligne droite. --"
+fun distance(a: Point, b: Point) -> float
+  ...
+end
+
+--"
+  Un point du plan.
+
+  Les coordonnées sont des entiers.
+--"
+struct Point
+  --" Position horizontale. --"
+  public x: int
+  public y: int
+end
+```
+
+On peut documenter : une fonction (ou une méthode, une signature de `trait`), une `struct`,
+un champ, une `enum` et chacune de ses variantes, un `trait`, et une variable ou
+constante de premier niveau. Un commentaire ne documente que la déclaration qui le
+suit ; avec une ligne vide entre les deux, il ne documente rien. Le texte est libre
+(Markdown possible) : les espaces communs en début de ligne et les lignes vides au
+début et à la fin sont retirés. `qlang check --json` avec `"info": true` renvoie ces
+textes (champ `doc`).
+
 ---
 
 ## 3. Valeurs et types
@@ -1289,11 +1322,6 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Méthodes par défaut dans les traits** et traits qui en exigent d'autres :
   non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Commentaires de documentation** (`--" … --"`) : pour le langage, ce sont des
-  commentaires comme les autres (ignorés par le compilateur). Seule l'extension
-  VS Code les lit : elle affiche, au survol et dans l'autocomplétion, le
-  commentaire placé juste au-dessus d'une fonction, d'une structure, d'une
-  méthode, d'un champ… (texte libre). À prévoir : les rattacher à la déclaration
-  dans l'arbre et le `Program` (au lieu de les chercher dans le texte), pour
-  générer une page de documentation. Il faudra choisir le format du texte : texte
-  libre, ou un format léger du type `@param` / `@return`.
+- **Format des commentaires de documentation** : le texte est libre pour l'instant.
+  À prévoir, selon l'usage : un format léger du type `@param` / `@return`, et une page de
+  documentation générée à partir de ces commentaires.

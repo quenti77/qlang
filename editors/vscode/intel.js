@@ -1,6 +1,8 @@
 'use strict';
 // Hovers, completion and signature help, computed from what `qlang check --json` reports
-// (`info`). Pure functions, no VS Code API, so they can be tested with plain Node.
+// (`info`), documentation comments included (the compiler attaches the `--" ... --"` comment
+// written above a declaration to it). Pure functions, no VS Code API, so they can be tested
+// with plain Node.
 //
 // Positions: `line` and `col` arguments are 0-based (as in VS Code); the `loc` objects of
 // the compiler are 1-based.
@@ -64,32 +66,6 @@ function wordAt(text, col) {
   return { word: text.slice(s, e), start: s, end: e };
 }
 
-/** The text of the documentation comment (`--" ... --"`) that ends right above `line`. */
-function docAbove(lines, line) {
-  const end = line - 1;
-  if (end < 0 || end >= lines.length) return null;
-  const closing = lines[end].trimEnd();
-  if (!closing.endsWith('--"')) return null;
-  let start = end;
-  if (closing.indexOf('--"') === closing.length - 3) {
-    // only the closing marker on this line: the opening one is above
-    start = end - 1;
-    while (start >= 0 && !lines[start].includes('--"')) start--;
-    if (start < 0) return null;
-  }
-  const joined = lines.slice(start, end + 1).join('\n');
-  const from = joined.indexOf('--"');
-  const to = joined.lastIndexOf('--"');
-  if (to <= from) return null;
-  const body = joined
-    .slice(from + 3, to)
-    .split('\n')
-    .map((l) => l.trim())
-    .join('\n')
-    .trim();
-  return body || null;
-}
-
 const within = (loc, line1, col1) => {
   if (line1 < loc.line || line1 > loc.end_line) return false;
   if (line1 === loc.line && col1 < loc.col) return false;
@@ -132,19 +108,13 @@ function membersOf(info, expr) {
 const KIND_LABEL = { field: 'field', method: 'method', variant: 'variant', constant: 'constant', function: 'function' };
 
 /**
- * What to show when hovering the position. `lines(file)` returns the lines of a file (for
- * documentation comments) or null.
+ * What to show when hovering the position.
  */
-function hoverAt(info, file, line, col, lineText, linesOf) {
+function hoverAt(info, file, line, col, lineText) {
   const w = wordAt(lineText, col);
   if (!w) return null;
   const line1 = line + 1;
   const range = { line, start: w.start, end: w.end };
-  const docFor = (loc) => {
-    if (!loc) return null;
-    const lines = linesOf(loc.file);
-    return lines ? docAbove(lines, loc.line - 1) : null;
-  };
   const result = (code, doc) => ({ range, markdown: CODE_FENCE(code) + (doc ? '\n\n' + doc : '') });
 
   // a declaration
@@ -152,7 +122,7 @@ function hoverAt(info, file, line, col, lineText, linesOf) {
     if (l.loc.file === file && sameRange(l.loc, line1, w.start, w.end)) return result(`${l.kind} ${l.name}: ${l.type}`);
   }
   for (const it of info.items || []) {
-    if (it.loc.file === file && sameRange(it.loc, line1, w.start, w.end)) return result(it.label, docFor(it.loc));
+    if (it.loc.file === file && sameRange(it.loc, line1, w.start, w.end)) return result(it.label, it.doc);
   }
 
   // `value.member` and `Type.member`
@@ -160,7 +130,7 @@ function hoverAt(info, file, line, col, lineText, linesOf) {
   if (dot !== -1) {
     const member = membersOf(info, receiverAt(info, file, line, dot)).find((m) => m.name === w.word);
     if (!member) return null;
-    return result(`(${KIND_LABEL[member.kind] || member.kind}) ${member.detail}`, member.doc || docFor(member.loc));
+    return result(`(${KIND_LABEL[member.kind] || member.kind}) ${member.detail}`, member.doc);
   }
 
   // a name used in an expression
@@ -168,15 +138,12 @@ function hoverAt(info, file, line, col, lineText, linesOf) {
     (info.items || []).find((it) => it.name === w.word && kinds.includes(it.kind) && it.loc.file === file) ||
     (info.items || []).find((it) => it.name === w.word && kinds.includes(it.kind));
   const entry = (info.exprs || []).find((e) => e.loc.file === file && sameRange(e.loc, line1, w.start, w.end));
-  if (entry) {
-    const site = entry.label && /^(fun|struct|enum|trait) /.test(entry.label) ? definition(['function', 'struct', 'enum', 'trait']) : null;
-    return result(entry.label || `${w.word}: ${entry.type}`, site ? docFor(site.loc) : null);
-  }
+  if (entry) return result(entry.label || `${w.word}: ${entry.type}`, entry.doc);
 
   // a call to a function or a built-in: the callee is not an expression of its own
   const calls = lineText.slice(w.end).trimStart().startsWith('(');
   const site = definition(['function', 'struct', 'enum', 'trait']);
-  if (site) return result(site.label, docFor(site.loc));
+  if (site) return result(site.label, site.doc);
   const builtin = (info.functions || []).find((f) => f.name === w.word);
   if (builtin && calls) return result(builtin.detail, builtin.doc);
   const local = (info.locals || []).find((l) => l.name === w.word && l.loc.file === file && within(l.scope, line1, w.start + 1));
@@ -186,24 +153,15 @@ function hoverAt(info, file, line, col, lineText, linesOf) {
 }
 
 /** The completion items after a `.`: members of the receiver. */
-function memberCompletions(info, expr, receiverText, linesOf) {
+function memberCompletions(info, expr, receiverText) {
   const showPrivate = /(^|[^A-Za-z0-9_.])self$/.test(receiverText.trimEnd());
   return membersOf(info, expr)
     .filter((m) => m.public || showPrivate)
-    .map((m) => {
-      const lines = m.loc && linesOf(m.loc.file);
-      return {
-        label: m.name,
-        kind: m.kind,
-        detail: m.detail,
-        doc: m.doc || (lines ? docAbove(lines, m.loc.line - 1) : null),
-        sort: (m.kind === 'field' ? '0' : '1') + m.name,
-      };
-    });
+    .map((m) => ({ label: m.name, kind: m.kind, detail: m.detail, doc: m.doc || null, sort: (m.kind === 'field' ? '0' : '1') + m.name }));
 }
 
 /** The completion items without a dot: variables in scope, names of the file, built-ins. */
-function nameCompletions(info, file, line, col, linesOf) {
+function nameCompletions(info, file, line, col) {
   const out = new Map();
   const add = (item) => {
     if (!out.has(item.label)) out.set(item.label, item);
@@ -215,8 +173,7 @@ function nameCompletions(info, file, line, col, linesOf) {
     add({ label: l.name, kind: l.kind === 'param' ? 'param' : 'variable', detail: `${l.kind} ${l.name}: ${l.type}`, sort: '0' + l.name });
   }
   for (const g of (info.globals || {})[file] || []) {
-    const lines = g.loc && linesOf(g.loc.file);
-    add({ label: g.name, kind: g.kind, detail: g.detail, doc: lines ? docAbove(lines, g.loc.line - 1) : null, sort: '1' + g.name });
+    add({ label: g.name, kind: g.kind, detail: g.detail, doc: g.doc || null, sort: '1' + g.name });
   }
   for (const f of info.functions || []) {
     add({ label: f.name, kind: 'function', detail: f.detail, doc: f.doc, sort: '2' + f.name });
@@ -306,7 +263,7 @@ function parameters(detail) {
 }
 
 /** The signature of what `call` (from `callAt`) calls, if known. */
-function signatureFor(info, file, line, lineText, call, linesOf) {
+function signatureFor(info, file, line, lineText, call) {
   const nameEnd = lineText.slice(0, call.open).trimEnd().length;
   const nameStart = nameEnd - call.name.length;
   let label = null;
@@ -316,16 +273,14 @@ function signatureFor(info, file, line, lineText, call, linesOf) {
     const m = membersOf(info, receiverAt(info, file, line, dot)).find((x) => x.name === call.name);
     if (m) {
       label = m.detail;
-      const lines = m.loc && linesOf(m.loc.file);
-      doc = m.doc || (lines ? docAbove(lines, m.loc.line - 1) : null);
+      doc = m.doc || null;
     }
   } else {
     const site = (info.items || []).find((it) => it.name === call.name && it.kind === 'function');
     const builtin = (info.functions || []).find((f) => f.name === call.name);
     if (site) {
       label = site.label.replace(/^fun /, '');
-      const lines = linesOf(site.loc.file);
-      doc = lines ? docAbove(lines, site.loc.line - 1) : null;
+      doc = site.doc || null;
     } else if (builtin) {
       label = builtin.detail;
       doc = builtin.doc;
@@ -338,7 +293,6 @@ function signatureFor(info, file, line, lineText, call, linesOf) {
 module.exports = {
   KEYWORDS,
   wordAt,
-  docAbove,
   dotBefore,
   receiverAt,
   membersOf,

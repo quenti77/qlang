@@ -213,7 +213,7 @@ impl Checker {
     pub fn check_stmt(&mut self, s: &Stmt, want: &Want) -> Ty {
         match &s.kind {
             StmtKind::Expr(e) => self.expr(e, want),
-            StmtKind::Let { is_const, name, ty, init } => {
+            StmtKind::Let { is_const, name, ty, init, .. } => {
                 let ann = ty.as_ref().map(|t| self.resolve_type(t));
                 let w = match &ann {
                     Some(t) => Want::Exp(t.clone()),

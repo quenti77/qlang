@@ -290,6 +290,8 @@ pub(crate) struct Checker {
     pub subst: Vec<Option<Ty>>,
     /// Set when an editor asked for [`Info`].
     pub collect: Option<info::Collector>,
+    /// The documentation comments (filled when building [`Info`]).
+    pub(crate) docs: info::Docs,
 }
 
 impl Checker {
@@ -313,6 +315,7 @@ impl Checker {
             cur_fn: None,
             subst: Vec::new(),
             collect: None,
+            docs: info::Docs::default(),
         }
     }
 

@@ -8,7 +8,7 @@ Support for the [qlang](../../README.md) language in VS Code (files ending in `.
   so you see the same errors as in the terminal, underlined in the editor and listed in the
   Problems panel. Errors inside imported modules are shown in those files.
 - **Tooltips**: hover a name to see its type (`names: array<string>`), a function or method
-  signature, and the documentation written above it in a `--" … --"` comment. Built-in methods
+  signature, and the documentation comment (`--" … --"`) written right above its declaration; the compiler attaches it, so it works in imported files too. Built-in methods
   (`len`, `push`, `split`…) are explained too.
 - **Completion**: after a `.`, the fields and methods of the value's type (only the public ones, all
   of them on `self`), the variants and static functions after `Type.`, and the contents of a module

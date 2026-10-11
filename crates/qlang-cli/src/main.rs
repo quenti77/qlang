@@ -14,7 +14,9 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N]   run a program
+    qlang run <file.q> [--max-steps N] [--root DIR]
+                                         run a program (imports may live anywhere, or only
+                                         under DIR with --root)
     qlang check <file.q>                 check a program without running it
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
@@ -67,10 +69,10 @@ fn real_main(args: Vec<String>) -> ExitCode {
     }
 }
 
-/// A host connected to the terminal and the disk, limited to the entry
-/// file's directory for imports.
+/// A host connected to the terminal and the disk. Imports can reach any `.q` file the
+/// user can read (like `require` in Node), unless `--root` confines them to a directory.
 struct TerminalHost {
-    root: PathBuf,
+    root: Option<PathBuf>,
 }
 
 impl Host for TerminalHost {
@@ -90,11 +92,24 @@ impl Host for TerminalHost {
     }
 
     fn load_module(&mut self, path: &str) -> Result<String, String> {
-        let full = Path::new(path).canonicalize().map_err(|_| format!("file \"{path}\" not found"))?;
-        if !full.starts_with(&self.root) {
-            return Err("modules must be inside the directory of the main file".to_string());
+        // only qlang sources: importing any file would show its lines in error messages
+        if !path.ends_with(".q") {
+            return Err(format!("\"{path}\" is not a qlang file (only .q files can be imported)"));
         }
+        let full = Path::new(path).canonicalize().map_err(|_| format!("file \"{path}\" not found"))?;
+        if let Some(root) = &self.root
+            && !full.starts_with(root) {
+                return Err(format!("\"{path}\" is outside of --root {}", root.display()));
+            }
         std::fs::read_to_string(&full).map_err(|e| e.to_string())
+    }
+
+    fn canonical_path(&mut self, path: &str) -> String {
+        // the same file reached through `..` or a symbolic link is the same module
+        Path::new(path)
+            .canonicalize()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_string())
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -104,6 +119,7 @@ impl Host for TerminalHost {
 
 fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut file: Option<&str> = None;
+    let mut root: Option<PathBuf> = None;
     let mut limits = Limits::default();
     let mut i = 0;
     while i < args.len() {
@@ -114,6 +130,16 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                     Some(n) => limits.max_steps = n,
                     None => {
                         eprintln!("--max-steps needs a number");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--root" => {
+                i += 1;
+                match args.get(i).map(|d| Path::new(d).canonicalize()) {
+                    Some(Ok(dir)) if dir.is_dir() => root = Some(dir),
+                    _ => {
+                        eprintln!("--root needs an existing directory");
                         return ExitCode::from(64);
                     }
                 }
@@ -137,11 +163,11 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             return ExitCode::from(66);
         }
     };
-    let root = Path::new(file)
-        .canonicalize()
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."));
+    if let (Some(root), Ok(full)) = (&root, Path::new(file).canonicalize())
+        && !full.starts_with(root) {
+            eprintln!("{file} is outside of --root {}", root.display());
+            return ExitCode::from(64);
+        }
     let mut host = TerminalHost { root };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,

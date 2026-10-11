@@ -35,6 +35,13 @@ pub trait Host {
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }
+
+    /// A name that is the same for the same module however its path was written
+    /// (`lib/a.q`, `lib/../lib/a.q`, a symbolic link...). Used to load a module once
+    /// and to detect circular imports. By default the normalised path itself.
+    fn canonical_path(&mut self, path: &str) -> String {
+        path.to_string()
+    }
 }
 
 /// Resource limits for one run.

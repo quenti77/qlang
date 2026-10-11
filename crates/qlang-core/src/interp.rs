@@ -41,14 +41,19 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
         statics: HashMap::new(),
         frames: Vec::new(),
         cur_call: 0,
+        fmt_depth: 0,
+        fmt_nodes: 0,
     };
-    let error = match it.run_all() {
-        Ok(()) => None,
-        Err(Ctrl::Error(mut d)) => {
+    // A bug in the interpreter must not take the caller down with it (a server, an editor).
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
+    let error = match outcome {
+        Ok(Ok(())) => None,
+        Ok(Err(Ctrl::Error(mut d))) => {
             d.resolve(&prog.sources);
             Some(*d)
         }
-        Err(_) => None,
+        Ok(Err(_)) => None,
+        Err(payload) => Some(crate::check::internal_error(&payload)),
     };
     RunResult { error, steps: it.steps }
 }
@@ -86,7 +91,13 @@ struct Interp<'a> {
     frames: Vec<(String, Span)>,
     /// The call expression being evaluated (for `sum()` on empty float arrays).
     cur_call: NodeId,
+    /// Nesting and size of the value being converted to text (cycles, huge values).
+    fmt_depth: usize,
+    fmt_nodes: usize,
 }
+
+/// Deeper values print as `...` (this also stops cyclic structures).
+const MAX_FMT_DEPTH: usize = 64;
 
 impl<'a> Interp<'a> {
     // ------------------------------------------------------------------ errors
@@ -118,6 +129,21 @@ impl<'a> Interp<'a> {
             return self.fail("R900", "the program ran for too long (step limit reached: infinite loop?)", span);
         }
         Ok(())
+    }
+
+    /// Charge the work of a built-in operation to the step budget: about one step
+    /// per 4 elements visited. Without it, `xs.contains(v)` on a big array would be free.
+    fn charge(&mut self, elements: usize, span: Span) -> R<()> {
+        self.steps = self.steps.saturating_add((elements / 4) as u64);
+        if self.steps > self.limits.max_steps {
+            return self.fail("R900", "the program ran for too long (step limit reached: infinite loop?)", span);
+        }
+        Ok(())
+    }
+
+    /// Same for work proportional to a number of bytes (copying or scanning a string).
+    fn charge_bytes(&mut self, bytes: usize, span: Span) -> R<()> {
+        self.charge(bytes / 8, span)
     }
 
     /// Refuse arrays and strings that grow beyond the configured size.
@@ -309,6 +335,7 @@ impl<'a> Interp<'a> {
                     }
                     Value::Map(m) => {
                         // a snapshot: the map may be changed by the loop body
+                        self.charge(m.borrow().len(), s.span)?;
                         let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
                         for (k, v) in entries {
                             if !run_body(self, k, Some(v))? {
@@ -352,6 +379,8 @@ impl<'a> Interp<'a> {
                         }
                     }
                 }
+                self.guard_alloc(out.len(), e.span)?;
+                self.charge_bytes(out.len(), e.span)?;
                 Ok(Value::str(&out))
             }
             ExprKind::Ident(name, _) => match prog.res.paths.get(&e.id) {
@@ -663,7 +692,12 @@ impl<'a> Interp<'a> {
         if let Value::None = recv {
             return self.fail("R006", format!("cannot call `.{}()`: the value is `none`", name.name), span);
         }
-        if !matches!(recv, Value::Struct(_) | Value::Enum(..))
+        // A call made through a trait (a generic bound or a trait-typed value) goes to the
+        // user's impl; a call on a concrete built-in type goes to the built-in method.
+        // The checker decided which, so that both sides agree.
+        let via_trait = self.prog.res.trait_calls.contains(&self.cur_call);
+        if !via_trait
+            && !matches!(recv, Value::Struct(_) | Value::Enum(..))
             && let Some(v) = self.builtin_method(&recv, &name.name, &args, span)? {
                 return Ok(v);
             }
@@ -800,6 +834,24 @@ impl<'a> Interp<'a> {
     }
 
     fn stringify(&mut self, v: &Value, span: Span) -> R<String> {
+        if self.fmt_depth == 0 {
+            self.fmt_nodes = 0;
+        }
+        if self.fmt_depth >= MAX_FMT_DEPTH {
+            return Ok("...".to_string());
+        }
+        self.fmt_nodes += 1;
+        if self.fmt_nodes > self.limits.max_alloc {
+            return self.fail("R903", "this value is too large to print (memory limit reached)", span);
+        }
+        self.tick(span)?;
+        self.fmt_depth += 1;
+        let r = self.stringify_inner(v, span);
+        self.fmt_depth -= 1;
+        r
+    }
+
+    fn stringify_inner(&mut self, v: &Value, span: Span) -> R<String> {
         Ok(match v {
             Value::Str(s) => s.to_string(),
             Value::Int(i) => i.to_string(),
@@ -962,6 +1014,7 @@ impl<'a> Interp<'a> {
             }
             (Value::Str(a), Value::Str(b)) if op == BinOp::Add => {
                 self.guard_alloc(a.len() + b.len(), span)?;
+                self.charge_bytes(a.len() + b.len(), span)?;
                 let mut s = String::with_capacity(a.len() + b.len());
                 s.push_str(a);
                 s.push_str(b);
@@ -1021,6 +1074,8 @@ impl<'a> Interp<'a> {
                 if Rc::ptr_eq(x, y) {
                     return Ok(true);
                 }
+                let n = x.borrow().len();
+                self.charge(n, span)?;
                 let (xs, ys): (Vec<Value>, Vec<Value>) = (x.borrow().clone(), y.borrow().clone());
                 if xs.len() != ys.len() {
                     return Ok(false);
@@ -1063,10 +1118,14 @@ impl<'a> Interp<'a> {
                 }
             }
             (Value::Map(m), k) => Ok(m.borrow().get(k).cloned().unwrap_or(Value::None)),
-            (Value::Str(s), Value::Int(i)) => match usize::try_from(*i).ok().and_then(|u| s.chars().nth(u)) {
-                Some(c) => Ok(Value::str(&c.to_string())),
-                None => self.fail("R020", format!("index {i} is out of bounds (length {})", s.chars().count()), span),
-            },
+            (Value::Str(s), Value::Int(i)) => {
+                // finding the i-th character walks the string
+                self.charge_bytes((*i).max(0) as usize, span)?;
+                match usize::try_from(*i).ok().and_then(|u| s.chars().nth(u)) {
+                    Some(c) => Ok(Value::str(&c.to_string())),
+                    None => self.fail("R020", format!("index {i} is out of bounds (length {})", s.chars().count()), span),
+                }
+            }
             _ => match self.find_method(base, Lang::Index.method_name(), Some(self.prog.defs.lang(Lang::Index)), Some(idx)) {
                 Some(fid) => self.call_fid(fid, Some(base.clone()), vec![idx.clone()], span),
                 None => self.fail("R004", "this value cannot be indexed", span),
@@ -1346,6 +1405,19 @@ impl<'a> Interp<'a> {
     }
 
     fn builtin_method(&mut self, recv: &Value, name: &str, args: &[Value], span: Span) -> R<Option<Value>> {
+        // linear built-ins pay for the elements they visit
+        match recv {
+            Value::Str(s) => self.charge_bytes(s.len(), span)?,
+            Value::Array(a) if matches!(name, "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort") => {
+                let n = a.borrow().len();
+                self.charge(n, span)?;
+            }
+            Value::Map(m) if matches!(name, "keys" | "values" | "remove") => {
+                let n = m.borrow().len();
+                self.charge(n, span)?;
+            }
+            _ => {}
+        }
         let int_arg = |i: usize| -> Option<i64> {
             match args.get(i) {
                 Some(Value::Int(n)) => Some(*n),

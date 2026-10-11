@@ -469,4 +469,7 @@ pub struct Resolutions {
     pub patterns: HashMap<(NodeId, usize), (EnumId, usize)>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: HashSet<NodeId>,
+    /// Method calls made through a trait (a generic bound or a trait-typed value): at
+    /// run time they go to the user's impl, not to a built-in method of the same name.
+    pub trait_calls: HashSet<NodeId>,
 }

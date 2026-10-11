@@ -27,6 +27,8 @@ print(7 div 2)             -- 3
 
 ## Utilisation
 
+Il faut Rust 1.88 ou plus récent (`rustup update`).
+
 ```sh
 cargo build --release            # produit target/release/qlang
 
@@ -189,8 +191,12 @@ Ou, avec le serveur HTTP : `POST http://127.0.0.1:8080/run` avec la même requê
 
 ### Sécurité
 
-Le protocole JSON n'accède pas au disque et borne le temps de calcul (étapes), la
-récursion, la sortie et la taille des tableaux et chaînes. Il ne limite pas la
+Le protocole JSON n'accède pas au disque et borne le temps de calcul (étapes,
+y compris le travail des méthodes prédéfinies), la récursion, la sortie, la taille
+des tableaux et chaînes, et le nombre d'erreurs renvoyées (100 au plus). Un bug
+interne du compilateur ou de l'interpréteur est renvoyé comme une erreur `X999`
+au lieu d'arrêter le processus ; dans le serveur HTTP, le worker concerné répond
+500 et son emplacement de connexion est libéré. Il ne limite pas la
 mémoire totale d'un processus ni le temps réel : pour du code d'inconnus, lancez
 `qlang` dans un conteneur ou avec les limites du système (`ulimit`, cgroups) et un
 délai d'attente. Le serveur HTTP (`qlang serve`) est minimal : pas de TLS, pas de

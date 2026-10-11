@@ -275,14 +275,14 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
                 Some(b'(') => match src[i + 3..].find("--)") {
                     Some(p) => i = i + 3 + p + 3,
                     None => {
-                        diags.push(Diagnostic::error("L003", "unterminated block comment (missing `--)`)", span(i, i + 3)));
+                        crate::diag::push_capped(diags, Diagnostic::error("L003", "unterminated block comment (missing `--)`)", span(i, i + 3)));
                         i = b.len();
                     }
                 },
                 Some(b'"') => match src[i + 3..].find("--\"") {
                     Some(p) => i = i + 3 + p + 3,
                     None => {
-                        diags.push(Diagnostic::error("L003", "unterminated documentation comment (missing `--\"`)", span(i, i + 3)));
+                        crate::diag::push_capped(diags, Diagnostic::error("L003", "unterminated documentation comment (missing `--\"`)", span(i, i + 3)));
                         i = b.len();
                     }
                 },
@@ -313,7 +313,7 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
                     push!(Tok::Str(src[content_start..content_end].to_string()), start, i + 1);
                     i += 1;
                 } else {
-                    diags.push(Diagnostic::error("L002", "unterminated string (missing closing `\"`)", span(start, start + 1)));
+                    crate::diag::push_capped(diags, Diagnostic::error("L002", "unterminated string (missing closing `\"`)", span(start, start + 1)));
                     push!(Tok::Str(src[content_start..content_end].to_string()), start, content_end);
                     i = b.len();
                 }
@@ -406,7 +406,7 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
                             '\'' => "unexpected `'` (strings use double quotes)".to_string(),
                             c => format!("unexpected character `{c}`"),
                         };
-                        diags.push(Diagnostic::error("L001", msg, span(i, i + ch.len_utf8())));
+                        crate::diag::push_capped(diags, Diagnostic::error("L001", msg, span(i, i + ch.len_utf8())));
                         i += ch.len_utf8();
                     }
                 }
@@ -450,7 +450,7 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
             eat_digits(&mut i, |c| c == b'0' || c == b'1')
         };
         if digits.is_empty() {
-            diags.push(Diagnostic::error(
+            crate::diag::push_capped(diags, Diagnostic::error(
                 "L004",
                 if hex { "expected hexadecimal digits after `0x`" } else { "expected binary digits (0 or 1) after `0b`" },
                 span(start, i),
@@ -461,7 +461,7 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
         match i64::from_str_radix(&digits, if hex { 16 } else { 2 }) {
             Ok(v) => toks.push(Token { tok: Tok::Int(v), span: span(start, i) }),
             Err(_) => {
-                diags.push(Diagnostic::error("L005", "integer literal is too large", span(start, i)));
+                crate::diag::push_capped(diags, Diagnostic::error("L005", "integer literal is too large", span(start, i)));
                 toks.push(Token { tok: Tok::Int(0), span: span(start, i) });
             }
         }
@@ -496,7 +496,7 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
         match text.parse::<f64>() {
             Ok(v) if v.is_finite() => toks.push(Token { tok: Tok::Float(v), span: span(start, i) }),
             _ => {
-                diags.push(Diagnostic::error("L005", "float literal is out of range", span(start, i)));
+                crate::diag::push_capped(diags, Diagnostic::error("L005", "float literal is out of range", span(start, i)));
                 toks.push(Token { tok: Tok::Float(0.0), span: span(start, i) });
             }
         }
@@ -504,7 +504,7 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
         match text.parse::<i64>() {
             Ok(v) => toks.push(Token { tok: Tok::Int(v), span: span(start, i) }),
             Err(_) => {
-                diags.push(Diagnostic::error("L005", "integer literal is too large", span(start, i)));
+                crate::diag::push_capped(diags, Diagnostic::error("L005", "integer literal is too large", span(start, i)));
                 toks.push(Token { tok: Tok::Int(0), span: span(start, i) });
             }
         }

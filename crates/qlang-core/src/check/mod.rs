@@ -8,7 +8,7 @@ mod expr;
 mod unify;
 
 use crate::ast::{self, Item};
-use crate::diag::{Diagnostic, Severity};
+use crate::diag::{Diagnostic, MAX_DIAGNOSTICS, Severity};
 use crate::host::{Capabilities, Host};
 use crate::parser::parse_module_from;
 use crate::span::{SourceMap, Span, resolve_module_path};
@@ -47,6 +47,27 @@ impl CompileError {
 /// Compile the program whose entry file is `entry` with text `source`.
 /// Imported modules are requested from `host`.
 pub fn compile(entry: &str, source: &str, host: &mut dyn Host) -> Result<Program, CompileError> {
+    // A bug in the compiler must not take the caller down with it (a server, an editor).
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_inner(entry, source, host))) {
+        Ok(result) => result,
+        Err(payload) => Err(CompileError {
+            diagnostics: vec![internal_error(&payload)],
+            sources: SourceMap::default(),
+        }),
+    }
+}
+
+/// A diagnostic for a panic caught inside qlang itself.
+pub(crate) fn internal_error(payload: &Box<dyn std::any::Any + Send>) -> Diagnostic {
+    let detail = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown error".to_string());
+    Diagnostic::error("X999", format!("internal error: {detail} (this is a bug in qlang, please report it)"), Span::default())
+}
+
+fn compile_inner(entry: &str, source: &str, host: &mut dyn Host) -> Result<Program, CompileError> {
     let caps = host.capabilities();
     let mut loader = Loader {
         host,
@@ -88,11 +109,20 @@ pub fn compile(entry: &str, source: &str, host: &mut dyn Host) -> Result<Program
 }
 
 fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap) -> CompileError {
+    // stable order: by file then position
+    diags.sort_by_key(|d| (d.span.file, d.span.start));
+    if diags.len() > MAX_DIAGNOSTICS {
+        let last = diags[MAX_DIAGNOSTICS - 1].span;
+        diags.truncate(MAX_DIAGNOSTICS);
+        diags.push(Diagnostic::error(
+            "T000",
+            format!("too many errors: only the first {MAX_DIAGNOSTICS} are shown"),
+            last,
+        ));
+    }
     for d in &mut diags {
         d.resolve(&sources);
     }
-    // stable order: by file then position
-    diags.sort_by_key(|d| (d.span.file, d.span.start));
     CompileError { diagnostics: diags, sources }
 }
 
@@ -127,7 +157,7 @@ impl Loader<'_> {
         for (idx, item) in ast.items.iter().enumerate() {
             let Item::Import(imp) = item else { continue };
             let Some(target) = resolve_module_path(path, &imp.path) else {
-                self.diags.push(Diagnostic::error(
+                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T100",
                     format!("cannot import \"{}\": the path must be relative and stay inside the project", imp.path),
                     imp.path_span,
@@ -135,7 +165,7 @@ impl Loader<'_> {
                 continue;
             };
             if self.loading.contains(&target) {
-                self.diags.push(Diagnostic::error(
+                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T101",
                     format!("circular import of \"{}\"", imp.path),
                     imp.path_span,
@@ -151,7 +181,7 @@ impl Loader<'_> {
                     let m = self.load(&target, src);
                     imports.insert(idx, m);
                 }
-                Err(e) => self.diags.push(Diagnostic::error(
+                Err(e) => crate::diag::push_capped(&mut self.diags, Diagnostic::error(
                     "T102",
                     format!("cannot import \"{}\": {e}", imp.path),
                     imp.path_span,
@@ -253,11 +283,11 @@ impl Checker {
     }
 
     pub fn err(&mut self, code: &str, msg: impl Into<String>, span: Span) {
-        self.diags.push(Diagnostic::error(code, msg, span));
+        crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span));
     }
 
     pub fn err_note(&mut self, code: &str, msg: impl Into<String>, span: Span, note: impl Into<String>, note_span: Option<Span>) {
-        self.diags.push(Diagnostic::error(code, msg, span).with_note(note, note_span));
+        crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span).with_note(note, note_span));
     }
 
     pub fn show(&self, t: &Ty) -> String {

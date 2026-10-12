@@ -275,6 +275,23 @@ fn modules_have_separate_ids() {
 }
 
 #[test]
+fn generic_struct_type_args_resolve_across_modules_in_a_trait_signature() {
+    // a trait's signature is resolved before any module's structs are: a generic struct
+    // imported from another module used to be seen with 0 type parameters there, as if its
+    // `struct Box<T>` declaration had not been read yet
+    let o = run_files(
+        &[
+            ("main.q", "import Box from \"box.q\"\ntrait Holder\nfun get() -> Box<int>\nend\nprint(\"ok\")"),
+            ("box.q", "struct Box<T>\nvalue: T\nend\nexport Box"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "ok\n");
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

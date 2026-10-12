@@ -60,7 +60,10 @@ impl Checker {
                         name: s.name.name.clone(),
                         module: m,
                         span: s.name.span,
-                        tparams: Vec::new(),
+                        // the real `ParamId`s are filled in by `resolve_structs` (phase B), but the
+                        // *count* is already known from the source and other modules' phase B may
+                        // need it (to check `Name<...>` argument counts) before that runs
+                        tparams: vec![0; s.tparams.len()],
                         parent: None,
                         fields: Vec::new(),
                     });
@@ -87,8 +90,9 @@ impl Checker {
                         name: t.name.name.clone(),
                         module: m,
                         span: t.name.span,
-                        tparams: Vec::new(),
-                        defaults: Vec::new(),
+                        // see the comment on `StructDef.tparams` above: the count is already known
+                        tparams: vec![0; t.tparams.len()],
+                        defaults: vec![None; t.tparams.len()],
                         sigs: Vec::new(),
                         lang: None,
                     });

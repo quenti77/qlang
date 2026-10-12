@@ -52,6 +52,8 @@ const KEYWORDS = {
   none: 'The absence of a value (`T?` types).',
 };
 
+const RESERVED = new Set(Object.keys(KEYWORDS));
+
 const CODE_FENCE = (text) => '```qlang\n' + text + '\n```';
 
 const isWordChar = (c) => /[A-Za-z0-9_]/.test(c);
@@ -190,6 +192,69 @@ function nameCompletions(info, file, line, col) {
   return [...out.values()];
 }
 
+/** The field already given by the segment `text[segStart, commaPos)`, if any (`name: value`
+ * or the shorthand `name`). */
+function givenFieldOf(text, segStart, commaPos) {
+  const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(:|$)/.exec(text.slice(segStart, commaPos));
+  return m ? m[1] : null;
+}
+
+/**
+ * The struct literal (`Point { x: 1, | }`) enclosing `offset` in the full document `text`,
+ * if the cursor sits where a field name goes: the type name written before the `{`, the
+ * fields already given (so they are not suggested again) and the partial name being typed.
+ * Returns null when the cursor is typing a value instead (after a `:`), or is not inside a
+ * struct literal at all.
+ */
+function structLitAt(text, offset) {
+  const stack = [];
+  let inString = false;
+  for (let i = 0; i < offset; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      let j = i - 1;
+      while (j >= 0 && /\s/.test(text[j])) j--;
+      let name = null;
+      if (j >= 0 && isWordChar(text[j])) {
+        let k = j;
+        while (k >= 0 && isWordChar(text[k])) k--;
+        const word = text.slice(k + 1, j + 1);
+        if (!/^[0-9]/.test(word) && !RESERVED.has(word)) name = word;
+      }
+      stack.push({ kind: '{', name, given: new Set(), segStart: i + 1 });
+    } else if (c === '(' || c === '[') {
+      stack.push({ kind: c });
+    } else if (c === '}' || c === ')' || c === ']') {
+      stack.pop();
+    } else if (c === ',' && stack.length && stack[stack.length - 1].kind === '{') {
+      const top = stack[stack.length - 1];
+      const given = givenFieldOf(text, top.segStart, i);
+      if (given) top.given.add(given);
+      top.segStart = i + 1;
+    }
+  }
+  const top = stack[stack.length - 1];
+  if (!top || top.kind !== '{' || !top.name) return null;
+  const seg = text.slice(top.segStart, offset);
+  const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)?\s*$/.exec(seg);
+  if (!m) return null; // a value, or something else, is being typed: not a field name
+  return { name: top.name, given: top.given, prefix: m[1] || '' };
+}
+
+/** The completion items for the fields of a struct literal, excluding those already given. */
+function structFieldCompletions(info, lit) {
+  return (info.members[lit.name] || [])
+    .filter((m) => m.kind === 'field' && !lit.given.has(m.name))
+    .map((m) => ({ label: m.name, kind: m.kind, detail: m.detail, doc: m.doc || null, sort: '0' + m.name }));
+}
+
 /**
  * Replace `[from, to)` of line `line` by spaces, keeping every position: used to ask the
  * compiler about `value.partial|` or `f(arg|` as if the unfinished part was not there.
@@ -302,6 +367,8 @@ module.exports = {
   hoverAt,
   memberCompletions,
   nameCompletions,
+  structLitAt,
+  structFieldCompletions,
   blank,
   memberAccessAt,
   callAt,

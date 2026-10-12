@@ -105,6 +105,29 @@ test('completion after a dot offers the members of the type', { skip }, () => {
   assert.deepStrictEqual(members.map((m) => m.label), ['x', 'y', 'norm']);
 });
 
+test('completion inside a struct literal offers the fields not yet given', { skip }, () => {
+  const info = analyse({ 'main.q': SOURCE });
+  const text = 'let p = Point { x: 1,  }';
+  const offset = text.indexOf(', ') + 2; // right after `x: 1, `, before the final `}`
+  const lit = intel.structLitAt(text, offset);
+  assert.deepStrictEqual(lit, { name: 'Point', given: new Set(['x']), prefix: '' });
+  const items = intel.structFieldCompletions(info, lit);
+  assert.deepStrictEqual(items.map((i) => i.label), ['y']);
+
+  // a partial field name narrows further: `Point { x: 1, y|` offers nothing new (`y` is
+  // the only field left and is itself the word being typed)
+  const partial = 'let p = Point { x: 1, y';
+  const lit2 = intel.structLitAt(partial, partial.length);
+  assert.deepStrictEqual(lit2, { name: 'Point', given: new Set(['x']), prefix: 'y' });
+
+  // typing the value, after `:`, is not a field name position
+  const value = 'let p = Point { x: 1, y: ';
+  assert.strictEqual(intel.structLitAt(value, value.length), null);
+
+  // not inside a struct literal at all
+  assert.strictEqual(intel.structLitAt('let m = { "k": 1 }', 11), null);
+});
+
 test('completion without a dot offers variables in scope, names and keywords', { skip }, () => {
   const info = analyse({ 'main.q': SOURCE });
   const inside = intel.nameCompletions(info, 'main.q', 18, 12).map((i) => i.label);

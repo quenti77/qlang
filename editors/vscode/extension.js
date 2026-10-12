@@ -46,7 +46,7 @@ function activate(context) {
   const qlang = { language: 'qlang', scheme: 'file' };
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(qlang, { provideHover }),
-    vscode.languages.registerCompletionItemProvider(qlang, { provideCompletionItems }, '.'),
+    vscode.languages.registerCompletionItemProvider(qlang, { provideCompletionItems }, '.', '{', ','),
     vscode.languages.registerSignatureHelpProvider(qlang, { provideSignatureHelp }, '(', ',')
   );
 }
@@ -222,6 +222,14 @@ async function provideCompletionItems(doc, pos) {
   }
   const a = await currentInfo(doc);
   if (!a) return undefined;
+  const lit = intel.structLitAt(doc.getText(), doc.offsetAt(pos));
+  if (lit) {
+    const items = intel.structFieldCompletions(a.info, lit);
+    if (items.length) {
+      const range = new vscode.Range(pos.line, pos.character - lit.prefix.length, pos.line, pos.character);
+      return items.map((i) => toCompletion(i, range));
+    }
+  }
   return intel.nameCompletions(a.info, a.entry, pos.line, pos.character).map((i) => toCompletion(i));
 }
 

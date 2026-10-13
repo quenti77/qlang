@@ -147,6 +147,475 @@ impl<T, E> Result<T, E>
         end
     end
 end
+
+-- ===== encode =====
+
+--" A type that can be turned into JSON text: `impl ToJson for Post ... end`. --"
+trait ToJson
+    fun to_json(self) -> string
+end
+
+--" A JSON string literal of `s`, quoted and escaped. --"
+fun json_escape(s: string) -> string
+    let out = "\""
+    for c in s.chars() do
+        if c == "\"" then
+            out += "\\\""
+        elseif c == "\\" then
+            out += "\\\\"
+        elseif c == "\n" then
+            out += "\\n"
+        elseif c == "\t" then
+            out += "\\t"
+        elseif c == "\r" then
+            out += "\\r"
+        else
+            out += c
+        end
+    end
+    out + "\""
+end
+
+--" A JSON array of `items`, each serialized through `to_json()`. --"
+fun json_array(items: array<ToJson>) -> string
+    let parts: array<string> = []
+    for it in items do
+        parts[] = it.to_json()
+    end
+    "[" + parts.join(",") + "]"
+end
+
+--" A JSON object of `fields`, each value serialized through `to_json()`. Used from a
+struct's own `to_json`: `json_object({ "title": self.title, "views": self.views })`. --"
+fun json_object(fields: map<string, ToJson>) -> string
+    let parts: array<string> = []
+    for k, v in fields do
+        parts[] = json_escape(k) + ":" + v.to_json()
+    end
+    "\{" + parts.join(",") + "\}"
+end
+
+impl ToJson for int
+    public fun to_json(self) -> string
+        self as string
+    end
+end
+
+impl ToJson for float
+    public fun to_json(self) -> string
+        self as string
+    end
+end
+
+impl ToJson for bool
+    public fun to_json(self) -> string
+        self as string
+    end
+end
+
+impl ToJson for string
+    public fun to_json(self) -> string
+        json_escape(self)
+    end
+end
+
+-- ===== value tree (decode target) =====
+
+--" A parsed JSON value: a string, a number, a bool, null, an array or an object.
+Build one with `Json.string(...)`, `Json.number(...)`, `Json.array(...)`... (or parse
+text with `Json.parse`), read it back with `is_string()`/`as_string()` and friends. --"
+struct Json
+    kind: string
+    str: string?
+    num: float?
+    bool_: bool?
+    arr: array<Json>?
+    obj: map<string, Json>?
+end
+
+impl Json
+    public fun null() -> Json
+        Json { kind: "null", str: none, num: none, bool_: none, arr: none, obj: none }
+    end
+
+    public fun string(value: string) -> Json
+        Json { kind: "string", str: value, num: none, bool_: none, arr: none, obj: none }
+    end
+
+    public fun number(value: float) -> Json
+        Json { kind: "number", str: none, num: value, bool_: none, arr: none, obj: none }
+    end
+
+    public fun boolean(value: bool) -> Json
+        Json { kind: "bool", str: none, num: none, bool_: value, arr: none, obj: none }
+    end
+
+    public fun array(value: array<Json>) -> Json
+        Json { kind: "array", str: none, num: none, bool_: none, arr: value, obj: none }
+    end
+
+    public fun object(value: map<string, Json>) -> Json
+        Json { kind: "object", str: none, num: none, bool_: none, arr: none, obj: value }
+    end
+
+    public fun is_null(self) -> bool
+        self.kind == "null"
+    end
+
+    public fun is_string(self) -> bool
+        self.kind == "string"
+    end
+
+    public fun is_number(self) -> bool
+        self.kind == "number"
+    end
+
+    public fun is_bool(self) -> bool
+        self.kind == "bool"
+    end
+
+    public fun is_array(self) -> bool
+        self.kind == "array"
+    end
+
+    public fun is_object(self) -> bool
+        self.kind == "object"
+    end
+
+    public fun as_string(self) -> string
+        let v = self.str
+        if v != none then v else panic("Json: not a string") end
+    end
+
+    public fun as_number(self) -> float
+        let v = self.num
+        if v != none then v else panic("Json: not a number") end
+    end
+
+    public fun as_bool(self) -> bool
+        let v = self.bool_
+        if v != none then v else panic("Json: not a bool") end
+    end
+
+    public fun as_array(self) -> array<Json>
+        let v = self.arr
+        if v != none then v else panic("Json: not an array") end
+    end
+
+    public fun as_object(self) -> map<string, Json>
+        let v = self.obj
+        if v != none then v else panic("Json: not an object") end
+    end
+
+    public fun get(self, key: string) -> Json?
+        let o = self.obj
+        if o != none then o[key] else none end
+    end
+
+    public fun at(self, i: int) -> Json?
+        let a = self.arr
+        if a != none and i >= 0 and i < a.len() then a[i] else none end
+    end
+end
+
+impl ToJson for Json
+    public fun to_json(self) -> string
+        if self.kind == "null" then
+            "null"
+        elseif self.kind == "string" then
+            json_escape(self.as_string())
+        elseif self.kind == "number" then
+            self.as_number() as string
+        elseif self.kind == "bool" then
+            self.as_bool() as string
+        elseif self.kind == "array" then
+            let out: array<ToJson> = []
+            for it in self.as_array() do
+                out[] = it
+            end
+            json_array(out)
+        else
+            let fields: map<string, ToJson> = {}
+            for k, v in self.as_object() do
+                fields[k] = v
+            end
+            json_object(fields)
+        end
+    end
+end
+
+-- ===== parse =====
+
+fun hex_digit_value(c: string) -> int?
+    if c.is_digit() then
+        c.to_int()
+    elseif c == "a" or c == "A" then
+        10
+    elseif c == "b" or c == "B" then
+        11
+    elseif c == "c" or c == "C" then
+        12
+    elseif c == "d" or c == "D" then
+        13
+    elseif c == "e" or c == "E" then
+        14
+    elseif c == "f" or c == "F" then
+        15
+    else
+        none
+    end
+end
+
+fun parse_hex4(hex: string) -> int?
+    if hex.len() != 4 then
+        return none
+    end
+    let a = hex_digit_value(hex.substring(0, 1))
+    let b = hex_digit_value(hex.substring(1, 2))
+    let c = hex_digit_value(hex.substring(2, 3))
+    let d = hex_digit_value(hex.substring(3, 4))
+    if a == none or b == none or c == none or d == none then
+        return none
+    end
+    a * 4096 + b * 256 + c * 16 + d
+end
+
+struct JsonParser
+    text: string
+    pos: int
+end
+
+impl JsonParser
+    public fun new(text: string) -> JsonParser
+        JsonParser { text, pos: 0 }
+    end
+
+    public fun peek(self) -> string
+        if self.pos < self.text.len() then self.text.substring(self.pos, self.pos + 1) else "" end
+    end
+
+    public fun advance(self)
+        self.pos = self.pos + 1
+    end
+
+    public fun skip_ws(self)
+        while self.peek() == " " or self.peek() == "\t" or self.peek() == "\n" or self.peek() == "\r" do
+            self.advance()
+        end
+    end
+
+    public fun looking_at(self, word: string) -> bool
+        let end_ = (self.pos + word.len()).min(self.text.len())
+        self.text.substring(self.pos, end_) == word
+    end
+
+    public fun fail(self, message: string) -> Result<Json, Error>
+        Result<Json, Error>.err(Error { message: "JSON parse error at offset {self.pos}: {message}" })
+    end
+
+    public fun trailing_error(self) -> Error?
+        self.skip_ws()
+        if self.pos != self.text.len() then
+            Error { message: "JSON parse error at offset {self.pos}: unexpected trailing characters" }
+        else
+            none
+        end
+    end
+
+    public fun parse_value(self) -> Result<Json, Error>
+        self.skip_ws()
+        let c = self.peek()
+        if c == "\"" then
+            self.parse_string_value()
+        elseif c == "\{" then
+            self.parse_object()
+        elseif c == "[" then
+            self.parse_array()
+        elseif self.looking_at("true") then
+            self.pos = self.pos + 4
+            Result<Json, Error>.ok(Json.boolean(true))
+        elseif self.looking_at("false") then
+            self.pos = self.pos + 5
+            Result<Json, Error>.ok(Json.boolean(false))
+        elseif self.looking_at("null") then
+            self.pos = self.pos + 4
+            Result<Json, Error>.ok(Json.null())
+        elseif c == "-" or c.is_digit() then
+            self.parse_number()
+        else
+            self.fail("unexpected character {json_escape(c)}")
+        end
+    end
+
+    public fun parse_raw_string(self) -> Result<string, Error>
+        self.advance()
+        let out = ""
+        while self.peek() != "\"" do
+            if self.peek() == "" then
+                return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: unterminated string" })
+            end
+            if self.peek() == "\\" then
+                self.advance()
+                let e = self.peek()
+                if e == "\"" then
+                    out += "\""
+                elseif e == "\\" then
+                    out += "\\"
+                elseif e == "/" then
+                    out += "/"
+                elseif e == "n" then
+                    out += "\n"
+                elseif e == "t" then
+                    out += "\t"
+                elseif e == "r" then
+                    out += "\r"
+                elseif e == "b" then
+                    out += (8).char()
+                elseif e == "f" then
+                    out += (12).char()
+                elseif e == "u" then
+                    let hex = self.text.substring(self.pos + 1, self.pos + 5)
+                    let code = parse_hex4(hex)
+                    if code == none then
+                        return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: invalid \\u escape" })
+                    end
+                    out += code.char()
+                    self.pos = self.pos + 4
+                else
+                    return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: invalid escape \\{e}" })
+                end
+                self.advance()
+            else
+                out += self.peek()
+                self.advance()
+            end
+        end
+        self.advance()
+        Result<string, Error>.ok(out)
+    end
+
+    public fun parse_string_value(self) -> Result<Json, Error>
+        let r = self.parse_raw_string()
+        if r.is_err() then
+            return Result<Json, Error>.err(r.unwrap_err())
+        end
+        Result<Json, Error>.ok(Json.string(r.unwrap()))
+    end
+
+    public fun parse_number(self) -> Result<Json, Error>
+        let start = self.pos
+        if self.peek() == "-" then
+            self.advance()
+        end
+        while self.peek().is_digit() do
+            self.advance()
+        end
+        if self.peek() == "." then
+            self.advance()
+            while self.peek().is_digit() do
+                self.advance()
+            end
+        end
+        if self.peek() == "e" or self.peek() == "E" then
+            self.advance()
+            if self.peek() == "+" or self.peek() == "-" then
+                self.advance()
+            end
+            while self.peek().is_digit() do
+                self.advance()
+            end
+        end
+        let text = self.text.substring(start, self.pos)
+        let n = text.to_float()
+        if n == none then
+            return Result<Json, Error>.err(Error { message: "JSON parse error at offset {start}: invalid number" })
+        end
+        Result<Json, Error>.ok(Json.number(n))
+    end
+
+    public fun parse_array(self) -> Result<Json, Error>
+        self.advance()
+        let items: array<Json> = []
+        self.skip_ws()
+        if self.peek() == "]" then
+            self.advance()
+            return Result<Json, Error>.ok(Json.array(items))
+        end
+        while true do
+            let r = self.parse_value()
+            if r.is_err() then
+                return Result<Json, Error>.err(r.unwrap_err())
+            end
+            items[] = r.unwrap()
+            self.skip_ws()
+            if self.peek() == "," then
+                self.advance()
+            elseif self.peek() == "]" then
+                self.advance()
+                return Result<Json, Error>.ok(Json.array(items))
+            else
+                return self.fail("expected ',' or ']'")
+            end
+        end
+        self.fail("unreachable")
+    end
+
+    public fun parse_object(self) -> Result<Json, Error>
+        self.advance()
+        let fields: map<string, Json> = {}
+        self.skip_ws()
+        if self.peek() == "\}" then
+            self.advance()
+            return Result<Json, Error>.ok(Json.object(fields))
+        end
+        while true do
+            self.skip_ws()
+            if self.peek() != "\"" then
+                return self.fail("expected a string key")
+            end
+            let key_r = self.parse_raw_string()
+            if key_r.is_err() then
+                return Result<Json, Error>.err(key_r.unwrap_err())
+            end
+            self.skip_ws()
+            if self.peek() != ":" then
+                return self.fail("expected ':'")
+            end
+            self.advance()
+            let value_r = self.parse_value()
+            if value_r.is_err() then
+                return Result<Json, Error>.err(value_r.unwrap_err())
+            end
+            fields[key_r.unwrap()] = value_r.unwrap()
+            self.skip_ws()
+            if self.peek() == "," then
+                self.advance()
+            elseif self.peek() == "\}" then
+                self.advance()
+                return Result<Json, Error>.ok(Json.object(fields))
+            else
+                return self.fail("expected ',' or '\}'")
+            end
+        end
+        self.fail("unreachable")
+    end
+end
+
+impl Json
+    --" Parses JSON text into a `Json` value, or an `Error` describing what went wrong. --"
+    public fun parse(text: string) -> Result<Json, Error>
+        let p = JsonParser.new(text)
+        let r = p.parse_value()
+        if r.is_err() then
+            return r
+        end
+        let trailing = p.trailing_error()
+        if trailing != none then
+            return Result<Json, Error>.err(trailing)
+        end
+        r
+    end
+end
 "#;
 
 fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {

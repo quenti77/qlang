@@ -148,6 +148,18 @@ impl<T, E> Result<T, E>
     end
 end
 
+--" An ok `Result`, usually inferred from context (`return Ok(1)` inside a function
+returning `Result<int, Error>`, `let r: Result<int, Error> = Ok(1)`...). When the
+compiler cannot infer `E` from anywhere, write `Result<int, Error>.ok(1)` directly. --"
+fun Ok<T, E>(value: T) -> Result<T, E>
+    Result<T, E>.ok(value)
+end
+
+--" An error `Result`: see `Ok`. --"
+fun Err<T, E>(error: E) -> Result<T, E>
+    Result<T, E>.err(error)
+end
+
 -- ===== encode =====
 
 --" A type that can be turned into JSON text: `impl ToJson for Post ... end`. --"

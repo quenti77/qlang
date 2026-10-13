@@ -380,6 +380,53 @@ end
 }
 
 #[test]
+fn a_generic_call_infers_leftover_type_parameters_from_the_expected_type() {
+    // `T` cannot come from an argument here (there is none): only the `let`'s declared
+    // type, or the enclosing function's return type, can resolve it
+    let o = run(r#"
+struct Box<T>
+    public value: T?
+end
+
+impl<T> Box<T>
+    public fun empty() -> Box<T>
+        Box { value: none }
+    end
+end
+
+fun make_string_box() -> Box<string>
+    Box.empty()
+end
+
+let b: Box<int> = Box.empty()
+print(b.value == none)
+print(make_string_box().value == none)
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "true\ntrue\n");
+}
+
+#[test]
+fn prelude_ok_and_err_infer_their_type_parameters_from_context() {
+    let o = run(r#"
+fun divide(a: int, b: int) -> Result<int, Error>
+    if b == 0 then
+        return Err(Error { message: "division by zero" })
+    end
+    Ok(a div b)
+end
+
+print(divide(10, 2).unwrap())
+print(divide(10, 0).unwrap_err().message)
+
+let r: Result<int, Error> = Ok(5)
+print(r.unwrap())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "5\ndivision by zero\n5\n");
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

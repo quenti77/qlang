@@ -978,18 +978,30 @@ borne peut être un trait que tu as défini.
 
 ### Inférence
 
-Les types sont déduits des arguments quand c'est possible. On les écrit
-explicitement sinon :
+Les types sont déduits des arguments quand c'est possible. Ce qui reste
+indéterminé après les arguments se déduit ensuite du **type attendu** : celui
+d'un `let` annoté, ou le type de retour déclaré de la fonction en cours (pour
+un `return` ou la dernière expression du corps) :
 
 ```
 let a = sum(1, 2)
 let b = sum<float>(1.0, 2.0)
 let c: array<array<int>> = [[1], [2, 3]]
 let d = Box<int>.new(1)
+
+fun empty<T>() -> array<T>
+  []
+end
+
+let e: array<int> = empty()        -- T vient du type attendu, pas d'un argument
+
+fun get() -> Result<int, Error>
+  Result.ok(1)                     -- T et E viennent du type de retour de `get`
+end
 ```
 
-Si un type ne peut pas être déduit (`let xs = []`), le compilateur le demande :
-`let xs: array<int> = []`.
+Si rien ne permet de déduire un type (ni les arguments, ni le contexte), le
+compilateur le demande explicitement : `let xs: array<int> = []`.
 
 ---
 
@@ -1369,9 +1381,9 @@ end
 ```
 fun divide(a: int, b: int) -> Result<int, Error>
   if b == 0 then
-    return Result<int, Error>.err(Error { message: "division by zero" })
+    return Err(Error { message: "division by zero" })
   end
-  Result<int, Error>.ok(a div b)
+  Ok(a div b)
 end
 
 let r = divide(10, 0)
@@ -1382,9 +1394,11 @@ else
 end
 ```
 
-- `Result<T, E>.ok(valeur)` et `Result<T, E>.err(erreur)` construisent le résultat.
-  `T` et `E` ne se déduisent pas des arguments : ils s'écrivent sur `Result<...>`
-  avant le `.` (pas de sucre `?` de propagation : on déballe à la main).
+- `Ok(valeur)` et `Err(erreur)` construisent le résultat ; `T` et `E` se
+  déduisent du contexte (ici, le type de retour de `divide`). Quand rien ne
+  permet de les déduire, écris-les explicitement sur le type :
+  `Result<int, Error>.ok(valeur)` / `Result<int, Error>.err(erreur)` (pas de
+  sucre `?` de propagation : on déballe à la main).
 - `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
 - `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
   programme (`panic`) si on se trompe de cas.

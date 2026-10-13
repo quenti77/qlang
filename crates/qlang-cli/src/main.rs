@@ -5,7 +5,7 @@ mod json;
 mod serve;
 
 use qlang_core::check::compile;
-use qlang_core::host::{Capabilities, Host, HostError, Limits};
+use qlang_core::host::{Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -136,7 +136,31 @@ impl Host for TerminalHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: true, time: true, random: true }
+        Capabilities { read: true, time: true, random: true, http: true }
+    }
+
+    fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
+        let mut r = ureq::request(&req.method, &req.url);
+        for (name, value) in &req.headers {
+            r = r.set(name, value);
+        }
+        let result = match &req.body {
+            Some(body) => r.send_string(body),
+            None => r.call(),
+        };
+        match result {
+            Ok(resp) => {
+                let status = resp.status() as i64;
+                let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
+                Ok(HttpResponse { status, body })
+            }
+            // a non-2xx/3xx status is still a response, not a failure
+            Err(ureq::Error::Status(status, resp)) => {
+                let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
+                Ok(HttpResponse { status: status as i64, body })
+            }
+            Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
+        }
     }
 }
 

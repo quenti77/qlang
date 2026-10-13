@@ -8,7 +8,7 @@ use crate::check::Program;
 use crate::diag::Diagnostic;
 use crate::datetime;
 use crate::ids;
-use crate::host::{Host, HostError, Limits};
+use crate::host::{Host, HostError, HttpRequest, HttpResponse, Limits};
 use crate::span::Span;
 use crate::types::*;
 use crate::value::*;
@@ -1481,8 +1481,70 @@ impl<'a> Interp<'a> {
                 let draw = self.random_bits(span)? % width;
                 Value::Int((*lo as i128 + draw as i128) as i64)
             }
+            ("http", "send") => return self.http_send_call(&args[0], span),
             _ => Value::Unit,
         })
+    }
+
+    /// The id of a struct declared in the prelude, by name.
+    fn prelude_struct(&self, name: &str) -> StructId {
+        self.prog
+            .defs
+            .structs
+            .iter()
+            .position(|s| s.module == crate::check::PRELUDE_MOD && s.name == name)
+            .unwrap_or_else(|| panic!("prelude struct `{name}` not found"))
+    }
+
+    fn new_struct(&self, sid: StructId, fields: &[(&str, Value)]) -> Value {
+        let map: HashMap<String, Value> = fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+        Value::Struct(Rc::new(StructObj { def: sid, fields: RefCell::new(map) }))
+    }
+
+    fn http_ok(&self, resp: HttpResponse) -> Value {
+        let response = self.new_struct(self.prelude_struct("Response"), &[("status", Value::Int(resp.status)), ("body", Value::str(&resp.body))]);
+        self.new_struct(self.prelude_struct("Result"), &[("data", response), ("err", Value::None)])
+    }
+
+    fn http_err(&self, message: &str) -> Value {
+        let error = self.new_struct(self.prelude_struct("Error"), &[("message", Value::str(message))]);
+        self.new_struct(self.prelude_struct("Result"), &[("data", Value::None), ("err", error)])
+    }
+
+    /// `http.send(req)`: never fails the program itself, even on a connection error — it
+    /// always returns a `Result<Response, Error>` value.
+    fn http_send_call(&mut self, req: &Value, span: Span) -> R<Value> {
+        let Value::Struct(o) = req else { return self.fail("R005", "`http.send` expects a `Request`", span) };
+        let fields = o.fields.borrow();
+        let text = |k: &str| match fields.get(k) {
+            Some(Value::Str(s)) => s.to_string(),
+            _ => String::new(),
+        };
+        let method = text("method");
+        let url = text("url");
+        let body = match fields.get("body") {
+            Some(Value::Str(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        let headers: Vec<(String, String)> = match fields.get("headers") {
+            Some(Value::Map(m)) => m
+                .borrow()
+                .entries
+                .iter()
+                .filter_map(|(k, v)| match (k, v) {
+                    (Value::Str(k), Value::Str(v)) => Some((k.to_string(), v.to_string())),
+                    _ => None,
+                })
+                .collect(),
+            _ => vec![],
+        };
+        drop(fields);
+        let request = HttpRequest { method, url, headers, body };
+        match self.host.http_send(request) {
+            Ok(resp) => Ok(self.http_ok(resp)),
+            Err(HostError::Unsupported(_)) => Ok(self.http_err("http is not available in this environment")),
+            Err(HostError::Other(m)) => Ok(self.http_err(&m)),
+        }
     }
 
     #[inline(never)]

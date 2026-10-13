@@ -346,6 +346,95 @@ print(json_array([1, 2, 3]))
 }
 
 #[test]
+fn uuid_ulid_and_datetime_implement_tojson() {
+    let o = run(r#"
+let u = ulid.parse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+let id = uuid.parse("433a399f-aa94-467e-9345-239e87418042")
+let d = datetime.of(2026, 10, 13)
+if u != none and id != none then
+    print(u.to_json())
+    print(id.to_json())
+end
+print(d.to_json())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(
+        o.output,
+        "\"01ARZ3NDEKTSV4RRFFQ69G5FAV\"\n\"433a399f-aa94-467e-9345-239e87418042\"\n\"2026-10-13T00:00:00Z\"\n"
+    );
+}
+
+#[test]
+fn an_array_of_tojson_implements_tojson_itself_so_it_nests_in_json_object() {
+    let o = run(r#"
+struct Comment
+    public text: string
+end
+
+impl ToJson for Comment
+    public fun to_json(self) -> string
+        json_object({ "text": self.text })
+    end
+end
+
+struct Post
+    public title: string
+    public comments: array<Comment>
+end
+
+impl ToJson for Post
+    public fun to_json(self) -> string
+        json_object({ "title": self.title, "comments": self.comments })
+    end
+end
+
+let p = Post { title: "Hello", comments: [Comment { text: "nice" }, Comment { text: "cool" }] }
+print(p.to_json())
+print([[1, 2], [3]].to_json())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(
+        o.output,
+        "{\"title\":\"Hello\",\"comments\":[{\"text\":\"nice\"},{\"text\":\"cool\"}]}\n[[1,2],[3]]\n"
+    );
+}
+
+#[test]
+fn json_merge_lets_a_subclass_extend_its_parents_to_json_without_repeating_fields() {
+    let o = run(r#"
+struct UserEntity
+    public name: string
+    public email: string
+end
+
+impl ToJson for UserEntity
+    public fun to_json(self) -> string
+        json_object({ "name": self.name, "email": self.email })
+    end
+end
+
+struct AdminEntity extends UserEntity
+    public role: string
+end
+
+impl ToJson for AdminEntity
+    public fun to_json(self) -> string
+        json_merge(super.to_json(), json_object({ "role": self.role }))
+    end
+end
+
+print(AdminEntity { name: "Zoe", email: "zoe@example.com", role: "superadmin" }.to_json())
+print(json_merge(json_object({}), json_object({ "x": 1 })))
+print(json_merge(json_object({ "x": 1 }), json_object({})))
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(
+        o.output,
+        "{\"name\":\"Zoe\",\"email\":\"zoe@example.com\",\"role\":\"superadmin\"}\n{\"x\":1}\n{\"x\":1}\n"
+    );
+}
+
+#[test]
 fn prelude_json_parse_reads_nested_values_and_round_trips() {
     let o = run(r#"
 let parsed = Json.parse("\{\"name\": \"Zoe\", \"tags\": [\"a\", \"b\"], \"active\": true, \"parent\": null\}")

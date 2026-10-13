@@ -1518,8 +1518,40 @@ end
 print(Post { title: "Hello", views: 42 }.to_json())  -- {"title":"Hello","views":42}
 ```
 
-`json_array(items)` fait la même chose pour un tableau. `int`, `float`, `bool`
-et `string` implémentent déjà `ToJson`.
+`json_array(items)` fait la même chose pour un tableau. `int`, `float`, `bool`,
+`string`, `uuid`, `ulid` et `datetime` implémentent déjà `ToJson` ; `array<T>`
+aussi, dès que `T` l'implémente, donc un `array<Post>` se sérialise tel quel
+comme valeur d'un `json_object`, sans appeler `json_array` à la main :
+
+```
+struct Post
+  public title: string
+  public comments: array<Comment>
+end
+
+impl ToJson for Post
+  public fun to_json(self) -> string
+    json_object({ "title": self.title, "comments": self.comments })
+  end
+end
+```
+
+**Composer avec l'héritage.** `to_json` renvoie un texte déjà fermé (`"{...}"`),
+donc une sous-structure qui ajoute des champs n'a pas besoin de recopier ceux
+du parent : `json_merge` fusionne deux objets JSON déjà sérialisés, et
+`super.to_json()` donne celui du parent.
+
+```
+struct AdminEntity extends UserEntity
+  public role: string
+end
+
+impl ToJson for AdminEntity
+  public fun to_json(self) -> string
+    json_merge(super.to_json(), json_object({ "role": self.role }))
+  end
+end
+```
 
 **Décoder.** `Json.parse(texte)` renvoie un `Result<Json, Error>` : un arbre de
 valeurs JSON (chaîne, nombre, bool, `null`, tableau, objet), à lire avec

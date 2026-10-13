@@ -1482,8 +1482,41 @@ impl<'a> Interp<'a> {
                 Value::Int((*lo as i128 + draw as i128) as i64)
             }
             ("http", "send") => return self.http_send_call(&args[0], span),
+            ("regex", "matches") => Value::Bool(self.compile_regex(&text(&args[1]), span)?.is_match(&text(&args[0]))),
+            ("regex", "find") => match self.compile_regex(&text(&args[1]), span)?.find(&text(&args[0])) {
+                Some(m) => Value::str(m.as_str()),
+                None => Value::None,
+            },
+            ("regex", "find_all") => {
+                let re = self.compile_regex(&text(&args[1]), span)?;
+                let matches: Vec<Value> = re.find_iter(&text(&args[0])).map(|m| Value::str(m.as_str())).collect();
+                Value::array(matches)
+            }
+            ("regex", "captures") => {
+                let re = self.compile_regex(&text(&args[1]), span)?;
+                match re.captures(&text(&args[0])) {
+                    Some(caps) => {
+                        let groups: Vec<Value> = caps.iter().map(|g| g.map_or(Value::None, |m| Value::str(m.as_str()))).collect();
+                        Value::array(groups)
+                    }
+                    None => Value::None,
+                }
+            }
+            ("regex", "replace") => Value::str(&self.compile_regex(&text(&args[1]), span)?.replace(&text(&args[0]), text(&args[2]).as_str())),
+            ("regex", "replace_all") => Value::str(&self.compile_regex(&text(&args[1]), span)?.replace_all(&text(&args[0]), text(&args[2]).as_str())),
+            ("regex", "split") => {
+                let re = self.compile_regex(&text(&args[1]), span)?;
+                let parts: Vec<Value> = re.split(&text(&args[0])).map(Value::str).collect();
+                Value::array(parts)
+            }
             _ => Value::Unit,
         })
+    }
+
+    /// Compiles a regular expression; a malformed pattern stops the program (like a
+    /// malformed date in `datetime.of`), it is not something to recover from at run time.
+    fn compile_regex(&self, pattern: &str, span: Span) -> R<regex::Regex> {
+        regex::Regex::new(pattern).map_err(|e| self.error("R070", format!("invalid regular expression: {e}"), span))
     }
 
     /// The id of a struct declared in the prelude, by name.

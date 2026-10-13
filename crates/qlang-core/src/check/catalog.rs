@@ -147,6 +147,31 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
         "send(req: Request) -> Result<Response, Error>",
         "Sends an HTTP request and waits for the response. Needs network access. A connection failure is `err`, not a crash.",
     ),
+    ("regex", "function", "matches", "matches(text: string, pattern: string) -> bool", "Whether `pattern` matches anywhere in `text`."),
+    ("regex", "function", "find", "find(text: string, pattern: string) -> string?", "The first match of `pattern` in `text`, or `none`."),
+    ("regex", "function", "find_all", "find_all(text: string, pattern: string) -> array<string>", "Every match of `pattern` in `text`, in order."),
+    (
+        "regex",
+        "function",
+        "captures",
+        "captures(text: string, pattern: string) -> array<string?>?",
+        "The first match's groups (index 0 is the whole match, 1 and up are `(...)` groups), or `none` if `pattern` does not match. A group that did not participate (inside a `?` or an unmatched branch) is `none`.",
+    ),
+    (
+        "regex",
+        "function",
+        "replace",
+        "replace(text: string, pattern: string, replacement: string) -> string",
+        "`text` with the first match of `pattern` replaced by `replacement`. `$1`, `$name`... in `replacement` refer to capture groups.",
+    ),
+    (
+        "regex",
+        "function",
+        "replace_all",
+        "replace_all(text: string, pattern: string, replacement: string) -> string",
+        "`text` with every match of `pattern` replaced by `replacement`. `$1`, `$name`... in `replacement` refer to capture groups.",
+    ),
+    ("regex", "function", "split", "split(text: string, pattern: string) -> array<string>", "`text` cut at every match of `pattern` (the matches themselves are dropped)."),
 ];
 
 /// Built-in functions: (name, signature, explanation).

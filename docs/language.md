@@ -64,6 +64,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
+    - [Expressions régulières](#expressions-régulières)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
     - [Prélude : `http`](#prélude--http)
@@ -1409,6 +1410,41 @@ end
   dernier jour (31 janvier + 1 mois = 28 ou 29 février).
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
+### Expressions régulières
+
+L'espace de noms `regex` propose les opérations courantes sur les expressions
+régulières, à partir de deux chaînes (`text`, `pattern`) :
+
+```
+print(regex.matches("hello world", "wor.d"))          --> true
+print(regex.find("hello world", "w\\w+"))             --> "world"
+print(regex.find_all("a1 b2 c3", "\\d"))               --> ["1", "2", "3"]
+print(regex.replace("a1 b2", "\\d", "#"))              --> "a# b2"
+print(regex.replace_all("a1 b2", "\\d", "#"))          --> "a# b#"
+print(regex.split("a,b,,c", ","))                     --> ["a", "b", "", "c"]
+```
+
+Une chaîne qlang n'autorise que les échappements `\n \t \r \0 \\ \" \{ \}` :
+un `\d` ou `\w` de la syntaxe regex doit s'écrire `\\d`, `\\w`... dans le
+texte du motif (un seul `\` littéral dans la chaîne).
+
+`regex.captures(text, pattern)` donne les groupes de la première
+correspondance (`array<string?>?`) : l'indice 0 est la correspondance
+entière, 1 et plus les groupes `(...)`. `none` si `pattern` ne correspond pas
+du tout ; un groupe qui n'a pas participé (dans un `?` ou une branche non
+prise) est `none` lui aussi.
+
+```
+let caps = regex.captures("2026-10-13", "(\\d+)-(\\d+)-(\\d+)")
+if caps != none then
+  print(caps[1])  --> "2026"
+end
+```
+
+Une syntaxe d'expression régulière invalide est une erreur `R070` : c'est une
+erreur de programmation (comme une date qui n'existe pas), pas une
+condition à récupérer avec `Result`.
 
 ### Prélude : `Result` et `Error`
 

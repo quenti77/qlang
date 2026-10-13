@@ -3,6 +3,10 @@
 //! the synchronous `postgres` crate — no async runtime needed, the interpreter is
 //! synchronous too). Connections are kept open in a table keyed by a handle qlang only
 //! ever sees as the `conn: int` field of its `Db` struct.
+//!
+//! qlang code always writes `?` placeholders, whichever database it targets: SQLite
+//! already wants that syntax, and [`rewrite_placeholders`] turns them into Postgres's
+//! `$1, $2...` before the query reaches it.
 
 use qlang_core::host::{HostError, SqlRow, SqlValue};
 use std::collections::HashMap;
@@ -60,6 +64,31 @@ impl SqlConn for SqliteConn {
 
 struct PostgresConn(postgres::Client);
 
+/// qlang code always writes `?` placeholders, same as SQLite; Postgres wants `$1, $2...`
+/// instead. Rewrites bare `?` outside of `'...'` string literals (so a literal `?` inside
+/// a quoted string is left alone); `''` inside a string toggles the state twice, which
+/// correctly leaves it unchanged, matching SQL's own escaping for a quote inside a string.
+fn rewrite_placeholders(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut n = 0u32;
+    let mut in_string = false;
+    for c in sql.chars() {
+        match c {
+            '\'' => {
+                in_string = !in_string;
+                out.push(c);
+            }
+            '?' if !in_string => {
+                n += 1;
+                out.push('$');
+                out.push_str(&n.to_string());
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn to_pg_params(params: &[SqlValue]) -> Vec<Box<dyn postgres::types::ToSql + Sync>> {
     params
         .iter()
@@ -95,7 +124,7 @@ impl SqlConn for PostgresConn {
     fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
         let bound = to_pg_params(params);
         let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b.as_ref()).collect();
-        let rows = self.0.query(sql, &refs).map_err(|e| e.to_string())?;
+        let rows = self.0.query(&rewrite_placeholders(sql), &refs).map_err(|e| e.to_string())?;
         Ok(rows
             .iter()
             .map(|row| SqlRow { columns: row.columns().iter().enumerate().map(|(i, c)| (c.name().to_string(), pg_value(row, i))).collect() })
@@ -105,7 +134,27 @@ impl SqlConn for PostgresConn {
     fn execute(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64, String> {
         let bound = to_pg_params(params);
         let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b.as_ref()).collect();
-        self.0.execute(sql, &refs).map_err(|e| e.to_string())
+        self.0.execute(&rewrite_placeholders(sql), &refs).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_placeholders;
+
+    #[test]
+    fn rewrites_bare_question_marks_in_order() {
+        assert_eq!(rewrite_placeholders("SELECT * FROM t WHERE a = ? AND b = ?"), "SELECT * FROM t WHERE a = $1 AND b = $2");
+    }
+
+    #[test]
+    fn leaves_a_question_mark_inside_a_string_literal_alone() {
+        assert_eq!(rewrite_placeholders("SELECT ? , 'what?' FROM t"), "SELECT $1 , 'what?' FROM t");
+    }
+
+    #[test]
+    fn handles_an_escaped_quote_inside_a_string() {
+        assert_eq!(rewrite_placeholders("SELECT 'it''s a ?' , ?"), "SELECT 'it''s a ?' , $1");
     }
 }
 

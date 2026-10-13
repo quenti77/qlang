@@ -486,4 +486,7 @@ pub struct Resolutions {
     /// `value.class()`: the concrete struct or enum name of the value at run time
     /// (works even when `value`'s static type is a trait or a generic parameter).
     pub class_calls: HashSet<NodeId>,
+    /// A call on the prelude's `Db` (`query`, `execute`, `close`): which native operation
+    /// it is, since `Db` declares no methods in qlang for these (purely native).
+    pub db_calls: HashMap<NodeId, &'static str>,
 }

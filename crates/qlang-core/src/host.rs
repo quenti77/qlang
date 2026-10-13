@@ -22,6 +22,25 @@ pub struct Capabilities {
     pub random: bool,
     /// `http.send(...)` is available (the host can reach the network).
     pub http: bool,
+    /// `Db.connect(...)` is available (the host can reach a database).
+    pub sql: bool,
+}
+
+/// A column value read from, or bound to, a SQL statement. Null is explicit: a database
+/// column has no equivalent of qlang's `none` by default, so both sides must say so.
+#[derive(Clone, Debug)]
+pub enum SqlValue {
+    Null,
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Bool(bool),
+}
+
+/// One row of a `Db.query` result: `(column name, value)`, in column order.
+#[derive(Clone, Debug)]
+pub struct SqlRow {
+    pub columns: Vec<(String, SqlValue)>,
 }
 
 /// A request given to [`Host::http_send`]: the fields of the prelude's `Request` struct,
@@ -73,6 +92,28 @@ pub trait Host {
         Err(HostError::Unsupported("http"))
     }
 
+    /// Open a connection (`sqlite://path`, `postgres://...`...), returning a handle for
+    /// the other `sql_*` methods. What the handle means is entirely up to the host.
+    fn sql_connect(&mut self, _url: &str) -> Result<u64, HostError> {
+        Err(HostError::Unsupported("sql"))
+    }
+
+    /// Run a statement that returns rows (`SELECT`), with positional `?` parameters.
+    fn sql_query(&mut self, _conn: u64, _sql: &str, _params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+        Err(HostError::Unsupported("sql"))
+    }
+
+    /// Run a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL),
+    /// returning the number of rows affected.
+    fn sql_execute(&mut self, _conn: u64, _sql: &str, _params: Vec<SqlValue>) -> Result<u64, HostError> {
+        Err(HostError::Unsupported("sql"))
+    }
+
+    /// Close a connection opened by `sql_connect`.
+    fn sql_close(&mut self, _conn: u64) -> Result<(), HostError> {
+        Err(HostError::Unsupported("sql"))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }
@@ -122,6 +163,13 @@ pub struct MemoryHost {
     pub seed: Option<u64>,
     /// Canned responses for `http.send`, keyed by `(method, url)`. `None`: no network.
     pub http: Option<std::collections::HashMap<(String, String), Result<HttpResponse, String>>>,
+    /// Canned results for `sql_query`/`sql_execute`, keyed by the exact SQL text given.
+    /// `None`: no database. A query not in the map is `Ok(&[])` (easier to seed in tests
+    /// than making every untested statement an error).
+    pub sql: Option<std::collections::HashMap<String, Result<Vec<SqlRow>, String>>>,
+    /// Set by `sql_close`, so a later `sql_query`/`sql_execute` can report the connection
+    /// is gone, the same way a real driver would.
+    pub sql_closed: bool,
 }
 
 impl MemoryHost {
@@ -158,7 +206,13 @@ impl Host for MemoryHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: self.allow_read, time: self.clock.is_some(), random: self.seed.is_some(), http: self.http.is_some() }
+        Capabilities {
+            read: self.allow_read,
+            time: self.clock.is_some(),
+            random: self.seed.is_some(),
+            http: self.http.is_some(),
+            sql: self.sql.is_some(),
+        }
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
@@ -168,6 +222,47 @@ impl Host for MemoryHost {
             Some(Err(m)) => Err(HostError::Other(m.clone())),
             None => Err(HostError::Other("no canned response for this request".to_string())),
         }
+    }
+
+    fn sql_connect(&mut self, _url: &str) -> Result<u64, HostError> {
+        if self.sql.is_some() {
+            self.sql_closed = false;
+            Ok(1)
+        } else {
+            Err(HostError::Unsupported("sql"))
+        }
+    }
+
+    fn sql_query(&mut self, _conn: u64, sql: &str, _params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+        if self.sql_closed {
+            return Err(HostError::Other("this database connection is closed".to_string()));
+        }
+        let table = self.sql.as_ref().ok_or(HostError::Unsupported("sql"))?;
+        match table.get(sql) {
+            Some(Ok(rows)) => Ok(rows.clone()),
+            Some(Err(m)) => Err(HostError::Other(m.clone())),
+            None => Ok(vec![]),
+        }
+    }
+
+    fn sql_execute(&mut self, _conn: u64, sql: &str, _params: Vec<SqlValue>) -> Result<u64, HostError> {
+        if self.sql_closed {
+            return Err(HostError::Other("this database connection is closed".to_string()));
+        }
+        let table = self.sql.as_ref().ok_or(HostError::Unsupported("sql"))?;
+        match table.get(sql) {
+            Some(Ok(rows)) => Ok(rows.len() as u64),
+            Some(Err(m)) => Err(HostError::Other(m.clone())),
+            None => Ok(0),
+        }
+    }
+
+    fn sql_close(&mut self, _conn: u64) -> Result<(), HostError> {
+        if self.sql.is_none() {
+            return Err(HostError::Unsupported("sql"));
+        }
+        self.sql_closed = true;
+        Ok(())
     }
 
     fn now_ms(&mut self) -> Result<i64, HostError> {

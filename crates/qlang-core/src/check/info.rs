@@ -500,7 +500,10 @@ impl Checker {
         let collected = self.collect.take()?;
         self.docs = Docs::collect(&self.modules);
         let mut info = Info::default();
-        let mut types: BTreeMap<String, Ty> = BTreeMap::new();
+        // Several distinct types can share the same display name (e.g. an unrelated
+        // generic parameter `T` in two different structs, or in the prelude): keep every
+        // one of them so `members_of` is run on each, instead of picking the first found.
+        let mut types: BTreeMap<String, Vec<Ty>> = BTreeMap::new();
 
         for r in collected.exprs {
             let ty = self.resolve(&r.ty);
@@ -511,7 +514,10 @@ impl Checker {
             let label = self.label_of(&r, &ty);
             let doc = self.doc_of(&r);
             if r.statics.is_none() {
-                types.entry(shown.clone()).or_insert(ty);
+                let bucket = types.entry(shown.clone()).or_default();
+                if !bucket.contains(&ty) {
+                    bucket.push(ty.clone());
+                }
             }
             info.exprs.push(ExprInfo { loc: self.loc(r.span), ty: shown, label, statics: r.statics, doc });
         }
@@ -535,8 +541,8 @@ impl Checker {
             .iter()
             .map(|(name, detail, doc)| Member { name: name.to_string(), kind: "function", detail: detail.to_string(), loc: None, doc: Some(doc.to_string()), public: true })
             .collect();
-        for (ty_name, ty) in types {
-            let members = self.members_of(&ty);
+        for (ty_name, tys) in types {
+            let members = dedup(tys.iter().flat_map(|ty| self.members_of(ty)).collect());
             if !members.is_empty() {
                 info.members.insert(ty_name, members);
             }
@@ -654,6 +660,19 @@ mod tests {
         assert_eq!(names, ["x", "show"]);
         assert_eq!(info.members["P"][1].detail, "show() -> string");
         assert!(info.locals.iter().any(|l| l.name == "q" && l.ty == "P"));
+    }
+
+    /// The prelude's own unbound generic parameter `T` (in `Result<T, E>`) must not steal
+    /// the display name `T` from an unrelated, trait-bound `T` elsewhere in the program.
+    #[test]
+    fn same_named_generic_params_keep_their_own_members() {
+        let info = info_of(
+            "trait Nameable\n  fun name(self) -> string\nend\n\
+             struct Holder<T: Nameable>\n  public item: T\nend\n\
+             impl<T: Nameable> Holder<T>\n  public fun show(self) -> string\n    self.item.name()\n  end\nend\n",
+        );
+        let names: Vec<&str> = info.members["T"].iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["name"]);
     }
 
     #[test]

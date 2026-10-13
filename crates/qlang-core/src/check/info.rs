@@ -341,6 +341,16 @@ impl Checker {
             }
             _ => {}
         }
+        if matches!(ty, Ty::Struct(..) | Ty::Enum(_) | Ty::Trait(..) | Ty::Param(_)) {
+            out.push(Member {
+                name: "class".to_string(),
+                kind: "method",
+                detail: "class() -> string".to_string(),
+                loc: None,
+                doc: Some("The name of the value's concrete type, as a string.".to_string()),
+                public: true,
+            });
+        }
         dedup(out)
     }
 
@@ -419,6 +429,7 @@ impl Checker {
                     });
                 }
                 self.impl_methods(&Ty::Enum(*eid), false, &mut out);
+                out.push(class_member());
             }
             StaticKey::Type(TypeRef::Struct(sid)) => {
                 for (asid, _) in self.defs.ancestry(*sid, &[]) {
@@ -436,6 +447,7 @@ impl Checker {
                     let params: Vec<Ty> = def.tparams.iter().map(|p| Ty::Param(*p)).collect();
                     self.impl_methods(&Ty::Struct(asid, params), false, &mut out);
                 }
+                out.push(class_member());
             }
         }
         dedup(out)
@@ -595,6 +607,18 @@ impl Checker {
     }
 }
 
+/// `Point.class`: the static counterpart of `.class()`, offered on every struct and enum.
+fn class_member() -> Member {
+    Member {
+        name: "class".to_string(),
+        kind: "constant",
+        detail: "class: string".to_string(),
+        loc: None,
+        doc: Some("The name of the type, as a string.".to_string()),
+        public: true,
+    }
+}
+
 fn dedup(items: Vec<Member>) -> Vec<Member> {
     let mut seen = std::collections::HashSet::new();
     items.into_iter().filter(|m| seen.insert(m.name.clone())).collect()
@@ -657,7 +681,7 @@ mod tests {
         let info = info_of("struct P\n  public x: int\nend\nimpl P\n  public fun show(self) -> string\n    return \"p\"\n  end\nend\nlet p = P { x: 1 }\nlet q = p\n");
         assert!(info.exprs.iter().any(|e| e.ty == "P"));
         let names: Vec<&str> = info.members["P"].iter().map(|m| m.name.as_str()).collect();
-        assert_eq!(names, ["x", "show"]);
+        assert_eq!(names, ["x", "show", "class"]);
         assert_eq!(info.members["P"][1].detail, "show() -> string");
         assert!(info.locals.iter().any(|l| l.name == "q" && l.ty == "P"));
     }
@@ -672,7 +696,7 @@ mod tests {
              impl<T: Nameable> Holder<T>\n  public fun show(self) -> string\n    self.item.name()\n  end\nend\n",
         );
         let names: Vec<&str> = info.members["T"].iter().map(|m| m.name.as_str()).collect();
-        assert_eq!(names, ["name"]);
+        assert_eq!(names, ["class", "name"]);
     }
 
     #[test]

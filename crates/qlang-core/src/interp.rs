@@ -576,6 +576,7 @@ impl<'a> Interp<'a> {
                     _ => Value::Unit,
                 });
             }
+            Some(PathRes::ClassName(n)) => return Ok(Value::str(n)),
             Some(PathRes::Fn(fid)) => return Ok(self.fn_value(*fid)),
             Some(PathRes::Global(m, n)) => {
                 return match self.envs[*m].get(n) {
@@ -698,6 +699,9 @@ impl<'a> Interp<'a> {
         if let Value::None = recv {
             return self.fail("R006", format!("cannot call `.{}()`: the value is `none`", name.name), span);
         }
+        if self.prog.res.class_calls.contains(&self.cur_call) {
+            return Ok(Value::str(self.class_name_of(&recv)));
+        }
         // A call made through a trait (a generic bound or a trait-typed value) goes to the
         // user's impl; a call on a concrete built-in type goes to the built-in method.
         // The checker decided which, so that both sides agree.
@@ -718,6 +722,15 @@ impl<'a> Interp<'a> {
             }
         }
         self.fail("R008", format!("this value has no method `{}`", name.name), span)
+    }
+
+    /// The name of a value's concrete struct or enum, for `.class()`.
+    fn class_name_of(&self, v: &Value) -> &str {
+        match v {
+            Value::Struct(o) => &self.prog.defs.structs[o.def].name,
+            Value::Enum(eid, _) => &self.prog.defs.enums[*eid].name,
+            _ => "?",
+        }
     }
 
     // ---------------------------------------------------------- method lookup

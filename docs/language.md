@@ -45,6 +45,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Visibilité](#visibilité)
     - [Héritage](#héritage)
     - [Copier une valeur](#copier-une-valeur)
+    - [Le nom du type : `.class`](#le-nom-du-type--class)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Un trait comme type](#un-trait-comme-type)
     - [Surcharger un opérateur](#surcharger-un-opérateur)
@@ -769,6 +770,52 @@ impl Point
   end
 end
 ```
+
+### Le nom du type : `.class`
+
+`Point.class` donne le nom d'une structure ou d'une énumération, sous forme de
+texte, à la compilation :
+
+```
+print(Point.class) --> "Point"
+```
+
+`valeur.class()` donne le même nom, mais à l'exécution, à partir d'une valeur
+concrète. C'est surtout utile quand le type statique de `valeur` ne dit pas
+tout : un paramètre générique borné par un trait (`T: Nameable`), ou une
+variable typée par un trait, peuvent cacher des types concrets différents
+selon l'appel :
+
+```
+trait Nameable
+  fun name(self) -> string
+end
+
+struct Dog
+  public n: string
+end
+
+impl Nameable for Dog
+  public fun name(self) -> string
+    self.n
+  end
+end
+
+struct Holder<T: Nameable>
+  public item: T
+end
+
+impl<T: Nameable> Holder<T>
+  public fun describe(self) -> string
+    "{self.item.class()}: {self.item.name()}"
+  end
+end
+
+print(Holder<Dog> { item: Dog { n: "Rex" } }.describe()) --> "Dog: Rex"
+```
+
+Si un type définit lui-même une méthode `class`, c'est elle qui est appelée :
+`.class()` est un comportement par défaut, pas un mot réservé.
 
 ---
 

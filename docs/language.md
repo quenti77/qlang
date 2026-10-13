@@ -68,6 +68,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
     - [Prélude : `http`](#prélude--http)
+    - [Prélude : `Db`](#prélude--db)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1592,6 +1593,43 @@ let res = http.send(Request {
   body: "\{\"name\": \"Rex\"\}",
 })
 ```
+
+### Prélude : `Db`
+
+`Db.connect(url)` ouvre une connexion à une base de données ; le schéma de
+l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`, ou
+`postgres://utilisateur:mot_de_passe@hôte/base`.
+
+```
+let c = Db.connect("sqlite://data.db")
+if c.is_err() then
+  print(c.unwrap_err().message)
+else
+  let db = c.unwrap()
+  let r = db.execute("CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY, name TEXT)", [])
+  db.execute("INSERT INTO people (name) VALUES (?)", [Json.string("Rex")])
+
+  let rows = db.query("SELECT id, name FROM people", [])
+  if rows.is_ok() then
+    for row in rows.unwrap() do
+      print(row.get("name", Json.null()).as_string())
+    end
+  end
+  db.close()
+end
+```
+
+- **`query(sql, params)`** renvoie `Result<array<map<string, Json>>, Error>` : une ligne
+  par résultat, chaque colonne devenant une valeur `Json` (donc `row.get("col", ...)` ou
+  `row["col"]`, puis `as_string()`/`as_number()`/`as_bool()`).
+- **`execute(sql, params)`** (pour `INSERT`/`UPDATE`/`DELETE`/DDL) renvoie
+  `Result<int, Error>` : le nombre de lignes affectées.
+- **`params`** est un `array<Json>` (`Json.string(...)`, `Json.number(...)`...) : ces
+  valeurs remplacent les `?` de `sql`, dans l'ordre.
+- **`close()`** ferme la connexion ; `Result<bool, Error>`.
+- Une erreur de connexion ou de requête (SQL invalide, table absente...) donne un
+  `Result::err`, jamais un arrêt du programme — comme `http.send`.
+- Besoin d'un accès base de données côté hôte, comme pour `http`.
 
 ## 15. Fins de ligne
 

@@ -642,6 +642,12 @@ struct Response
     public status: int
     public body: string
 end
+
+--" A SQL database connection, opened with `Db.connect(url)`. `query`, `execute` and
+`close` are native: this struct declares no method in qlang. --"
+struct Db
+    conn: int
+end
 "#;
 
 fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {

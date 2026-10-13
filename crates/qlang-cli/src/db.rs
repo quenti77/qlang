@@ -89,19 +89,49 @@ fn rewrite_placeholders(sql: &str) -> String {
     out
 }
 
-fn to_pg_params(params: &[SqlValue]) -> Vec<Box<dyn postgres::types::ToSql + Sync>> {
-    params
-        .iter()
-        .map(|v| -> Box<dyn postgres::types::ToSql + Sync> {
-            match v {
-                SqlValue::Null => Box::new(Option::<String>::None),
-                SqlValue::Int(i) => Box::new(*i),
-                SqlValue::Float(f) => Box::new(*f),
-                SqlValue::Text(s) => Box::new(s.clone()),
-                SqlValue::Bool(b) => Box::new(*b),
-            }
-        })
-        .collect()
+/// Binds a [`SqlValue`] to whichever Postgres column type the statement actually declares
+/// for that placeholder: `Json`'s only number kind is a float, but a value like `5` must
+/// still bind into an `INTEGER` column (Postgres never implicitly turns a float8 parameter
+/// into an int4 one, so a single fixed Rust type per `SqlValue` variant is not enough).
+#[derive(Debug)]
+struct PgValue<'a>(&'a SqlValue);
+
+impl postgres::types::ToSql for PgValue<'_> {
+    fn to_sql(&self, ty: &postgres::types::Type, out: &mut bytes::BytesMut) -> Result<postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        use postgres::types::Type;
+        match self.0 {
+            SqlValue::Null => Ok(postgres::types::IsNull::Yes),
+            SqlValue::Bool(b) => b.to_sql(ty, out),
+            SqlValue::Text(s) => s.to_sql(ty, out),
+            SqlValue::Int(i) => match *ty {
+                Type::INT2 => (*i as i16).to_sql(ty, out),
+                Type::INT4 => (*i as i32).to_sql(ty, out),
+                Type::FLOAT4 => (*i as f32).to_sql(ty, out),
+                Type::FLOAT8 => (*i as f64).to_sql(ty, out),
+                Type::TEXT | Type::VARCHAR | Type::BPCHAR => i.to_string().to_sql(ty, out),
+                _ => i.to_sql(ty, out),
+            },
+            SqlValue::Float(f) => match *ty {
+                Type::FLOAT4 => (*f as f32).to_sql(ty, out),
+                Type::INT2 => (*f as i16).to_sql(ty, out),
+                Type::INT4 => (*f as i32).to_sql(ty, out),
+                Type::INT8 => (*f as i64).to_sql(ty, out),
+                Type::TEXT | Type::VARCHAR | Type::BPCHAR => f.to_string().to_sql(ty, out),
+                _ => f.to_sql(ty, out),
+            },
+        }
+    }
+
+    fn accepts(ty: &postgres::types::Type) -> bool {
+        use postgres::types::Type;
+        matches!(*ty, Type::BOOL | Type::INT2 | Type::INT4 | Type::INT8 | Type::FLOAT4 | Type::FLOAT8 | Type::TEXT | Type::VARCHAR | Type::BPCHAR)
+    }
+
+    postgres::types::to_sql_checked!();
+}
+
+fn to_pg_params(params: &[SqlValue]) -> Vec<PgValue<'_>> {
+    params.iter().map(PgValue).collect()
 }
 
 /// Common scalar types are read as the matching `SqlValue`; anything else (dates, uuid,
@@ -123,7 +153,7 @@ fn pg_value(row: &postgres::Row, i: usize) -> SqlValue {
 impl SqlConn for PostgresConn {
     fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
         let bound = to_pg_params(params);
-        let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b.as_ref()).collect();
+        let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b as &(dyn postgres::types::ToSql + Sync)).collect();
         let rows = self.0.query(&rewrite_placeholders(sql), &refs).map_err(|e| e.to_string())?;
         Ok(rows
             .iter()
@@ -133,14 +163,22 @@ impl SqlConn for PostgresConn {
 
     fn execute(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64, String> {
         let bound = to_pg_params(params);
-        let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b.as_ref()).collect();
+        let refs: Vec<&(dyn postgres::types::ToSql + Sync)> = bound.iter().map(|b| b as &(dyn postgres::types::ToSql + Sync)).collect();
         self.0.execute(&rewrite_placeholders(sql), &refs).map_err(|e| e.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::rewrite_placeholders;
+    use super::{rewrite_placeholders, wants_tls};
+
+    #[test]
+    fn wants_tls_only_when_sslmode_asks_for_it() {
+        assert!(!wants_tls("postgres://localhost/db"));
+        assert!(!wants_tls("postgres://localhost/db?sslmode=disable"));
+        assert!(wants_tls("postgres://localhost/db?sslmode=require"));
+        assert!(wants_tls("postgres://localhost/db?user=x&sslmode=verify-full"));
+    }
 
     #[test]
     fn rewrites_bare_question_marks_in_order() {
@@ -158,6 +196,26 @@ mod tests {
     }
 }
 
+/// Opens a Postgres connection, in TLS if the URL asks for it
+/// (`?sslmode=require`/`prefer`/`verify-ca`/`verify-full`; absent or `disable` is a plain
+/// connection, as before). The certificate is always verified against Mozilla's root
+/// store (`webpki-roots`, bundled so this works the same in every build): there is no
+/// "encrypt but don't check who to" mode here, unlike libpq's own `require`.
+fn wants_tls(url: &str) -> bool {
+    url.split(['?', '&']).skip(1).any(|p| matches!(p, "sslmode=require" | "sslmode=prefer" | "sslmode=verify-ca" | "sslmode=verify-full"))
+}
+
+fn pg_connect(url: &str) -> Result<postgres::Client, HostError> {
+    if !wants_tls(url) {
+        return postgres::Client::connect(url, postgres::NoTls).map_err(|e| HostError::Other(e.to_string()));
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+    let tls = tokio_postgres_rustls::MakeRustlsConnect::new(config);
+    postgres::Client::connect(url, tls).map_err(|e| HostError::Other(e.to_string()))
+}
+
 // --------------------------------------------------------------------- table
 
 /// Open connections, keyed by the handle given to qlang as `Db.conn`.
@@ -172,7 +230,7 @@ impl SqlConns {
         let conn: Box<dyn SqlConn> = if let Some(path) = url.strip_prefix("sqlite://") {
             Box::new(SqliteConn(rusqlite::Connection::open(path).map_err(|e| HostError::Other(e.to_string()))?))
         } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-            Box::new(PostgresConn(postgres::Client::connect(url, postgres::NoTls).map_err(|e| HostError::Other(e.to_string()))?))
+            Box::new(PostgresConn(pg_connect(url)?))
         } else {
             return Err(HostError::Other(format!("unknown database URL \"{url}\" (use sqlite://... or postgres://...)")));
         };

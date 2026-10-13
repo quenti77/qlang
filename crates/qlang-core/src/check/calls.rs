@@ -482,7 +482,9 @@ impl Checker {
                     ret: result(Ty::Array(Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])))))),
                 }),
                 "execute" => Some(CallSig { name: "Db.execute".to_string(), tparams: vec![], params: vec![Ty::Str, json_array], ret: result(Ty::Int) }),
-                "close" => Some(CallSig { name: "Db.close".to_string(), tparams: vec![], params: vec![], ret: result(Ty::Bool) }),
+                "close" | "begin" | "commit" | "rollback" => {
+                    Some(CallSig { name: format!("Db.{}", name.name), tparams: vec![], params: vec![], ret: result(Ty::Bool) })
+                }
                 _ => None,
             };
             if let Some(sig) = sig {
@@ -492,6 +494,9 @@ impl Checker {
                 self.res.db_calls.insert(e.id, match name.name.as_str() {
                     "query" => "query",
                     "execute" => "execute",
+                    "begin" => "begin",
+                    "commit" => "commit",
+                    "rollback" => "rollback",
                     _ => "close",
                 });
                 return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);

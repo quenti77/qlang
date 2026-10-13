@@ -502,6 +502,54 @@ print(Weird {}.class())
 }
 
 #[test]
+fn regex_matches_find_and_find_all() {
+    let o = run(r#"
+print(regex.matches("hello world", "wor.d"))
+print(regex.matches("hello world", "^world"))
+print(regex.find("hello world", "w\\w+"))
+print(regex.find_all("a1 b2 c3", "\\d"))
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "true\nfalse\nworld\n[\"1\", \"2\", \"3\"]\n");
+}
+
+#[test]
+fn regex_captures_groups_and_missing_groups() {
+    let o = run(r#"
+let caps = regex.captures("2026-10-13", "(\\d+)-(\\d+)-(\\d+)")
+if caps != none then
+    print(caps[0])
+    print(caps[1])
+end
+print(regex.captures("no date here", "(\\d+)-(\\d+)") == none)
+
+let partial = regex.captures("abc", "(a)(x)?(bc)?")
+if partial != none then
+    print(partial[2] == none)
+    print(partial[3])
+end
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "2026-10-13\n2026\ntrue\ntrue\nbc\n");
+}
+
+#[test]
+fn regex_replace_replace_all_and_split() {
+    let o = run(r##"
+print(regex.replace("a1 b2", "\\d", "#"))
+print(regex.replace_all("a1 b2", "\\d", "#"))
+print(regex.split("a,b,,c", ","))
+"##);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "a# b2\na# b#\n[\"a\", \"b\", \"\", \"c\"]\n");
+}
+
+#[test]
+fn an_invalid_regex_pattern_stops_the_program() {
+    assert!(err(r#"print(regex.matches("x", "("))"#).starts_with("R070"));
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

@@ -63,6 +63,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
+    - [Prélude : `Result` et `Error`](#prélude--result-et-error)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1347,6 +1348,49 @@ end
   dernier jour (31 janvier + 1 mois = 28 ou 29 février).
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
+### Prélude : `Result` et `Error`
+
+Deux types sont disponibles dans tout fichier, **sans `import`** :
+
+```
+struct Error
+  public message: string
+end
+
+struct Result<T, E>
+  -- data et err sont privés : on y accède avec les méthodes ci-dessous
+end
+```
+
+`Result<T, E>` représente soit une valeur (`ok`), soit une erreur (`err`) :
+
+```
+fun divide(a: int, b: int) -> Result<int, Error>
+  if b == 0 then
+    return Result<int, Error>.err(Error { message: "division by zero" })
+  end
+  Result<int, Error>.ok(a div b)
+end
+
+let r = divide(10, 0)
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  print(r.unwrap())
+end
+```
+
+- `Result<T, E>.ok(valeur)` et `Result<T, E>.err(erreur)` construisent le résultat.
+  `T` et `E` ne se déduisent pas des arguments : ils s'écrivent sur `Result<...>`
+  avant le `.` (pas de sucre `?` de propagation : on déballe à la main).
+- `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
+- `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
+  programme (`panic`) si on se trompe de cas.
+- `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou
+  `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
+  prélude, exactement comme une variable locale masque une variable de portée
+  plus large.
 
 ## 15. Fins de ligne
 

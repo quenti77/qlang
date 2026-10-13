@@ -109,6 +109,56 @@ print(db.query("SELECT 1", [Json.number(1.0), Json.string("x"), Json.boolean(tru
 }
 
 #[test]
+fn begin_commit_and_rollback_send_the_matching_sql() {
+    let mut m = HashMap::new();
+    m.insert("BEGIN".to_string(), Ok(vec![]));
+    m.insert("COMMIT".to_string(), Ok(vec![]));
+    m.insert("ROLLBACK".to_string(), Ok(vec![]));
+    let host = host_with(m);
+    let out = exec(
+        r#"
+let db = Db.connect("sqlite://x.db").unwrap()
+print(db.begin().unwrap())
+print(db.commit().unwrap())
+print(db.rollback().unwrap())
+"#,
+        host,
+    );
+    assert_eq!(out, "true\ntrue\ntrue\n");
+}
+
+#[test]
+fn a_failed_commit_is_a_result_err_not_a_crash() {
+    let mut m = HashMap::new();
+    m.insert("BEGIN".to_string(), Ok(vec![]));
+    m.insert("COMMIT".to_string(), Err("no transaction in progress".to_string()));
+    let host = host_with(m);
+    let out = exec(
+        r#"
+let db = Db.connect("sqlite://x.db").unwrap()
+db.begin()
+let r = db.commit()
+if r.is_err() then
+    print(r.unwrap_err().message)
+end
+"#,
+        host,
+    );
+    assert_eq!(out, "no transaction in progress\n");
+}
+
+/// A regression guard: `begin`/`commit`/`rollback` are resolved natively (never written
+/// as qlang calling `self.execute(...)` from inside the always-checked prelude), so a
+/// program that never touches `Db` still compiles on a host without the `sql` capability.
+/// Putting that call in the prelude's own source instead made every program need `sql`
+/// to compile at all, since the prelude's bodies are checked unconditionally.
+#[test]
+fn programs_that_never_use_db_do_not_need_the_sql_capability() {
+    let out = exec("print(1 + 1)\nlet j = Json.string(\"x\")\nprint(j.as_string())\n", MemoryHost::default());
+    assert_eq!(out, "2\nx\n");
+}
+
+#[test]
 fn a_query_after_close_is_a_result_err() {
     let host = host_with(HashMap::new());
     let out = exec(

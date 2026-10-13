@@ -663,6 +663,30 @@ fn db_members() -> Vec<Member> {
             doc: Some("Closes the connection.".to_string()),
             public: true,
         },
+        Member {
+            name: "begin".to_string(),
+            kind: "method",
+            detail: "begin() -> Result<bool, Error>".to_string(),
+            loc: None,
+            doc: Some("Starts a transaction: statements run after this are not visible to other connections until `commit()`, and are undone by `rollback()`.".to_string()),
+            public: true,
+        },
+        Member {
+            name: "commit".to_string(),
+            kind: "method",
+            detail: "commit() -> Result<bool, Error>".to_string(),
+            loc: None,
+            doc: Some("Makes every statement since `begin()` permanent.".to_string()),
+            public: true,
+        },
+        Member {
+            name: "rollback".to_string(),
+            kind: "method",
+            detail: "rollback() -> Result<bool, Error>".to_string(),
+            loc: None,
+            doc: Some("Undoes every statement since `begin()`.".to_string()),
+            public: true,
+        },
     ]
 }
 

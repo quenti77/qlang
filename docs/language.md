@@ -1625,11 +1625,20 @@ end
 - **`execute(sql, params)`** (pour `INSERT`/`UPDATE`/`DELETE`/DDL) renvoie
   `Result<int, Error>` : le nombre de lignes affectées.
 - **`params`** est un `array<Json>` (`Json.string(...)`, `Json.number(...)`...) : ces
-  valeurs remplacent les `?` de `sql`, dans l'ordre.
+  valeurs remplacent les `?` de `sql`, dans l'ordre. Le point d'interrogation `?` est
+  toujours la syntaxe à écrire, quel que soit le moteur ; vers Postgres, qlang le
+  réécrit lui-même en `$1, $2...`.
 - **`close()`** ferme la connexion ; `Result<bool, Error>`.
 - Une erreur de connexion ou de requête (SQL invalide, table absente...) donne un
   `Result::err`, jamais un arrêt du programme — comme `http.send`.
 - Besoin d'un accès base de données côté hôte, comme pour `http`.
+- **Limites actuelles** : pas de TLS vers Postgres (connexion non chiffrée seulement :
+  ne fonctionne pas avec la plupart des Postgres managés qui l'exigent) ; côté Postgres,
+  seuls les types scalaires courants (`bool`, entiers, flottants, texte) sont bien
+  convertis, les autres (date, uuid, json, tableau...) retombent en texte si possible,
+  sinon `none` ; pas de BLOB SQLite (devient `none`) ; pas de pool de connexions ni de
+  requêtes préparées mises en cache ; pas d'API de transaction dédiée (`BEGIN`/`COMMIT`
+  s'envoient comme du SQL via `execute`).
 
 ## 15. Fins de ligne
 

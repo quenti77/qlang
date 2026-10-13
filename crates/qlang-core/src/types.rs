@@ -464,6 +464,8 @@ pub enum PathRes {
     BuiltinFn(&'static str),
     /// `int.parse`
     BuiltinStatic(&'static str, &'static str),
+    /// `Point.class`: the name of a struct or enum, known at compile time.
+    ClassName(String),
 }
 
 #[derive(Default)]
@@ -481,4 +483,7 @@ pub struct Resolutions {
     /// Method calls made through a trait (a generic bound or a trait-typed value): at
     /// run time they go to the user's impl, not to a built-in method of the same name.
     pub trait_calls: HashSet<NodeId>,
+    /// `value.class()`: the concrete struct or enum name of the value at run time
+    /// (works even when `value`'s static type is a trait or a generic parameter).
+    pub class_calls: HashSet<NodeId>,
 }

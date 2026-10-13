@@ -210,6 +210,17 @@ impl Checker {
                 return Ty::Fn(f.params.iter().map(|p| p.subst(&um.map)).collect(), Box::new(f.ret.subst(&um.map)));
             }
         }
+        if name.name == "class" {
+            let class_name = match tref {
+                TypeRef::Struct(sid) => Some(self.defs.structs[*sid].name.clone()),
+                TypeRef::Enum(eid) => Some(self.defs.enums[*eid].name.clone()),
+                _ => None,
+            };
+            if let Some(n) = class_name {
+                self.res.paths.insert(e.id, PathRes::ClassName(n));
+                return Ty::Str;
+            }
+        }
         let shown = self.show(ty);
         self.err("T161", format!("`{shown}` has no static member `{}`", name.name), name.span);
         Ty::Error
@@ -519,6 +530,12 @@ impl Checker {
             } else {
                 self.diags.truncate(before);
             }
+        }
+        // `value.class()`: the concrete type's name, even through a trait or a generic bound
+        if name.name == "class" && matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)) {
+            self.res.class_calls.insert(e.id);
+            let sig = CallSig { name: name.name.clone(), tparams: vec![], params: vec![], ret: Ty::Str };
+            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
         }
         let shown = self.show(&rt);
         self.err("T161", format!("`{shown}` has no method `{}`", name.name), name.span);

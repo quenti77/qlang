@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "qlang-core",
  "serde",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "regex",
  "serde",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "qlang-core",
 ]

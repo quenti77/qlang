@@ -276,11 +276,11 @@ impl Checker {
         }
     }
 
-    pub fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], _want: &Want) -> Ty {
+    pub fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], want: &Want) -> Ty {
         match &callee.kind {
             ExprKind::Field(obj, name, targs) => {
                 if matches!(obj.kind, ExprKind::Super) {
-                    return self.call_super(e, callee, name, args);
+                    return self.call_super(e, callee, name, args, want);
                 }
                 match self.try_head(obj) {
                     Some(Head::Error) => {
@@ -293,7 +293,7 @@ impl Checker {
                             return Ty::Error;
                         };
                         match item {
-                            ItemRef::Fn(fid) => return self.call_fn_item(e, callee, fid, targs, args),
+                            ItemRef::Fn(fid) => return self.call_fn_item(e, callee, fid, targs, args, want),
                             ItemRef::Struct(_) => {
                                 self.err("T154", format!("`{0}` is a type: use `{0}.new(...)` or `{0} {{ ... }}`", name.name), callee.span);
                                 self.check_args_loose(args);
@@ -303,17 +303,17 @@ impl Checker {
                         }
                         // a variable holding a function: fall through to a value call
                     }
-                    Some(Head::Type(ty, tref)) => return self.call_static(e, callee, &ty, &tref, name, targs, args),
+                    Some(Head::Type(ty, tref)) => return self.call_static(e, callee, &ty, &tref, name, targs, args, want),
                     None => {
                         let rt = self.expr(obj, &Want::Any);
-                        return self.call_method(e, callee, &rt, name, targs, args);
+                        return self.call_method(e, callee, &rt, name, targs, args, want);
                     }
                 }
             }
             ExprKind::Ident(name, targs)
                 if self.lookup_var(name).is_none() => {
                     match self.lookup_item(name) {
-                        Some(ItemRef::Fn(fid)) => return self.call_fn_item(e, callee, fid, targs, args),
+                        Some(ItemRef::Fn(fid)) => return self.call_fn_item(e, callee, fid, targs, args, want),
                         Some(ItemRef::Struct(_) | ItemRef::Enum(_)) => {
                             self.err(
                                 "T154",
@@ -334,7 +334,7 @@ impl Checker {
         match self.resolve(&ct) {
             Ty::Fn(params, ret) => {
                 let sig = CallSig { name: callee_name(callee), tparams: vec![], params, ret: *ret };
-                self.check_args(e.span, &sig, &[], HashMap::new(), args)
+                self.check_args(e.span, &sig, &[], HashMap::new(), args, want)
             }
             Ty::Error => {
                 self.check_args_loose(args);
@@ -349,7 +349,7 @@ impl Checker {
         }
     }
 
-    fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[Expr]) -> Ty {
+    fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
         if let Some(c) = &mut self.collect {
@@ -358,11 +358,14 @@ impl Checker {
         let own: Vec<ParamId> = def.scope_params.iter().rev().take(def.own_tparams).rev().map(|(_, p)| *p).collect();
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         let sig = CallSig { name: def.name.clone(), tparams: own, params: def.params.clone(), ret: def.ret.clone() };
-        self.check_args(e.span, &sig, &explicit, HashMap::new(), args)
+        self.check_args(e.span, &sig, &explicit, HashMap::new(), args, want)
     }
 
-    /// Check arguments against a signature, inferring generic parameters.
-    pub fn check_args(&mut self, span: Span, sig: &CallSig, explicit: &[Ty], mut map: HashMap<ParamId, Ty>, args: &[Expr]) -> Ty {
+    /// Check arguments against a signature, inferring generic parameters. `want` is the
+    /// type expected of the call's result: when an argument leaves some type parameters
+    /// unresolved, matching the result against `want` can resolve the rest (`let x: Box<int>
+    /// = Box.empty()`, `return Result.ok(1)` inside a function returning `Result<int, E>`...).
+    pub fn check_args(&mut self, span: Span, sig: &CallSig, explicit: &[Ty], mut map: HashMap<ParamId, Ty>, args: &[Expr], want: &Want) -> Ty {
         if !explicit.is_empty() {
             if explicit.len() != sig.tparams.len() {
                 self.err("T121", format!("`{}` expects {} type argument(s), found {}", sig.name, sig.tparams.len(), explicit.len()), span);
@@ -413,7 +416,13 @@ impl Checker {
                 }
             }
         }
-        let ret = self.resolve(&ret);
+        let mut ret = self.resolve(&ret);
+        if ret.contains_infer()
+            && let Some(expected) = want.expected()
+        {
+            self.same(&ret, expected);
+            ret = self.resolve(&ret);
+        }
         if ret.contains_infer() {
             self.err(
                 "T171",
@@ -425,7 +434,7 @@ impl Checker {
         ret
     }
 
-    fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[Expr]) -> Ty {
+    fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
         let rt = self.resolve(rt);
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         match &rt {
@@ -450,7 +459,7 @@ impl Checker {
             && let Some((params, ret)) = self.builtin_method(&rt, &name.name) {
                 self.check_builtin_constraint(e, &rt, &name.name, callee.span);
                 let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret };
-                return self.check_args(e.span, &sig, &[], HashMap::new(), args);
+                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
             }
         if let Some(um) = self.find_user_method(&rt, &name.name) {
             let f = self.defs.fns[um.fid].clone();
@@ -471,7 +480,7 @@ impl Checker {
                 }
             let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
             let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-            return self.check_args(e.span, &sig, &explicit, um.map, args);
+            return self.check_args(e.span, &sig, &explicit, um.map, args, want);
         }
         // trait methods through a generic bound or a trait-typed value
         let trait_refs: Vec<(TraitId, Vec<Ty>)> = match &rt {
@@ -494,7 +503,7 @@ impl Checker {
                     params: sig.params.iter().map(|p| p.subst(&map)).collect(),
                     ret: sig.ret.clone().map(|r| r.subst(&map)).unwrap_or(Ty::Error),
                 };
-                return self.check_args(e.span, &cs, &explicit, map, args);
+                return self.check_args(e.span, &cs, &explicit, map, args, want);
             }
         }
         // a field holding a function: `obj.callback(x)`
@@ -505,7 +514,7 @@ impl Checker {
             if self.diags.len() == before {
                 if let Ty::Fn(params, ret) = self.resolve(&ft) {
                     let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret };
-                    return self.check_args(e.span, &sig, &[], HashMap::new(), args);
+                    return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
                 }
             } else {
                 self.diags.truncate(before);
@@ -517,7 +526,7 @@ impl Checker {
         Ty::Error
     }
 
-    fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr]) -> Ty {
+    fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
@@ -533,7 +542,7 @@ impl Checker {
                     self.err("T250", format!("`{b}.{fname}` is not available in this environment ({why})"), e.span);
                 }
                 let sig = CallSig { name: format!("{b}.{fname}"), tparams: vec![], params, ret };
-                return self.check_args(e.span, &sig, &[], HashMap::new(), args);
+                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
             }
             self.err("T161", format!("`{b}` has no static member `{}`", name.name), name.span);
             self.check_args_loose(args);
@@ -560,14 +569,14 @@ impl Checker {
             self.res.paths.insert(callee.id, PathRes::Fn(um.fid));
             let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
             let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-            return self.check_args(e.span, &sig, &explicit, um.map, args);
+            return self.check_args(e.span, &sig, &explicit, um.map, args, want);
         }
         // otherwise a static field/variant: evaluate as a value and call it
         let before = self.diags.len();
         let vt = self.static_member_value(callee, ty, tref, name, targs);
         if let Ty::Fn(params, ret) = self.resolve(&vt) {
             let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args);
+            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
         }
         if self.diags.len() == before {
             let shown = self.show(&vt);
@@ -577,7 +586,7 @@ impl Checker {
         Ty::Error
     }
 
-    fn call_super(&mut self, e: &Expr, callee: &Expr, name: &Ident, args: &[Expr]) -> Ty {
+    fn call_super(&mut self, e: &Expr, callee: &Expr, name: &Ident, args: &[Expr], want: &Want) -> Ty {
         let fail = |this: &mut Checker, msg: String| {
             this.err("T152", msg, callee.span);
             this.check_args_loose(args);
@@ -610,7 +619,7 @@ impl Checker {
         self.res.super_calls.insert(callee.id, um.fid);
         let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
         let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-        self.check_args(e.span, &sig, &[], um.map, args)
+        self.check_args(e.span, &sig, &[], um.map, args, want)
     }
 
     fn call_builtin_fn(&mut self, e: &Expr, callee: &Expr, name: &str, args: &[Expr]) -> Ty {

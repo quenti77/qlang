@@ -292,6 +292,141 @@ fn generic_struct_type_args_resolve_across_modules_in_a_trait_signature() {
 }
 
 #[test]
+fn prelude_result_and_error_need_no_import() {
+    let o = run(
+        "fun divide(a: int, b: int) -> Result<int, Error>\n\
+         if b == 0 then\n\
+         return Result<int, Error>.err(Error { message: \"division by zero\" })\n\
+         end\n\
+         Result<int, Error>.ok(a div b)\n\
+         end\n\
+         let r = divide(10, 2)\n\
+         print(r.is_ok())\n\
+         print(r.unwrap())\n\
+         let bad = divide(10, 0)\n\
+         print(bad.is_err())\n\
+         print(bad.unwrap_err().message)\n",
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "true\n5\ntrue\ndivision by zero\n");
+}
+
+#[test]
+fn prelude_names_can_be_shadowed_by_a_local_declaration() {
+    let o = run("struct Error\npublic code: int\nend\nprint(Error { code: 404 }.code)\n");
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "404\n");
+}
+
+#[test]
+fn prelude_unwrap_on_an_error_result_panics() {
+    let o = run("fun fail() -> Result<int, Error>\nResult<int, Error>.err(Error { message: \"nope\" })\nend\nprint(fail().unwrap())\n");
+    assert!(o.error.unwrap().contains("called unwrap() on an error Result"));
+}
+
+#[test]
+fn prelude_json_encodes_a_struct_through_the_tojson_trait() {
+    let o = run(r#"
+struct Post
+    public title: string
+    public views: int
+end
+
+impl ToJson for Post
+    public fun to_json(self) -> string
+        json_object({ "title": self.title, "views": self.views })
+    end
+end
+
+print(Post { title: "Hello", views: 42 }.to_json())
+print(json_array([1, 2, 3]))
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "{\"title\":\"Hello\",\"views\":42}\n[1,2,3]\n");
+}
+
+#[test]
+fn prelude_json_parse_reads_nested_values_and_round_trips() {
+    let o = run(r#"
+let parsed = Json.parse("\{\"name\": \"Zoe\", \"tags\": [\"a\", \"b\"], \"active\": true, \"parent\": null\}")
+if parsed.is_err() then
+    print("error: {parsed.unwrap_err().message}")
+else
+    let j = parsed.unwrap()
+    let name = j.get("name")
+    if name != none then print(name.as_string()) end
+    let tags = j.get("tags")
+    if tags != none then print(tags.as_array().len()) end
+    print(j.to_json())
+end
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(
+        o.output,
+        "Zoe\n2\n{\"name\":\"Zoe\",\"tags\":[\"a\",\"b\"],\"active\":true,\"parent\":null}\n"
+    );
+}
+
+#[test]
+fn prelude_json_parse_reports_a_malformed_document() {
+    let o = run(r#"
+let bad = Json.parse("not json")
+if bad.is_err() then
+    print(bad.unwrap_err().message)
+end
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "JSON parse error at offset 0: unexpected character \"n\"\n");
+}
+
+#[test]
+fn a_generic_call_infers_leftover_type_parameters_from_the_expected_type() {
+    // `T` cannot come from an argument here (there is none): only the `let`'s declared
+    // type, or the enclosing function's return type, can resolve it
+    let o = run(r#"
+struct Box<T>
+    public value: T?
+end
+
+impl<T> Box<T>
+    public fun empty() -> Box<T>
+        Box { value: none }
+    end
+end
+
+fun make_string_box() -> Box<string>
+    Box.empty()
+end
+
+let b: Box<int> = Box.empty()
+print(b.value == none)
+print(make_string_box().value == none)
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "true\ntrue\n");
+}
+
+#[test]
+fn prelude_ok_and_err_infer_their_type_parameters_from_context() {
+    let o = run(r#"
+fun divide(a: int, b: int) -> Result<int, Error>
+    if b == 0 then
+        return Err(Error { message: "division by zero" })
+    end
+    Ok(a div b)
+end
+
+print(divide(10, 2).unwrap())
+print(divide(10, 0).unwrap_err().message)
+
+let r: Result<int, Error> = Ok(5)
+print(r.unwrap())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "5\ndivision by zero\n5\n");
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

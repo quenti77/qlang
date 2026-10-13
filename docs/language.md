@@ -63,6 +63,8 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
+    - [Prélude : `Result` et `Error`](#prélude--result-et-error)
+    - [Prélude : JSON](#prélude--json)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -976,18 +978,30 @@ borne peut être un trait que tu as défini.
 
 ### Inférence
 
-Les types sont déduits des arguments quand c'est possible. On les écrit
-explicitement sinon :
+Les types sont déduits des arguments quand c'est possible. Ce qui reste
+indéterminé après les arguments se déduit ensuite du **type attendu** : celui
+d'un `let` annoté, ou le type de retour déclaré de la fonction en cours (pour
+un `return` ou la dernière expression du corps) :
 
 ```
 let a = sum(1, 2)
 let b = sum<float>(1.0, 2.0)
 let c: array<array<int>> = [[1], [2, 3]]
 let d = Box<int>.new(1)
+
+fun empty<T>() -> array<T>
+  []
+end
+
+let e: array<int> = empty()        -- T vient du type attendu, pas d'un argument
+
+fun get() -> Result<int, Error>
+  Result.ok(1)                     -- T et E viennent du type de retour de `get`
+end
 ```
 
-Si un type ne peut pas être déduit (`let xs = []`), le compilateur le demande :
-`let xs: array<int> = []`.
+Si rien ne permet de déduire un type (ni les arguments, ni le contexte), le
+compilateur le demande explicitement : `let xs: array<int> = []`.
 
 ---
 
@@ -1347,6 +1361,106 @@ end
   dernier jour (31 janvier + 1 mois = 28 ou 29 février).
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
+### Prélude : `Result` et `Error`
+
+Deux types sont disponibles dans tout fichier, **sans `import`** :
+
+```
+struct Error
+  public message: string
+end
+
+struct Result<T, E>
+  -- data et err sont privés : on y accède avec les méthodes ci-dessous
+end
+```
+
+`Result<T, E>` représente soit une valeur (`ok`), soit une erreur (`err`) :
+
+```
+fun divide(a: int, b: int) -> Result<int, Error>
+  if b == 0 then
+    return Err(Error { message: "division by zero" })
+  end
+  Ok(a div b)
+end
+
+let r = divide(10, 0)
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  print(r.unwrap())
+end
+```
+
+- `Ok(valeur)` et `Err(erreur)` construisent le résultat ; `T` et `E` se
+  déduisent du contexte (ici, le type de retour de `divide`). Quand rien ne
+  permet de les déduire, écris-les explicitement sur le type :
+  `Result<int, Error>.ok(valeur)` / `Result<int, Error>.err(erreur)` (pas de
+  sucre `?` de propagation : on déballe à la main).
+- `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
+- `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
+  programme (`panic`) si on se trompe de cas.
+- `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou
+  `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
+  prélude, exactement comme une variable locale masque une variable de portée
+  plus large.
+
+### Prélude : JSON
+
+**Encoder.** Le trait `ToJson` décrit un type qui sait se transformer en texte
+JSON :
+
+```
+trait ToJson
+  fun to_json(self) -> string
+end
+```
+
+Une structure l'implémente en listant les champs qu'elle veut exposer avec
+`json_object` (les valeurs sont elles-mêmes sérialisées via leur propre
+`to_json()` : des `int`, `float`, `bool`, `string` ou n'importe quel `ToJson`
+imbriqué) :
+
+```
+impl ToJson for Post
+  public fun to_json(self) -> string
+    json_object({ "title": self.title, "views": self.views })
+  end
+end
+
+print(Post { title: "Hello", views: 42 }.to_json())  -- {"title":"Hello","views":42}
+```
+
+`json_array(items)` fait la même chose pour un tableau. `int`, `float`, `bool`
+et `string` implémentent déjà `ToJson`.
+
+**Décoder.** `Json.parse(texte)` renvoie un `Result<Json, Error>` : un arbre de
+valeurs JSON (chaîne, nombre, bool, `null`, tableau, objet), à lire avec
+`is_string()`/`as_string()` (et les équivalents `number`, `bool`, `array`,
+`object`), `get(clé)` (sur un objet, renvoie un `Json?`) et `at(indice)` (sur un
+tableau) :
+
+```
+let r = Json.parse("\{\"name\": \"Zoe\"\}")
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  let j = r.unwrap()
+  let name = j.get("name")
+  if name != none then
+    print(name.as_string())
+  end
+end
+```
+
+Il n'y a **pas de conversion automatique** entre un `Json` décodé et une
+structure définie par l'utilisateur (qlang n'a pas de réflexion ni de macros
+`derive`) : pour reconstruire un `Post` à partir d'un `Json`, écris
+toi-même une méthode statique qui lit les champs un par un, par exemple
+`Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une
+interface imposée par le langage, comme `new`).
 
 ## 15. Fins de ligne
 

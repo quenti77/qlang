@@ -545,8 +545,12 @@ impl Checker {
             let members = self.statics_of(what);
             info.statics.insert(key.clone(), members);
         }
+        let prelude = self.item_members(super::PRELUDE_MOD, false);
         for m in 0..self.modules.len() {
-            let names = self.item_members(m, false);
+            let mut names = self.item_members(m, false);
+            if m != super::PRELUDE_MOD {
+                names.extend(prelude.iter().cloned());
+            }
             info.globals.insert(self.modules[m].path.clone(), names);
         }
         Some(info)

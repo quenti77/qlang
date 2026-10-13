@@ -87,6 +87,68 @@ pub(crate) fn internal_error(payload: &Box<dyn std::any::Any + Send>) -> Diagnos
     Diagnostic::error("X999", format!("internal error: {detail} (this is a bug in qlang, please report it)"), Span::default())
 }
 
+/// The path given to the prelude's synthetic module, and the index it always loads at
+/// (it is loaded before the entry file, and never imports anything itself).
+const PRELUDE_PATH: &str = "<prelude>";
+pub(crate) const PRELUDE_MOD: ModId = 0;
+
+/// Declarations available in every file without an `import`: resolved like ordinary
+/// qlang source (same checker, same diagnostics), just loaded as module 0 before the
+/// entry file. A name declared locally always shadows one from here (`lookup_item`
+/// checks the current module first).
+const PRELUDE_SOURCE: &str = r#"
+struct Error
+    public message: string
+end
+
+struct Result<T, E>
+    data: T?
+    err: E?
+end
+
+impl<T, E> Result<T, E>
+    --" An ok result holding `data`. --"
+    public fun ok(data: T) -> Result<T, E>
+        Result { data, err: none }
+    end
+
+    --" An error result holding `error`. --"
+    public fun err(error: E) -> Result<T, E>
+        Result { data: none, err: error }
+    end
+
+    --" Whether this is an ok result. --"
+    public fun is_ok(self) -> bool
+        self.data != none
+    end
+
+    --" Whether this is an error result. --"
+    public fun is_err(self) -> bool
+        self.err != none
+    end
+
+    --" The ok value, or stops the program if this is an error result. --"
+    public fun unwrap(self) -> T
+        let d = self.data
+        if d != none then
+            d
+        else
+            panic("called unwrap() on an error Result")
+        end
+    end
+
+    --" The error value, or stops the program if this is an ok result. --"
+    public fun unwrap_err(self) -> E
+        let e = self.err
+        if e != none then
+            e
+        else
+            panic("called unwrap_err() on an ok Result")
+        end
+    end
+end
+"#;
+
 fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {
     let caps = host.capabilities();
     let mut loader = Loader {
@@ -98,6 +160,7 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &Compi
         loading: Vec::new(),
         next_id: 0,
     };
+    loader.load(PRELUDE_PATH, PRELUDE_PATH.to_string(), PRELUDE_SOURCE.to_string());
     let entry_key = loader.host.canonical_path(entry);
     loader.load(entry, entry_key, source.to_string());
     let Loader { sources, mut diags, modules, .. } = loader;

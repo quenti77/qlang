@@ -151,6 +151,11 @@ impl Checker {
         if let Some(it) = self.mscopes[self.cur_mod].items.get(name) {
             return Some(it.clone());
         }
+        if self.cur_mod != super::PRELUDE_MOD
+            && let Some(it) = self.mscopes[super::PRELUDE_MOD].items.get(name)
+        {
+            return Some(it.clone());
+        }
         for l in ALL_LANG {
             if l.trait_name() == name {
                 return Some(ItemRef::Trait(self.defs.lang(l)));

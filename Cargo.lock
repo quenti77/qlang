@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "qlang-core",
  "serde",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "qlang-core",
 ]

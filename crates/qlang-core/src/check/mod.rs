@@ -189,7 +189,7 @@ fun json_escape(s: string) -> string
 end
 
 --" A JSON array of `items`, each serialized through `to_json()`. --"
-fun json_array(items: array<ToJson>) -> string
+fun json_array<T: ToJson>(items: array<T>) -> string
     let parts: array<string> = []
     for it in items do
         parts[] = it.to_json()
@@ -205,6 +205,19 @@ fun json_object(fields: map<string, ToJson>) -> string
         parts[] = json_escape(k) + ":" + v.to_json()
     end
     "\{" + parts.join(",") + "\}"
+end
+
+--" Merges two JSON objects (as produced by `json_object`) into one with the keys of
+both. Lets a struct's `to_json` extend its parent's without repeating its fields:
+`json_merge(super.to_json(), json_object({ "role": self.role }))`. --"
+fun json_merge(a: string, b: string) -> string
+    if a == "\{\}" then
+        return b
+    end
+    if b == "\{\}" then
+        return a
+    end
+    a.substring(0, a.len() - 1) + "," + b.substring(1, b.len())
 end
 
 impl ToJson for int
@@ -228,6 +241,33 @@ end
 impl ToJson for string
     public fun to_json(self) -> string
         json_escape(self)
+    end
+end
+
+impl ToJson for uuid
+    public fun to_json(self) -> string
+        json_escape(self as string)
+    end
+end
+
+impl ToJson for ulid
+    public fun to_json(self) -> string
+        json_escape(self as string)
+    end
+end
+
+impl ToJson for datetime
+    public fun to_json(self) -> string
+        json_escape(self as string)
+    end
+end
+
+--" So an `array<T>` of any `ToJson` type (including a nested struct or another
+array) can be used directly as a `json_object` field, with no need to call
+`json_array` by hand. --"
+impl<T: ToJson> ToJson for array<T>
+    public fun to_json(self) -> string
+        json_array(self)
     end
 end
 

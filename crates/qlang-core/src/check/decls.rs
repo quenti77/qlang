@@ -507,7 +507,7 @@ impl Checker {
                     self.tparam_scope.clear();
                     continue;
                 }
-                Ty::Struct(..) | Ty::Enum(_) | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Array(_) => {}
+                Ty::Struct(..) | Ty::Enum(_) | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Array(_) | Ty::Uuid | Ty::Ulid | Ty::DateTime => {}
                 other => {
                     let shown = self.show(other);
                     self.err("T130", format!("cannot implement methods for `{shown}`"), imp.target.span);

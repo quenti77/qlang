@@ -102,7 +102,7 @@ test('completion after a dot offers the members of the type', { skip }, () => {
   // a structure: fields first, only the public ones from outside
   const p = analyse({ 'main.q': intel.blank(SOURCE + '\np.', lines.length, 1, 2) });
   const members = intel.memberCompletions(p, intel.receiverAt(p, 'main.q', lines.length, 1), 'p');
-  assert.deepStrictEqual(members.map((m) => m.label), ['x', 'y', 'norm']);
+  assert.deepStrictEqual(members.map((m) => m.label), ['x', 'y', 'norm', 'class']);
 });
 
 test('completion inside a struct literal offers the fields not yet given', { skip }, () => {
@@ -147,7 +147,7 @@ test('static members: enum variants, static functions and built-in types', { ski
   const l = src.split('\n');
   const info = analyse({ 'main.q': intel.blank(src, 6, 11, 12) });
   const color = intel.receiverAt(info, 'main.q', 6, 11);
-  assert.deepStrictEqual(intel.membersOf(info, color).map((m) => m.name), ['Red', 'Green']);
+  assert.deepStrictEqual(intel.membersOf(info, color).map((m) => m.name), ['Red', 'Green', 'class']);
   const ints = analyse({ 'main.q': intel.blank('print(int.)', 0, 9, 10) });
   assert.deepStrictEqual(intel.membersOf(ints, intel.receiverAt(ints, 'main.q', 0, 9)).map((m) => m.name), ['parse', 'MAX', 'MIN']);
   assert.ok(l.length > 0);

@@ -1599,7 +1599,7 @@ let res = http.send(Request {
 `Db.connect(url)` ouvre une connexion à une base de données ; le schéma de
 l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`, ou
 `postgres://utilisateur:mot_de_passe@hôte/base`. Pour Postgres en TLS, ajoute
-`?sslmode=require` (ou `prefer`/`verify-ca`/`verify-full` — ils sont traités
+`?sslmode=require` (ou `prefer`/`verify-ca`/`verify-full`, ils sont traités
 pareil ici) : `postgres://user:pass@hôte/base?sslmode=require`. Le certificat
 du serveur est toujours vérifié contre les autorités publiques (Mozilla) ;
 un certificat auto-signé ou une autorité privée ne sont pas acceptés sans
@@ -1649,7 +1649,7 @@ end
 ```
 
 - Une erreur de connexion ou de requête (SQL invalide, table absente...) donne un
-  `Result::err`, jamais un arrêt du programme — comme `http.send`.
+  `Result::err`, jamais un arrêt du programme, comme `http.send`.
 - Besoin d'un accès base de données côté hôte, comme pour `http`.
 - **Limites actuelles** : côté Postgres, seuls les types scalaires courants (`bool`,
   entiers, flottants, texte) sont bien convertis, les autres (date, uuid, json,

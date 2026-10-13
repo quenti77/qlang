@@ -427,6 +427,81 @@ print(r.unwrap())
 }
 
 #[test]
+fn class_gives_the_struct_or_enum_name_statically_and_from_a_value() {
+    let o = run(r#"
+struct Dog
+    public n: string
+end
+
+enum Color
+    Red
+    Green
+    Blue
+end
+
+let d = Dog { n: "Rex" }
+print(d.class())
+print(Dog.class)
+print(Color.Red.class())
+print(Color.class)
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "Dog\nDog\nColor\nColor\n");
+}
+
+#[test]
+fn class_reports_the_concrete_type_through_a_trait_bound() {
+    let o = run(r#"
+trait Nameable
+    fun name(self) -> string
+end
+
+struct Dog
+    public n: string
+end
+
+impl Nameable for Dog
+    public fun name(self) -> string
+        self.n
+    end
+end
+
+struct Holder<T: Nameable>
+    public item: T
+end
+
+impl<T: Nameable> Holder<T>
+    public fun describe(self) -> string
+        "{self.item.class()}: {self.item.name()}"
+    end
+end
+
+let h = Holder<Dog> { item: Dog { n: "Rex" } }
+print(h.describe())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "Dog: Rex\n");
+}
+
+#[test]
+fn a_user_defined_class_method_takes_priority_over_the_built_in_one() {
+    let o = run(r#"
+struct Weird
+end
+
+impl Weird
+    public fun class(self) -> string
+        "custom"
+    end
+end
+
+print(Weird {}.class())
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "custom\n");
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

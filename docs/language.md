@@ -64,6 +64,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
+    - [Prélude : JSON](#prélude--json)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1391,6 +1392,61 @@ end
   `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
   prélude, exactement comme une variable locale masque une variable de portée
   plus large.
+
+### Prélude : JSON
+
+**Encoder.** Le trait `ToJson` décrit un type qui sait se transformer en texte
+JSON :
+
+```
+trait ToJson
+  fun to_json(self) -> string
+end
+```
+
+Une structure l'implémente en listant les champs qu'elle veut exposer avec
+`json_object` (les valeurs sont elles-mêmes sérialisées via leur propre
+`to_json()` : des `int`, `float`, `bool`, `string` ou n'importe quel `ToJson`
+imbriqué) :
+
+```
+impl ToJson for Post
+  public fun to_json(self) -> string
+    json_object({ "title": self.title, "views": self.views })
+  end
+end
+
+print(Post { title: "Hello", views: 42 }.to_json())  -- {"title":"Hello","views":42}
+```
+
+`json_array(items)` fait la même chose pour un tableau. `int`, `float`, `bool`
+et `string` implémentent déjà `ToJson`.
+
+**Décoder.** `Json.parse(texte)` renvoie un `Result<Json, Error>` : un arbre de
+valeurs JSON (chaîne, nombre, bool, `null`, tableau, objet), à lire avec
+`is_string()`/`as_string()` (et les équivalents `number`, `bool`, `array`,
+`object`), `get(clé)` (sur un objet, renvoie un `Json?`) et `at(indice)` (sur un
+tableau) :
+
+```
+let r = Json.parse("\{\"name\": \"Zoe\"\}")
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  let j = r.unwrap()
+  let name = j.get("name")
+  if name != none then
+    print(name.as_string())
+  end
+end
+```
+
+Il n'y a **pas de conversion automatique** entre un `Json` décodé et une
+structure définie par l'utilisateur (qlang n'a pas de réflexion ni de macros
+`derive`) : pour reconstruire un `Post` à partir d'un `Json`, écris
+toi-même une méthode statique qui lit les champs un par un, par exemple
+`Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une
+interface imposée par le langage, comme `new`).
 
 ## 15. Fins de ligne
 

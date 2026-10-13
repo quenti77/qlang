@@ -325,6 +325,61 @@ fn prelude_unwrap_on_an_error_result_panics() {
 }
 
 #[test]
+fn prelude_json_encodes_a_struct_through_the_tojson_trait() {
+    let o = run(r#"
+struct Post
+    public title: string
+    public views: int
+end
+
+impl ToJson for Post
+    public fun to_json(self) -> string
+        json_object({ "title": self.title, "views": self.views })
+    end
+end
+
+print(Post { title: "Hello", views: 42 }.to_json())
+print(json_array([1, 2, 3]))
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "{\"title\":\"Hello\",\"views\":42}\n[1,2,3]\n");
+}
+
+#[test]
+fn prelude_json_parse_reads_nested_values_and_round_trips() {
+    let o = run(r#"
+let parsed = Json.parse("\{\"name\": \"Zoe\", \"tags\": [\"a\", \"b\"], \"active\": true, \"parent\": null\}")
+if parsed.is_err() then
+    print("error: {parsed.unwrap_err().message}")
+else
+    let j = parsed.unwrap()
+    let name = j.get("name")
+    if name != none then print(name.as_string()) end
+    let tags = j.get("tags")
+    if tags != none then print(tags.as_array().len()) end
+    print(j.to_json())
+end
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(
+        o.output,
+        "Zoe\n2\n{\"name\":\"Zoe\",\"tags\":[\"a\",\"b\"],\"active\":true,\"parent\":null}\n"
+    );
+}
+
+#[test]
+fn prelude_json_parse_reports_a_malformed_document() {
+    let o = run(r#"
+let bad = Json.parse("not json")
+if bad.is_err() then
+    print(bad.unwrap_err().message)
+end
+"#);
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "JSON parse error at offset 0: unexpected character \"n\"\n");
+}
+
+#[test]
 fn input_output() {
     let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
     assert_eq!(o.output, "name?\nhi Zoe\n");

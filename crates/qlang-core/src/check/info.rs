@@ -767,7 +767,7 @@ mod tests {
              impl<T: Nameable> Holder<T>\n  public fun show(self) -> string\n    self.item.name()\n  end\nend\n",
         );
         let names: Vec<&str> = info.members["T"].iter().map(|m| m.name.as_str()).collect();
-        assert_eq!(names, ["class", "name"]);
+        assert_eq!(names, ["class", "to_json", "name"]);
     }
 
     #[test]

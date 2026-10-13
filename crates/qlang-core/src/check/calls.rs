@@ -76,6 +76,7 @@ impl Checker {
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
                             "http" => (Ty::Unit, "http"),
+                            "regex" => (Ty::Unit, "regex"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -849,6 +850,13 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
         ("time", "now") => ("now", vec![], Ty::Int, Needs::Time),
         ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
         ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),
+        ("regex", "matches") => ("matches", vec![Ty::Str, Ty::Str], Ty::Bool, Needs::Nothing),
+        ("regex", "find") => ("find", vec![Ty::Str, Ty::Str], Ty::nullable(Ty::Str), Needs::Nothing),
+        ("regex", "find_all") => ("find_all", vec![Ty::Str, Ty::Str], Ty::Array(Box::new(Ty::Str)), Needs::Nothing),
+        ("regex", "captures") => ("captures", vec![Ty::Str, Ty::Str], Ty::nullable(Ty::Array(Box::new(Ty::nullable(Ty::Str)))), Needs::Nothing),
+        ("regex", "replace") => ("replace", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
+        ("regex", "replace_all") => ("replace_all", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
+        ("regex", "split") => ("split", vec![Ty::Str, Ty::Str], Ty::Array(Box::new(Ty::Str)), Needs::Nothing),
         _ => return None,
     })
 }

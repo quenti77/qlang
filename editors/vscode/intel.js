@@ -190,6 +190,7 @@ function nameCompletions(info, file, line, col) {
   add({ label: 'time', kind: 'module', detail: 'namespace', doc: 'The clock: `time.now()`.', sort: '4time' });
   add({ label: 'random', kind: 'module', detail: 'namespace', doc: 'Random numbers: `random.int(1, 6)`, `random.float()`.', sort: '4random' });
   add({ label: 'http', kind: 'module', detail: 'namespace', doc: 'HTTP requests: `http.send(Request { method: "GET", url: "..." })`.', sort: '4http' });
+  add({ label: 'regex', kind: 'module', detail: 'namespace', doc: 'Regular expressions: `regex.matches(text, pattern)`, `regex.find(text, pattern)`...', sort: '4regex' });
   return [...out.values()];
 }
 

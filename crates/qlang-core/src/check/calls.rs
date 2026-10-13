@@ -467,6 +467,36 @@ impl Checker {
             }
             _ => {}
         }
+        // `Db` declares no method in qlang: `query`, `execute` and `close` are native
+        if let Ty::Struct(sid, _) = &rt
+            && *sid == self.prelude_struct("Db")
+        {
+            let error = || Ty::Struct(self.prelude_struct("Error"), vec![]);
+            let result = |data: Ty| Ty::Struct(self.prelude_struct("Result"), vec![data, error()]);
+            let json_array = Ty::Array(Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])));
+            let sig = match name.name.as_str() {
+                "query" => Some(CallSig {
+                    name: "Db.query".to_string(),
+                    tparams: vec![],
+                    params: vec![Ty::Str, json_array.clone()],
+                    ret: result(Ty::Array(Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])))))),
+                }),
+                "execute" => Some(CallSig { name: "Db.execute".to_string(), tparams: vec![], params: vec![Ty::Str, json_array], ret: result(Ty::Int) }),
+                "close" => Some(CallSig { name: "Db.close".to_string(), tparams: vec![], params: vec![], ret: result(Ty::Bool) }),
+                _ => None,
+            };
+            if let Some(sig) = sig {
+                if !self.caps.sql {
+                    self.err("T250", format!("`Db.{}` is not available in this environment (there is no database access)", name.name), e.span);
+                }
+                self.res.db_calls.insert(e.id, match name.name.as_str() {
+                    "query" => "query",
+                    "execute" => "execute",
+                    _ => "close",
+                });
+                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            }
+        }
         // built-in methods first for built-in types
         if !matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..))
             && let Some((params, ret)) = self.builtin_method(&rt, &name.name) {
@@ -568,6 +598,20 @@ impl Checker {
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let result = Ty::Struct(self.prelude_struct("Result"), vec![response, error]);
             let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result };
+            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+        }
+        if let TypeRef::Struct(sid) = tref
+            && *sid == self.prelude_struct("Db")
+            && name.name == "connect"
+        {
+            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("db", "connect"));
+            if !self.caps.sql {
+                self.err("T250", "`Db.connect` is not available in this environment (there is no database access)".to_string(), e.span);
+            }
+            let db = Ty::Struct(*sid, vec![]);
+            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
+            let result = Ty::Struct(self.prelude_struct("Result"), vec![db, error]);
+            let sig = CallSig { name: "Db.connect".to_string(), tparams: vec![], params: vec![Ty::Str], ret: result };
             return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Builtin(b) = tref {

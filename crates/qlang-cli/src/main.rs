@@ -1,11 +1,12 @@
 //! The `qlang` command line tool: runs programs in a terminal, speaks JSON
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
+mod db;
 mod json;
 mod serve;
 
 use qlang_core::check::compile;
-use qlang_core::host::{Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits};
+use qlang_core::host::{Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits, SqlRow, SqlValue};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -76,6 +77,8 @@ struct TerminalHost {
     root: Option<PathBuf>,
     /// State of the random generator: `--seed N`, or taken from the system.
     rng: u64,
+    /// Open SQL connections, for `Db.connect`.
+    db: db::SqlConns,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -136,7 +139,23 @@ impl Host for TerminalHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: true, time: true, random: true, http: true }
+        Capabilities { read: true, time: true, random: true, http: true, sql: true }
+    }
+
+    fn sql_connect(&mut self, url: &str) -> Result<u64, HostError> {
+        self.db.connect(url)
+    }
+
+    fn sql_query(&mut self, conn: u64, sql: &str, params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+        self.db.query(conn, sql, params)
+    }
+
+    fn sql_execute(&mut self, conn: u64, sql: &str, params: Vec<SqlValue>) -> Result<u64, HostError> {
+        self.db.execute(conn, sql, params)
+    }
+
+    fn sql_close(&mut self, conn: u64) -> Result<(), HostError> {
+        self.db.close(conn)
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
@@ -226,7 +245,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             eprintln!("{file} is outside of --root {}", root.display());
             return ExitCode::from(64);
         }
-    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy) };
+    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy), db: db::SqlConns::default() };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,
         Err(e) => {

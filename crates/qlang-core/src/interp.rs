@@ -1655,8 +1655,9 @@ impl<'a> Interp<'a> {
         }
     }
 
-    /// A call on a `Db` value (`query`, `execute`, `close`): `op` is what the checker
-    /// recorded in `Resolutions::db_calls` for this call expression.
+    /// A call on a `Db` value (`query`, `execute`, `close`, `begin`, `commit`,
+    /// `rollback`): `op` is what the checker recorded in `Resolutions::db_calls` for
+    /// this call expression.
     fn db_call(&mut self, op: &'static str, recv: Value, args: Vec<Value>, span: Span) -> R<Value> {
         let Value::Struct(o) = &recv else { return self.fail("R005", "`Db` methods need a `Db` value", span) };
         let conn = match o.fields.borrow().get("conn") {
@@ -1693,6 +1694,17 @@ impl<'a> Interp<'a> {
                 let params = self.bind_params(&args);
                 match self.host.sql_execute(conn, &sql, params) {
                     Ok(n) => Ok(self.ok_result(Value::Int(n as i64))),
+                    Err(e) => Ok(self.host_err_result(e)),
+                }
+            }
+            "begin" | "commit" | "rollback" => {
+                let sql = match op {
+                    "begin" => "BEGIN",
+                    "commit" => "COMMIT",
+                    _ => "ROLLBACK",
+                };
+                match self.host.sql_execute(conn, sql, vec![]) {
+                    Ok(_) => Ok(self.ok_result(Value::Bool(true))),
                     Err(e) => Ok(self.host_err_result(e)),
                 }
             }

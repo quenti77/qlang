@@ -140,6 +140,13 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
     ("time", "function", "now", "now() -> int", "The current time: milliseconds since 1970-01-01 00:00:00 UTC. Needs a clock."),
     ("random", "function", "int", "int(min: int, max: int) -> int", "A random integer from `min` to `max`, both included. Needs a source of randomness."),
     ("random", "function", "float", "float() -> float", "A random number from 0 (included) to 1 (excluded). Needs a source of randomness."),
+    (
+        "http",
+        "function",
+        "send",
+        "send(req: Request) -> Result<Response, Error>",
+        "Sends an HTTP request and waits for the response. Needs network access. A connection failure is `err`, not a crash.",
+    ),
 ];
 
 /// Built-in functions: (name, signature, explanation).

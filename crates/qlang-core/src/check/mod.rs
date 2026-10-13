@@ -628,6 +628,20 @@ impl Json
         r
     end
 end
+
+--" An HTTP request, given to `http.send`. --"
+struct Request
+    public method: string
+    public url: string
+    public headers: map<string, string> = {}
+    public body: string? = none
+end
+
+--" An HTTP response, returned by `http.send`. --"
+struct Response
+    public status: int
+    public body: string
+end
 "#;
 
 fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {

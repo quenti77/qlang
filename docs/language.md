@@ -66,6 +66,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
+    - [Prélude : `http`](#prélude--http)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1508,6 +1509,53 @@ structure définie par l'utilisateur (qlang n'a pas de réflexion ni de macros
 toi-même une méthode statique qui lit les champs un par un, par exemple
 `Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une
 interface imposée par le langage, comme `new`).
+
+### Prélude : `http`
+
+`http.send(req)` envoie une requête HTTP et attend la réponse. `Request` et
+`Response` sont fournis par le prélude (pas besoin de les déclarer) :
+
+```
+struct Request
+  public method: string
+  public url: string
+  public headers: map<string, string> = {}
+  public body: string? = none
+end
+
+struct Response
+  public status: int
+  public body: string
+end
+```
+
+Besoin d'un accès réseau côté hôte : un hôte qui ne l'offre pas (un bac à
+sable, par exemple) fait échouer la vérification avant même l'exécution.
+
+```
+let req = Request { method: "GET", url: "https://example.com" }
+let r = http.send(req)
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  print(r.unwrap().status)
+end
+```
+
+Une erreur de connexion (DNS, délai dépassé, connexion refusée...) donne un
+`Result::err`, jamais un arrêt du programme : le réseau est par nature
+instable, donc toujours récupérable, comme `int.parse` ou `Json.parse`.
+`headers` et `body` ont une valeur par défaut, donc une requête `GET` simple
+n'a besoin que de `method` et `url`.
+
+```
+let res = http.send(Request {
+  method: "POST",
+  url: "https://example.com/items",
+  headers: { "Content-Type": "application/json" },
+  body: "\{\"name\": \"Rex\"\}",
+})
+```
 
 ## 15. Fins de ligne
 

@@ -20,6 +20,26 @@ pub struct Capabilities {
     pub time: bool,
     /// `random` and the generators of `uuid` and `ulid` are available.
     pub random: bool,
+    /// `http.send(...)` is available (the host can reach the network).
+    pub http: bool,
+}
+
+/// A request given to [`Host::http_send`]: the fields of the prelude's `Request` struct,
+/// read by the interpreter (it does not depend on `qlang-core`'s struct layout).
+#[derive(Clone, Debug)]
+pub struct HttpRequest {
+    pub method: String,
+    pub url: String,
+    /// `(name, value)` pairs, in the order given.
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+/// What a host returns on success: the fields of the prelude's `Response` struct.
+#[derive(Clone, Debug)]
+pub struct HttpResponse {
+    pub status: i64,
+    pub body: String,
 }
 
 pub trait Host {
@@ -44,6 +64,13 @@ pub trait Host {
     /// Source text of a module, for `import`. `path` is already normalised.
     fn load_module(&mut self, _path: &str) -> Result<String, String> {
         Err("modules are not available in this environment".to_string())
+    }
+
+    /// Send an HTTP request and wait for the response. A failed request (DNS, timeout,
+    /// connection refused...) is `Err`, same as a host that cannot reach the network at
+    /// all; the caller turns both into a qlang `Result::err`, never a crash.
+    fn http_send(&mut self, _req: HttpRequest) -> Result<HttpResponse, HostError> {
+        Err(HostError::Unsupported("http"))
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -93,6 +120,8 @@ pub struct MemoryHost {
     pub clock: Option<i64>,
     /// State of the random generator. `None`: there is no randomness.
     pub seed: Option<u64>,
+    /// Canned responses for `http.send`, keyed by `(method, url)`. `None`: no network.
+    pub http: Option<std::collections::HashMap<(String, String), Result<HttpResponse, String>>>,
 }
 
 impl MemoryHost {
@@ -129,7 +158,16 @@ impl Host for MemoryHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: self.allow_read, time: self.clock.is_some(), random: self.seed.is_some() }
+        Capabilities { read: self.allow_read, time: self.clock.is_some(), random: self.seed.is_some(), http: self.http.is_some() }
+    }
+
+    fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
+        let table = self.http.as_ref().ok_or(HostError::Unsupported("http"))?;
+        match table.get(&(req.method, req.url)) {
+            Some(Ok(r)) => Ok(r.clone()),
+            Some(Err(m)) => Err(HostError::Other(m.clone())),
+            None => Err(HostError::Other("no canned response for this request".to_string())),
+        }
     }
 
     fn now_ms(&mut self) -> Result<i64, HostError> {

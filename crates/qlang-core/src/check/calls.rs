@@ -75,6 +75,7 @@ impl Checker {
                             // namespaces: they only hold functions
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
+                            "http" => (Ty::Unit, "http"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -543,8 +544,31 @@ impl Checker {
         Ty::Error
     }
 
+    /// The id of a struct declared in the prelude, by name (`Request`, `Response`...).
+    fn prelude_struct(&self, name: &str) -> StructId {
+        self.defs
+            .structs
+            .iter()
+            .position(|s| s.module == super::PRELUDE_MOD && s.name == name)
+            .unwrap_or_else(|| panic!("prelude struct `{name}` not found"))
+    }
+
     fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
+        if let TypeRef::Builtin("http") = tref
+            && name.name == "send"
+        {
+            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("http", "send"));
+            if !self.caps.http {
+                self.err("T250", "`http.send` is not available in this environment (there is no network access)".to_string(), e.span);
+            }
+            let request = Ty::Struct(self.prelude_struct("Request"), vec![]);
+            let response = Ty::Struct(self.prelude_struct("Response"), vec![]);
+            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
+            let result = Ty::Struct(self.prelude_struct("Result"), vec![response, error]);
+            let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result };
+            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+        }
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
                 self.res.paths.insert(callee.id, PathRes::BuiltinStatic(b, fname));

@@ -186,9 +186,10 @@ function nameCompletions(info, file, line, col) {
   for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'datetime', 'array', 'map']) {
     add({ label: t, kind: 'type', detail: 'type', sort: '4' + t });
   }
-  // `time.now()` and `random.int(1, 6)`: namespaces of the language
+  // `time.now()`, `random.int(1, 6)` and `http.send(req)`: namespaces of the language
   add({ label: 'time', kind: 'module', detail: 'namespace', doc: 'The clock: `time.now()`.', sort: '4time' });
   add({ label: 'random', kind: 'module', detail: 'namespace', doc: 'Random numbers: `random.int(1, 6)`, `random.float()`.', sort: '4random' });
+  add({ label: 'http', kind: 'module', detail: 'namespace', doc: 'HTTP requests: `http.send(Request { method: "GET", url: "..." })`.', sort: '4http' });
   return [...out.values()];
 }
 

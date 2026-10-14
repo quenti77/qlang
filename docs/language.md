@@ -1704,13 +1704,21 @@ struct Request
   public url: string
   public headers: map<string, string> = {}
   public body: string? = none
+  public path: string = ""
+  public query: map<string, string> = {}
+  public params: map<string, string> = {}
 end
 
 struct Response
   public status: int
+  public headers: map<string, string> = {}
   public body: string
 end
 ```
+
+`path`, `query` et `params` ne servent que pour une requête **reçue** (voir
+[Répondre à des requêtes HTTP](#répondre-à-des-requêtes-http)) ; `headers` d'une `Response` donne
+les en-têtes reçus (noms en minuscules).
 
 Besoin d'un accès réseau côté hôte : un hôte qui ne l'offre pas (un bac à
 sable, par exemple) fait échouer la vérification avant même l'exécution.
@@ -1739,6 +1747,138 @@ let res = http.send(Request {
   body: "\{\"name\": \"Rex\"\}",
 })
 ```
+
+### Répondre à des requêtes HTTP
+
+Un programme peut aussi **servir** des requêtes : `qlang serve app.q` écoute sur un port
+(8080 par défaut, sur `127.0.0.1`), exécute le code du fichier **une fois**, puis appelle
+sa fonction `handle` pour chaque requête reçue.
+
+```
+let visits = 0
+
+fun handle(req: Request) -> Response
+  visits += 1
+  match req.path
+    case "/hello" then
+      let name = req.query.get("name", "toi")
+      Response.text("Bonjour {name} !")
+    case "/visits" then
+      Response.json("\{\"visits\": {visits}\}")
+    else
+      Response.not_found()
+  end
+end
+```
+
+```
+qlang serve app.q --port 8080
+curl "http://127.0.0.1:8080/hello?name=Ada"
+```
+
+- **La fonction** s'appelle exactement `handle`, prend une `Request` et renvoie une
+  `Response` : la vérification le contrôle avant le démarrage.
+- **La requête** :
+  - `method` (`"GET"`, `"POST"`…) ;
+  - `url`, la cible telle qu'elle a été reçue (`/items?id=3`), sans décodage ;
+  - `path`, le chemin **décodé** (`/items`), et `query`, les paramètres **décodés** (`id` vaut
+    `"3"` ; si un nom est répété, la dernière valeur gagne) ;
+  - `headers`, dont les noms sont en **minuscules**, et `req.header("User-Agent")`, qui cherche
+    un en-tête sans tenir compte de la casse (`string?`) ;
+  - `body`, le corps (`none` s'il n'y en a pas).
+- **La réponse** : `status` (de 100 à 599), `body`, et `headers` facultatifs. Des raccourcis :
+
+  | Appel                       | Résultat                                                    |
+  | --------------------------- | ----------------------------------------------------------- |
+  | `Response.text(corps)`      | statut 200, `text/plain; charset=utf-8`                     |
+  | `Response.html(corps)`      | statut 200, `text/html; charset=utf-8`                      |
+  | `Response.json(texte)`      | statut 200, `application/json` (le texte JSON est à fournir) |
+  | `Response.redirect(url)`    | statut 302 vers `url`                                       |
+  | `Response.not_found()`      | statut 404                                                  |
+  | `r.with_status(201)`        | la même réponse avec un autre statut                        |
+  | `r.with_header("X-Id", "7")` | la même réponse avec un en-tête de plus                    |
+
+  Sans `Content-Type`, le serveur ajoute `text/plain; charset=utf-8`. Les en-têtes qui
+  contiennent un retour à la ligne sont ignorés, et `Content-Length` et `Connection` sont gérés
+  par le serveur.
+- **L'état** : le code du fichier s'exécute une seule fois, donc `visits` se souvient de sa
+  valeur d'une requête à l'autre, comme dans un serveur Node. Avec un seul interpréteur (le
+  défaut), les requêtes sont traitées **une par une** : les variables ne changent jamais pendant
+  l'exécution de `handle`.
+- **Les erreurs** : un `panic`, une erreur d'exécution ou une boucle trop longue (limite
+  d'étapes, `--max-steps`, **par requête**) donnent une réponse `500 Internal Server Error`
+  **sans détail** pour le client ; le détail est écrit dans le journal du serveur (la sortie
+  d'erreur), et le serveur continue. Une requête qui attend plus de 30 secondes reçoit `504`.
+- **Les capacités** : le programme tourne comme avec `qlang run` : `print`, fichiers,
+  variables d'environnement, `http.send`, `Db`, `import` fonctionnent (`--root` limite les
+  fichiers et les imports à un dossier). `--seed N` fixe le hasard.
+
+#### Le routeur
+
+Quand il y a plusieurs pages, un `Router` évite un grand `match` sur le chemin : on déclare les
+routes, puis `handle` lui passe la requête.
+
+```
+let router = Router.new()
+
+router.get("/", fun(req: Request) -> Response
+  Response.text("Accueil")
+end)
+
+router.get("/items/:id", fun(req: Request) -> Response
+  let id = req.params.get("id", "?")
+  Response.text("Objet {id}")
+end)
+
+router.post("/items", fun(req: Request) -> Response
+  Response.text("créé").with_status(201)
+end)
+
+fun handle(req: Request) -> Response
+  router.handle(req)
+end
+```
+
+- **Déclarer** : `router.get(chemin, fonction)`, `post`, `put`, `delete`, ou
+  `router.add("PATCH", chemin, fonction)` pour une autre méthode. Chaque appel renvoie le
+  routeur, donc on peut les enchaîner.
+- **Le chemin** est une suite de segments séparés par `/` : un mot doit être identique, `:nom`
+  accepte n'importe quel segment **non vide** et le met dans `req.params` (`req.params.get("id",
+  "")`), et un `*` final accepte le reste du chemin (`req.params["*"]`). `/items/:id` accepte
+  `/items/3`, pas `/items/` ni `/items/3/x`. La première route qui correspond gagne.
+- **Sans correspondance** : un chemin connu avec une autre méthode donne `405` avec un en-tête
+  `Allow` (`GET, DELETE`) ; tout autre chemin donne `404`, ou la fonction donnée à
+  `router.fallback(fonction)`.
+- **`Router.matches(modèle, chemin)`** renvoie les paramètres (un `map<string, string>?`) si le
+  chemin correspond au modèle, sinon `none` : utile pour vérifier un modèle sans serveur.
+
+Options de `qlang serve app.q` :
+
+| Option           | Rôle                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `--port N`       | le port (8080 par défaut)                                                                 |
+| `--bind ADRESSE` | l'adresse d'écoute (`127.0.0.1` par défaut : seulement cette machine)                     |
+| `--max-steps N`  | le nombre d'étapes d'évaluation **par requête**                                           |
+| `--static DOSSIER` | sert les fichiers de ce dossier tels quels, **avant** d'appeler le programme            |
+| `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
+| `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
+| `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
+
+- **Fichiers statiques** (`--static public`) : pour `GET` et `HEAD`, si le chemin désigne un
+  fichier du dossier (ou `index.html` pour un dossier), il est servi avec son type
+  (`.html`, `.css`, `.js`, `.json`, `.svg`, `.png`…), sans passer par le programme. Un chemin
+  qui sort du dossier (`..`, lien symbolique vers l'extérieur) n'est jamais servi. Le reste va
+  au programme.
+- **Plusieurs workers** (`--workers 4`) : chaque worker exécute le fichier **à part**, avec ses
+  propres variables, et prend les requêtes dans une file commune : une requête lente ne bloque
+  plus les autres. Ce qui doit être partagé (un compteur, des données) va dans une base de
+  données ou des fichiers, pas dans une variable.
+- **Arrêt** : Ctrl-C ou un signal `TERM` arrête proprement le serveur : les requêtes déjà
+  acceptées reçoivent leur réponse (5 secondes au plus), les nouvelles reçoivent `503`.
+- **Le serveur** est minimal : HTTP/1.1 sans TLS ni connexions persistantes, 16 connexions
+  en même temps au plus, corps limité à 1 Mo, pas de requêtes en morceaux (`Transfer-Encoding:
+  chunked`). Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
+  inverse** et ne l'exposez pas directement à Internet.
 
 ### Prélude : `Db`
 

@@ -62,6 +62,8 @@ pub struct HttpRequest {
 #[derive(Clone, Debug)]
 pub struct HttpResponse {
     pub status: i64,
+    /// `(name, value)` pairs. Names are in lower case.
+    pub headers: Vec<(String, String)>,
     pub body: String,
 }
 

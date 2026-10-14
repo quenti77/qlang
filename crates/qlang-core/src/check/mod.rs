@@ -669,18 +669,203 @@ impl Json
     end
 end
 
---" An HTTP request, given to `http.send`. --"
+--" An HTTP request: the one given to `http.send`, and the one a program run with
+`qlang serve` receives. For a received request, `url` is the target as received
+(`/items?id=3`), `path` its decoded path (`/items`) and `query` the decoded parameters
+(`id` is `"3"`; the last one wins when a name is repeated); `headers` has lower-case names.
+`params` holds the parameters of the route a `Router` matched (`/items/:id`). --"
 struct Request
     public method: string
     public url: string
     public headers: map<string, string> = {}
     public body: string? = none
+    public path: string = ""
+    public query: map<string, string> = {}
+    public params: map<string, string> = {}
 end
 
---" An HTTP response, returned by `http.send`. --"
+impl Request
+    --" The value of the header `name` of a received request (whatever the case of `name`),
+    or `none`. --"
+    public fun header(self, name: string) -> string?
+        self.headers[name.lower()]
+    end
+end
+
+--" An HTTP response: the one returned by `http.send`, and the one the `handle` function of
+a program run with `qlang serve` returns. --"
 struct Response
     public status: int
+    public headers: map<string, string> = {}
     public body: string
+end
+
+impl Response
+    --" A plain text response (status 200). --"
+    public fun text(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" }, body }
+    end
+
+    --" An HTML response (status 200). --"
+    public fun html(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" }, body }
+    end
+
+    --" A JSON response (status 200) with the JSON text `body`. --"
+    public fun json(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body }
+    end
+
+    --" A redirection (status 302) to `location`. --"
+    public fun redirect(location: string) -> Response
+        Response { status: 302, headers: { "Location": location }, body: "" }
+    end
+
+    --" The 404 response. --"
+    public fun not_found() -> Response
+        Response { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" }, body: "Not Found" }
+    end
+
+    --" This response with another status (returns the response itself). --"
+    public fun with_status(self, code: int) -> Response
+        self.status = code
+        self
+    end
+
+    --" This response with one more header (returns the response itself). --"
+    public fun with_header(self, name: string, value: string) -> Response
+        self.headers[name] = value
+        self
+    end
+end
+
+--" One route of a `Router`: the requests with this `method` (`"GET"`...) and a path matching
+`pattern` go to `handler`. --"
+struct Route
+    public method: string
+    public pattern: string
+    public handler: fun(Request) -> Response
+end
+
+--" Sends each request to the route that matches it, so that a `handle` function does not need a
+`match` on the path:
+
+```
+let router = Router.new()
+router.get("/", fun(req: Request) -> Response Response.text("home") end)
+router.get("/items/:id", fun(req: Request) -> Response
+    Response.text("item " + req.params.get("id", ""))
+end)
+
+fun handle(req: Request) -> Response
+    router.handle(req)
+end
+```
+
+A pattern is made of segments between `/`: a word must match exactly, `:name` matches any
+non-empty segment and puts it in `req.params`, and a final `*` matches the rest of the path
+(`req.params["*"]`). The first route that matches wins. A path that matches a route with
+another method gets a 405 response (with an `Allow` header), any other path a 404 --"
+struct Router
+    routes: array<Route>
+    other: (fun(Request) -> Response)?
+end
+
+impl Router
+    --" A router with no route. --"
+    public fun new() -> Router
+        Router { routes: [], other: none }
+    end
+
+    --" Adds a route for the requests with this `method` (`"GET"`, `"POST"`...). Returns the
+    router, so calls can be chained. --"
+    public fun add(self, method: string, pattern: string, handler: fun(Request) -> Response) -> Router
+        self.routes[] = Route { method, pattern, handler }
+        self
+    end
+
+    --" Adds a `GET` route. --"
+    public fun get(self, pattern: string, handler: fun(Request) -> Response) -> Router
+        self.add("GET", pattern, handler)
+    end
+
+    --" Adds a `POST` route. --"
+    public fun post(self, pattern: string, handler: fun(Request) -> Response) -> Router
+        self.add("POST", pattern, handler)
+    end
+
+    --" Adds a `PUT` route. --"
+    public fun put(self, pattern: string, handler: fun(Request) -> Response) -> Router
+        self.add("PUT", pattern, handler)
+    end
+
+    --" Adds a `DELETE` route. --"
+    public fun delete(self, pattern: string, handler: fun(Request) -> Response) -> Router
+        self.add("DELETE", pattern, handler)
+    end
+
+    --" What to answer when no route matches (instead of the 404 response). --"
+    public fun fallback(self, handler: fun(Request) -> Response) -> Router
+        self.other = handler
+        self
+    end
+
+    --" The parameters of `path` if it matches `pattern`, or `none`. `/items/:id` matches
+    `/items/3` (`id` is `"3"`); a final `*` takes the rest. --"
+    public fun matches(pattern: string, path: string) -> map<string, string>?
+        let wanted = pattern.split("/")
+        let parts = path.split("/")
+        let params: map<string, string> = {}
+        let i = 0
+        while i < wanted.len() do
+            let w = wanted[i]
+            if w == "*" and i == wanted.len() - 1 then
+                if parts.len() <= i then
+                    return none
+                end
+                params["*"] = parts.slice(i, parts.len()).join("/")
+                return params
+            end
+            if i >= parts.len() then
+                return none
+            end
+            if w.starts_with(":") then
+                if parts[i] == "" then
+                    return none
+                end
+                params[w.substring(1, w.len())] = parts[i]
+            elseif w != parts[i] then
+                return none
+            end
+            i += 1
+        end
+        if parts.len() != wanted.len() then none else params end
+    end
+
+    --" Answers `req` with the first route that matches it. --"
+    public fun handle(self, req: Request) -> Response
+        let allowed: array<string> = []
+        for route in self.routes do
+            let found = Router.matches(route.pattern, req.path)
+            if found != none then
+                if route.method == req.method then
+                    req.params = found
+                    return route.handler(req)
+                end
+                if not allowed.contains(route.method) then
+                    allowed[] = route.method
+                end
+            end
+        end
+        let other = self.other
+        if other != none then
+            return other(req)
+        end
+        if allowed.len() > 0 then
+            return Response { status: 405, headers: { "Allow": allowed.join(", "), "Content-Type": "text/plain; charset=utf-8" }, body: "Method Not Allowed" }
+        end
+        Response.not_found()
+    end
 end
 
 --" A SQL database connection, opened with `Db.connect(url)`. `query`, `execute` and

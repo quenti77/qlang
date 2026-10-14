@@ -17,7 +17,8 @@ fn info(files: &[(&str, &str)]) -> Info {
 }
 
 fn item<'a>(info: &'a Info, name: &str) -> &'a qlang_core::check::ItemInfo {
-    info.items.iter().find(|i| i.name == name).unwrap_or_else(|| panic!("no item {name}"))
+    // the prelude's items come first and may share a name (`Router.add`): the program's win
+    info.items.iter().rev().find(|i| i.name == name).unwrap_or_else(|| panic!("no item {name}"))
 }
 
 const SOURCE: &str = r#"

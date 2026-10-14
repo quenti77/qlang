@@ -949,6 +949,9 @@ impl Checker {
             (Ty::Array(t), "each") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unit))], Ty::Unit),
             (Ty::Array(t), "sort_by") => (vec![Ty::Fn(vec![(**t).clone(), (**t).clone()], Box::new(Ty::Int))], Ty::Unit),
             (Ty::Array(t), "unique") => (vec![], arr(t)),
+            (Ty::Array(t), "first" | "last") => (vec![], Ty::nullable((**t).clone())),
+            (Ty::Array(t), "concat") => (vec![arr(t)], arr(t)),
+            (Ty::Array(t), "take" | "drop") => (vec![Ty::Int], arr(t)),
             (Ty::Array(t), "flatten") => {
                 let inner = match self.resolve(t) {
                     Ty::Array(x) => *x,

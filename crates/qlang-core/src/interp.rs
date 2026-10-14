@@ -1856,7 +1856,7 @@ impl<'a> Interp<'a> {
             Value::Array(a)
                 if matches!(
                     name,
-                    "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort" | "unique" | "flatten"
+                    "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort" | "unique" | "flatten" | "take" | "drop"
                 ) =>
             {
                 let n = a.borrow().len();
@@ -2244,6 +2244,24 @@ impl<'a> Interp<'a> {
                     }
                 }
                 Value::array(out)
+            }
+            (Value::Array(a), "first") => a.borrow().first().cloned().unwrap_or(Value::None),
+            (Value::Array(a), "last") => a.borrow().last().cloned().unwrap_or(Value::None),
+            (Value::Array(a), "concat") => {
+                let Value::Array(other) = &args[0] else { unreachable!("checked by the type checker") };
+                self.charge(other.borrow().len(), span)?;
+                let mut out = a.borrow().clone();
+                out.extend(other.borrow().iter().cloned());
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
+            }
+            (Value::Array(a), "take") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                Value::array(a.borrow().iter().take(n).cloned().collect())
+            }
+            (Value::Array(a), "drop") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                Value::array(a.borrow().iter().skip(n).cloned().collect())
             }
             (Value::Array(a), "flatten") => {
                 let items: Vec<Value> = a.borrow().clone();

@@ -1233,6 +1233,9 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `sort_by(f)`          | trie le tableau sur place avec `f(a, b)` comme comparateur (négatif si `a` avant `b`, positif sinon, `0` si égaux) |
 | `unique()`            | nouveau tableau ne gardant que la première occurrence de chaque valeur |
 | `flatten()`           | nouveau tableau qui aplatit un tableau de tableaux (un seul niveau) |
+| `first()`, `last()`   | premier / dernier élément, ou `none` si vide (`T?`)              |
+| `concat(autre)`       | nouveau tableau avec les éléments de ce tableau puis ceux d'`autre` |
+| `take(n)`, `drop(n)`  | nouveau tableau des `n` premiers éléments / sans les `n` premiers |
 
 ```
 let names = ["ana", "bob", "cy"]

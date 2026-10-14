@@ -34,6 +34,11 @@ pub const ARRAY: &[Entry] = &[
     ("sort_by", "f", "Sorts the array in place using `f(a, b)` as the comparator (negative if `a` comes first, positive if `b` does, `0` if equal)."),
     ("unique", "", "New array keeping only the first occurrence of each value."),
     ("flatten", "", "New array joining the elements of an array of arrays, one level deep."),
+    ("first", "", "The first element, or `none` if empty."),
+    ("last", "", "The last element, or `none` if empty."),
+    ("concat", "other", "New array with the elements of this array followed by `other`'s."),
+    ("take", "n", "New array of the first `n` elements (fewer if there are not enough)."),
+    ("drop", "n", "New array without the first `n` elements (empty if there are not enough)."),
 ];
 
 pub const MAP: &[Entry] = &[

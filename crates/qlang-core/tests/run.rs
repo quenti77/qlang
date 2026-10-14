@@ -876,6 +876,10 @@ fn array_higher_order_functions() {
     assert!(err("print([1, 2].flatten())").starts_with("COMPILE"));
     let e = err("print([1, 2].flatten())");
     assert!(e.contains("needs an array of arrays"), "{e}");
+    assert_eq!(out("print([1, 2, 3].first())\nprint([1, 2, 3].last())\nlet e: array<int> = []\nprint(e.first())\nprint(e.last())"), "1\n3\nnone\nnone\n");
+    assert_eq!(out("print([1, 2].concat([3, 4]))\nlet a = [1, 2]\nlet b = a.concat([3])\nprint(a)\nprint(b)"), "[1, 2, 3, 4]\n[1, 2]\n[1, 2, 3]\n");
+    assert_eq!(out("print([1, 2, 3, 4].take(2))\nprint([1, 2].take(10))\nprint([1, 2].take(0))"), "[1, 2]\n[1, 2]\n[]\n");
+    assert_eq!(out("print([1, 2, 3, 4].drop(2))\nprint([1, 2].drop(10))\nprint([1, 2].drop(0))"), "[3, 4]\n[]\n[1, 2]\n");
 }
 
 #[test]

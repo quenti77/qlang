@@ -680,6 +680,7 @@ end
 --" An HTTP response, returned by `http.send`. --"
 struct Response
     public status: int
+    public headers: map<string, string> = {}
     public body: string
 end
 

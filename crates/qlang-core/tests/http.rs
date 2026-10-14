@@ -44,7 +44,7 @@ fn http_send_needs_the_network_capability() {
 
 #[test]
 fn http_send_returns_the_status_and_body_on_success() {
-    let host = canned("GET", "https://example.com", Ok(HttpResponse { status: 200, body: "hello".to_string() }));
+    let host = canned("GET", "https://example.com", Ok(HttpResponse { status: 200, headers: vec![], body: "hello".to_string() }));
     let out = exec(
         r#"
 let r = http.send(Request { method: "GET", url: "https://example.com" })
@@ -74,7 +74,7 @@ end
 
 #[test]
 fn request_headers_and_body_default_to_empty_and_none() {
-    let host = canned("POST", "https://example.com/items", Ok(HttpResponse { status: 201, body: "created".to_string() }));
+    let host = canned("POST", "https://example.com/items", Ok(HttpResponse { status: 201, headers: vec![], body: "created".to_string() }));
     let out = exec(
         r#"
 let req = Request { method: "POST", url: "https://example.com/items" }

@@ -32,21 +32,7 @@ impl Program {
 }
 
 pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
-    let mut it = Interp {
-        prog,
-        host,
-        limits,
-        steps: 0,
-        depth: 0,
-        out_bytes: 0,
-        envs: Vec::new(),
-        statics: HashMap::new(),
-        frames: Vec::new(),
-        cur_call: 0,
-        fmt_depth: 0,
-        fmt_nodes: 0,
-        last_ulid: 0,
-    };
+    let mut it = Interp::new(prog, host, limits);
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
     let error = match outcome {
@@ -59,6 +45,137 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
         Err(payload) => Some(crate::check::internal_error(&payload)),
     };
     RunResult { error, steps: it.steps }
+}
+
+/// An HTTP request for a program started with [`Program::start_app`]: the fields of the
+/// prelude's `Request` struct (`headers` names in lower case).
+#[derive(Clone, Debug, Default)]
+pub struct AppRequest {
+    pub method: String,
+    /// The target as received: the path and the query (`/items?id=3`).
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+/// What the program's `handle` function answered: the fields of the prelude's `Response`.
+#[derive(Clone, Debug)]
+pub struct AppResponse {
+    pub status: i64,
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+}
+
+/// A program that serves requests: its top-level code ran once (it keeps its variables, like
+/// a Node server), then `handle(req: Request) -> Response` is called for every request, each
+/// with a fresh step budget. The caller (a server) owns the network; the program only sees
+/// values.
+pub struct App<'a> {
+    it: Interp<'a>,
+    handler: FnId,
+}
+
+impl Program {
+    /// Run the program's top-level code, then keep it ready to answer requests with its
+    /// `fun handle(req: Request) -> Response`.
+    pub fn start_app<'a>(&'a self, host: &'a mut dyn Host, limits: Limits) -> Result<App<'a>, Box<Diagnostic>> {
+        let entry = self.modules.len().saturating_sub(1);
+        let found = self.defs.fns.iter().position(|f| f.name == "handle" && f.module == entry && f.impl_id.is_none() && !f.has_self && f.decl.is_some());
+        let Some(handler) = found else {
+            return Err(Box::new(Diagnostic::error("R070", "a program that serves requests needs `fun handle(req: Request) -> Response`", Default::default())));
+        };
+        let prelude = |name: &str| self.defs.structs.iter().position(|s| s.module == crate::check::PRELUDE_MOD && s.name == name);
+        let (req, resp) = (prelude("Request"), prelude("Response"));
+        let f = &self.defs.fns[handler];
+        let right = matches!((&f.params[..], &f.ret), ([Ty::Struct(a, _)], Ty::Struct(b, _)) if Some(*a) == req && Some(*b) == resp);
+        if !right {
+            return Err(Box::new(Diagnostic::error("R070", "`handle` must be `fun handle(req: Request) -> Response`", f.span)));
+        }
+        let mut it = Interp::new(self, host, limits);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
+        match outcome {
+            Ok(Ok(())) => Ok(App { it, handler }),
+            Ok(Err(Ctrl::Error(mut d))) => {
+                d.resolve(&self.sources);
+                Err(d)
+            }
+            Ok(Err(_)) => Ok(App { it, handler }),
+            Err(payload) => Err(Box::new(crate::check::internal_error(&payload))),
+        }
+    }
+}
+
+impl App<'_> {
+    /// Answer one request. An error (a runtime error in `handle`, the step limit...) is
+    /// returned for the caller to turn into a 500; the program stays usable.
+    pub fn handle(&mut self, req: AppRequest) -> Result<AppResponse, Box<Diagnostic>> {
+        let handler = self.handler;
+        let it = &mut self.it;
+        it.steps = 0;
+        it.depth = 0;
+        it.out_bytes = 0;
+        it.frames.clear();
+        it.fmt_depth = 0;
+        it.fmt_nodes = 0;
+        let prog = it.prog;
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let value = it.request_value(&req);
+            it.call_fid(handler, None, vec![value], Default::default())
+        }));
+        match outcome {
+            Ok(Ok(v)) => it.response_of(&v).map_err(|e| match e {
+                Ctrl::Error(mut d) => {
+                    d.resolve(&prog.sources);
+                    d
+                }
+                _ => Box::new(Diagnostic::error("X999", "internal error", Default::default())),
+            }),
+            Ok(Err(Ctrl::Error(mut d))) => {
+                d.resolve(&prog.sources);
+                Err(d)
+            }
+            Ok(Err(_)) => Err(Box::new(Diagnostic::error("X999", "internal error", Default::default()))),
+            Err(payload) => Err(Box::new(crate::check::internal_error(&payload))),
+        }
+    }
+}
+
+impl Interp<'_> {
+    fn request_value(&self, req: &AppRequest) -> Value {
+        let body = req.body.as_deref().map_or(Value::None, Value::str);
+        self.new_struct(
+            self.prelude_struct("Request"),
+            &[("method", Value::str(&req.method)), ("url", Value::str(&req.url)), ("headers", Self::string_map(&req.headers)), ("body", body)],
+        )
+    }
+
+    /// Reads the fields of the `Response` the handler returned.
+    fn response_of(&self, v: &Value) -> R<AppResponse> {
+        let bad = |msg: &str| self.fail("R071", msg, Default::default());
+        let Value::Struct(o) = v else { return bad("`handle` must return a `Response`") };
+        let fields = o.fields.borrow();
+        let status = match fields.get("status") {
+            Some(Value::Int(s)) if (100..=599).contains(s) => *s,
+            _ => return bad("the `status` of the `Response` must be an integer from 100 to 599"),
+        };
+        let body = match fields.get("body") {
+            Some(Value::Str(s)) => s.to_string(),
+            _ => return bad("the `body` of the `Response` must be a string"),
+        };
+        let headers = match fields.get("headers") {
+            Some(Value::Map(m)) => m
+                .borrow()
+                .entries
+                .iter()
+                .filter_map(|(k, v)| match (k, v) {
+                    (Value::Str(k), Value::Str(v)) => Some((k.to_string(), v.to_string())),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        Ok(AppResponse { status, headers, body })
+    }
 }
 
 enum Ctrl {
@@ -105,6 +222,24 @@ struct Interp<'a> {
 const MAX_FMT_DEPTH: usize = 64;
 
 impl<'a> Interp<'a> {
+    fn new(prog: &'a Program, host: &'a mut dyn Host, limits: Limits) -> Interp<'a> {
+        Interp {
+            prog,
+            host,
+            limits,
+            steps: 0,
+            depth: 0,
+            out_bytes: 0,
+            envs: Vec::new(),
+            statics: HashMap::new(),
+            frames: Vec::new(),
+            cur_call: 0,
+            fmt_depth: 0,
+            fmt_nodes: 0,
+            last_ulid: 0,
+        }
+    }
+
     // ------------------------------------------------------------------ errors
 
     fn error(&self, code: &str, msg: impl Into<String>, span: Span) -> Ctrl {
@@ -1611,8 +1746,18 @@ impl<'a> Interp<'a> {
         }
     }
 
+    /// A `map<string, string>` value from `(name, value)` pairs.
+    fn string_map(pairs: &[(String, String)]) -> Value {
+        let mut m = MapObj::default();
+        for (k, v) in pairs {
+            m.insert(Value::str(k), Value::str(v));
+        }
+        Value::Map(Rc::new(RefCell::new(m)))
+    }
+
     fn http_ok(&self, resp: HttpResponse) -> Value {
-        let response = self.new_struct(self.prelude_struct("Response"), &[("status", Value::Int(resp.status)), ("body", Value::str(&resp.body))]);
+        let headers = Self::string_map(&resp.headers);
+        let response = self.new_struct(self.prelude_struct("Response"), &[("status", Value::Int(resp.status)), ("headers", headers), ("body", Value::str(&resp.body))]);
         self.ok_result(response)
     }
 

@@ -1,0 +1,112 @@
+//! A program that serves requests: top-level code runs once, `handle` runs for each request.
+
+use qlang_core::check::compile;
+use qlang_core::host::{Limits, MemoryHost};
+use qlang_core::interp::AppRequest;
+
+fn get(url: &str) -> AppRequest {
+    AppRequest { method: "GET".into(), url: url.into(), ..Default::default() }
+}
+
+/// Runs `f` with a started app, on a big stack.
+fn with_app<T: Send + 'static>(src: &'static str, limits: Limits, f: impl FnOnce(Result<qlang_core::interp::App<'_>, String>) -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let mut host = MemoryHost::new();
+            let prog = match compile("app.q", src, &mut host) {
+                Ok(p) => p,
+                Err(e) => return f(Err(format!("COMPILE: {}", e.render()))),
+            };
+            let app = prog.start_app(&mut host, limits).map_err(|d| format!("{}: {}", d.code, d.message));
+            f(app)
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+const COUNTER: &str = r#"
+let hits = 0
+print("started")
+
+fun handle(req: Request) -> Response
+  hits += 1
+  if req.url == "/boom" then
+    panic("boom")
+  end
+  if req.url == "/loop" then
+    while true do
+    end
+  end
+  Response { status: 200, headers: { "content-type": "text/plain" }, body: "{req.method} {req.url} #{hits}" }
+end
+"#;
+
+#[test]
+fn state_is_kept_between_requests_and_top_level_runs_once() {
+    with_app(COUNTER, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let a = app.handle(get("/a")).unwrap();
+        assert_eq!((a.status, a.body.as_str()), (200, "GET /a #1"));
+        assert_eq!(a.headers, vec![("content-type".to_string(), "text/plain".to_string())]);
+        let b = app.handle(get("/b")).unwrap();
+        assert_eq!(b.body, "GET /b #2");
+    });
+}
+
+#[test]
+fn the_request_carries_headers_and_body() {
+    let src = r#"
+fun handle(req: Request) -> Response
+  let agent = req.headers.get("user-agent", "none")
+  let body = req.body
+  let text = if body == none then "no body" else body end
+  Response { status: 201, body: "{agent}|{text}" }
+end
+"#;
+    with_app(src, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let r = app
+            .handle(AppRequest { method: "POST".into(), url: "/x".into(), headers: vec![("user-agent".into(), "test".into())], body: Some("hello".into()) })
+            .unwrap();
+        assert_eq!((r.status, r.body.as_str()), (201, "test|hello"));
+        assert_eq!(app.handle(get("/")).unwrap().body, "none|no body");
+    });
+}
+
+#[test]
+fn an_error_in_one_request_does_not_stop_the_next() {
+    with_app(COUNTER, Limits { max_steps: 10_000, ..Limits::default() }, |app| {
+        let mut app = app.unwrap();
+        let boom = app.handle(get("/boom")).unwrap_err();
+        assert_eq!(boom.code, "R050");
+        // an infinite loop hits the step limit of this request only
+        let looped = app.handle(get("/loop")).unwrap_err();
+        assert_eq!(looped.code, "R900");
+        let ok = app.handle(get("/after")).unwrap();
+        assert_eq!(ok.body, "GET /after #3");
+    });
+}
+
+#[test]
+fn the_handler_is_checked_before_serving() {
+    with_app("print(1)", Limits::default(), |app| assert!(app.err().unwrap().starts_with("R070")));
+    with_app("fun handle(x: int) -> int\n  x\nend", Limits::default(), |app| assert!(app.err().unwrap().starts_with("R070")));
+    with_app("fun handle(req: Request) -> string\n  \"x\"\nend", Limits::default(), |app| assert!(app.err().unwrap().starts_with("R070")));
+}
+
+#[test]
+fn a_runtime_error_at_start_is_reported() {
+    with_app("panic(\"no\")\nfun handle(req: Request) -> Response\n  Response { status: 200, body: \"\" }\nend", Limits::default(), |app| {
+        assert!(app.err().unwrap().starts_with("R050"));
+    });
+}
+
+#[test]
+fn a_bad_status_is_an_error() {
+    let src = "fun handle(req: Request) -> Response\n  Response { status: 42, body: \"\" }\nend";
+    with_app(src, Limits::default(), |app| {
+        assert_eq!(app.unwrap().handle(get("/")).unwrap_err().code, "R071");
+    });
+}

@@ -1740,6 +1740,55 @@ let res = http.send(Request {
 })
 ```
 
+### Répondre à des requêtes HTTP
+
+Un programme peut aussi **servir** des requêtes : `qlang serve app.q` écoute sur un port
+(8080 par défaut, sur `127.0.0.1`), exécute le code du fichier **une fois**, puis appelle
+sa fonction `handle` pour chaque requête reçue.
+
+```
+let visits = 0
+
+fun handle(req: Request) -> Response
+  visits += 1
+  match req.url
+    case "/hello" then
+      Response { status: 200, body: "Bonjour !" }
+    else
+      Response { status: 404, body: "Introuvable : {req.url}" }
+  end
+end
+```
+
+```
+qlang serve app.q --port 8080
+curl http://127.0.0.1:8080/hello
+```
+
+- **La fonction** s'appelle exactement `handle`, prend une `Request` et renvoie une
+  `Response` : la vérification le contrôle avant le démarrage.
+- **La requête** : `method` (`"GET"`, `"POST"`…), `url` telle qu'elle a été reçue, chemin et
+  paramètres compris (`/items?id=3`, sans décodage), `headers` (noms en **minuscules**, par
+  exemple `req.headers.get("user-agent", "")`) et `body` (`none` s'il n'y a pas de corps).
+- **La réponse** : `status` (de 100 à 599), `body`, et `headers` facultatifs. Sans
+  `Content-Type`, le serveur ajoute `text/plain; charset=utf-8`. Les en-têtes qui contiennent
+  un retour à la ligne sont ignorés, et `Content-Length` et `Connection` sont gérés par le
+  serveur.
+- **L'état** : le code du fichier s'exécute une seule fois, donc `visits` se souvient de sa
+  valeur d'une requête à l'autre, comme dans un serveur Node. Les requêtes sont traitées **une
+  par une** : les variables ne changent jamais pendant l'exécution de `handle`.
+- **Les erreurs** : un `panic`, une erreur d'exécution ou une boucle trop longue (limite
+  d'étapes, `--max-steps`, **par requête**) donnent une réponse `500 Internal Server Error`
+  **sans détail** pour le client ; le détail est écrit dans le journal du serveur (la sortie
+  d'erreur), et le serveur continue. Une requête qui attend plus de 30 secondes reçoit `504`.
+- **Les capacités** : le programme tourne comme avec `qlang run` : `print`, fichiers,
+  variables d'environnement, `http.send`, `Db`, `import` fonctionnent (`--root` limite les
+  fichiers et les imports à un dossier). `--seed N` fixe le hasard.
+- **Le serveur** est minimal : HTTP/1.1 sans TLS ni connexions persistantes, 16 connexions
+  en même temps au plus, corps limité à 1 Mo, pas de requêtes en morceaux (`Transfer-Encoding:
+  chunked`). Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
+  inverse** et ne l'exposez pas directement à Internet.
+
 ### Prélude : `Db`
 
 `Db.connect(url)` ouvre une connexion à une base de données ; le schéma de

@@ -24,6 +24,9 @@ USAGE:
     qlang run --json                     read a JSON request on stdin, write a JSON response
     qlang serve [--port 8080] [--bind 127.0.0.1]
                                          serve the JSON protocol over HTTP (POST /run)
+    qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--max-steps N] [--root DIR] [--seed N]
+                                         serve a qlang program: its `handle(req: Request) ->
+                                         Response` function answers every HTTP request
     qlang --help | --version
 ";
 
@@ -209,17 +212,27 @@ impl Host for TerminalHost {
         match result {
             Ok(resp) => {
                 let status = resp.status() as i64;
+                let headers = response_headers(&resp);
                 let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
-                Ok(HttpResponse { status, body })
+                Ok(HttpResponse { status, headers, body })
             }
             // a non-2xx/3xx status is still a response, not a failure
             Err(ureq::Error::Status(status, resp)) => {
+                let headers = response_headers(&resp);
                 let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
-                Ok(HttpResponse { status: status as i64, body })
+                Ok(HttpResponse { status: status as i64, headers, body })
             }
             Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
         }
     }
+}
+
+/// The headers of a response, with lower-case names.
+fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
+    resp.headers_names()
+        .into_iter()
+        .filter_map(|name| resp.header(&name).map(|v| (name.to_ascii_lowercase(), v.to_string())))
+        .collect()
 }
 
 fn run_file(args: &[&str], execute: bool) -> ExitCode {

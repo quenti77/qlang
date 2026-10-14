@@ -56,24 +56,27 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Bornes](#bornes)
     - [Inférence](#inférence)
   - [13. Modules](#13-modules)
-  - [14. Entrées, sorties et bibliothèque standard](#14-entrées-sorties-et-bibliothèque-standard)
+  - [14. Bibliothèque standard](#14-bibliothèque-standard)
     - [Dépendance à l'environnement](#dépendance-à-lenvironnement)
     - [Fonctions prédéfinies](#fonctions-prédéfinies)
     - [Méthodes prédéfinies](#méthodes-prédéfinies)
     - [Dictionnaires](#dictionnaires)
+  - [15. Temps, identifiants et expressions régulières](#15-temps-identifiants-et-expressions-régulières)
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
     - [Expressions régulières](#expressions-régulières)
+  - [16. Prélude : `Result`, `Error` et JSON](#16-prélude--result-error-et-json)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
+  - [17. Prélude : réseau, bases de données et système](#17-prélude--réseau-bases-de-données-et-système)
     - [Prélude : `http`](#prélude--http)
     - [Prélude : `Db`](#prélude--db)
     - [Prélude : fichiers et environnement](#prélude--fichiers-et-environnement)
-  - [15. Fins de ligne](#15-fins-de-ligne)
-  - [16. Mots-clés réservés](#16-mots-clés-réservés)
-  - [17. Erreurs et limites](#17-erreurs-et-limites)
-  - [18. Points encore ouverts](#18-points-encore-ouverts)
+  - [18. Fins de ligne](#18-fins-de-ligne)
+  - [19. Mots-clés réservés](#19-mots-clés-réservés)
+  - [20. Erreurs et limites](#20-erreurs-et-limites)
+  - [21. Points encore ouverts](#21-points-encore-ouverts)
 
 ---
 
@@ -1108,7 +1111,7 @@ print(math.add(1, 2))
 
 ---
 
-## 14. Entrées, sorties et bibliothèque standard
+## 14. Bibliothèque standard
 
 ### Dépendance à l'environnement
 
@@ -1292,6 +1295,8 @@ d'exécution.
 
 ---
 
+## 15. Temps, identifiants et expressions régulières
+
 ### Heure et aléatoire
 
 Le cœur du langage ne lit ni l'horloge ni le hasard : comme `read`, ils viennent
@@ -1451,6 +1456,8 @@ Une syntaxe d'expression régulière invalide est une erreur `R070` : c'est une
 erreur de programmation (comme une date qui n'existe pas), pas une
 condition à récupérer avec `Result`.
 
+## 16. Prélude : `Result`, `Error` et JSON
+
 ### Prélude : `Result` et `Error`
 
 Deux types sont disponibles dans tout fichier, **sans `import`** :
@@ -1582,6 +1589,8 @@ structure définie par l'utilisateur (qlang n'a pas de réflexion ni de macros
 toi-même une méthode statique qui lit les champs un par un, par exemple
 `Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une
 interface imposée par le langage, comme `new`).
+
+## 17. Prélude : réseau, bases de données et système
 
 ### Prélude : `http`
 
@@ -1728,7 +1737,7 @@ côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait
 `env.args()` renvoie (`qlang run script.q -- a b`), et `fs` respecte `--root`
 comme les imports.
 
-## 15. Fins de ligne
+## 18. Fins de ligne
 
 Il n'y a pas de `;`. **Une instruction se termine à la fin de la ligne.** La
 ligne continue sur la suivante dans ces cas :
@@ -1752,7 +1761,7 @@ Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, 
 
 ---
 
-## 16. Mots-clés réservés
+## 19. Mots-clés réservés
 
 ```
 let const fun return
@@ -1773,7 +1782,7 @@ prédéfinie (`print`, `write`, `read`, `panic`, `assert`).
 
 ---
 
-## 17. Erreurs et limites
+## 20. Erreurs et limites
 
 **Les erreurs sont des données.** Chaque erreur a un code, un message, une
 position (fichier, ligne, colonne) et parfois des notes. Le préfixe du code
@@ -1818,7 +1827,7 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 ---
 
-## 18. Points encore ouverts
+## 21. Points encore ouverts
 
 - **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
   s'étoffera à l'usage.

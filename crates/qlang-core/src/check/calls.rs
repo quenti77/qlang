@@ -895,6 +895,12 @@ impl Checker {
                     );
                 }
             }
+            "flatten" => {
+                if !matches!(t, Ty::Array(_)) {
+                    let shown = self.show(&t);
+                    self.err("T261", format!("`flatten()` needs an array of arrays, not `array<{shown}>`"), span);
+                }
+            }
             "sum" => match t {
                 Ty::Int => {}
                 Ty::Float => {
@@ -929,6 +935,33 @@ impl Checker {
             (Ty::Array(t), "min" | "max") => (vec![], Ty::nullable((**t).clone())),
             (Ty::Array(t), "sum") => (vec![], (**t).clone()),
             (Ty::Array(t), "slice") => (vec![Ty::Int, Ty::Int], arr(t)),
+            (Ty::Array(t), "map") => {
+                let u = self.fresh();
+                (vec![Ty::Fn(vec![(**t).clone()], Box::new(u.clone()))], arr(&u))
+            }
+            (Ty::Array(t), "filter") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], arr(t)),
+            (Ty::Array(t), "reduce") => {
+                let u = self.fresh();
+                (vec![u.clone(), Ty::Fn(vec![u.clone(), (**t).clone()], Box::new(u.clone()))], u)
+            }
+            (Ty::Array(t), "any" | "all") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::Bool),
+            (Ty::Array(t), "find") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::nullable((**t).clone())),
+            (Ty::Array(t), "each") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unit))], Ty::Unit),
+            (Ty::Array(t), "sort_by") => (vec![Ty::Fn(vec![(**t).clone(), (**t).clone()], Box::new(Ty::Int))], Ty::Unit),
+            (Ty::Array(t), "unique") => (vec![], arr(t)),
+            (Ty::Array(t), "first" | "last") => (vec![], Ty::nullable((**t).clone())),
+            (Ty::Array(t), "concat") => (vec![arr(t)], arr(t)),
+            (Ty::Array(t), "take" | "drop") => (vec![Ty::Int], arr(t)),
+            (Ty::Array(_), "swap") => (vec![Ty::Int, Ty::Int], Ty::Unit),
+            (Ty::Array(t), "chunk") => (vec![Ty::Int], arr(&arr(t))),
+            (Ty::Array(t), "repeat") => (vec![Ty::Int], arr(t)),
+            (Ty::Array(t), "flatten") => {
+                let inner = match self.resolve(t) {
+                    Ty::Array(x) => *x,
+                    other => other,
+                };
+                (vec![], arr(&inner))
+            }
             (Ty::Map(_, _), "len") => (vec![], Ty::Int),
             (Ty::Map(_, _), "is_empty") => (vec![], Ty::Bool),
             (Ty::Map(_, _), "clear") => (vec![], Ty::Unit),
@@ -937,9 +970,18 @@ impl Checker {
             (Ty::Map(k, v), "remove") => (vec![(**k).clone()], Ty::nullable((**v).clone())),
             (Ty::Map(k, _), "keys") => (vec![], arr(k)),
             (Ty::Map(_, v), "values") => (vec![], arr(v)),
+            (Ty::Map(k, v), "merge") => (vec![Ty::Map(k.clone(), v.clone())], Ty::Map(k.clone(), v.clone())),
+            (Ty::Map(k, v), "filter") => (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Bool))], Ty::Map(k.clone(), v.clone())),
+            (Ty::Map(k, v), "map_values") => {
+                let u = self.fresh();
+                (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(u.clone()))], Ty::Map(k.clone(), Box::new(u)))
+            }
             (Ty::Str, "len") => (vec![], Ty::Int),
             (Ty::Str, "is_empty") => (vec![], Ty::Bool),
             (Ty::Str, "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse") => (vec![], Ty::Str),
+            (Ty::Str, "snake_case" | "camel_case" | "kebab_case" | "title_case") => (vec![], Ty::Str),
+            (Ty::Str, "strip_prefix" | "strip_suffix") => (vec![Ty::Str], Ty::nullable(Ty::Str)),
+            (Ty::Str, "eq_ignore_case") => (vec![Ty::Str], Ty::Bool),
             (Ty::Str, "last_index_of") => (vec![Ty::Str], Ty::nullable(Ty::Int)),
             (Ty::Str, "count") => (vec![Ty::Str], Ty::Int),
             (Ty::Str, "lines" | "words") => (vec![], arr(&Ty::Str)),
@@ -966,9 +1008,11 @@ impl Checker {
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),
+            (Ty::Int, "to_hex" | "to_oct" | "to_bin") => (vec![], Ty::Str),
             (Ty::Float, "abs" | "sqrt") => (vec![], Ty::Float),
             (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
             (Ty::Float, "floor" | "ceil" | "round") => (vec![], Ty::Int),
+            (Ty::Float, "to_fixed") => (vec![Ty::Int], Ty::Str),
             _ => return None,
         })
     }

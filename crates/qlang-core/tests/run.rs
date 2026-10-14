@@ -851,6 +851,43 @@ fn array_helpers_reject_wrong_element_types() {
 }
 
 #[test]
+fn array_higher_order_functions() {
+    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> int x * 2 end))"), "[2, 4, 6]\n");
+    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> string \"n{x}\" end))"), "[\"n1\", \"n2\", \"n3\"]\n");
+    assert_eq!(out("print([1, 2, 3, 4].filter(fun(x: int) -> bool x mod 2 == 0 end))"), "[2, 4]\n");
+    assert_eq!(out("print([1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end))"), "10\n");
+    assert_eq!(out("print([\"a\", \"bb\", \"ccc\"].reduce(\"\", fun(acc: string, x: string) -> string acc + x end))"), "abbccc\n");
+    assert_eq!(out("print([1, 2, 3].any(fun(x: int) -> bool x > 2 end))\nprint([1, 2, 3].any(fun(x: int) -> bool x > 9 end))"), "true\nfalse\n");
+    assert_eq!(out("print([1, 2, 3].all(fun(x: int) -> bool x > 0 end))\nprint([1, 2, 3].all(fun(x: int) -> bool x > 1 end))"), "true\nfalse\n");
+    assert_eq!(out("print([1, 2, 3].find(fun(x: int) -> bool x > 1 end))\nprint([1, 2, 3].find(fun(x: int) -> bool x > 9 end))"), "2\nnone\n");
+    assert_eq!(
+        out("let log: array<int> = []\n[1, 2, 3].each(fun(x: int) log.push(x * 10) end)\nprint(log)"),
+        "[10, 20, 30]\n"
+    );
+    assert_eq!(out("let a = [3, 1, 2]\na.sort_by(fun(x: int, y: int) -> int y - x end)\nprint(a)"), "[3, 2, 1]\n");
+    assert_eq!(out("print([1, 2, 2, 3, 1].unique())"), "[1, 2, 3]\n");
+    assert_eq!(out("print([[1, 2], [], [3]].flatten())"), "[1, 2, 3]\n");
+    // chaining
+    assert_eq!(
+        out("print([1, 2, 3, 4, 5].filter(fun(x: int) -> bool x mod 2 == 0 end).map(fun(x: int) -> int x * x end))"),
+        "[4, 16]\n"
+    );
+    // errors: flatten on a non-nested array, and a comparator that doesn't return an int
+    assert!(err("print([1, 2].flatten())").starts_with("COMPILE"));
+    let e = err("print([1, 2].flatten())");
+    assert!(e.contains("needs an array of arrays"), "{e}");
+    assert_eq!(out("print([1, 2, 3].first())\nprint([1, 2, 3].last())\nlet e: array<int> = []\nprint(e.first())\nprint(e.last())"), "1\n3\nnone\nnone\n");
+    assert_eq!(out("print([1, 2].concat([3, 4]))\nlet a = [1, 2]\nlet b = a.concat([3])\nprint(a)\nprint(b)"), "[1, 2, 3, 4]\n[1, 2]\n[1, 2, 3]\n");
+    assert_eq!(out("print([1, 2, 3, 4].take(2))\nprint([1, 2].take(10))\nprint([1, 2].take(0))"), "[1, 2]\n[1, 2]\n[]\n");
+    assert_eq!(out("print([1, 2, 3, 4].drop(2))\nprint([1, 2].drop(10))\nprint([1, 2].drop(0))"), "[3, 4]\n[]\n[1, 2]\n");
+    assert_eq!(out("let a = [1, 2, 3]\na.swap(0, 2)\nprint(a)"), "[3, 2, 1]\n");
+    assert!(err("let a = [1, 2]\na.swap(0, 5)").starts_with("R020"));
+    assert_eq!(out("print([1, 2, 3, 4, 5].chunk(2))\nprint([1, 2, 3].chunk(5))"), "[[1, 2], [3, 4], [5]]\n[[1, 2, 3]]\n");
+    assert!(err("print([1].chunk(0))").starts_with("R021"));
+    assert_eq!(out("print([1, 2].repeat(3))\nprint([1, 2].repeat(0))"), "[1, 2, 1, 2, 1, 2]\n[]\n");
+}
+
+#[test]
 fn number_methods_and_constants() {
     assert_eq!(out("print(3.min(8))\nprint(3.max(8))\nprint(2.pow(10))\nprint(16.sqrt())"), "3\n8\n1024\n4.0\n");
     assert_eq!(out("print(2.5.min(1.5))\nprint(2.5.max(1.5))\nprint(2.0.pow(0.5) > 1.41)\nprint(9.0.sqrt())"), "1.5\n2.5\ntrue\n3.0\n");
@@ -888,6 +925,14 @@ fn maps_counting_and_loops() {
     // `m[k] += 1` works when the key exists, and is an error when it does not
     assert_eq!(out("let m = { \"n\": 1 }\nm[\"n\"] += 5\nprint(m[\"n\"])"), "6\n");
     assert!(err("let m: map<string, int> = {}\nm[\"n\"] += 1").starts_with("R022"));
+}
+
+#[test]
+fn maps_higher_order_functions() {
+    assert_eq!(out("let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 20, \"z\": 3 }\nprint(a.merge(b))\nprint(a)"), "{\"x\": 1, \"y\": 20, \"z\": 3}\n{\"x\": 1, \"y\": 2}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.filter(fun(k: string, v: int) -> bool v > 1 end))"), "{\"b\": 2, \"c\": 3}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> int v * 10 end))"), "{\"a\": 10, \"b\": 20}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> string \"{k}={v}\" end))"), "{\"a\": \"a=1\", \"b\": \"b=2\"}\n");
 }
 
 #[test]
@@ -1023,6 +1068,26 @@ fn string_library() {
     assert!(err("print(\"x\".count(\"\"))").starts_with("R021"));
     let o = run_files(&[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")], None, Limits { max_alloc: 1000, ..Limits::default() });
     assert!(o.error.unwrap().starts_with("R903"));
+}
+
+#[test]
+fn string_prefix_suffix_and_case_conversions() {
+    assert_eq!(out("print(\"hello.txt\".strip_suffix(\".txt\"))\nprint(\"hello.txt\".strip_suffix(\".md\"))"), "hello\nnone\n");
+    assert_eq!(out("print(\"hello world\".strip_prefix(\"hello \"))\nprint(\"hello world\".strip_prefix(\"bye\"))"), "world\nnone\n");
+    assert_eq!(out("print(\"Hello World\".snake_case())\nprint(\"helloWorld\".snake_case())\nprint(\"already_snake\".snake_case())"), "hello_world\nhello_world\nalready_snake\n");
+    assert_eq!(out("print(\"hello world\".kebab_case())\nprint(\"HelloWorld\".kebab_case())"), "hello-world\nhello-world\n");
+    assert_eq!(out("print(\"hello world\".camel_case())\nprint(\"hello-world-test\".camel_case())"), "helloWorld\nhelloWorldTest\n");
+    assert_eq!(out("print(\"hello_world test\".title_case())"), "Hello World Test\n");
+    assert_eq!(out("print(\"Hello\".eq_ignore_case(\"hello\"))\nprint(\"Hello\".eq_ignore_case(\"world\"))"), "true\nfalse\n");
+}
+
+#[test]
+fn number_formatting() {
+    assert_eq!(out("print(255.to_hex())\nprint((-255).to_hex())\nprint(0.to_hex())"), "ff\n-ff\n0\n");
+    assert_eq!(out("print(8.to_oct())\nprint(5.to_bin())"), "10\n101\n");
+    assert_eq!(out("print(3.14159.to_fixed(2))\nprint(1.0.to_fixed(0))\nprint((-2.5).to_fixed(3))"), "3.14\n1\n-2.500\n");
+    assert!(err("print(1.5.to_fixed(-1))").starts_with("R021"));
+    assert!(err("print(1.5.to_fixed(18))").starts_with("R021"));
 }
 
 // ---------------------------------------------------------------- hardening

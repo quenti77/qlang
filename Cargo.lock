@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytes",
  "postgres",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "regex",
  "serde",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "qlang-core",
 ]

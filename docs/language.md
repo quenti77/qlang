@@ -1224,6 +1224,30 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `min()`, `max()`      | le plus petit / grand élément, ou `none` si vide (`T?`)          |
 | `sum()`               | somme d'un tableau de nombres (`0` ou `0.0` si vide)             |
 | `slice(début, fin)`   | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
+| `map(f)`              | nouveau tableau de `f(élément)` pour chaque élément               |
+| `filter(f)`           | nouveau tableau des éléments pour lesquels `f(élément)` est `true` |
+| `reduce(initial, f)`  | réduit le tableau en une valeur, en combinant `initial` puis chaque élément via `f(accumulateur, élément)` |
+| `any(f)`, `all(f)`    | `bool` : au moins un élément / tous les éléments vérifient `f(élément)` |
+| `find(f)`             | premier élément pour lequel `f(élément)` est `true`, ou `none`    |
+| `each(f)`             | appelle `f(élément)` pour chaque élément, dans l'ordre            |
+| `sort_by(f)`          | trie le tableau sur place avec `f(a, b)` comme comparateur (négatif si `a` avant `b`, positif sinon, `0` si égaux) |
+| `unique()`            | nouveau tableau ne gardant que la première occurrence de chaque valeur |
+| `flatten()`           | nouveau tableau qui aplatit un tableau de tableaux (un seul niveau) |
+| `first()`, `last()`   | premier / dernier élément, ou `none` si vide (`T?`)              |
+| `concat(autre)`       | nouveau tableau avec les éléments de ce tableau puis ceux d'`autre` |
+| `take(n)`, `drop(n)`  | nouveau tableau des `n` premiers éléments / sans les `n` premiers |
+| `swap(i, j)`          | échange les éléments d'indices `i` et `j`, sur place              |
+| `chunk(taille)`       | découpe en groupes consécutifs de `taille` éléments (le dernier peut être plus petit) |
+| `repeat(n)`           | nouveau tableau avec les éléments répétés `n` fois                 |
+
+```
+let names = ["ana", "bob", "cy"]
+print(names.map(fun(s: string) -> int s.len() end))        // [3, 3, 2]
+print(names.filter(fun(s: string) -> bool s.len() > 2 end)) // ["ana", "bob"]
+
+let total = [1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end)
+print(total) // 10
+```
 
 `string` :
 
@@ -1247,11 +1271,19 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `code()`                                        | code Unicode d'une chaîne d'**un seul** caractère (`"A".code()` vaut 65)                                             |
 | `to_int()`, `to_float()`                        | comme `int.parse` / `float.parse` : `int?` / `float?`                                                                |
 | `substring(début, fin)`                         | caractères de `début` (inclus) à `fin` (exclu)                                                                       |
+| `strip_prefix(p)`, `strip_suffix(p)`            | la chaîne sans `p` au début / à la fin, ou `none` si elle ne commence / finit pas par `p`                           |
+| `snake_case()`, `camel_case()`, `kebab_case()`  | copie en `snake_case`, `camelCase` ou `kebab-case`                                                                   |
+| `title_case()`                                  | copie avec chaque mot capitalisé, séparés par une espace                                                            |
+| `eq_ignore_case(autre)`                         | `bool` : égalité en ignorant majuscules / minuscules                                                                |
 
 `sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
 chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de
 compilation. `sum` n'accepte que des tableaux d'`int` ou de `float`. `slice`
 copie les éléments : modifier le résultat ne change pas le tableau d'origine.
+`flatten` demande un tableau de tableaux (`array<array<T>>`) ; sinon c'est une
+erreur de compilation. `map`, `filter`, `reduce`, `any`, `all`, `find`,
+`each` et `sort_by` prennent une [fonction anonyme](#fonctions-anonymes) : son
+type de retour n'a pas besoin d'être écrit s'il se déduit du contexte.
 
 Nombres :
 
@@ -1263,6 +1295,8 @@ Nombres :
 | `x.pow(y)`                           | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`)       |
 | `x.sqrt()`                           | racine carrée, un `float` (erreur si `x` est négatif)                 |
 | `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int`                         |
+| `n.to_hex()`, `n.to_oct()`, `n.to_bin()` | (`int`) texte en base 16 / 8 / 2 (`255.to_hex()` vaut `"ff"`)      |
+| `f.to_fixed(décimales)`              | (`float`) texte avec exactement `décimales` chiffres après la virgule (0 à 17) |
 | `float.PI`, `float.E`                | constantes mathématiques                                              |
 | `int.MAX`, `int.MIN`                 | plus grand / plus petit `int`                                         |
 
@@ -1270,6 +1304,8 @@ Nombres :
 print([3, 1, 2].max())             -- 3
 print(float.PI * 2.0 ** 2)         -- 12.566370614359172
 print(16.sqrt())                   -- 4.0
+print(3.14159.to_fixed(2))         -- "3.14"
+print(255.to_hex())                -- "ff"
 ```
 
 Ces opérations sont des méthodes et des constantes attachées aux types, pour ne
@@ -1322,6 +1358,16 @@ end
 | `keys()`              | `array<K>` des clés, dans l'ordre d'insertion           |
 | `values()`            | `array<V>` des valeurs, dans le même ordre              |
 | `clear()`             | vide le dictionnaire                                    |
+| `merge(autre)`        | nouveau dictionnaire avec les entrées des deux ; `autre` gagne sur une clé commune |
+| `filter(f)`           | nouveau dictionnaire ne gardant que les entrées où `f(clé, valeur)` est `true` |
+| `map_values(f)`       | nouveau dictionnaire avec les mêmes clés, chaque valeur remplacée par `f(clé, valeur)` |
+
+```
+let a = { "x": 1, "y": 2 }
+let b = { "y": 20, "z": 3 }
+print(a.merge(b))                                      -- {"x": 1, "y": 20, "z": 3}
+print(a.filter(fun(k: string, v: int) -> bool v > 1 end)) -- {"y": 2}
+```
 
 - **Parcours** : `for name, age in ages do … end` donne la clé et la valeur, dans
   l'ordre d'insertion. On peut aussi ne parcourir que les clés

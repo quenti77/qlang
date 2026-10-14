@@ -318,3 +318,19 @@ fn it_stops_cleanly_when_asked() {
     };
     assert!(status.success(), "{status:?}");
 }
+
+#[test]
+fn the_api_example_routes_requests() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/api.q")).unwrap();
+    let server = start("api", Box::leak(source.into_boxed_str()), &[]);
+    let r = exchange(&server, "GET /items HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("application/json") && r.ends_with("[]"), "{r}");
+    assert!(exchange(&server, "POST /items/ordinateur HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n").starts_with("HTTP/1.1 201"));
+    assert!(exchange(&server, "POST /items/c%C3%A2ble HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n").starts_with("HTTP/1.1 201"));
+    let r = exchange(&server, "GET /items HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.ends_with("[\"ordinateur\",\"câble\"]"), "{r}");
+    assert!(exchange(&server, "GET /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n").ends_with("ordinateur"));
+    assert!(exchange(&server, "GET /items/absent HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 404"));
+    let r = exchange(&server, "DELETE /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.starts_with("HTTP/1.1 405") && r.contains("Allow: GET, POST"), "{r}");
+}

@@ -167,3 +167,109 @@ end
         assert_eq!(app.handle(get("/zzz")).unwrap().status, 404);
     });
 }
+
+fn at(method: &str, path: &str) -> AppRequest {
+    AppRequest { method: method.into(), url: path.into(), path: path.into(), ..Default::default() }
+}
+
+const ROUTES: &str = r#"
+let router = Router.new()
+router.get("/", fun(req: Request) -> Response Response.text("home") end)
+router.get("/items/:id", fun(req: Request) -> Response
+  let id = req.params.get("id", "?")
+  Response.text("item {id}")
+end).post("/items", fun(req: Request) -> Response Response.text("created").with_status(201) end)
+router.get("/users/:user/posts/:post", fun(req: Request) -> Response
+  let user = req.params.get("user", "?")
+  let post = req.params.get("post", "?")
+  Response.text("{user}/{post}")
+end)
+router.get("/files/*", fun(req: Request) -> Response
+  let rest = req.params.get("*", "?")
+  Response.text("file {rest}")
+end)
+router.delete("/items/:id", fun(req: Request) -> Response Response.text("gone") end)
+
+fun handle(req: Request) -> Response
+  router.handle(req)
+end
+"#;
+
+#[test]
+fn the_router_sends_requests_to_matching_routes() {
+    with_app(ROUTES, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let mut ask = |m: &str, p: &str| {
+            let r = app.handle(at(m, p)).unwrap();
+            (r.status, r.body)
+        };
+        assert_eq!(ask("GET", "/"), (200, "home".into()));
+        assert_eq!(ask("GET", "/items/42"), (200, "item 42".into()));
+        assert_eq!(ask("POST", "/items"), (201, "created".into()));
+        assert_eq!(ask("DELETE", "/items/7"), (200, "gone".into()));
+        assert_eq!(ask("GET", "/users/ada/posts/9"), (200, "ada/9".into()));
+        // a final `*` takes the rest of the path
+        assert_eq!(ask("GET", "/files/a/b/c.txt"), (200, "file a/b/c.txt".into()));
+        assert_eq!(ask("GET", "/files/x"), (200, "file x".into()));
+        assert_eq!(ask("GET", "/files/"), (200, "file ".into()));
+        // what does not match
+        assert_eq!(ask("GET", "/nothing").0, 404);
+        assert_eq!(ask("GET", "/items/").0, 404, "an empty segment is not a parameter");
+        assert_eq!(ask("GET", "/items/1/extra").0, 404);
+        assert_eq!(ask("GET", "/users/ada/posts").0, 404);
+        assert_eq!(ask("GET", "/files").0, 404);
+    });
+}
+
+#[test]
+fn a_known_path_with_another_method_is_a_405_with_the_allowed_methods() {
+    with_app(ROUTES, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let r = app.handle(at("PUT", "/items/3")).unwrap();
+        assert_eq!(r.status, 405);
+        let allow = r.headers.iter().find(|(k, _)| k == "Allow").map(|(_, v)| v.clone());
+        assert_eq!(allow.as_deref(), Some("GET, DELETE"));
+        assert_eq!(app.handle(at("POST", "/")).unwrap().status, 405);
+    });
+}
+
+#[test]
+fn the_fallback_replaces_the_404() {
+    let src = r#"
+let router = Router.new().get("/", fun(req: Request) -> Response Response.text("home") end)
+router.fallback(fun(req: Request) -> Response Response.text("nothing at {req.path}").with_status(404) end)
+fun handle(req: Request) -> Response
+  router.handle(req)
+end
+"#;
+    with_app(src, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let r = app.handle(at("GET", "/lost")).unwrap();
+        assert_eq!((r.status, r.body.as_str()), (404, "nothing at /lost"));
+        assert_eq!(app.handle(at("GET", "/")).unwrap().body, "home");
+    });
+}
+
+#[test]
+fn matches_is_usable_on_its_own() {
+    let src = r#"
+let a = Router.matches("/items/:id", "/items/3")
+let b = Router.matches("/items/:id", "/other/3")
+if a != none then
+  print(a.get("id", "?"))
+end
+print(b == none)
+"#;
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let mut host = MemoryHost::new();
+            let prog = compile("main.q", src, &mut host).unwrap_or_else(|e| panic!("{}", e.render()));
+            let r = prog.run(&mut host, Limits::default());
+            assert!(r.error.is_none());
+            assert_eq!(host.output, "3\ntrue\n");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

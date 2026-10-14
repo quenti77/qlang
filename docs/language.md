@@ -1805,6 +1805,45 @@ curl "http://127.0.0.1:8080/hello?name=Ada"
   variables d'environnement, `http.send`, `Db`, `import` fonctionnent (`--root` limite les
   fichiers et les imports à un dossier). `--seed N` fixe le hasard.
 
+#### Le routeur
+
+Quand il y a plusieurs pages, un `Router` évite un grand `match` sur le chemin : on déclare les
+routes, puis `handle` lui passe la requête.
+
+```
+let router = Router.new()
+
+router.get("/", fun(req: Request) -> Response
+  Response.text("Accueil")
+end)
+
+router.get("/items/:id", fun(req: Request) -> Response
+  let id = req.params.get("id", "?")
+  Response.text("Objet {id}")
+end)
+
+router.post("/items", fun(req: Request) -> Response
+  Response.text("créé").with_status(201)
+end)
+
+fun handle(req: Request) -> Response
+  router.handle(req)
+end
+```
+
+- **Déclarer** : `router.get(chemin, fonction)`, `post`, `put`, `delete`, ou
+  `router.add("PATCH", chemin, fonction)` pour une autre méthode. Chaque appel renvoie le
+  routeur, donc on peut les enchaîner.
+- **Le chemin** est une suite de segments séparés par `/` : un mot doit être identique, `:nom`
+  accepte n'importe quel segment **non vide** et le met dans `req.params` (`req.params.get("id",
+  "")`), et un `*` final accepte le reste du chemin (`req.params["*"]`). `/items/:id` accepte
+  `/items/3`, pas `/items/` ni `/items/3/x`. La première route qui correspond gagne.
+- **Sans correspondance** : un chemin connu avec une autre méthode donne `405` avec un en-tête
+  `Allow` (`GET, DELETE`) ; tout autre chemin donne `404`, ou la fonction donnée à
+  `router.fallback(fonction)`.
+- **`Router.matches(modèle, chemin)`** renvoie les paramètres (un `map<string, string>?`) si le
+  chemin correspond au modèle, sinon `none` : utile pour vérifier un modèle sans serveur.
+
 Options de `qlang serve app.q` :
 
 | Option           | Rôle                                                                                      |

@@ -87,7 +87,8 @@ qlang run prog.q --max-steps 1000000
 Un programme peut aussi répondre à des requêtes HTTP : `qlang serve app.q` appelle sa fonction
 `handle(req: Request) -> Response` pour chaque requête (voir
 [`docs/language.md`](docs/language.md) et [`examples/app.q`](examples/app.q)) ; `--static dossier`
-sert des fichiers, `--workers N` répond en parallèle.
+sert des fichiers, `--workers N` répond en parallèle, et un `Router` associe des chemins
+(`/items/:id`) à des fonctions.
 
 Les erreurs s'affichent avec leur position et un extrait du code :
 

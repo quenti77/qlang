@@ -15,10 +15,10 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N]
+    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [-- ARGS...]
                                          run a program (imports may live anywhere, or only
                                          under DIR with --root; the same --seed gives the
-                                         same random numbers)
+                                         same random numbers; ARGS after -- are env.args())
     qlang check <file.q>                 check a program without running it
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
@@ -79,6 +79,9 @@ struct TerminalHost {
     rng: u64,
     /// Open SQL connections, for `Db.connect`.
     db: db::SqlConns,
+    /// The script's own arguments, for `env.args()` (everything after `--` on the command
+    /// line), not including the file path or qlang's own options.
+    script_args: Vec<String>,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -90,6 +93,17 @@ fn system_entropy() -> u64 {
     }
     use std::hash::{BuildHasher, Hasher};
     std::collections::hash_map::RandomState::new().build_hasher().finish()
+}
+
+impl TerminalHost {
+    /// `fs.read`/`fs.write` honour `--root` the same way imports do.
+    fn check_fs_root(&self, full: &Path) -> Result<(), HostError> {
+        if let Some(root) = &self.root
+            && !full.starts_with(root) {
+                return Err(HostError::Other(format!("\"{}\" is outside of --root {}", full.display(), root.display())));
+            }
+        Ok(())
+    }
 }
 
 impl Host for TerminalHost {
@@ -139,7 +153,32 @@ impl Host for TerminalHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: true, time: true, random: true, http: true, sql: true }
+        Capabilities { read: true, time: true, random: true, http: true, sql: true, fs: true, env: true }
+    }
+
+    fn read_file(&mut self, path: &str) -> Result<String, HostError> {
+        let full = Path::new(path).canonicalize().map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full)?;
+        std::fs::read_to_string(&full).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
+        let p = Path::new(path);
+        let parent = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+        let full_parent = parent.canonicalize().map_err(|e| HostError::Other(e.to_string()))?;
+        self.check_fs_root(&full_parent)?;
+        let Some(name) = p.file_name() else {
+            return Err(HostError::Other(format!("\"{path}\" is not a valid file name")));
+        };
+        std::fs::write(full_parent.join(name), content).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
+        Ok(std::env::var(name).ok())
+    }
+
+    fn args(&mut self) -> Result<Vec<String>, HostError> {
+        Ok(self.script_args.clone())
     }
 
     fn sql_connect(&mut self, url: &str) -> Result<u64, HostError> {
@@ -188,8 +227,13 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut root: Option<PathBuf> = None;
     let mut seed: Option<u64> = None;
     let mut limits = Limits::default();
+    let mut script_args: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
+        if args[i] == "--" {
+            script_args = args[i + 1..].iter().map(|s| s.to_string()).collect();
+            break;
+        }
         match args[i] {
             "--max-steps" => {
                 i += 1;
@@ -245,7 +289,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             eprintln!("{file} is outside of --root {}", root.display());
             return ExitCode::from(64);
         }
-    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy), db: db::SqlConns::default() };
+    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy), db: db::SqlConns::default(), script_args };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,
         Err(e) => {

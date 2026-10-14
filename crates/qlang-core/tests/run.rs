@@ -865,10 +865,16 @@ fn maps_are_shared_and_typed() {
 }
 
 #[test]
+fn maps_accept_float_keys() {
+    assert_eq!(out("let m: map<float, string> = { 1.5: \"a\", 2.5: \"b\" }\nprint(m[1.5])\nprint(m.len())"), "a\n2\n");
+    assert_eq!(out("let m: map<float, int> = {}\nm[0.0] = 1\nm[-0.0] = 2\nprint(m.len())\nprint(m[0.0])"), "1\n2\n");
+    assert_eq!(out("let m = { 1.5: 2 }\nprint(m[1.5])"), "2\n");
+}
+
+#[test]
 fn maps_static_errors() {
     for (src, needle) in [
         ("let m = {}", "cannot infer"),
-        ("let m: map<float, int> = {}", "cannot be a map key"),
         ("let m: map<array<int>, int> = {}", "cannot be a map key"),
         ("let m = { [1]: 2 }", "cannot be a map key"),
         ("let m = { \"a\": 1, 2: 3 }", "same type"),
@@ -959,14 +965,6 @@ fn map_equality() {
     for src in ["print({ 1: 2 } == { \"a\": 2 })", "print({ 1: 2 } == { 1: \"s\" })"] {
         assert!(err(src).starts_with("COMPILE"), "{src}");
     }
-}
-
-#[test]
-fn float_keys_are_refused_with_an_explanation() {
-    let e = err("let m: map<float, int> = {}");
-    assert!(e.contains("decimal numbers are not exact"), "{e}");
-    let e = err("let m = { 1.5: 2 }");
-    assert!(e.contains("cannot be a map key"), "{e}");
 }
 
 #[test]

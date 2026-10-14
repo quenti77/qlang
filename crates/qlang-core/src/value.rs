@@ -34,6 +34,9 @@ pub enum Value {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum KeyVal {
     Int(i64),
+    /// IEEE-754 bits, with `-0.0` normalized to `0.0` and any `NaN` normalized
+    /// to a single canonical bit pattern so every `NaN` key collides with itself.
+    Float(u64),
     Str(Rc<str>),
     Bool(bool),
     Uuid(u128),
@@ -46,6 +49,7 @@ impl KeyVal {
     pub fn of(v: &Value) -> Option<KeyVal> {
         Some(match v {
             Value::Int(i) => KeyVal::Int(*i),
+            Value::Float(f) => KeyVal::Float(Self::float_bits(*f)),
             Value::Str(s) => KeyVal::Str(s.clone()),
             Value::Bool(b) => KeyVal::Bool(*b),
             Value::Uuid(u) => KeyVal::Uuid(*u),
@@ -54,6 +58,16 @@ impl KeyVal {
             Value::Enum(e, i) => KeyVal::Enum(*e, *i),
             _ => return None,
         })
+    }
+
+    fn float_bits(f: f64) -> u64 {
+        if f.is_nan() {
+            f64::NAN.to_bits()
+        } else if f == 0.0 {
+            0.0f64.to_bits()
+        } else {
+            f.to_bits()
+        }
     }
 }
 

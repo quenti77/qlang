@@ -1395,6 +1395,34 @@ impl<'a> Interp<'a> {
         Ok(out)
     }
 
+    /// Same as `merge_sort`, but ordering through a qlang comparator (`sort_by`).
+    fn merge_sort_by(&mut self, v: Vec<Value>, cmp: &Value, span: Span) -> R<Vec<Value>> {
+        if v.len() <= 1 {
+            return Ok(v);
+        }
+        let mid = v.len() / 2;
+        let left = self.merge_sort_by(v[..mid].to_vec(), cmp, span)?;
+        let right = self.merge_sort_by(v[mid..].to_vec(), cmp, span)?;
+        let mut out = Vec::with_capacity(left.len() + right.len());
+        let (mut i, mut j) = (0, 0);
+        while i < left.len() && j < right.len() {
+            let ord = match self.call_value(cmp, vec![left[i].clone(), right[j].clone()], span)? {
+                Value::Int(n) => n,
+                _ => return self.fail("R001", "the comparator passed to `sort_by` must return an int", span),
+            };
+            if ord <= 0 {
+                out.push(left[i].clone());
+                i += 1;
+            } else {
+                out.push(right[j].clone());
+                j += 1;
+            }
+        }
+        out.extend_from_slice(&left[i..]);
+        out.extend_from_slice(&right[j..]);
+        Ok(out)
+    }
+
     fn builtin_fn(&mut self, name: &str, args: Vec<Value>, span: Span) -> R<Value> {
         match name {
             "print" | "write" => {
@@ -1825,7 +1853,27 @@ impl<'a> Interp<'a> {
         // linear built-ins pay for the elements they visit
         match recv {
             Value::Str(s) => self.charge_bytes(s.len(), span)?,
-            Value::Array(a) if matches!(name, "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort") => {
+            Value::Array(a)
+                if matches!(
+                    name,
+                    "contains"
+                        | "index_of"
+                        | "join"
+                        | "reverse"
+                        | "insert"
+                        | "remove"
+                        | "sum"
+                        | "min"
+                        | "max"
+                        | "slice"
+                        | "sort"
+                        | "unique"
+                        | "flatten"
+                        | "take"
+                        | "drop"
+                        | "chunk"
+                ) =>
+            {
                 let n = a.borrow().len();
                 self.charge(n, span)?;
             }
@@ -1977,6 +2025,29 @@ impl<'a> Interp<'a> {
             (Value::Str(s), "contains") => Value::Bool(s.contains(str_arg(0).unwrap().as_ref())),
             (Value::Str(s), "starts_with") => Value::Bool(s.starts_with(str_arg(0).unwrap().as_ref())),
             (Value::Str(s), "ends_with") => Value::Bool(s.ends_with(str_arg(0).unwrap().as_ref())),
+            (Value::Str(s), "strip_prefix") => match s.strip_prefix(str_arg(0).unwrap().as_ref()) {
+                Some(r) => Value::str(r),
+                None => Value::None,
+            },
+            (Value::Str(s), "strip_suffix") => match s.strip_suffix(str_arg(0).unwrap().as_ref()) {
+                Some(r) => Value::str(r),
+                None => Value::None,
+            },
+            (Value::Str(s), "snake_case") => Value::str(&split_words(s).join("_").to_lowercase()),
+            (Value::Str(s), "kebab_case") => Value::str(&split_words(s).join("-").to_lowercase()),
+            (Value::Str(s), "camel_case") => {
+                let words = split_words(s);
+                let mut out = String::new();
+                for (i, w) in words.iter().enumerate() {
+                    if i == 0 { out.push_str(&w.to_lowercase()) } else { out.push_str(&capitalize_word(w)) }
+                }
+                Value::str(&out)
+            }
+            (Value::Str(s), "title_case") => {
+                let words: Vec<String> = split_words(s).iter().map(|w| capitalize_word(w)).collect();
+                Value::str(&words.join(" "))
+            }
+            (Value::Str(s), "eq_ignore_case") => Value::Bool(s.to_lowercase() == str_arg(0).unwrap().to_lowercase()),
             (Value::Str(s), "index_of") => {
                 let needle = str_arg(0).unwrap();
                 match s.find(needle.as_ref()) {
@@ -2025,6 +2096,38 @@ impl<'a> Interp<'a> {
             (Value::Map(m), "remove") => m.borrow_mut().remove(&args[0]).unwrap_or(Value::None),
             (Value::Map(m), "keys") => Value::array(m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()),
             (Value::Map(m), "values") => Value::array(m.borrow().entries.iter().map(|(_, v)| v.clone()).collect()),
+            (Value::Map(m), "merge") => {
+                let Value::Map(other) = &args[0] else { unreachable!("checked by the type checker") };
+                self.charge(m.borrow().len() + other.borrow().len(), span)?;
+                let mut out = MapObj::default();
+                for (k, v) in m.borrow().entries.iter() {
+                    out.insert(k.clone(), v.clone());
+                }
+                for (k, v) in other.borrow().entries.iter() {
+                    out.insert(k.clone(), v.clone());
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
+            (Value::Map(m), "filter") => {
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                let mut out = MapObj::default();
+                for (k, v) in entries {
+                    if matches!(self.call_value(&args[0], vec![k.clone(), v.clone()], span)?, Value::Bool(true)) {
+                        out.insert(k, v);
+                    }
+                }
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
+            (Value::Map(m), "map_values") => {
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                let mut out = MapObj::default();
+                for (k, v) in entries {
+                    let nv = self.call_value(&args[0], vec![k.clone(), v], span)?;
+                    out.insert(k, nv);
+                }
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
             (Value::Array(a), "sort") => {
                 let items: Vec<Value> = a.borrow().clone();
                 let sorted = self.merge_sort(items, span)?;
@@ -2073,6 +2176,146 @@ impl<'a> Interp<'a> {
                 }
                 Value::array(a.borrow()[s as usize..e as usize].to_vec())
             }
+            (Value::Array(a), "map") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::with_capacity(items.len());
+                for it in items {
+                    out.push(self.call_value(&args[0], vec![it], span)?);
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
+            }
+            (Value::Array(a), "filter") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::new();
+                for it in items {
+                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                        out.push(it);
+                    }
+                }
+                Value::array(out)
+            }
+            (Value::Array(a), "reduce") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut acc = args[0].clone();
+                for it in items {
+                    acc = self.call_value(&args[1], vec![acc, it], span)?;
+                }
+                acc
+            }
+            (Value::Array(a), "any" | "all") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut result = name == "all";
+                for it in items {
+                    let ok = matches!(self.call_value(&args[0], vec![it], span)?, Value::Bool(true));
+                    if name == "any" && ok {
+                        result = true;
+                        break;
+                    }
+                    if name == "all" && !ok {
+                        result = false;
+                        break;
+                    }
+                }
+                Value::Bool(result)
+            }
+            (Value::Array(a), "find") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut found = Value::None;
+                for it in items {
+                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                        found = it;
+                        break;
+                    }
+                }
+                found
+            }
+            (Value::Array(a), "each") => {
+                let items: Vec<Value> = a.borrow().clone();
+                for it in items {
+                    self.call_value(&args[0], vec![it], span)?;
+                }
+                Value::Unit
+            }
+            (Value::Array(a), "sort_by") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let sorted = self.merge_sort_by(items, &args[0], span)?;
+                *a.borrow_mut() = sorted;
+                Value::Unit
+            }
+            (Value::Array(a), "unique") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out: Vec<Value> = Vec::new();
+                for it in items {
+                    let mut dup = false;
+                    for existing in &out {
+                        if self.values_equal(existing, &it, span)? {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if !dup {
+                        out.push(it);
+                    }
+                }
+                Value::array(out)
+            }
+            (Value::Array(a), "first") => a.borrow().first().cloned().unwrap_or(Value::None),
+            (Value::Array(a), "last") => a.borrow().last().cloned().unwrap_or(Value::None),
+            (Value::Array(a), "concat") => {
+                let Value::Array(other) = &args[0] else { unreachable!("checked by the type checker") };
+                self.charge(other.borrow().len(), span)?;
+                let mut out = a.borrow().clone();
+                out.extend(other.borrow().iter().cloned());
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
+            }
+            (Value::Array(a), "take") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                Value::array(a.borrow().iter().take(n).cloned().collect())
+            }
+            (Value::Array(a), "drop") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                Value::array(a.borrow().iter().skip(n).cloned().collect())
+            }
+            (Value::Array(a), "swap") => {
+                let len = a.borrow().len();
+                match (int_arg(0).and_then(|i| usize::try_from(i).ok()), int_arg(1).and_then(|i| usize::try_from(i).ok())) {
+                    (Some(i), Some(j)) if i < len && j < len => {
+                        a.borrow_mut().swap(i, j);
+                        Value::Unit
+                    }
+                    _ => return self.fail("R020", format!("cannot swap these indices (length {len})"), span),
+                }
+            }
+            (Value::Array(a), "chunk") => {
+                let n = match int_arg(0) {
+                    Some(n) if n > 0 => n as usize,
+                    _ => return self.fail("R021", "the chunk size must be a positive int", span),
+                };
+                let items: Vec<Value> = a.borrow().clone();
+                Value::array(items.chunks(n).map(|c| Value::array(c.to_vec())).collect())
+            }
+            (Value::Array(a), "repeat") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                let items: Vec<Value> = a.borrow().clone();
+                let total = items.len().saturating_mul(n);
+                self.guard_alloc(total, span)?;
+                self.charge(total, span)?;
+                Value::array(items.iter().cloned().cycle().take(total).collect())
+            }
+            (Value::Array(a), "flatten") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::new();
+                for it in items {
+                    match it {
+                        Value::Array(inner) => out.extend(inner.borrow().iter().cloned()),
+                        other => out.push(other),
+                    }
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
+            }
             (Value::Int(x), "min" | "max") => {
                 let y = int_arg(0).unwrap_or(0);
                 Value::Int(if name == "min" { (*x).min(y) } else { (*x).max(y) })
@@ -2096,6 +2339,13 @@ impl<'a> Interp<'a> {
                 Some(v) => Value::Int(v),
                 None => return self.fail("R010", "integer overflow", span),
             },
+            (Value::Int(n), "to_hex") => Value::str(&if *n < 0 { format!("-{:x}", n.unsigned_abs()) } else { format!("{n:x}") }),
+            (Value::Int(n), "to_oct") => Value::str(&if *n < 0 { format!("-{:o}", n.unsigned_abs()) } else { format!("{n:o}") }),
+            (Value::Int(n), "to_bin") => Value::str(&if *n < 0 { format!("-{:b}", n.unsigned_abs()) } else { format!("{n:b}") }),
+            (Value::Float(f), "to_fixed") => match int_arg(0) {
+                Some(n) if (0..=17).contains(&n) => Value::str(&format!("{:.*}", n as usize, f)),
+                _ => return self.fail("R021", "the number of decimals must be between 0 and 17", span),
+            },
             (Value::Float(f), "abs") => Value::Float(f.abs()),
             (Value::Float(f), "sqrt") => {
                 if *f < 0.0 {
@@ -2116,6 +2366,41 @@ impl<'a> Interp<'a> {
             }
             _ => return Ok(None),
         }))
+    }
+}
+
+/// Splits text into words for case conversion: separators are any non-alphanumeric
+/// character, plus a boundary before an upper-case letter following a lower-case
+/// letter or digit (so `camelCase` and `snake_case` both split cleanly).
+fn split_words(s: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for c in s.chars() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            continue;
+        }
+        if c.is_uppercase()
+            && let Some(prev) = cur.chars().last()
+            && (prev.is_lowercase() || prev.is_numeric())
+        {
+            words.push(std::mem::take(&mut cur));
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
+
+fn capitalize_word(w: &str) -> String {
+    let mut cs = w.chars();
+    match cs.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase(),
+        None => String::new(),
     }
 }
 

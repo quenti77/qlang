@@ -24,6 +24,24 @@ pub const ARRAY: &[Entry] = &[
     ("max", "", "Largest element, or `none` if empty."),
     ("sum", "", "Sum of an array of numbers (`0` or `0.0` if empty)."),
     ("slice", "start, end", "New array of the elements from `start` (included) to `end` (excluded)."),
+    ("map", "f", "New array of `f(element)` for each element."),
+    ("filter", "f", "New array of the elements for which `f(element)` is `true`."),
+    ("reduce", "initial, f", "Folds the array into one value, starting from `initial` and combining it with each element through `f(accumulator, element)`."),
+    ("any", "f", "`true` if `f(element)` is `true` for at least one element."),
+    ("all", "f", "`true` if `f(element)` is `true` for every element (and for an empty array)."),
+    ("find", "f", "The first element for which `f(element)` is `true`, or `none`."),
+    ("each", "f", "Calls `f(element)` for each element, in order."),
+    ("sort_by", "f", "Sorts the array in place using `f(a, b)` as the comparator (negative if `a` comes first, positive if `b` does, `0` if equal)."),
+    ("unique", "", "New array keeping only the first occurrence of each value."),
+    ("flatten", "", "New array joining the elements of an array of arrays, one level deep."),
+    ("first", "", "The first element, or `none` if empty."),
+    ("last", "", "The last element, or `none` if empty."),
+    ("concat", "other", "New array with the elements of this array followed by `other`'s."),
+    ("take", "n", "New array of the first `n` elements (fewer if there are not enough)."),
+    ("drop", "n", "New array without the first `n` elements (empty if there are not enough)."),
+    ("swap", "i, j", "Swaps the elements at indices `i` and `j`, in place."),
+    ("chunk", "size", "Splits into consecutive groups of `size` elements (the last one may be smaller)."),
+    ("repeat", "times", "New array with this array's elements repeated `times` times."),
 ];
 
 pub const MAP: &[Entry] = &[
@@ -35,6 +53,9 @@ pub const MAP: &[Entry] = &[
     ("remove", "key", "Removes `key` and returns its value, or `none`."),
     ("keys", "", "The keys, in insertion order."),
     ("values", "", "The values, in the same order as `keys()`."),
+    ("merge", "other", "New map with every entry of this map and `other`; `other`'s value wins on a shared key."),
+    ("filter", "f", "New map keeping only the entries for which `f(key, value)` is `true`."),
+    ("map_values", "f", "New map with the same keys, each value replaced by `f(key, value)`."),
 ];
 
 pub const STRING: &[Entry] = &[
@@ -68,6 +89,13 @@ pub const STRING: &[Entry] = &[
     ("to_int", "", "The integer written in the string, or `none`."),
     ("to_float", "", "The number written in the string, or `none`."),
     ("substring", "start, end", "Characters from `start` (included) to `end` (excluded)."),
+    ("strip_prefix", "prefix", "The string without `prefix` at the start, or `none` if it does not start with `prefix`."),
+    ("strip_suffix", "suffix", "The string without `suffix` at the end, or `none` if it does not end with `suffix`."),
+    ("snake_case", "", "Copy in `snake_case` (words separated by `_`, lower case)."),
+    ("camel_case", "", "Copy in `camelCase` (no separators, each word but the first capitalized)."),
+    ("kebab_case", "", "Copy in `kebab-case` (words separated by `-`, lower case)."),
+    ("title_case", "", "Copy with each word capitalized, separated by one space."),
+    ("eq_ignore_case", "other", "`true` if the strings are equal, ignoring upper/lower case."),
 ];
 
 pub const UUID: &[Entry] = &[
@@ -105,6 +133,9 @@ pub const INT: &[Entry] = &[
     ("max", "other", "The larger of the two."),
     ("pow", "exponent", "Same as `x ** exponent`."),
     ("sqrt", "", "Square root, as a float (error if negative)."),
+    ("to_hex", "", "Hexadecimal text (`255.to_hex()` is `\"ff\"`; negative numbers get a `-`)."),
+    ("to_oct", "", "Octal text."),
+    ("to_bin", "", "Binary text."),
 ];
 
 pub const FLOAT: &[Entry] = &[
@@ -116,6 +147,7 @@ pub const FLOAT: &[Entry] = &[
     ("floor", "", "Rounds down, as an int."),
     ("ceil", "", "Rounds up, as an int."),
     ("round", "", "Rounds to the nearest, as an int."),
+    ("to_fixed", "decimals", "Text with exactly `decimals` digits after the point (0 to 17)."),
 ];
 
 /// Static members of the built-in types: (type, kind, name, detail, explanation).

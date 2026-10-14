@@ -246,6 +246,17 @@ fn traits_as_types() {
 }
 
 #[test]
+fn trait_default_methods() {
+    let src = "trait Greeter\nfun name(self) -> string\nfun greet(self) -> string\n\"Hello, \" + self.name() + \"!\"\nend\nend\nstruct Dog\nend\nstruct Cat\nend\nimpl Greeter for Dog\npublic fun name(self) -> string\n\"Rex\"\nend\nend\nimpl Greeter for Cat\npublic fun name(self) -> string\n\"Tom\"\nend\npublic fun greet(self) -> string\n\"Meow, \" + self.name()\nend\nend\n";
+    // Dog doesn't define `greet`, so it uses the trait's default; Cat overrides it
+    assert_eq!(out(&format!("{src}print(Dog {{ }}.greet())\nprint(Cat {{ }}.greet())")), "Hello, Rex!\nMeow, Tom\n");
+    // works through a generic bound too
+    assert_eq!(out(&format!("{src}fun hi<G: Greeter>(g: G) -> string\ng.greet()\nend\nprint(hi(Dog {{ }}))")), "Hello, Rex!\n");
+    // a struct providing neither `name` nor `greet` is still missing `name`
+    assert!(err(&format!("{src}struct Fox\nend\nimpl Greeter for Fox\nend")).contains("missing method `name`"));
+}
+
+#[test]
 fn modules() {
     let math = "export add, Counter, PI\nconst PI = 3\nfun add(a: int, b: int) -> int\na + b\nend\nstruct Counter\npublic n: int = 0\nend\nimpl Counter\npublic fun inc(self)\nself.n += 1\nend\nend\nprint(\"math loaded\")";
     let o = run_files(

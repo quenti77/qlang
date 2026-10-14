@@ -63,7 +63,18 @@ impl Checker {
                 }
                 Item::Impl(_) => {
                     if let Some(&iid) = self.mscopes[m].decl_ids.get(&idx) {
-                        let fids: Vec<FnId> = self.defs.impls[iid].methods.iter().map(|(_, f)| *f).collect();
+                        // trait defaults used to fill a gap are checked once, below,
+                        // not once per impl that happens to fall back to them.
+                        let fids: Vec<FnId> =
+                            self.defs.impls[iid].methods.iter().map(|(_, f)| *f).filter(|f| self.defs.fns[*f].trait_default_self.is_none()).collect();
+                        for fid in fids {
+                            self.check_fn_body(fid);
+                        }
+                    }
+                }
+                Item::Trait(_) => {
+                    if let Some(&tid) = self.mscopes[m].decl_ids.get(&idx) {
+                        let fids: Vec<FnId> = self.defs.traits[tid].sigs.iter().filter_map(|s| s.default).collect();
                         for fid in fids {
                             self.check_fn_body(fid);
                         }
@@ -92,6 +103,12 @@ impl Checker {
                 let name = Ident { name: "self".to_string(), span: decl.span };
                 self.declare(&name, Local { ty: target, kind: LocalKind::Param, orig: None, span: decl.span });
             }
+        } else if let Some(self_ty) = def.trait_default_self.clone()
+            && def.has_self
+        {
+            self.cur_self = Some(self_ty.clone());
+            let name = Ident { name: "self".to_string(), span: decl.span };
+            self.declare(&name, Local { ty: self_ty, kind: LocalKind::Param, orig: None, span: decl.span });
         }
         for (p, t) in decl.params.iter().zip(def.params.iter()) {
             self.declare(&p.name, Local { ty: t.clone(), kind: LocalKind::Param, orig: None, span: p.name.span });

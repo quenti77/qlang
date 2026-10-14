@@ -1395,6 +1395,34 @@ impl<'a> Interp<'a> {
         Ok(out)
     }
 
+    /// Same as `merge_sort`, but ordering through a qlang comparator (`sort_by`).
+    fn merge_sort_by(&mut self, v: Vec<Value>, cmp: &Value, span: Span) -> R<Vec<Value>> {
+        if v.len() <= 1 {
+            return Ok(v);
+        }
+        let mid = v.len() / 2;
+        let left = self.merge_sort_by(v[..mid].to_vec(), cmp, span)?;
+        let right = self.merge_sort_by(v[mid..].to_vec(), cmp, span)?;
+        let mut out = Vec::with_capacity(left.len() + right.len());
+        let (mut i, mut j) = (0, 0);
+        while i < left.len() && j < right.len() {
+            let ord = match self.call_value(cmp, vec![left[i].clone(), right[j].clone()], span)? {
+                Value::Int(n) => n,
+                _ => return self.fail("R001", "the comparator passed to `sort_by` must return an int", span),
+            };
+            if ord <= 0 {
+                out.push(left[i].clone());
+                i += 1;
+            } else {
+                out.push(right[j].clone());
+                j += 1;
+            }
+        }
+        out.extend_from_slice(&left[i..]);
+        out.extend_from_slice(&right[j..]);
+        Ok(out)
+    }
+
     fn builtin_fn(&mut self, name: &str, args: Vec<Value>, span: Span) -> R<Value> {
         match name {
             "print" | "write" => {
@@ -1825,7 +1853,12 @@ impl<'a> Interp<'a> {
         // linear built-ins pay for the elements they visit
         match recv {
             Value::Str(s) => self.charge_bytes(s.len(), span)?,
-            Value::Array(a) if matches!(name, "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort") => {
+            Value::Array(a)
+                if matches!(
+                    name,
+                    "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort" | "unique" | "flatten"
+                ) =>
+            {
                 let n = a.borrow().len();
                 self.charge(n, span)?;
             }
@@ -2072,6 +2105,102 @@ impl<'a> Interp<'a> {
                     return self.fail("R020", format!("invalid slice {s}..{e} (length {len})"), span);
                 }
                 Value::array(a.borrow()[s as usize..e as usize].to_vec())
+            }
+            (Value::Array(a), "map") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::with_capacity(items.len());
+                for it in items {
+                    out.push(self.call_value(&args[0], vec![it], span)?);
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
+            }
+            (Value::Array(a), "filter") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::new();
+                for it in items {
+                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                        out.push(it);
+                    }
+                }
+                Value::array(out)
+            }
+            (Value::Array(a), "reduce") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut acc = args[0].clone();
+                for it in items {
+                    acc = self.call_value(&args[1], vec![acc, it], span)?;
+                }
+                acc
+            }
+            (Value::Array(a), "any" | "all") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut result = name == "all";
+                for it in items {
+                    let ok = matches!(self.call_value(&args[0], vec![it], span)?, Value::Bool(true));
+                    if name == "any" && ok {
+                        result = true;
+                        break;
+                    }
+                    if name == "all" && !ok {
+                        result = false;
+                        break;
+                    }
+                }
+                Value::Bool(result)
+            }
+            (Value::Array(a), "find") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut found = Value::None;
+                for it in items {
+                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                        found = it;
+                        break;
+                    }
+                }
+                found
+            }
+            (Value::Array(a), "each") => {
+                let items: Vec<Value> = a.borrow().clone();
+                for it in items {
+                    self.call_value(&args[0], vec![it], span)?;
+                }
+                Value::Unit
+            }
+            (Value::Array(a), "sort_by") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let sorted = self.merge_sort_by(items, &args[0], span)?;
+                *a.borrow_mut() = sorted;
+                Value::Unit
+            }
+            (Value::Array(a), "unique") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out: Vec<Value> = Vec::new();
+                for it in items {
+                    let mut dup = false;
+                    for existing in &out {
+                        if self.values_equal(existing, &it, span)? {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if !dup {
+                        out.push(it);
+                    }
+                }
+                Value::array(out)
+            }
+            (Value::Array(a), "flatten") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let mut out = Vec::new();
+                for it in items {
+                    match it {
+                        Value::Array(inner) => out.extend(inner.borrow().iter().cloned()),
+                        other => out.push(other),
+                    }
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::array(out)
             }
             (Value::Int(x), "min" | "max") => {
                 let y = int_arg(0).unwrap_or(0);

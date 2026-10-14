@@ -851,6 +851,34 @@ fn array_helpers_reject_wrong_element_types() {
 }
 
 #[test]
+fn array_higher_order_functions() {
+    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> int x * 2 end))"), "[2, 4, 6]\n");
+    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> string \"n{x}\" end))"), "[\"n1\", \"n2\", \"n3\"]\n");
+    assert_eq!(out("print([1, 2, 3, 4].filter(fun(x: int) -> bool x mod 2 == 0 end))"), "[2, 4]\n");
+    assert_eq!(out("print([1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end))"), "10\n");
+    assert_eq!(out("print([\"a\", \"bb\", \"ccc\"].reduce(\"\", fun(acc: string, x: string) -> string acc + x end))"), "abbccc\n");
+    assert_eq!(out("print([1, 2, 3].any(fun(x: int) -> bool x > 2 end))\nprint([1, 2, 3].any(fun(x: int) -> bool x > 9 end))"), "true\nfalse\n");
+    assert_eq!(out("print([1, 2, 3].all(fun(x: int) -> bool x > 0 end))\nprint([1, 2, 3].all(fun(x: int) -> bool x > 1 end))"), "true\nfalse\n");
+    assert_eq!(out("print([1, 2, 3].find(fun(x: int) -> bool x > 1 end))\nprint([1, 2, 3].find(fun(x: int) -> bool x > 9 end))"), "2\nnone\n");
+    assert_eq!(
+        out("let log: array<int> = []\n[1, 2, 3].each(fun(x: int) log.push(x * 10) end)\nprint(log)"),
+        "[10, 20, 30]\n"
+    );
+    assert_eq!(out("let a = [3, 1, 2]\na.sort_by(fun(x: int, y: int) -> int y - x end)\nprint(a)"), "[3, 2, 1]\n");
+    assert_eq!(out("print([1, 2, 2, 3, 1].unique())"), "[1, 2, 3]\n");
+    assert_eq!(out("print([[1, 2], [], [3]].flatten())"), "[1, 2, 3]\n");
+    // chaining
+    assert_eq!(
+        out("print([1, 2, 3, 4, 5].filter(fun(x: int) -> bool x mod 2 == 0 end).map(fun(x: int) -> int x * x end))"),
+        "[4, 16]\n"
+    );
+    // errors: flatten on a non-nested array, and a comparator that doesn't return an int
+    assert!(err("print([1, 2].flatten())").starts_with("COMPILE"));
+    let e = err("print([1, 2].flatten())");
+    assert!(e.contains("needs an array of arrays"), "{e}");
+}
+
+#[test]
 fn number_methods_and_constants() {
     assert_eq!(out("print(3.min(8))\nprint(3.max(8))\nprint(2.pow(10))\nprint(16.sqrt())"), "3\n8\n1024\n4.0\n");
     assert_eq!(out("print(2.5.min(1.5))\nprint(2.5.max(1.5))\nprint(2.0.pow(0.5) > 1.41)\nprint(9.0.sqrt())"), "1.5\n2.5\ntrue\n3.0\n");

@@ -24,6 +24,16 @@ pub const ARRAY: &[Entry] = &[
     ("max", "", "Largest element, or `none` if empty."),
     ("sum", "", "Sum of an array of numbers (`0` or `0.0` if empty)."),
     ("slice", "start, end", "New array of the elements from `start` (included) to `end` (excluded)."),
+    ("map", "f", "New array of `f(element)` for each element."),
+    ("filter", "f", "New array of the elements for which `f(element)` is `true`."),
+    ("reduce", "initial, f", "Folds the array into one value, starting from `initial` and combining it with each element through `f(accumulator, element)`."),
+    ("any", "f", "`true` if `f(element)` is `true` for at least one element."),
+    ("all", "f", "`true` if `f(element)` is `true` for every element (and for an empty array)."),
+    ("find", "f", "The first element for which `f(element)` is `true`, or `none`."),
+    ("each", "f", "Calls `f(element)` for each element, in order."),
+    ("sort_by", "f", "Sorts the array in place using `f(a, b)` as the comparator (negative if `a` comes first, positive if `b` does, `0` if equal)."),
+    ("unique", "", "New array keeping only the first occurrence of each value."),
+    ("flatten", "", "New array joining the elements of an array of arrays, one level deep."),
 ];
 
 pub const MAP: &[Entry] = &[

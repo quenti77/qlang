@@ -745,6 +745,7 @@ mod tests {
         "ends_with", "last_index_of", "count", "replace", "split", "repeat", "chars", "lines", "words", "pad_left", "pad_right",
         "is_digit", "is_alpha", "is_blank", "code", "to_int", "to_float", "substring", "char", "abs", "pow", "sqrt", "floor", "ceil",
         "round", "first", "last", "append", "extend", "find", "filter", "map", "length", "size", "swap", "copy", "clone", "to_string",
+        "reduce", "any", "all", "each", "sort_by", "unique", "flatten", "fold", "for_each", "group_by", "zip",
     ];
 
     #[test]

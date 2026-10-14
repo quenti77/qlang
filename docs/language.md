@@ -1224,6 +1224,24 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `min()`, `max()`      | le plus petit / grand élément, ou `none` si vide (`T?`)          |
 | `sum()`               | somme d'un tableau de nombres (`0` ou `0.0` si vide)             |
 | `slice(début, fin)`   | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
+| `map(f)`              | nouveau tableau de `f(élément)` pour chaque élément               |
+| `filter(f)`           | nouveau tableau des éléments pour lesquels `f(élément)` est `true` |
+| `reduce(initial, f)`  | réduit le tableau en une valeur, en combinant `initial` puis chaque élément via `f(accumulateur, élément)` |
+| `any(f)`, `all(f)`    | `bool` : au moins un élément / tous les éléments vérifient `f(élément)` |
+| `find(f)`             | premier élément pour lequel `f(élément)` est `true`, ou `none`    |
+| `each(f)`             | appelle `f(élément)` pour chaque élément, dans l'ordre            |
+| `sort_by(f)`          | trie le tableau sur place avec `f(a, b)` comme comparateur (négatif si `a` avant `b`, positif sinon, `0` si égaux) |
+| `unique()`            | nouveau tableau ne gardant que la première occurrence de chaque valeur |
+| `flatten()`           | nouveau tableau qui aplatit un tableau de tableaux (un seul niveau) |
+
+```
+let names = ["ana", "bob", "cy"]
+print(names.map(fun(s: string) -> int s.len() end))        // [3, 3, 2]
+print(names.filter(fun(s: string) -> bool s.len() > 2 end)) // ["ana", "bob"]
+
+let total = [1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end)
+print(total) // 10
+```
 
 `string` :
 
@@ -1252,6 +1270,10 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de
 compilation. `sum` n'accepte que des tableaux d'`int` ou de `float`. `slice`
 copie les éléments : modifier le résultat ne change pas le tableau d'origine.
+`flatten` demande un tableau de tableaux (`array<array<T>>`) ; sinon c'est une
+erreur de compilation. `map`, `filter`, `reduce`, `any`, `all`, `find`,
+`each` et `sort_by` prennent une [fonction anonyme](#fonctions-anonymes) : son
+type de retour n'a pas besoin d'être écrit s'il se déduit du contexte.
 
 Nombres :
 

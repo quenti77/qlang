@@ -895,6 +895,12 @@ impl Checker {
                     );
                 }
             }
+            "flatten" => {
+                if !matches!(t, Ty::Array(_)) {
+                    let shown = self.show(&t);
+                    self.err("T261", format!("`flatten()` needs an array of arrays, not `array<{shown}>`"), span);
+                }
+            }
             "sum" => match t {
                 Ty::Int => {}
                 Ty::Float => {
@@ -929,6 +935,27 @@ impl Checker {
             (Ty::Array(t), "min" | "max") => (vec![], Ty::nullable((**t).clone())),
             (Ty::Array(t), "sum") => (vec![], (**t).clone()),
             (Ty::Array(t), "slice") => (vec![Ty::Int, Ty::Int], arr(t)),
+            (Ty::Array(t), "map") => {
+                let u = self.fresh();
+                (vec![Ty::Fn(vec![(**t).clone()], Box::new(u.clone()))], arr(&u))
+            }
+            (Ty::Array(t), "filter") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], arr(t)),
+            (Ty::Array(t), "reduce") => {
+                let u = self.fresh();
+                (vec![u.clone(), Ty::Fn(vec![u.clone(), (**t).clone()], Box::new(u.clone()))], u)
+            }
+            (Ty::Array(t), "any" | "all") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::Bool),
+            (Ty::Array(t), "find") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::nullable((**t).clone())),
+            (Ty::Array(t), "each") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unit))], Ty::Unit),
+            (Ty::Array(t), "sort_by") => (vec![Ty::Fn(vec![(**t).clone(), (**t).clone()], Box::new(Ty::Int))], Ty::Unit),
+            (Ty::Array(t), "unique") => (vec![], arr(t)),
+            (Ty::Array(t), "flatten") => {
+                let inner = match self.resolve(t) {
+                    Ty::Array(x) => *x,
+                    other => other,
+                };
+                (vec![], arr(&inner))
+            }
             (Ty::Map(_, _), "len") => (vec![], Ty::Int),
             (Ty::Map(_, _), "is_empty") => (vec![], Ty::Bool),
             (Ty::Map(_, _), "clear") => (vec![], Ty::Unit),

@@ -145,6 +145,30 @@ fn functions_and_closures() {
 }
 
 #[test]
+fn named_arguments() {
+    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(name: \"ana\", greeting: \"hi\"))"), "hi ana\n");
+    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(\"hi\", name: \"ana\"))"), "hi ana\n");
+    assert_eq!(out("fun f(a: int, b: int) -> int\na - b\nend\nprint(f(a: 10, b: 3))"), "7\n");
+    // order of evaluation follows what's written, not the parameter order
+    assert_eq!(out("fun f(a: int, b: int) -> int\na * 10 + b\nend\nfun side(n: int, tag: string) -> int\nwrite(tag)\nn\nend\nprint(f(b: side(2, \"B\"), a: side(1, \"A\")))"), "BA12\n");
+    assert_eq!(
+        out("struct P\npublic x: int\npublic y: int\nend\nimpl P\npublic fun new(x: int, y: int) -> P\nP { x, y }\nend\npublic fun show(self) -> string\n\"{self.x},{self.y}\"\nend\nend\nlet p = P.new(y: 2, x: 1)\nprint(p.show())"),
+        "1,2\n"
+    );
+    for (src, needle) in [
+        ("fun f(a: int, b: int)\nend\nf(a: 1, c: 2)", "no parameter named `c`"),
+        ("fun f(a: int, b: int)\nend\nf(a: 1, a: 2)", "more than once"),
+        ("fun f(a: int, b: int)\nend\nf(a: 1)", "missing the argument"),
+        ("fun f(a: int, b: int)\nend\nf(b: 2, 1)", "before named arguments"),
+        ("let f: fun(int) -> int = fun(n: int) -> int\nn\nend\nprint(f(n: 1))", "does not accept named arguments"),
+        ("print(x: 1)", "does not accept named arguments"),
+    ] {
+        let e = err(src);
+        assert!(e.contains(needle), "{src}: {e}");
+    }
+}
+
+#[test]
 fn generics() {
     assert_eq!(out("fun id<T>(x: T) -> T\nx\nend\nprint(id(5))\nprint(id(\"s\"))\nprint(id<float>(1.5))"), "5\ns\n1.5\n");
     assert_eq!(out("fun big<T: Ord>(a: T, b: T) -> T\nif a > b then a else b end\nend\nprint(big(2, 7))\nprint(big(2.5, 1.5))"), "7\n2.5\n");

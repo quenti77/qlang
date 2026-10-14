@@ -35,6 +35,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [`match`](#match)
   - [7. Boucles](#7-boucles)
   - [8. Fonctions](#8-fonctions)
+    - [Arguments nommés](#arguments-nommés)
     - [Fonctions anonymes](#fonctions-anonymes)
     - [Type d'une fonction](#type-dune-fonction)
     - [Déclarations locales](#déclarations-locales)
@@ -593,6 +594,26 @@ fun first_positive(xs: array<int>) -> int?
   none
 end
 ```
+
+### Arguments nommés
+
+Un appel peut nommer ses arguments avec `nom: valeur`, dans n'importe quel
+ordre :
+
+```
+fun greet(greeting: string, name: string) -> string
+  greeting + " " + name
+end
+
+print(greet(name: "ana", greeting: "hi"))   -- hi ana
+print(greet("hi", name: "ana"))             -- mélange positionnel + nommé
+```
+
+Les arguments positionnels doivent précéder les arguments nommés, chaque
+paramètre ne peut être rempli qu'une fois, et tous les paramètres doivent
+être fournis. Les arguments nommés ne sont possibles que pour appeler une
+fonction ou une méthode déclarée dans le code qlang (pas les fonctions ou
+méthodes natives comme `print` ou `.sort()`).
 
 ### Fonctions anonymes
 

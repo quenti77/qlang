@@ -108,6 +108,18 @@ impl<'a> Parser<'a> {
         self.toks[self.pos].span
     }
 
+    /// The token after the current one, without consuming anything.
+    fn peek2(&mut self) -> Tok {
+        self.skip_insignificant();
+        let mut i = self.pos + 1;
+        if !*self.nl.last().unwrap() {
+            while self.toks[i].tok == Tok::Newline {
+                i += 1;
+            }
+        }
+        self.toks[i].tok.clone()
+    }
+
     fn prev_span(&self) -> Span {
         if self.pos == 0 { self.toks[0].span } else { self.toks[self.pos - 1].span }
     }
@@ -1027,10 +1039,19 @@ impl<'a> Parser<'a> {
         Ok(e)
     }
 
-    fn parse_call_args(&mut self) -> PResult<(Vec<Expr>, Span)> {
+    fn parse_call_args(&mut self) -> PResult<(Vec<CallArg>, Span)> {
         let mut args = Vec::new();
         while !self.at(&Tok::RParen) {
-            args.push(self.parse_expr()?);
+            // `name: value` is a named argument; anything else is positional.
+            let name = if matches!(self.peek(), Tok::Ident(_)) && matches!(self.peek2(), Tok::Colon) {
+                let name = self.expect_ident()?;
+                self.bump();
+                Some(name)
+            } else {
+                None
+            };
+            let value = self.parse_expr()?;
+            args.push(CallArg { name, value });
             if !self.eat(&Tok::Comma) {
                 break;
             }

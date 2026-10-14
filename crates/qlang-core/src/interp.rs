@@ -601,29 +601,38 @@ impl<'a> Interp<'a> {
 
     // ----------------------------------------------------------------- calls
 
-    fn eval_args(&mut self, args: &[Expr], env: &Env) -> R<Vec<Value>> {
+    /// Evaluates arguments in the order written, then places each value in the parameter
+    /// slot it fills (identity unless the call mixed in named arguments: see `arg_order`).
+    fn eval_args(&mut self, node: NodeId, args: &[CallArg], env: &Env) -> R<Vec<Value>> {
+        if let Some(order) = self.prog.res.arg_order.get(&node).cloned() {
+            let mut out: Vec<Option<Value>> = (0..args.len()).map(|_| None).collect();
+            for (a, slot) in args.iter().zip(order.iter()) {
+                out[*slot] = Some(self.eval(&a.value, env)?);
+            }
+            return Ok(out.into_iter().map(|v| v.expect("every parameter slot filled by the checker")).collect());
+        }
         let mut out = Vec::with_capacity(args.len());
         for a in args {
-            out.push(self.eval(a, env)?);
+            out.push(self.eval(&a.value, env)?);
         }
         Ok(out)
     }
 
-    fn eval_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], env: &Env) -> R<Value> {
+    fn eval_call(&mut self, e: &Expr, callee: &Expr, args: &[CallArg], env: &Env) -> R<Value> {
         let prog = self.prog;
         match &callee.kind {
             ExprKind::Ident(..) | ExprKind::Field(..) => {
                 match prog.res.paths.get(&callee.id) {
                     Some(PathRes::Fn(fid)) => {
-                        let argv = self.eval_args(args, env)?;
+                        let argv = self.eval_args(e.id, args, env)?;
                         return self.call_fid(*fid, None, argv, e.span);
                     }
                     Some(PathRes::BuiltinFn(name)) => {
-                        let argv = self.eval_args(args, env)?;
+                        let argv = self.eval_args(e.id, args, env)?;
                         return self.builtin_fn(name, argv, e.span);
                     }
                     Some(PathRes::BuiltinStatic(ty, name)) => {
-                        let argv = self.eval_args(args, env)?;
+                        let argv = self.eval_args(e.id, args, env)?;
                         return self.static_call(ty, name, argv, e.span);
                     }
                     _ => {}
@@ -631,13 +640,13 @@ impl<'a> Interp<'a> {
                 if let ExprKind::Field(obj, name, _) = &callee.kind {
                     if let Some(fid) = prog.res.super_calls.get(&callee.id) {
                         let this = env.get("self");
-                        let argv = self.eval_args(args, env)?;
+                        let argv = self.eval_args(e.id, args, env)?;
                         return self.call_fid(*fid, this, argv, e.span);
                     }
                     // a module member that is a variable holding a function, or a method call
                     if !matches!(prog.res.paths.get(&obj.id), Some(PathRes::Module(_)) | Some(PathRes::Type(_))) {
                         let recv = self.eval(obj, env)?;
-                        let argv = self.eval_args(args, env)?;
+                        let argv = self.eval_args(e.id, args, env)?;
                         self.cur_call = e.id;
                         return self.call_method(recv, name, argv, e.span);
                     }
@@ -646,7 +655,7 @@ impl<'a> Interp<'a> {
             _ => {}
         }
         let f = self.eval(callee, env)?;
-        let argv = self.eval_args(args, env)?;
+        let argv = self.eval_args(e.id, args, env)?;
         self.call_value(&f, argv, e.span)
     }
 

@@ -489,4 +489,8 @@ pub struct Resolutions {
     /// A call on the prelude's `Db` (`query`, `execute`, `close`): which native operation
     /// it is, since `Db` declares no methods in qlang for these (purely native).
     pub db_calls: HashMap<NodeId, &'static str>,
+    /// Calls with at least one named argument (`f(a: 1)`): for each argument, in the
+    /// order written, which parameter slot it fills. Absent means purely positional
+    /// (the common case), so the interpreter binds arguments in writing order as-is.
+    pub arg_order: HashMap<NodeId, Vec<usize>>,
 }

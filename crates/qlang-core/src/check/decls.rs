@@ -281,20 +281,15 @@ impl Checker {
         self.item_to_type(item, path, args, span)
     }
 
-    /// Map keys must be compared by value: int, string, bool or enum.
+    /// Map keys must be compared by value: int, float, string, bool or enum.
     pub(crate) fn check_key_type(&mut self, k: &Ty, span: Span) {
         let k = self.resolve(k);
-        if k == Ty::Float {
-            self.err(
-                "T270",
-                "`float` cannot be a map key: decimal numbers are not exact (`0.1 + 0.2 != 0.3`). Use an `int` (for example the value times 100) or a `string`",
-                span,
-            );
-            return;
-        }
-        if !matches!(k, Ty::Int | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)) {
+        if !matches!(
+            k,
+            Ty::Int | Ty::Float | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)
+        ) {
             let shown = self.show(&k);
-            self.err("T270", format!("`{shown}` cannot be a map key (use int, string, bool, uuid, ulid, datetime or an enum)"), span);
+            self.err("T270", format!("`{shown}` cannot be a map key (use int, float, string, bool, uuid, ulid, datetime or an enum)"), span);
         }
     }
 

@@ -1225,8 +1225,9 @@ pas réserver de noms globaux (`PI`, `min`…) que tu voudrais utiliser toi-mêm
 ### Dictionnaires
 
 Un dictionnaire (`map<K, V>`) associe des valeurs à des **clés**. Les clés sont
-des `int`, des `string`, des `bool` ou des valeurs d'une énumération : des types
-qui se comparent par valeur. Les clés gardent leur **ordre d'insertion**.
+des `int`, des `float`, des `string`, des `bool` ou des valeurs d'une
+énumération : des types qui se comparent par valeur. Les clés gardent leur
+**ordre d'insertion**.
 
 ```
 let ages = { "ana": 31, "bob": 27 }

@@ -24,7 +24,8 @@ USAGE:
     qlang run --json                     read a JSON request on stdin, write a JSON response
     qlang serve [--port 8080] [--bind 127.0.0.1]
                                          serve the JSON protocol over HTTP (POST /run)
-    qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--max-steps N] [--root DIR] [--seed N]
+    qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--static DIR] [--workers N]
+                        [--max-steps N] [--root DIR] [--seed N]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
     qlang --help | --version

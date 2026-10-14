@@ -56,6 +56,10 @@ pub struct AppRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// The decoded path of the target (`/items`).
+    pub path: String,
+    /// The decoded query parameters, in order (a repeated name: the last value wins).
+    pub query: Vec<(String, String)>,
 }
 
 /// What the program's `handle` function answered: the fields of the prelude's `Response`.
@@ -145,7 +149,14 @@ impl Interp<'_> {
         let body = req.body.as_deref().map_or(Value::None, Value::str);
         self.new_struct(
             self.prelude_struct("Request"),
-            &[("method", Value::str(&req.method)), ("url", Value::str(&req.url)), ("headers", Self::string_map(&req.headers)), ("body", body)],
+            &[
+                ("method", Value::str(&req.method)),
+                ("url", Value::str(&req.url)),
+                ("headers", Self::string_map(&req.headers)),
+                ("body", body),
+                ("path", Value::str(&req.path)),
+                ("query", Self::string_map(&req.query)),
+            ],
         )
     }
 

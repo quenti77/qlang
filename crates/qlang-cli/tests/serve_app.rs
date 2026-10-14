@@ -30,27 +30,38 @@ fn app_file(name: &str, source: &str) -> PathBuf {
 }
 
 fn start(name: &str, source: &str, extra: &[&str]) -> Server {
-    let port = free_port();
     let file = app_file(name, source);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
-        .arg("serve")
-        .arg(&file)
-        .args(["--port", &port.to_string()])
-        .args(extra)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    // the server says it is listening on its standard error
-    let mut line = String::new();
-    BufReader::new(child.stderr.take().unwrap()).read_line(&mut line).unwrap();
-    assert!(line.contains("serving"), "unexpected start: {line}");
-    Server { child, port }
+    // another test may take the port between `free_port` and the server's `bind`: try again
+    for _ in 0..10 {
+        let port = free_port();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .arg("serve")
+            .arg(&file)
+            .args(["--port", &port.to_string()])
+            .args(extra)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // the server says it is listening on its standard error
+        let mut line = String::new();
+        BufReader::new(child.stderr.take().unwrap()).read_line(&mut line).unwrap();
+        if line.contains("serving") {
+            return Server { child, port };
+        }
+        assert!(line.contains("cannot listen"), "unexpected start: {line}");
+        let _ = child.wait();
+    }
+    panic!("no free port");
 }
 
 /// Sends raw text, returns everything the server answers.
 fn exchange(server: &Server, request: &str) -> String {
-    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    exchange_port(server.port, request)
+}
+
+fn exchange_port(port: u16, request: &str) -> String {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.write_all(request.as_bytes()).unwrap();
     let mut out = String::new();
     s.read_to_string(&mut out).unwrap();
@@ -168,9 +179,142 @@ fn the_json_server_still_works() {
 fn the_example_serves() {
     let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/app.q")).unwrap();
     let server = start("example", Box::leak(source.into_boxed_str()), &[]);
-    let r = exchange(&server, "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.ends_with("Bonjour !\n"), "{r}");
+    let r = exchange(&server, "GET /hello?name=Ada HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.ends_with("Bonjour Ada !\n"), "{r}");
+    assert!(exchange(&server, "GET /visits HTTP/1.1\r\nHost: t\r\n\r\n").contains("application/json"));
     let r = exchange(&server, "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\n\r\nabc");
     assert!(r.ends_with("abc"), "{r}");
     assert!(exchange(&server, "GET /x HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 404"));
+}
+
+const ECHO_APP: &str = r#"
+fun handle(req: Request) -> Response
+  let x = req.query.get("x", "-")
+  let y = req.query.get("y", "-")
+  let agent = req.header("USER-AGENT")
+  let a = if agent == none then "-" else agent end
+  Response.text("path={req.path} x={x} y={y} agent={a} url={req.url}")
+end
+"#;
+
+#[test]
+fn the_path_and_the_query_are_decoded() {
+    let server = start("query", ECHO_APP, &[]);
+    let r = exchange(&server, "GET /a%20b/c?x=1&x=2&y=%C3%A9+z HTTP/1.1\r\nHost: t\r\nUser-Agent: curl\r\n\r\n");
+    assert!(r.ends_with("path=/a b/c x=2 y=é z agent=curl url=/a%20b/c?x=1&x=2&y=%C3%A9+z"), "{r}");
+    let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.ends_with("path=/ x=- y=- agent=- url=/"), "{r}");
+}
+
+#[test]
+fn static_files_are_served_before_the_program_and_cannot_escape() {
+    let root = std::env::temp_dir().join(format!("qlang-static-test-{}", std::process::id()));
+    let public = root.join("public");
+    std::fs::create_dir_all(public.join("sub")).unwrap();
+    std::fs::write(public.join("hello.txt"), "static hello").unwrap();
+    std::fs::write(public.join("index.html"), "<h1>home</h1>").unwrap();
+    std::fs::write(public.join("sub/style.css"), "body{}").unwrap();
+    std::fs::write(root.join("secret.txt"), "TOP SECRET").unwrap();
+    let server = start("static", ECHO_APP, &["--static", public.to_str().unwrap()]);
+
+    let r = exchange(&server, "GET /hello.txt HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.starts_with("HTTP/1.1 200 OK\r\n") && r.contains("Content-Type: text/plain; charset=utf-8\r\n") && r.ends_with("static hello"), "{r}");
+    let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("Content-Type: text/html; charset=utf-8\r\n") && r.ends_with("<h1>home</h1>"), "{r}");
+    let r = exchange(&server, "GET /sub/style.css HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("Content-Type: text/css; charset=utf-8\r\n"), "{r}");
+    // what is not a file goes to the program
+    let r = exchange(&server, "GET /nothing?x=7 HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("path=/nothing x=7"), "{r}");
+    // only GET and HEAD read files
+    let r = exchange(&server, "POST /hello.txt HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n");
+    assert!(r.contains("path=/hello.txt"), "{r}");
+    // nothing outside the folder, whatever the spelling
+    for target in ["/../secret.txt", "/%2e%2e/secret.txt", "/sub/../../secret.txt", "/%2E%2E%2Fsecret.txt"] {
+        let r = exchange(&server, &format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n"));
+        assert!(!r.contains("TOP SECRET"), "{target}: {r}");
+    }
+}
+
+/// A program whose `/slow` request spins until a file appears: no timing involved.
+fn busy_app(flag: &std::path::Path) -> String {
+    let flag = flag.to_string_lossy().replace('\\', "/");
+    r#"
+fun handle(req: Request) -> Response
+  if req.url == "/slow" then
+    while fs.read("FLAG").is_err() do
+    end
+  end
+  Response.text("done {req.url}")
+end
+"#
+    .replace("FLAG", &flag)
+}
+
+fn flag_file(name: &str) -> PathBuf {
+    let flag = std::env::temp_dir().join(format!("qlang-flag-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_file(&flag);
+    flag
+}
+
+fn send_get(port: u16, target: &str) -> TcpStream {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n").as_bytes()).unwrap();
+    s
+}
+
+fn finish(mut s: TcpStream) -> String {
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    out
+}
+
+#[test]
+fn workers_answer_while_another_one_is_busy() {
+    let flag = flag_file("two");
+    let source: &'static str = Box::leak(busy_app(&flag).into_boxed_str());
+    let server = start("workers2", source, &["--workers", "2", "--max-steps", "2000000000"]);
+    let slow = send_get(server.port, "/slow");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // the other worker answers while /slow is still spinning
+    let fast = exchange(&server, "GET /fast HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(fast.ends_with("done /fast"), "{fast}");
+    std::fs::write(&flag, "go").unwrap();
+    assert!(finish(slow).ends_with("done /slow"));
+}
+
+#[test]
+fn with_one_worker_a_busy_request_makes_the_others_wait() {
+    let flag = flag_file("one");
+    let source: &'static str = Box::leak(busy_app(&flag).into_boxed_str());
+    let server = start("workers1", source, &["--max-steps", "2000000000"]);
+    let slow = send_get(server.port, "/slow");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let fast = send_get(server.port, "/fast");
+    fast.set_read_timeout(Some(std::time::Duration::from_millis(700))).unwrap();
+    let mut early = String::new();
+    let mut fast = fast;
+    assert!(fast.read_to_string(&mut early).is_err(), "answered while the only worker was busy: {early}");
+    std::fs::write(&flag, "go").unwrap();
+    assert!(finish(slow).ends_with("done /slow"));
+    fast.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    assert!((early + &finish(fast)).ends_with("done /fast"));
+}
+
+#[cfg(unix)]
+#[test]
+fn it_stops_cleanly_when_asked() {
+    let mut server = start("stop", APP, &[]);
+    assert!(exchange(&server, "GET /x HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 200"));
+    let pid = server.child.id().to_string();
+    assert!(Command::new("kill").args(["-TERM", &pid]).status().unwrap().success());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        if let Some(s) = server.child.try_wait().unwrap() {
+            break s;
+        }
+        assert!(std::time::Instant::now() < deadline, "the server did not stop");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert!(status.success(), "{status:?}");
 }

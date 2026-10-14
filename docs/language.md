@@ -1751,32 +1751,52 @@ let visits = 0
 
 fun handle(req: Request) -> Response
   visits += 1
-  match req.url
+  match req.path
     case "/hello" then
-      Response { status: 200, body: "Bonjour !" }
+      let name = req.query.get("name", "toi")
+      Response.text("Bonjour {name} !")
+    case "/visits" then
+      Response.json("\{\"visits\": {visits}\}")
     else
-      Response { status: 404, body: "Introuvable : {req.url}" }
+      Response.not_found()
   end
 end
 ```
 
 ```
 qlang serve app.q --port 8080
-curl http://127.0.0.1:8080/hello
+curl "http://127.0.0.1:8080/hello?name=Ada"
 ```
 
 - **La fonction** s'appelle exactement `handle`, prend une `Request` et renvoie une
   `Response` : la vérification le contrôle avant le démarrage.
-- **La requête** : `method` (`"GET"`, `"POST"`…), `url` telle qu'elle a été reçue, chemin et
-  paramètres compris (`/items?id=3`, sans décodage), `headers` (noms en **minuscules**, par
-  exemple `req.headers.get("user-agent", "")`) et `body` (`none` s'il n'y a pas de corps).
-- **La réponse** : `status` (de 100 à 599), `body`, et `headers` facultatifs. Sans
-  `Content-Type`, le serveur ajoute `text/plain; charset=utf-8`. Les en-têtes qui contiennent
-  un retour à la ligne sont ignorés, et `Content-Length` et `Connection` sont gérés par le
-  serveur.
+- **La requête** :
+  - `method` (`"GET"`, `"POST"`…) ;
+  - `url`, la cible telle qu'elle a été reçue (`/items?id=3`), sans décodage ;
+  - `path`, le chemin **décodé** (`/items`), et `query`, les paramètres **décodés** (`id` vaut
+    `"3"` ; si un nom est répété, la dernière valeur gagne) ;
+  - `headers`, dont les noms sont en **minuscules**, et `req.header("User-Agent")`, qui cherche
+    un en-tête sans tenir compte de la casse (`string?`) ;
+  - `body`, le corps (`none` s'il n'y en a pas).
+- **La réponse** : `status` (de 100 à 599), `body`, et `headers` facultatifs. Des raccourcis :
+
+  | Appel                       | Résultat                                                    |
+  | --------------------------- | ----------------------------------------------------------- |
+  | `Response.text(corps)`      | statut 200, `text/plain; charset=utf-8`                     |
+  | `Response.html(corps)`      | statut 200, `text/html; charset=utf-8`                      |
+  | `Response.json(texte)`      | statut 200, `application/json` (le texte JSON est à fournir) |
+  | `Response.redirect(url)`    | statut 302 vers `url`                                       |
+  | `Response.not_found()`      | statut 404                                                  |
+  | `r.with_status(201)`        | la même réponse avec un autre statut                        |
+  | `r.with_header("X-Id", "7")` | la même réponse avec un en-tête de plus                    |
+
+  Sans `Content-Type`, le serveur ajoute `text/plain; charset=utf-8`. Les en-têtes qui
+  contiennent un retour à la ligne sont ignorés, et `Content-Length` et `Connection` sont gérés
+  par le serveur.
 - **L'état** : le code du fichier s'exécute une seule fois, donc `visits` se souvient de sa
-  valeur d'une requête à l'autre, comme dans un serveur Node. Les requêtes sont traitées **une
-  par une** : les variables ne changent jamais pendant l'exécution de `handle`.
+  valeur d'une requête à l'autre, comme dans un serveur Node. Avec un seul interpréteur (le
+  défaut), les requêtes sont traitées **une par une** : les variables ne changent jamais pendant
+  l'exécution de `handle`.
 - **Les erreurs** : un `panic`, une erreur d'exécution ou une boucle trop longue (limite
   d'étapes, `--max-steps`, **par requête**) donnent une réponse `500 Internal Server Error`
   **sans détail** pour le client ; le détail est écrit dans le journal du serveur (la sortie
@@ -1784,6 +1804,30 @@ curl http://127.0.0.1:8080/hello
 - **Les capacités** : le programme tourne comme avec `qlang run` : `print`, fichiers,
   variables d'environnement, `http.send`, `Db`, `import` fonctionnent (`--root` limite les
   fichiers et les imports à un dossier). `--seed N` fixe le hasard.
+
+Options de `qlang serve app.q` :
+
+| Option           | Rôle                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `--port N`       | le port (8080 par défaut)                                                                 |
+| `--bind ADRESSE` | l'adresse d'écoute (`127.0.0.1` par défaut : seulement cette machine)                     |
+| `--max-steps N`  | le nombre d'étapes d'évaluation **par requête**                                           |
+| `--static DOSSIER` | sert les fichiers de ce dossier tels quels, **avant** d'appeler le programme            |
+| `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
+| `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
+| `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
+
+- **Fichiers statiques** (`--static public`) : pour `GET` et `HEAD`, si le chemin désigne un
+  fichier du dossier (ou `index.html` pour un dossier), il est servi avec son type
+  (`.html`, `.css`, `.js`, `.json`, `.svg`, `.png`…), sans passer par le programme. Un chemin
+  qui sort du dossier (`..`, lien symbolique vers l'extérieur) n'est jamais servi. Le reste va
+  au programme.
+- **Plusieurs workers** (`--workers 4`) : chaque worker exécute le fichier **à part**, avec ses
+  propres variables, et prend les requêtes dans une file commune : une requête lente ne bloque
+  plus les autres. Ce qui doit être partagé (un compteur, des données) va dans une base de
+  données ou des fichiers, pas dans une variable.
+- **Arrêt** : Ctrl-C ou un signal `TERM` arrête proprement le serveur : les requêtes déjà
+  acceptées reçoivent leur réponse (5 secondes au plus), les nouvelles reçoivent `503`.
 - **Le serveur** est minimal : HTTP/1.1 sans TLS ni connexions persistantes, 16 connexions
   en même temps au plus, corps limité à 1 Mo, pas de requêtes en morceaux (`Transfer-Encoding:
   chunked`). Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy

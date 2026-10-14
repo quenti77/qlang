@@ -15,7 +15,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 const MAX_BODY: usize = 1 << 20;
@@ -24,7 +24,7 @@ const MAX_CONNECTIONS: usize = 16;
 pub fn serve(args: &[&str]) -> ExitCode {
     let mut port: u16 = 8080;
     let mut bind = "127.0.0.1".to_string();
-    let mut app = AppOptions::default();
+    let mut app = AppOptions { workers: 1, ..AppOptions::default() };
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -58,6 +58,26 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     Some(Ok(dir)) if dir.is_dir() => app.root = Some(dir),
                     _ => {
                         eprintln!("--root needs an existing directory");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--static" => {
+                i += 1;
+                match args.get(i).map(|d| Path::new(d).canonicalize()) {
+                    Some(Ok(dir)) if dir.is_dir() => app.static_dir = Some(dir),
+                    _ => {
+                        eprintln!("--static needs an existing directory");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--workers" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<usize>().ok()) {
+                    Some(n) if (1..=64).contains(&n) => app.workers = n,
+                    _ => {
+                        eprintln!("--workers needs a number from 1 to 64");
                         return ExitCode::from(64);
                     }
                 }
@@ -97,8 +117,8 @@ pub fn serve(args: &[&str]) -> ExitCode {
     if app.file.is_some() {
         return serve_app(&bind, port, app);
     }
-    if app.max_steps.is_some() || app.seed.is_some() || app.root.is_some() || !app.script_args.is_empty() {
-        eprintln!("--max-steps, --seed, --root and `--` only apply to `qlang serve <file.q>`");
+    if app.max_steps.is_some() || app.seed.is_some() || app.root.is_some() || app.static_dir.is_some() || app.workers != 1 || !app.script_args.is_empty() {
+        eprintln!("--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`");
         return ExitCode::from(64);
     }
     let listener = match TcpListener::bind((bind.as_str(), port)) {
@@ -179,12 +199,12 @@ fn reason(status: u16) -> &'static str {
 }
 
 fn respond(stream: TcpStream, status: u16, body: &str) -> std::io::Result<()> {
-    write_response(stream, status, &[("Content-Type".to_string(), "application/json".to_string())], body, false)
+    write_response(stream, status, &[("Content-Type".to_string(), "application/json".to_string())], body.as_bytes(), false)
 }
 
 /// Writes a response. Header names and values with line breaks are dropped (a program could
 /// otherwise split the response), and the ones this server decides itself are ignored.
-fn write_response(mut stream: TcpStream, status: u16, headers: &[(String, String)], body: &str, head_only: bool) -> std::io::Result<()> {
+fn write_response(mut stream: TcpStream, status: u16, headers: &[(String, String)], body: &[u8], head_only: bool) -> std::io::Result<()> {
     let mut head = format!("HTTP/1.1 {status} {}\r\n", reason(status));
     for (name, value) in headers {
         let fixed = ["content-length", "connection", "transfer-encoding"].contains(&name.to_ascii_lowercase().as_str());
@@ -196,7 +216,7 @@ fn write_response(mut stream: TcpStream, status: u16, headers: &[(String, String
     head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
     stream.write_all(head.as_bytes())?;
     if !head_only {
-        stream.write_all(body.as_bytes())?;
+        stream.write_all(body)?;
     }
     stream.flush()
 }
@@ -293,14 +313,31 @@ struct AppOptions {
     max_steps: Option<u64>,
     seed: Option<u64>,
     root: Option<PathBuf>,
+    /// Files served as they are, before asking the program (`--static DIR`).
+    static_dir: Option<PathBuf>,
+    /// Interpreters answering requests, each with its own copy of the program.
+    workers: usize,
     script_args: Vec<String>,
 }
 
-/// A request waiting for the interpreter, and where to send the answer.
+/// A request waiting for an interpreter, and where to send the answer.
 struct Job {
     request: AppRequest,
     reply: mpsc::Sender<Result<AppResponse, String>>,
 }
+
+enum Msg {
+    Job(Job),
+    /// The server is stopping: a worker that reads this ends.
+    Stop,
+}
+
+/// How long a connection waits for the program before answering 504.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Set when the server was asked to stop.
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// How long a stopping server lets the requests in progress finish.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 
 /// Writes to the server's log (standard error). Unlike `eprint!` it never panics when the log
 /// cannot be written (a closed terminal or pipe must not stop requests being answered).
@@ -308,13 +345,10 @@ fn log(text: &str) {
     let _ = std::io::stderr().write_all(text.as_bytes());
 }
 
-/// How long a connection waits for the program before answering 504.
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// `qlang serve app.q`: the program's top-level code runs once; every request calls its
-/// `handle(req: Request) -> Response`. One interpreter, so requests are answered one at a
-/// time (the program's variables are shared and never change under its feet); connections are
-/// read in parallel, so a slow client does not block the others.
+/// `qlang serve app.q`: every worker runs the program's top-level code once, then calls its
+/// `handle(req: Request) -> Response` for the requests it takes from the queue. A worker has
+/// its own copy of the program, so its variables are its own (use a database or files for what
+/// must be shared). Connections are read in parallel, so a slow client blocks nobody.
 fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
     let file = opts.file.clone().unwrap_or_default();
     let source = match std::fs::read_to_string(&file) {
@@ -329,18 +363,103 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
             eprintln!("{file} is outside of --root {}", root.display());
             return ExitCode::from(64);
         }
-    let mut host = crate::TerminalHost { root: opts.root.clone(), rng: opts.seed.unwrap_or_else(crate::system_entropy), db: Default::default(), script_args: opts.script_args.clone() };
-    let program = match compile(&file, &source, &mut host) {
+    let (jobs, queue) = mpsc::channel::<Msg>();
+    let queue = Arc::new(Mutex::new(queue));
+    let active = Arc::new(AtomicUsize::new(0));
+    let opts = Arc::new(opts);
+    let bind = bind.to_string();
+
+    // the other workers start once the first one is ready (so that mistakes are reported once)
+    let ready = {
+        let (jobs, queue, active, opts, file, source, bind) = (jobs.clone(), queue.clone(), active.clone(), opts.clone(), file.clone(), source.clone(), bind.clone());
+        move || -> Result<(), ExitCode> {
+            let listener = match TcpListener::bind((bind.as_str(), port)) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("cannot listen on {bind}:{port}: {e}");
+                    return Err(ExitCode::from(74));
+                }
+            };
+            let workers = opts.workers;
+            let more = if workers == 1 { String::new() } else { format!(" ({workers} workers)") };
+            log(&format!("qlang serving {file} on http://{bind}:{port}{more}\n"));
+            for index in 1..workers {
+                let (queue, opts, file, source) = (queue.clone(), opts.clone(), file.clone(), source.clone());
+                let started = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
+                    if let Err(code) = worker(index, &file, &source, &opts, &queue, || Ok(())) {
+                        log(&format!("worker {index} could not start\n"));
+                        std::process::exit(if code == ExitCode::SUCCESS { 0 } else { 70 });
+                    }
+                });
+                if started.is_err() {
+                    log("cannot start a worker thread\n");
+                }
+            }
+            // stop on Ctrl-C or `kill`: the requests already queued are still answered
+            let stop = jobs.clone();
+            let _ = ctrlc::set_handler(move || {
+                STOPPING.store(true, Ordering::SeqCst);
+                for _ in 0..workers {
+                    let _ = stop.send(Msg::Stop);
+                }
+            });
+            let opts = opts.clone();
+            let acceptor = std::thread::Builder::new().spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    if STOPPING.load(Ordering::SeqCst) {
+                        let _ = write_response(stream, 503, &[], b"server stopping", false);
+                        continue;
+                    }
+                    if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        let _ = write_response(stream, 503, &[], b"server busy", false);
+                        continue;
+                    }
+                    let slot = Slot::take(&active);
+                    let (jobs, opts) = (jobs.clone(), opts.clone());
+                    let _ = std::thread::Builder::new().spawn(move || {
+                        let _slot = slot;
+                        serve_connection(stream, &jobs, opts.static_dir.as_deref());
+                    });
+                }
+            });
+            if acceptor.is_err() {
+                eprintln!("cannot start the listener thread");
+                return Err(ExitCode::from(70));
+            }
+            Ok(())
+        }
+    };
+    // this thread is the first worker (it has the big stack, see `main`)
+    let outcome = worker(0, &file, &source, &opts, &queue, ready);
+    // wait a little for the answers still being written
+    let deadline = Instant::now() + STOP_GRACE;
+    while active.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(code) => code,
+    }
+}
+
+/// One interpreter: compiles the program, runs it, then answers requests until told to stop.
+/// `ready` runs once the program has started (the first worker uses it to open the port).
+fn worker(index: usize, file: &str, source: &str, opts: &AppOptions, queue: &Arc<Mutex<mpsc::Receiver<Msg>>>, ready: impl FnOnce() -> Result<(), ExitCode>) -> Result<(), ExitCode> {
+    let seed = opts.seed.map(|s| s.wrapping_add(index as u64)).unwrap_or_else(crate::system_entropy);
+    let mut host = crate::TerminalHost { root: opts.root.clone(), rng: seed, db: Default::default(), script_args: opts.script_args.clone() };
+    let program = match compile(file, source, &mut host) {
         Ok(p) => p,
         Err(e) => {
             eprint!("{}", e.render());
             let n = e.diagnostics.len();
             eprintln!("\n{n} error{} found", if n == 1 { "" } else { "s" });
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
     };
-    for w in &program.warnings {
-        eprint!("{}", w.render(&program.sources));
+    if index == 0 {
+        for w in &program.warnings {
+            eprint!("{}", w.render(&program.sources));
+        }
     }
     let mut limits = Limits::default();
     if let Some(n) = opts.max_steps {
@@ -350,82 +469,157 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
         Ok(a) => a,
         Err(d) => {
             eprint!("{}", d.render(&program.sources));
-            return ExitCode::from(2);
+            return Err(ExitCode::from(2));
         }
     };
-    let listener = match TcpListener::bind((bind, port)) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("cannot listen on {bind}:{port}: {e}");
-            return ExitCode::from(74);
-        }
-    };
-    eprintln!("qlang serving {file} on http://{bind}:{port}");
-
-    let (jobs, queue) = mpsc::channel::<Job>();
-    let acceptor = std::thread::Builder::new().spawn(move || {
-        let active = Arc::new(AtomicUsize::new(0));
-        for stream in listener.incoming().flatten() {
-            if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
-                let _ = write_response(stream, 503, &[], "server busy", false);
-                continue;
+    ready()?;
+    loop {
+        // only one worker waits on the queue at a time, the others wait for their turn
+        let msg = match queue.lock() {
+            Ok(q) => q.recv(),
+            Err(_) => return Ok(()),
+        };
+        match msg {
+            Ok(Msg::Job(job)) => {
+                let answer = app.handle(job.request).map_err(|d| d.render(&program.sources));
+                let _ = job.reply.send(answer);
             }
-            let slot = Slot::take(&active);
-            let jobs = jobs.clone();
-            let _ = std::thread::Builder::new().spawn(move || {
-                let _slot = slot;
-                serve_connection(stream, &jobs);
-            });
+            Ok(Msg::Stop) | Err(_) => return Ok(()),
         }
-    });
-    if acceptor.is_err() {
-        eprintln!("cannot start the listener thread");
-        return ExitCode::from(70);
     }
-    // this thread owns the interpreter (it has the big stack, see `main`)
-    for job in queue {
-        let answer = app.handle(job.request).map_err(|d| d.render(&program.sources));
-        let _ = job.reply.send(answer);
-    }
-    ExitCode::SUCCESS
 }
 
-fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Job>) {
+/// `%41` to `A`. In a query, `+` is a space.
+fn percent_decode(text: &str, plus_is_space: bool) -> String {
+    let b = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() => {
+                out.push(u8::from_str_radix(&text[i + 1..i + 3], 16).unwrap_or(b'?'));
+                i += 3;
+            }
+            b'+' if plus_is_space => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The decoded path and query parameters of a request target (`/a%20b?x=1&y=2`).
+fn split_target(target: &str) -> (String, Vec<(String, String)>) {
+    let target = target.split('#').next().unwrap_or("");
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let params = query
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let (k, v) = p.split_once('=').unwrap_or((p, ""));
+            (percent_decode(k, true), percent_decode(v, true))
+        })
+        .collect();
+    (percent_decode(path, false), params)
+}
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        Some("txt" | "md") => "text/plain; charset=utf-8",
+        Some("xml") => "application/xml; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("pdf") => "application/pdf",
+        Some("wasm") => "application/wasm",
+        _ => "application/octet-stream",
+    }
+}
+
+/// The file `path` (a decoded request path) names inside `dir`, if there is one. Paths that
+/// try to leave `dir` (`..`, links pointing outside) never match.
+fn static_file(dir: &Path, path: &str) -> Option<PathBuf> {
+    if path.contains('\0') || path.split('/').any(|part| part == "..") {
+        return None;
+    }
+    let mut full = dir.join(path.trim_start_matches('/'));
+    if full.is_dir() {
+        full = full.join("index.html");
+    }
+    let full = full.canonicalize().ok()?;
+    (full.starts_with(dir) && full.is_file()).then_some(full)
+}
+
+/// Biggest file served with `--static` (bigger ones would be read whole into memory).
+const MAX_STATIC: u64 = 50 << 20;
+
+fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir: Option<&Path>) {
     let started = Instant::now();
     let request = match read_request(&mut stream, MAX_BODY) {
         Ok(r) => r,
         Err(Some((status, message))) => {
-            let _ = write_response(stream, status, &[], message, false);
+            let _ = write_response(stream, status, &[], message.as_bytes(), false);
             return;
         }
         Err(None) => return,
     };
     let head_only = request.method == "HEAD";
     let line = format!("{} {}", request.method, request.target);
-    let body = if request.body.is_empty() { None } else { Some(String::from_utf8_lossy(&request.body).to_string()) };
-    let (reply, answer) = mpsc::channel();
-    let job = Job { request: AppRequest { method: request.method, url: request.target, headers: request.headers, body }, reply };
-    if jobs.send(job).is_err() {
-        let _ = write_response(stream, 503, &[], "server stopping", false);
+    let (path, query) = split_target(&request.target);
+
+    // files first, like a web server in front of the program
+    if let (Some(dir), true) = (static_dir, matches!(request.method.as_str(), "GET" | "HEAD"))
+        && let Some(file) = static_file(dir, &path)
+        && std::fs::metadata(&file).map(|m| m.len() <= MAX_STATIC).unwrap_or(false)
+        && let Ok(bytes) = std::fs::read(&file)
+    {
+        let headers = [("Content-Type".to_string(), content_type(&file).to_string()), ("X-Content-Type-Options".to_string(), "nosniff".to_string())];
+        let _ = write_response(stream, 200, &headers, &bytes, head_only);
+        log(&format!("{line} -> 200 static ({} ms)\n", started.elapsed().as_millis()));
         return;
     }
-    let (status, result) = match answer.recv_timeout(ANSWER_TIMEOUT) {
+
+    let body = if request.body.is_empty() { None } else { Some(String::from_utf8_lossy(&request.body).to_string()) };
+    let (reply, answer) = mpsc::channel();
+    let app_request = AppRequest { method: request.method, url: request.target, headers: request.headers, body, path, query };
+    if STOPPING.load(Ordering::SeqCst) || jobs.send(Msg::Job(Job { request: app_request, reply })).is_err() {
+        let _ = write_response(stream, 503, &[], b"server stopping", false);
+        return;
+    }
+    let text_plain = [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())];
+    let status = match answer.recv_timeout(ANSWER_TIMEOUT) {
         Ok(Ok(r)) => {
-            let status = r.status as u16;
             let mut headers = r.headers;
             if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-                headers.push(("Content-Type".to_string(), "text/plain; charset=utf-8".to_string()));
+                headers.extend(text_plain);
             }
-            (status, write_response(stream, status, &headers, &r.body, head_only))
+            let _ = write_response(stream, r.status as u16, &headers, r.body.as_bytes(), head_only);
+            r.status as u16
         }
         Ok(Err(diagnostic)) => {
             // the details stay in the server's log: they are not for the client
             log(&diagnostic);
-            (500, write_response(stream, 500, &[("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())], "Internal Server Error", head_only))
+            let _ = write_response(stream, 500, &text_plain, b"Internal Server Error", head_only);
+            500
         }
-        Err(_) => (504, write_response(stream, 504, &[], "the program took too long to answer", false)),
+        Err(_) => {
+            let _ = write_response(stream, 504, &[], b"the program took too long to answer", false);
+            504
+        }
     };
-    let _ = result;
     log(&format!("{line} -> {status} ({} ms)\n", started.elapsed().as_millis()));
 }
 

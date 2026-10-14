@@ -669,19 +669,72 @@ impl Json
     end
 end
 
---" An HTTP request, given to `http.send`. --"
+--" An HTTP request: the one given to `http.send`, and the one a program run with
+`qlang serve` receives. For a received request, `url` is the target as received
+(`/items?id=3`), `path` its decoded path (`/items`) and `query` the decoded parameters
+(`id` is `"3"`; the last one wins when a name is repeated); `headers` has lower-case names. --"
 struct Request
     public method: string
     public url: string
     public headers: map<string, string> = {}
     public body: string? = none
+    public path: string = ""
+    public query: map<string, string> = {}
 end
 
---" An HTTP response, returned by `http.send`. --"
+impl Request
+    --" The value of the header `name` of a received request (whatever the case of `name`),
+    or `none`. --"
+    public fun header(self, name: string) -> string?
+        self.headers[name.lower()]
+    end
+end
+
+--" An HTTP response: the one returned by `http.send`, and the one the `handle` function of
+a program run with `qlang serve` returns. --"
 struct Response
     public status: int
     public headers: map<string, string> = {}
     public body: string
+end
+
+impl Response
+    --" A plain text response (status 200). --"
+    public fun text(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" }, body }
+    end
+
+    --" An HTML response (status 200). --"
+    public fun html(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" }, body }
+    end
+
+    --" A JSON response (status 200) with the JSON text `body`. --"
+    public fun json(body: string) -> Response
+        Response { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body }
+    end
+
+    --" A redirection (status 302) to `location`. --"
+    public fun redirect(location: string) -> Response
+        Response { status: 302, headers: { "Location": location }, body: "" }
+    end
+
+    --" The 404 response. --"
+    public fun not_found() -> Response
+        Response { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" }, body: "Not Found" }
+    end
+
+    --" This response with another status (returns the response itself). --"
+    public fun with_status(self, code: int) -> Response
+        self.status = code
+        self
+    end
+
+    --" This response with one more header (returns the response itself). --"
+    public fun with_header(self, name: string, value: string) -> Response
+        self.headers[name] = value
+        self
+    end
 end
 
 --" A SQL database connection, opened with `Db.connect(url)`. `query`, `execute` and

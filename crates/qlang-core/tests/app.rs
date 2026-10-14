@@ -68,7 +68,7 @@ end
     with_app(src, Limits::default(), |app| {
         let mut app = app.unwrap();
         let r = app
-            .handle(AppRequest { method: "POST".into(), url: "/x".into(), headers: vec![("user-agent".into(), "test".into())], body: Some("hello".into()) })
+            .handle(AppRequest { method: "POST".into(), url: "/x".into(), headers: vec![("user-agent".into(), "test".into())], body: Some("hello".into()), ..Default::default() })
             .unwrap();
         assert_eq!((r.status, r.body.as_str()), (201, "test|hello"));
         assert_eq!(app.handle(get("/")).unwrap().body, "none|no body");
@@ -108,5 +108,62 @@ fn a_bad_status_is_an_error() {
     let src = "fun handle(req: Request) -> Response\n  Response { status: 42, body: \"\" }\nend";
     with_app(src, Limits::default(), |app| {
         assert_eq!(app.unwrap().handle(get("/")).unwrap_err().code, "R071");
+    });
+}
+
+#[test]
+fn path_query_and_header_helpers() {
+    let src = r#"
+fun handle(req: Request) -> Response
+  let who = req.query.get("name", "nobody")
+  let agent = req.header("User-Agent")
+  let a = if agent == none then "-" else agent end
+  Response.text("{req.path}|{who}|{a}|{req.url}")
+end
+"#;
+    with_app(src, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let r = app
+            .handle(AppRequest {
+                method: "GET".into(),
+                url: "/hi%20there?name=Ada".into(),
+                path: "/hi there".into(),
+                query: vec![("name".into(), "Ada".into())],
+                headers: vec![("user-agent".into(), "curl".into())],
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(r.body, "/hi there|Ada|curl|/hi%20there?name=Ada");
+        assert!(r.headers.iter().any(|(k, v)| k == "Content-Type" && v == "text/plain; charset=utf-8"));
+        let bare = app.handle(get("/")).unwrap();
+        assert_eq!(bare.body, "|nobody|-|/");
+    });
+}
+
+#[test]
+fn response_helpers() {
+    let src = r#"
+fun handle(req: Request) -> Response
+  match req.url
+    case "/html" then Response.html("<p>x</p>")
+    case "/json" then Response.json("\{\"ok\": true\}")
+    case "/go" then Response.redirect("/there")
+    case "/created" then Response.text("made").with_status(201).with_header("X-Id", "7")
+    else Response.not_found()
+  end
+end
+"#;
+    with_app(src, Limits::default(), |app| {
+        let mut app = app.unwrap();
+        let header = |r: &qlang_core::interp::AppResponse, name: &str| r.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+        let html = app.handle(get("/html")).unwrap();
+        assert_eq!((html.status, header(&html, "Content-Type").unwrap()), (200, "text/html; charset=utf-8".to_string()));
+        let json = app.handle(get("/json")).unwrap();
+        assert_eq!((json.body.as_str(), header(&json, "Content-Type").unwrap()), ("{\"ok\": true}", "application/json; charset=utf-8".to_string()));
+        let go = app.handle(get("/go")).unwrap();
+        assert_eq!((go.status, header(&go, "Location").unwrap()), (302, "/there".to_string()));
+        let made = app.handle(get("/created")).unwrap();
+        assert_eq!((made.status, made.body.as_str(), header(&made, "X-Id").unwrap()), (201, "made", "7".to_string()));
+        assert_eq!(app.handle(get("/zzz")).unwrap().status, 404);
     });
 }

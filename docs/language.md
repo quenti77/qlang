@@ -1704,13 +1704,21 @@ struct Request
   public url: string
   public headers: map<string, string> = {}
   public body: string? = none
+  public path: string = ""
+  public query: map<string, string> = {}
+  public params: map<string, string> = {}
 end
 
 struct Response
   public status: int
+  public headers: map<string, string> = {}
   public body: string
 end
 ```
+
+`path`, `query` et `params` ne servent que pour une requête **reçue** (voir
+[Répondre à des requêtes HTTP](#répondre-à-des-requêtes-http)) ; `headers` d'une `Response` donne
+les en-têtes reçus (noms en minuscules).
 
 Besoin d'un accès réseau côté hôte : un hôte qui ne l'offre pas (un bac à
 sable, par exemple) fait échouer la vérification avant même l'exécution.

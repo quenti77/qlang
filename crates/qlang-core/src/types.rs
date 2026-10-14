@@ -197,6 +197,9 @@ pub struct SigDef {
     pub params: Vec<Ty>,
     /// `None`: not constrained by the trait (operator results).
     pub ret: Option<Ty>,
+    /// The method's default body, if the trait declared one: an impl that
+    /// doesn't define this method uses it instead of failing to compile.
+    pub default: Option<FnId>,
 }
 
 /// Traits the language itself knows: they back operators and `as`.
@@ -303,6 +306,10 @@ pub struct FnDef {
     pub vis: Visibility,
     pub is_override: bool,
     pub decl: Option<Rc<FunDecl>>,
+    /// Set for a trait's default method body: the type to give `self` while
+    /// checking it (the trait itself, applied to its own type parameters).
+    /// `impl_id` is `None` for these: they belong to no concrete impl.
+    pub trait_default_self: Option<Ty>,
 }
 
 #[derive(Clone, Debug)]
@@ -399,6 +406,7 @@ impl Defs {
                 has_self: true,
                 params,
                 ret,
+                default: None,
             }],
             lang: Some(lang),
         });
@@ -489,4 +497,8 @@ pub struct Resolutions {
     /// A call on the prelude's `Db` (`query`, `execute`, `close`): which native operation
     /// it is, since `Db` declares no methods in qlang for these (purely native).
     pub db_calls: HashMap<NodeId, &'static str>,
+    /// Calls with at least one named argument (`f(a: 1)`): for each argument, in the
+    /// order written, which parameter slot it fills. Absent means purely positional
+    /// (the common case), so the interpreter binds arguments in writing order as-is.
+    pub arg_order: HashMap<NodeId, Vec<usize>>,
 }

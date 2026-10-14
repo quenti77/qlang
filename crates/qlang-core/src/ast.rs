@@ -134,7 +134,7 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub tparams: Vec<TypeParam>,
-    pub sigs: Vec<FunDecl>,
+    pub sigs: Vec<Rc<FunDecl>>,
 }
 
 #[derive(Debug)]
@@ -264,6 +264,13 @@ pub struct StructLitItem {
     pub value: Expr,
 }
 
+/// An argument in a call: `f(1, b: 2)`. `name` is `Some` for a named argument.
+#[derive(Debug)]
+pub struct CallArg {
+    pub name: Option<Ident>,
+    pub value: Expr,
+}
+
 #[derive(Debug)]
 pub struct StructLit {
     /// The path of the type being built: `Point` or `m.Point`.
@@ -325,7 +332,7 @@ pub enum ExprKind {
         inclusive: bool,
     },
     Cast(Box<Expr>, TypeExpr),
-    Call { callee: Box<Expr>, args: Vec<Expr> },
+    Call { callee: Box<Expr>, args: Vec<CallArg> },
     Index(Box<Expr>, Box<Expr>),
     /// `target[]`: only valid as the target of `=` (appends a value).
     Append(Box<Expr>),

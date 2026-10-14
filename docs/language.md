@@ -35,6 +35,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [`match`](#match)
   - [7. Boucles](#7-boucles)
   - [8. Fonctions](#8-fonctions)
+    - [Arguments nommés](#arguments-nommés)
     - [Fonctions anonymes](#fonctions-anonymes)
     - [Type d'une fonction](#type-dune-fonction)
     - [Déclarations locales](#déclarations-locales)
@@ -47,6 +48,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Copier une valeur](#copier-une-valeur)
     - [Le nom du type : `.class`](#le-nom-du-type--class)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
+    - [Méthode par défaut](#méthode-par-défaut)
     - [Un trait comme type](#un-trait-comme-type)
     - [Surcharger un opérateur](#surcharger-un-opérateur)
     - [Surcharger une conversion](#surcharger-une-conversion)
@@ -594,6 +596,26 @@ fun first_positive(xs: array<int>) -> int?
 end
 ```
 
+### Arguments nommés
+
+Un appel peut nommer ses arguments avec `nom: valeur`, dans n'importe quel
+ordre :
+
+```
+fun greet(greeting: string, name: string) -> string
+  greeting + " " + name
+end
+
+print(greet(name: "ana", greeting: "hi"))   -- hi ana
+print(greet("hi", name: "ana"))             -- mélange positionnel + nommé
+```
+
+Les arguments positionnels doivent précéder les arguments nommés, chaque
+paramètre ne peut être rempli qu'une fois, et tous les paramètres doivent
+être fournis. Les arguments nommés ne sont possibles que pour appeler une
+fonction ou une méthode déclarée dans le code qlang (pas les fonctions ou
+méthodes natives comme `print` ou `.sort()`).
+
 ### Fonctions anonymes
 
 ```
@@ -853,9 +875,40 @@ end
 ```
 
 Une implémentation doit définir toutes les méthodes du trait, avec les mêmes
-types. Pour l'instant, un trait ne peut ni avoir de méthode par défaut, ni en
-exiger un autre. On peut implémenter un trait pour n'importe quel type, y
-compris `int`, `string` ou `array<T>` (`impl Describe for int`).
+types — sauf celles qui ont une **méthode par défaut** (voir plus bas). On
+peut implémenter un trait pour n'importe quel type, y compris `int`, `string`
+ou `array<T>` (`impl Describe for int`).
+
+### Méthode par défaut
+
+Une signature de trait peut avoir un corps : une implémentation qui ne
+redéfinit pas la méthode utilise alors ce corps par défaut.
+
+```
+trait Greeter
+  fun name(self) -> string
+
+  fun greet(self) -> string
+    "Hello, " + self.name() + "!"
+  end
+end
+
+struct Dog
+end
+
+impl Greeter for Dog
+  public fun name(self) -> string
+    "Rex"
+  end
+  -- pas de `greet` : utilise le comportement par défaut
+end
+
+print(Dog { }.greet())   -- Hello, Rex!
+```
+
+Dans le corps par défaut, `self` a le type du trait lui-même : on peut y
+appeler les autres méthodes du trait (y compris d'autres méthodes abstraites,
+comme `name()` ici), mais pas accéder à des champs.
 
 ### Un trait comme type
 
@@ -1225,8 +1278,9 @@ pas réserver de noms globaux (`PI`, `min`…) que tu voudrais utiliser toi-mêm
 ### Dictionnaires
 
 Un dictionnaire (`map<K, V>`) associe des valeurs à des **clés**. Les clés sont
-des `int`, des `string`, des `bool` ou des valeurs d'une énumération : des types
-qui se comparent par valeur. Les clés gardent leur **ordre d'insertion**.
+des `int`, des `float`, des `string`, des `bool` ou des valeurs d'une
+énumération : des types qui se comparent par valeur. Les clés gardent leur
+**ordre d'insertion**.
 
 ```
 let ages = { "ana": 31, "bob": 27 }
@@ -1279,11 +1333,12 @@ end
 - Les dictionnaires s'affichent `{"ana": 31, "bob": 27}`. Deux dictionnaires sont
   égaux (`==`) s'ils ont les mêmes clés avec des valeurs égales, quel que soit
   l'ordre d'insertion.
-- **Pourquoi pas de clés `float`, tableau ou structure ?** Une clé doit désigner
-  toujours la même entrée. Un tableau ou une structure est une référence partagée
-  qu'on peut modifier après l'avoir rangée (`k[0] = 99`), et un `float` n'est pas
-  exact (`0.1 + 0.2 != 0.3`). Pour des coordonnées, utilise une chaîne
-  (`m["{x},{y}"]`) ou des dictionnaires imbriqués.
+- **Pourquoi pas de clés tableau ou structure ?** Une clé doit désigner toujours
+  la même entrée, mais un tableau ou une structure est une référence partagée
+  qu'on peut modifier après l'avoir rangée (`k[0] = 99`). Pour des coordonnées,
+  utilise une chaîne (`m["{x},{y}"]`) ou des dictionnaires imbriqués. Un
+  `float` est en revanche autorisé comme clé : il est comparé par ses bits
+  (`0.0` et `-0.0` comptent comme la même clé).
 - Un littéral vide `{}` demande une annotation de type : `let m = {}` est une
   erreur. Un littéral peut s'étendre sur plusieurs lignes et finir par une
   virgule.
@@ -1831,15 +1886,14 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 - **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
   s'étoffera à l'usage.
-- **Dictionnaires :** pas de clés de type `float`, tableau ou structure (voir plus
+- **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut), et pas de comparaison `<`.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme
   littéral (le chiffre sans signe dépasse 64 bits).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les
   chaînes et commentaires acceptent tous les caractères Unicode.
-- **Arguments nommés** (`f(a: 1)`) : non prévus.
-- **Méthodes par défaut dans les traits** et traits qui en exigent d'autres :
-  non prévus pour l'instant.
+- **Traits qui en exigent d'autres** (un trait qui suppose qu'un autre est
+  aussi implémenté) : non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
 - **Format des commentaires de documentation** : le texte est libre pour l'instant.
   À prévoir, selon l'usage : un format léger du type `@param` / `@return`, et une page de

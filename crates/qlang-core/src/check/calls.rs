@@ -11,6 +11,16 @@ pub(crate) struct CallSig {
     pub tparams: Vec<ParamId>,
     pub params: Vec<Ty>,
     pub ret: Ty,
+    /// The parameters' own names, in order, when known: lets a call use
+    /// named arguments (`f(a: 1)`). `None` for calls where names aren't
+    /// available (built-ins, trait dispatch through a bound), where named
+    /// arguments are rejected.
+    pub param_names: Option<Vec<String>>,
+}
+
+/// The parameter names of a declared function, for named-argument resolution.
+fn fn_param_names(decl: &Option<Rc<FunDecl>>) -> Option<Vec<String>> {
+    decl.as_ref().map(|d| d.params.iter().map(|p| p.name.name.clone()).collect())
 }
 
 pub(crate) enum Head {
@@ -285,13 +295,13 @@ impl Checker {
     // ------------------------------------------------------------------ calls
 
     /// Check arguments loosely after an error, to still report problems inside them.
-    fn check_args_loose(&mut self, args: &[Expr]) {
+    fn check_args_loose(&mut self, args: &[CallArg]) {
         for a in args {
-            self.expr(a, &Want::Any);
+            self.expr(&a.value, &Want::Any);
         }
     }
 
-    pub fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], want: &Want) -> Ty {
+    pub fn check_call(&mut self, e: &Expr, callee: &Expr, args: &[CallArg], want: &Want) -> Ty {
         match &callee.kind {
             ExprKind::Field(obj, name, targs) => {
                 if matches!(obj.kind, ExprKind::Super) {
@@ -348,8 +358,8 @@ impl Checker {
         let ct = self.expr(callee, &Want::Any);
         match self.resolve(&ct) {
             Ty::Fn(params, ret) => {
-                let sig = CallSig { name: callee_name(callee), tparams: vec![], params, ret: *ret };
-                self.check_args(e.span, &sig, &[], HashMap::new(), args, want)
+                let sig = CallSig { name: callee_name(callee), tparams: vec![], params, ret: *ret, param_names: None };
+                self.check_args(e, &sig, &[], HashMap::new(), args, want)
             }
             Ty::Error => {
                 self.check_args_loose(args);
@@ -364,7 +374,7 @@ impl Checker {
         }
     }
 
-    fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
+    fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
         if let Some(c) = &mut self.collect {
@@ -372,18 +382,85 @@ impl Checker {
         }
         let own: Vec<ParamId> = def.scope_params.iter().rev().take(def.own_tparams).rev().map(|(_, p)| *p).collect();
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
-        let sig = CallSig { name: def.name.clone(), tparams: own, params: def.params.clone(), ret: def.ret.clone() };
-        self.check_args(e.span, &sig, &explicit, HashMap::new(), args, want)
+        let sig = CallSig { name: def.name.clone(), tparams: own, params: def.params.clone(), ret: def.ret.clone(), param_names: fn_param_names(&def.decl) };
+        self.check_args(e, &sig, &explicit, HashMap::new(), args, want)
+    }
+
+    /// Resolve `args` (possibly mixing positional and named arguments) into one value
+    /// expression per parameter, in parameter order. Reports and returns `None` on any
+    /// arity/name mismatch, after still checking every argument loosely for other errors.
+    fn order_args<'a>(&mut self, e: &Expr, sig: &CallSig, params: &[Ty], args: &'a [CallArg]) -> Option<Vec<&'a Expr>> {
+        if args.iter().all(|a| a.name.is_none()) {
+            if args.len() != params.len() {
+                self.err("T240", format!("`{}` expects {} argument(s), found {}", sig.name, params.len(), args.len()), e.span);
+                self.check_args_loose(args);
+                return None;
+            }
+            return Some(args.iter().map(|a| &a.value).collect());
+        }
+        let Some(names) = &sig.param_names else {
+            self.err("T245", format!("`{}` does not accept named arguments", sig.name), e.span);
+            self.check_args_loose(args);
+            return None;
+        };
+        let mut slots: Vec<Option<&Expr>> = vec![None; params.len()];
+        // slot filled by each argument, in writing order: lets the interpreter
+        // evaluate arguments in writing order, then place each value correctly.
+        let mut order: Vec<usize> = Vec::with_capacity(args.len());
+        let mut seen_named = false;
+        let mut ok = true;
+        for (i, a) in args.iter().enumerate() {
+            match &a.name {
+                None => {
+                    if seen_named {
+                        self.err("T246", "positional arguments must come before named arguments", a.value.span);
+                        ok = false;
+                    } else if i < slots.len() {
+                        slots[i] = Some(&a.value);
+                        order.push(i);
+                    } else {
+                        ok = false;
+                    }
+                }
+                Some(n) => {
+                    seen_named = true;
+                    let Some(idx) = names.iter().position(|p| p == &n.name) else {
+                        self.err("T247", format!("`{}` has no parameter named `{}`", sig.name, n.name), n.span);
+                        ok = false;
+                        continue;
+                    };
+                    if slots[idx].is_some() {
+                        self.err("T248", format!("parameter `{}` is given more than once", n.name), n.span);
+                        ok = false;
+                        continue;
+                    }
+                    slots[idx] = Some(&a.value);
+                    order.push(idx);
+                }
+            }
+        }
+        if !ok {
+            self.check_args_loose(args);
+            return None;
+        }
+        if let Some(missing) = slots.iter().position(|s| s.is_none()) {
+            let pn = names.get(missing).map(|s| s.as_str()).unwrap_or("?");
+            self.err("T249", format!("`{}` is missing the argument for `{pn}`", sig.name), e.span);
+            self.check_args_loose(args);
+            return None;
+        }
+        self.res.arg_order.insert(e.id, order);
+        Some(slots.into_iter().map(|s| s.unwrap()).collect())
     }
 
     /// Check arguments against a signature, inferring generic parameters. `want` is the
     /// type expected of the call's result: when an argument leaves some type parameters
     /// unresolved, matching the result against `want` can resolve the rest (`let x: Box<int>
     /// = Box.empty()`, `return Result.ok(1)` inside a function returning `Result<int, E>`...).
-    pub fn check_args(&mut self, span: Span, sig: &CallSig, explicit: &[Ty], mut map: HashMap<ParamId, Ty>, args: &[Expr], want: &Want) -> Ty {
+    pub fn check_args(&mut self, e: &Expr, sig: &CallSig, explicit: &[Ty], mut map: HashMap<ParamId, Ty>, args: &[CallArg], want: &Want) -> Ty {
         if !explicit.is_empty() {
             if explicit.len() != sig.tparams.len() {
-                self.err("T121", format!("`{}` expects {} type argument(s), found {}", sig.name, sig.tparams.len(), explicit.len()), span);
+                self.err("T121", format!("`{}` expects {} type argument(s), found {}", sig.name, sig.tparams.len(), explicit.len()), e.span);
                 self.check_args_loose(args);
                 return Ty::Error;
             }
@@ -398,16 +475,10 @@ impl Checker {
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.subst(&map)).collect();
         let ret = sig.ret.subst(&map);
-        if args.len() != params.len() {
-            self.err(
-                "T240",
-                format!("`{}` expects {} argument(s), found {}", sig.name, params.len(), args.len()),
-                span,
-            );
-            self.check_args_loose(args);
+        let Some(ordered) = self.order_args(e, sig, &params, args) else {
             return self.resolve(&ret);
-        }
-        for (a, p) in args.iter().zip(params.iter()) {
+        };
+        for (a, p) in ordered.iter().zip(params.iter()) {
             let want = self.resolve(p);
             let t = self.expr(a, &Want::Exp(want.clone()));
             let t = self.require_value(t, a.span);
@@ -427,7 +498,7 @@ impl Checker {
                 if !self.implements(&arg, tid, &targs) {
                     let (a, tn) = (self.show(&arg), self.show(&Ty::Trait(tid, targs)));
                     let pn = self.defs.params[*p].name.clone();
-                    self.err("T242", format!("`{a}` cannot be used for `{pn}` in `{}`: it does not implement `{tn}`", sig.name), span);
+                    self.err("T242", format!("`{a}` cannot be used for `{pn}` in `{}`: it does not implement `{tn}`", sig.name), e.span);
                 }
             }
         }
@@ -442,14 +513,14 @@ impl Checker {
             self.err(
                 "T171",
                 format!("cannot infer the type parameters of `{0}`: write them explicitly, like `{0}<int>(...)`", sig.name),
-                span,
+                e.span,
             );
             return Ty::Error;
         }
         ret
     }
 
-    fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
+    fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
         let rt = self.resolve(rt);
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         match &rt {
@@ -482,10 +553,13 @@ impl Checker {
                     tparams: vec![],
                     params: vec![Ty::Str, json_array.clone()],
                     ret: result(Ty::Array(Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])))))),
+                    param_names: None,
                 }),
-                "execute" => Some(CallSig { name: "Db.execute".to_string(), tparams: vec![], params: vec![Ty::Str, json_array], ret: result(Ty::Int) }),
+                "execute" => {
+                    Some(CallSig { name: "Db.execute".to_string(), tparams: vec![], params: vec![Ty::Str, json_array], ret: result(Ty::Int), param_names: None })
+                }
                 "close" | "begin" | "commit" | "rollback" => {
-                    Some(CallSig { name: format!("Db.{}", name.name), tparams: vec![], params: vec![], ret: result(Ty::Bool) })
+                    Some(CallSig { name: format!("Db.{}", name.name), tparams: vec![], params: vec![], ret: result(Ty::Bool), param_names: None })
                 }
                 _ => None,
             };
@@ -501,15 +575,15 @@ impl Checker {
                     "rollback" => "rollback",
                     _ => "close",
                 });
-                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+                return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
         }
         // built-in methods first for built-in types
         if !matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..))
             && let Some((params, ret)) = self.builtin_method(&rt, &name.name) {
                 self.check_builtin_constraint(e, &rt, &name.name, callee.span);
-                let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret };
-                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+                let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret, param_names: None };
+                return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
         if let Some(um) = self.find_user_method(&rt, &name.name) {
             let f = self.defs.fns[um.fid].clone();
@@ -529,8 +603,8 @@ impl Checker {
                     self.check_vis(f.vis, owner, name.span, &format!("method `{}`", name.name));
                 }
             let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-            return self.check_args(e.span, &sig, &explicit, um.map, args, want);
+            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+            return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // trait methods through a generic bound or a trait-typed value
         let trait_refs: Vec<(TraitId, Vec<Ty>)> = match &rt {
@@ -552,8 +626,9 @@ impl Checker {
                     tparams: sig.tparams.clone(),
                     params: sig.params.iter().map(|p| p.subst(&map)).collect(),
                     ret: sig.ret.clone().map(|r| r.subst(&map)).unwrap_or(Ty::Error),
+                    param_names: None,
                 };
-                return self.check_args(e.span, &cs, &explicit, map, args, want);
+                return self.check_args(e, &cs, &explicit, map, args, want);
             }
         }
         // a field holding a function: `obj.callback(x)`
@@ -563,8 +638,8 @@ impl Checker {
             let ft = self.field_of(e, &rt, &probe, true);
             if self.diags.len() == before {
                 if let Ty::Fn(params, ret) = self.resolve(&ft) {
-                    let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret };
-                    return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+                    let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret, param_names: None };
+                    return self.check_args(e, &sig, &[], HashMap::new(), args, want);
                 }
             } else {
                 self.diags.truncate(before);
@@ -573,8 +648,8 @@ impl Checker {
         // `value.class()`: the concrete type's name, even through a trait or a generic bound
         if name.name == "class" && matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)) {
             self.res.class_calls.insert(e.id);
-            let sig = CallSig { name: name.name.clone(), tparams: vec![], params: vec![], ret: Ty::Str };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            let sig = CallSig { name: name.name.clone(), tparams: vec![], params: vec![], ret: Ty::Str, param_names: None };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         let shown = self.show(&rt);
         self.err("T161", format!("`{shown}` has no method `{}`", name.name), name.span);
@@ -591,7 +666,7 @@ impl Checker {
             .unwrap_or_else(|| panic!("prelude struct `{name}` not found"))
     }
 
-    fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[Expr], want: &Want) -> Ty {
+    fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin("http") = tref
             && name.name == "send"
@@ -604,8 +679,8 @@ impl Checker {
             let response = Ty::Struct(self.prelude_struct("Response"), vec![]);
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let result = Ty::Struct(self.prelude_struct("Result"), vec![response, error]);
-            let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result, param_names: None };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Builtin("fs") = tref
             && let Some(fname) = match name.name.as_str() {
@@ -621,8 +696,8 @@ impl Checker {
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let (params, ok) = if fname == "read" { (vec![Ty::Str], Ty::Str) } else { (vec![Ty::Str, Ty::Str], Ty::Bool) };
             let result = Ty::Struct(self.prelude_struct("Result"), vec![ok, error]);
-            let sig = CallSig { name: format!("fs.{fname}"), tparams: vec![], params, ret: result };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            let sig = CallSig { name: format!("fs.{fname}"), tparams: vec![], params, ret: result, param_names: None };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Struct(sid) = tref
             && *sid == self.prelude_struct("Db")
@@ -635,8 +710,8 @@ impl Checker {
             let db = Ty::Struct(*sid, vec![]);
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let result = Ty::Struct(self.prelude_struct("Result"), vec![db, error]);
-            let sig = CallSig { name: "Db.connect".to_string(), tparams: vec![], params: vec![Ty::Str], ret: result };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            let sig = CallSig { name: "Db.connect".to_string(), tparams: vec![], params: vec![Ty::Str], ret: result, param_names: None };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
@@ -652,8 +727,8 @@ impl Checker {
                 if let Some(why) = missing {
                     self.err("T250", format!("`{b}.{fname}` is not available in this environment ({why})"), e.span);
                 }
-                let sig = CallSig { name: format!("{b}.{fname}"), tparams: vec![], params, ret };
-                return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+                let sig = CallSig { name: format!("{b}.{fname}"), tparams: vec![], params, ret, param_names: None };
+                return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
             self.err("T161", format!("`{b}` has no static member `{}`", name.name), name.span);
             self.check_args_loose(args);
@@ -679,15 +754,15 @@ impl Checker {
                 }
             self.res.paths.insert(callee.id, PathRes::Fn(um.fid));
             let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-            return self.check_args(e.span, &sig, &explicit, um.map, args, want);
+            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+            return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // otherwise a static field/variant: evaluate as a value and call it
         let before = self.diags.len();
         let vt = self.static_member_value(callee, ty, tref, name, targs);
         if let Ty::Fn(params, ret) = self.resolve(&vt) {
-            let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret };
-            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+            let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret, param_names: None };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if self.diags.len() == before {
             let shown = self.show(&vt);
@@ -697,7 +772,7 @@ impl Checker {
         Ty::Error
     }
 
-    fn call_super(&mut self, e: &Expr, callee: &Expr, name: &Ident, args: &[Expr], want: &Want) -> Ty {
+    fn call_super(&mut self, e: &Expr, callee: &Expr, name: &Ident, args: &[CallArg], want: &Want) -> Ty {
         let fail = |this: &mut Checker, msg: String| {
             this.err("T152", msg, callee.span);
             this.check_args_loose(args);
@@ -729,11 +804,11 @@ impl Checker {
         }
         self.res.super_calls.insert(callee.id, um.fid);
         let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-        let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone() };
-        self.check_args(e.span, &sig, &[], um.map, args, want)
+        let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+        self.check_args(e, &sig, &[], um.map, args, want)
     }
 
-    fn call_builtin_fn(&mut self, e: &Expr, callee: &Expr, name: &str, args: &[Expr]) -> Ty {
+    fn call_builtin_fn(&mut self, e: &Expr, callee: &Expr, name: &str, args: &[CallArg]) -> Ty {
         let static_name: &'static str = match name {
             "print" => "print",
             "write" => "write",
@@ -742,11 +817,20 @@ impl Checker {
             _ => "assert",
         };
         self.res.paths.insert(callee.id, PathRes::BuiltinFn(static_name));
+        for a in args {
+            if let Some(n) = &a.name {
+                self.err("T245", format!("`{name}` does not accept named arguments"), n.span);
+            }
+        }
+        let args: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+        let args = args.as_slice();
         let arity = |this: &mut Checker, min: usize, max: usize| -> bool {
             if args.len() < min || args.len() > max {
                 let n = if min == max { format!("{min}") } else { format!("{min} to {max}") };
                 this.err("T240", format!("`{name}` expects {n} argument(s), found {}", args.len()), e.span);
-                this.check_args_loose(args);
+                for a in args.iter().copied() {
+                    this.expr(a, &Want::Any);
+                }
                 false
             } else {
                 true
@@ -757,7 +841,7 @@ impl Checker {
                 if !arity(self, if name == "print" { 0 } else { 1 }, 1) {
                     return Ty::Unit;
                 }
-                for a in args {
+                for a in args.iter().copied() {
                     let t = self.expr(a, &Want::Any);
                     self.require_value(t, a.span);
                 }
@@ -772,18 +856,18 @@ impl Checker {
             }
             "panic" => {
                 if arity(self, 1, 1) {
-                    let t = self.expr(&args[0], &Want::Any);
+                    let t = self.expr(args[0], &Want::Any);
                     self.require_value(t, args[0].span);
                 }
                 Ty::Never
             }
             _ => {
                 if arity(self, 1, 2) {
-                    let t = self.expr(&args[0], &Want::Exp(Ty::Bool));
+                    let t = self.expr(args[0], &Want::Exp(Ty::Bool));
                     if !self.assignable(&t, &Ty::Bool) {
                         self.mismatch(args[0].span, &Ty::Bool, &t);
                     }
-                    if let Some(m) = args.get(1) {
+                    if let Some(m) = args.get(1).copied() {
                         let t = self.expr(m, &Want::Any);
                         self.require_value(t, m.span);
                     }

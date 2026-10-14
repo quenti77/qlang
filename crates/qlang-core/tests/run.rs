@@ -145,6 +145,30 @@ fn functions_and_closures() {
 }
 
 #[test]
+fn named_arguments() {
+    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(name: \"ana\", greeting: \"hi\"))"), "hi ana\n");
+    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(\"hi\", name: \"ana\"))"), "hi ana\n");
+    assert_eq!(out("fun f(a: int, b: int) -> int\na - b\nend\nprint(f(a: 10, b: 3))"), "7\n");
+    // order of evaluation follows what's written, not the parameter order
+    assert_eq!(out("fun f(a: int, b: int) -> int\na * 10 + b\nend\nfun side(n: int, tag: string) -> int\nwrite(tag)\nn\nend\nprint(f(b: side(2, \"B\"), a: side(1, \"A\")))"), "BA12\n");
+    assert_eq!(
+        out("struct P\npublic x: int\npublic y: int\nend\nimpl P\npublic fun new(x: int, y: int) -> P\nP { x, y }\nend\npublic fun show(self) -> string\n\"{self.x},{self.y}\"\nend\nend\nlet p = P.new(y: 2, x: 1)\nprint(p.show())"),
+        "1,2\n"
+    );
+    for (src, needle) in [
+        ("fun f(a: int, b: int)\nend\nf(a: 1, c: 2)", "no parameter named `c`"),
+        ("fun f(a: int, b: int)\nend\nf(a: 1, a: 2)", "more than once"),
+        ("fun f(a: int, b: int)\nend\nf(a: 1)", "missing the argument"),
+        ("fun f(a: int, b: int)\nend\nf(b: 2, 1)", "before named arguments"),
+        ("let f: fun(int) -> int = fun(n: int) -> int\nn\nend\nprint(f(n: 1))", "does not accept named arguments"),
+        ("print(x: 1)", "does not accept named arguments"),
+    ] {
+        let e = err(src);
+        assert!(e.contains(needle), "{src}: {e}");
+    }
+}
+
+#[test]
 fn generics() {
     assert_eq!(out("fun id<T>(x: T) -> T\nx\nend\nprint(id(5))\nprint(id(\"s\"))\nprint(id<float>(1.5))"), "5\ns\n1.5\n");
     assert_eq!(out("fun big<T: Ord>(a: T, b: T) -> T\nif a > b then a else b end\nend\nprint(big(2, 7))\nprint(big(2.5, 1.5))"), "7\n2.5\n");
@@ -219,6 +243,17 @@ fn traits_as_types() {
     assert_eq!(out(&format!("{src}let pets: array<Speak> = [Dog {{ }}, Cat {{ }}]\nfor p in pets do\nprint(p.say())\nend")), "woof\nmeow\n");
     assert!(err(&format!("{src}struct Rock\nend\nlet s: Speak = Rock {{ }}")).starts_with("COMPILE"));
     assert_eq!(out("trait Named\nfun name(self) -> string\nend\nstruct T\nend\nimpl Named for T\npublic fun name(self) -> string\n\"t\"\nend\nend\nfun hi<N: Named>(n: N) -> string\n\"hi \" + n.name()\nend\nprint(hi(T { }))"), "hi t\n");
+}
+
+#[test]
+fn trait_default_methods() {
+    let src = "trait Greeter\nfun name(self) -> string\nfun greet(self) -> string\n\"Hello, \" + self.name() + \"!\"\nend\nend\nstruct Dog\nend\nstruct Cat\nend\nimpl Greeter for Dog\npublic fun name(self) -> string\n\"Rex\"\nend\nend\nimpl Greeter for Cat\npublic fun name(self) -> string\n\"Tom\"\nend\npublic fun greet(self) -> string\n\"Meow, \" + self.name()\nend\nend\n";
+    // Dog doesn't define `greet`, so it uses the trait's default; Cat overrides it
+    assert_eq!(out(&format!("{src}print(Dog {{ }}.greet())\nprint(Cat {{ }}.greet())")), "Hello, Rex!\nMeow, Tom\n");
+    // works through a generic bound too
+    assert_eq!(out(&format!("{src}fun hi<G: Greeter>(g: G) -> string\ng.greet()\nend\nprint(hi(Dog {{ }}))")), "Hello, Rex!\n");
+    // a struct providing neither `name` nor `greet` is still missing `name`
+    assert!(err(&format!("{src}struct Fox\nend\nimpl Greeter for Fox\nend")).contains("missing method `name`"));
 }
 
 #[test]
@@ -865,10 +900,16 @@ fn maps_are_shared_and_typed() {
 }
 
 #[test]
+fn maps_accept_float_keys() {
+    assert_eq!(out("let m: map<float, string> = { 1.5: \"a\", 2.5: \"b\" }\nprint(m[1.5])\nprint(m.len())"), "a\n2\n");
+    assert_eq!(out("let m: map<float, int> = {}\nm[0.0] = 1\nm[-0.0] = 2\nprint(m.len())\nprint(m[0.0])"), "1\n2\n");
+    assert_eq!(out("let m = { 1.5: 2 }\nprint(m[1.5])"), "2\n");
+}
+
+#[test]
 fn maps_static_errors() {
     for (src, needle) in [
         ("let m = {}", "cannot infer"),
-        ("let m: map<float, int> = {}", "cannot be a map key"),
         ("let m: map<array<int>, int> = {}", "cannot be a map key"),
         ("let m = { [1]: 2 }", "cannot be a map key"),
         ("let m = { \"a\": 1, 2: 3 }", "same type"),
@@ -959,14 +1000,6 @@ fn map_equality() {
     for src in ["print({ 1: 2 } == { \"a\": 2 })", "print({ 1: 2 } == { 1: \"s\" })"] {
         assert!(err(src).starts_with("COMPILE"), "{src}");
     }
-}
-
-#[test]
-fn float_keys_are_refused_with_an_explanation() {
-    let e = err("let m: map<float, int> = {}");
-    assert!(e.contains("decimal numbers are not exact"), "{e}");
-    let e = err("let m = { 1.5: 2 }");
-    assert!(e.contains("cannot be a map key"), "{e}");
 }
 
 #[test]

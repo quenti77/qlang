@@ -50,6 +50,7 @@ impl Checker {
                         vis: Visibility::Public,
                         is_override: false,
                         decl: Some(f.clone()),
+                        trait_default_self: None,
                     });
                     self.mscopes[m].decl_ids.insert(idx, id);
                     self.add_item(&name, ItemRef::Fn(id));
@@ -281,20 +282,15 @@ impl Checker {
         self.item_to_type(item, path, args, span)
     }
 
-    /// Map keys must be compared by value: int, string, bool or enum.
+    /// Map keys must be compared by value: int, float, string, bool or enum.
     pub(crate) fn check_key_type(&mut self, k: &Ty, span: Span) {
         let k = self.resolve(k);
-        if k == Ty::Float {
-            self.err(
-                "T270",
-                "`float` cannot be a map key: decimal numbers are not exact (`0.1 + 0.2 != 0.3`). Use an `int` (for example the value times 100) or a `string`",
-                span,
-            );
-            return;
-        }
-        if !matches!(k, Ty::Int | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)) {
+        if !matches!(
+            k,
+            Ty::Int | Ty::Float | Ty::Str | Ty::Bool | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Enum(_) | Ty::Param(_) | Ty::Never | Ty::Error | Ty::Infer(_)
+        ) {
             let shown = self.show(&k);
-            self.err("T270", format!("`{shown}` cannot be a map key (use int, string, bool, uuid, ulid, datetime or an enum)"), span);
+            self.err("T270", format!("`{shown}` cannot be a map key (use int, float, string, bool, uuid, ulid, datetime or an enum)"), span);
         }
     }
 
@@ -398,6 +394,10 @@ impl Checker {
             let id = self.mscopes[m].decl_ids[&idx];
             self.tparam_scope.clear();
             let tps = self.make_tparams(&t.tparams);
+            let tp_ids: Vec<ParamId> = tps.iter().map(|(_, p)| *p).collect();
+            // `self` inside a default body: the trait itself, applied to its own
+            // type parameters (dispatches through the same path as a generic bound).
+            let self_ty = Ty::Trait(id, tp_ids.iter().map(|p| Ty::Param(*p)).collect());
             let mut sigs: Vec<SigDef> = Vec::new();
             for s in &t.sigs {
                 let name = s.name.clone().unwrap();
@@ -407,18 +407,35 @@ impl Checker {
                 }
                 let mark = self.tparam_scope.len();
                 let own = self.make_tparams(&s.tparams);
-                let params = s.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                let params: Vec<Ty> = s.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
                 let ret = s.ret.as_ref().map(|r| self.resolve_type(r)).unwrap_or(Ty::Unit);
                 self.tparam_scope.truncate(mark);
-                sigs.push(SigDef {
-                    name: name.name,
-                    tparams: own.into_iter().map(|(_, p)| p).collect(),
-                    has_self: s.has_self,
-                    params,
-                    ret: Some(ret),
-                });
+                let own_ids: Vec<ParamId> = own.iter().map(|(_, p)| *p).collect();
+                let default = if s.body.is_some() {
+                    let mut scope_params = tps.clone();
+                    scope_params.extend(own.iter().cloned());
+                    let fid = self.defs.fns.len();
+                    self.defs.fns.push(FnDef {
+                        name: name.name.clone(),
+                        module: m,
+                        span: name.span,
+                        scope_params,
+                        own_tparams: own.len(),
+                        impl_id: None,
+                        has_self: s.has_self,
+                        params: params.clone(),
+                        ret: ret.clone(),
+                        vis: Visibility::Public,
+                        is_override: false,
+                        decl: Some(s.clone()),
+                        trait_default_self: Some(self_ty.clone()),
+                    });
+                    Some(fid)
+                } else {
+                    None
+                };
+                sigs.push(SigDef { name: name.name, tparams: own_ids, has_self: s.has_self, params, ret: Some(ret), default });
             }
-            let tp_ids: Vec<ParamId> = tps.iter().map(|(_, p)| *p).collect();
             let n = tp_ids.len();
             let def = &mut self.defs.traits[id];
             def.tparams = tp_ids;
@@ -565,6 +582,7 @@ impl Checker {
                     vis: md.vis.unwrap_or(Visibility::Private),
                     is_override: md.is_override,
                     decl: Some(f.clone()),
+                    trait_default_self: None,
                 });
                 methods.push((name.name.clone(), fid));
             }
@@ -605,11 +623,15 @@ impl Checker {
         let trait_shown = self.show(&Ty::Trait(tid, targs.clone()));
         for sig in &tdef.sigs {
             let Some((_, fid)) = def.methods.iter().find(|(n, _)| *n == sig.name).cloned() else {
-                self.err(
-                    "T133",
-                    format!("missing method `{}` required by trait `{trait_shown}`", sig.name),
-                    imp.target.span,
-                );
+                if let Some(default_fid) = sig.default {
+                    self.defs.impls[impl_id].methods.push((sig.name.clone(), default_fid));
+                } else {
+                    self.err(
+                        "T133",
+                        format!("missing method `{}` required by trait `{trait_shown}`", sig.name),
+                        imp.target.span,
+                    );
+                }
                 continue;
             };
             let f = self.defs.fns[fid].clone();

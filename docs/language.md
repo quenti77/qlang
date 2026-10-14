@@ -69,6 +69,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Prélude : JSON](#prélude--json)
     - [Prélude : `http`](#prélude--http)
     - [Prélude : `Db`](#prélude--db)
+    - [Prélude : fichiers et environnement](#prélude--fichiers-et-environnement)
   - [15. Fins de ligne](#15-fins-de-ligne)
   - [16. Mots-clés réservés](#16-mots-clés-réservés)
   - [17. Erreurs et limites](#17-erreurs-et-limites)
@@ -1124,6 +1125,9 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
   disponible dans cet environnement »). Un environnement peut aussi fournir à
   l'avance une liste de lignes que `read()` consomme ; quand elle est épuisée,
   `read()` provoque une erreur.
+- `fs.read()`/`fs.write()` (disque) et `env.get()`/`env.args()` (variables
+  d'environnement, arguments) dépendent aussi de l'environnement : voir
+  [Prélude : fichiers et environnement](#prélude--fichiers-et-environnement).
 
 ### Fonctions prédéfinies
 
@@ -1687,6 +1691,42 @@ end
   entiers, flottants, texte) sont bien convertis, les autres (date, uuid, json,
   tableau...) retombent en texte si possible, sinon `none` ; pas de BLOB SQLite (devient
   `none`) ; pas de pool de connexions ni de requêtes préparées mises en cache.
+
+### Prélude : fichiers et environnement
+
+`fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
+contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
+`Result` : un fichier absent ou une erreur de permission donnent un
+`Result::err`, jamais un arrêt du programme.
+
+```
+let r = fs.read("config.json")
+if r.is_err() then
+  print(r.unwrap_err().message)
+else
+  print(r.unwrap())
+end
+
+fs.write("sortie.txt", "contenu").unwrap()
+```
+
+`env.get(nom)` renvoie la valeur d'une variable d'environnement, ou `none` si
+elle n'est pas définie (`string?`, pas de `Result` : une variable absente est
+une situation normale, pas une erreur). `env.args()` renvoie les arguments
+propres au programme (`array<string>`).
+
+```
+let lang = env.get("LANG")
+print(lang != none)
+print(env.args())
+```
+
+Besoin d'un accès au disque (`fs`) ou à l'environnement du processus (`env`)
+côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait
+échouer la vérification avant même l'exécution, comme `http`/`Db`. Avec
+`qlang-cli`, les arguments après `--` sur la ligne de commande sont ceux que
+`env.args()` renvoie (`qlang run script.q -- a b`), et `fs` respecte `--root`
+comme les imports.
 
 ## 15. Fins de ligne
 

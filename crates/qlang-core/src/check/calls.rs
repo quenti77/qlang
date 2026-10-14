@@ -77,6 +77,8 @@ impl Checker {
                             "random" => (Ty::Unit, "random"),
                             "http" => (Ty::Unit, "http"),
                             "regex" => (Ty::Unit, "regex"),
+                            "fs" => (Ty::Unit, "fs"),
+                            "env" => (Ty::Unit, "env"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -605,6 +607,23 @@ impl Checker {
             let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result };
             return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
         }
+        if let TypeRef::Builtin("fs") = tref
+            && let Some(fname) = match name.name.as_str() {
+                "read" => Some("read"),
+                "write" => Some("write"),
+                _ => None,
+            }
+        {
+            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("fs", fname));
+            if !self.caps.fs {
+                self.err("T250", format!("`fs.{fname}` is not available in this environment (there is no disk access)"), e.span);
+            }
+            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
+            let (params, ok) = if fname == "read" { (vec![Ty::Str], Ty::Str) } else { (vec![Ty::Str, Ty::Str], Ty::Bool) };
+            let result = Ty::Struct(self.prelude_struct("Result"), vec![ok, error]);
+            let sig = CallSig { name: format!("fs.{fname}"), tparams: vec![], params, ret: result };
+            return self.check_args(e.span, &sig, &[], HashMap::new(), args, want);
+        }
         if let TypeRef::Struct(sid) = tref
             && *sid == self.prelude_struct("Db")
             && name.name == "connect"
@@ -627,6 +646,7 @@ impl Checker {
                     Needs::Random if !self.caps.random => Some("there is no source of randomness"),
                     Needs::TimeAndRandom if !self.caps.time => Some("there is no clock"),
                     Needs::TimeAndRandom if !self.caps.random => Some("there is no source of randomness"),
+                    Needs::Env if !self.caps.env => Some("there is no process environment"),
                     _ => None,
                 };
                 if let Some(why) = missing {
@@ -877,6 +897,7 @@ enum Needs {
     Time,
     Random,
     TimeAndRandom,
+    Env,
 }
 
 /// The static functions of the built-in types: (name, parameters, result, needs).
@@ -906,6 +927,8 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
         ("regex", "replace") => ("replace", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
         ("regex", "replace_all") => ("replace_all", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
         ("regex", "split") => ("split", vec![Ty::Str, Ty::Str], Ty::Array(Box::new(Ty::Str)), Needs::Nothing),
+        ("env", "get") => ("get", vec![Ty::Str], Ty::nullable(Ty::Str), Needs::Env),
+        ("env", "args") => ("args", vec![], Ty::Array(Box::new(Ty::Str)), Needs::Env),
         _ => return None,
     })
 }

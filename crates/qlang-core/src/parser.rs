@@ -14,6 +14,14 @@ use std::rc::Rc;
 
 type PResult<T> = Result<T, ()>;
 
+/// Whether a `fun` declaration being parsed must, or may, have a body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BodyMode {
+    Required,
+    /// Only for trait method signatures: a body makes it a default implementation.
+    Optional,
+}
+
 /// Deepest nesting of expressions, blocks and types the parser accepts.
 const MAX_NESTING: u32 = 200;
 
@@ -116,6 +124,18 @@ impl<'a> Parser<'a> {
             while self.toks[i].tok == Tok::Newline {
                 i += 1;
             }
+        }
+        self.toks[i].tok.clone()
+    }
+
+    /// The first token that isn't a line break, from the current position on
+    /// (inclusive), without consuming anything: a non-destructive lookahead
+    /// past blank lines, for deciding whether a declaration continues.
+    fn peek_past_newlines(&mut self) -> Tok {
+        self.skip_insignificant();
+        let mut i = self.pos;
+        while self.toks[i].tok == Tok::Newline {
+            i += 1;
         }
         self.toks[i].tok.clone()
     }
@@ -267,7 +287,7 @@ impl<'a> Parser<'a> {
             Tok::Import => self.parse_import().map(Item::Import),
             Tok::Export => self.parse_export().map(Item::Export),
             Tok::Fun if matches!(self.toks[self.pos + 1].tok, Tok::Ident(_)) => {
-                self.parse_fun(true, true).map(|f| Item::Fun(Rc::new(f)))
+                self.parse_fun(true, BodyMode::Required).map(|f| Item::Fun(Rc::new(f)))
             }
             Tok::Struct => self.parse_struct().map(Item::Struct),
             Tok::Impl => self.parse_impl().map(Item::Impl),
@@ -355,7 +375,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `fun name<T>(params) -> ret` and, if `require_body`, its block and `end`.
-    fn parse_fun(&mut self, named: bool, require_body: bool) -> PResult<FunDecl> {
+    fn parse_fun(&mut self, named: bool, body: BodyMode) -> PResult<FunDecl> {
         let start = self.expect(&Tok::Fun)?;
         let name = if named { Some(self.expect_ident()?) } else { None };
         let tparams = if self.at(&Tok::Lt) { self.parse_type_params()? } else { Vec::new() };
@@ -391,7 +411,14 @@ impl<'a> Parser<'a> {
         self.nl.pop();
         r?;
         let ret = if self.eat(&Tok::Arrow) { Some(self.parse_type()?) } else { None };
-        let (body, end_span) = if require_body {
+        let has_body = match body {
+            BodyMode::Required => true,
+            // a trait method has a default body unless its signature ends the line: the
+            // next token is then `fun` (the next signature) or `end` (no statement can
+            // start with a bare `fun` outside the top level, so this is unambiguous).
+            BodyMode::Optional => !matches!(self.peek_past_newlines(), Tok::Fun | Tok::End | Tok::Eof),
+        };
+        let (body, end_span) = if has_body {
             let block = self.parse_block(&[Tok::End]);
             let end = self.expect(&Tok::End)?;
             (Some(block), end)
@@ -501,7 +528,7 @@ impl<'a> Parser<'a> {
                 if !self.at(&Tok::Fun) {
                     return self.unexpected("a method (`fun name(...)`) or `end`");
                 }
-                let fun = Rc::new(self.parse_fun(true, true)?);
+                let fun = Rc::new(self.parse_fun(true, BodyMode::Required)?);
                 Ok(MethodDecl { vis, is_override, fun })
             })();
             match r {
@@ -534,13 +561,13 @@ impl<'a> Parser<'a> {
             }
             let before = self.pos;
             let r = if self.at(&Tok::Fun) {
-                self.parse_fun(true, false)
+                self.parse_fun(true, BodyMode::Optional)
             } else {
                 self.unexpected("a method signature (`fun name(...)`) or `end`")
             };
             match r {
                 Ok(s) => {
-                    sigs.push(s);
+                    sigs.push(Rc::new(s));
                     if !self.end_of_stmt(&[Tok::End]) {
                         self.sync(&[Tok::End]);
                     }
@@ -1198,7 +1225,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.toks[self.pos + 1].tok, Tok::Ident(_)) {
                     return self.error_at("P052", "named functions are only allowed at the top level; here write `let name = fun(...) ... end`", span);
                 }
-                let f = self.parse_fun(false, true)?;
+                let f = self.parse_fun(false, BodyMode::Required)?;
                 let sp = f.span;
                 Ok(self.mk(sp, ExprKind::Lambda(Rc::new(f))))
             }

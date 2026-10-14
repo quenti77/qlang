@@ -134,7 +134,7 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub tparams: Vec<TypeParam>,
-    pub sigs: Vec<FunDecl>,
+    pub sigs: Vec<Rc<FunDecl>>,
 }
 
 #[derive(Debug)]

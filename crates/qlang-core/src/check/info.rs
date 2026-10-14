@@ -747,7 +747,7 @@ mod tests {
         "round", "first", "last", "append", "extend", "find", "filter", "map", "length", "size", "swap", "copy", "clone", "to_string",
         "reduce", "any", "all", "each", "sort_by", "unique", "flatten", "fold", "for_each", "group_by", "zip", "merge", "map_values",
         "entries", "strip_prefix", "strip_suffix", "snake_case", "camel_case", "kebab_case", "title_case", "to_hex", "to_oct", "to_bin",
-        "to_fixed", "format", "eq_ignore_case", "concat", "take", "drop",
+        "to_fixed", "format", "eq_ignore_case", "concat", "take", "drop", "chunk",
     ];
 
     #[test]

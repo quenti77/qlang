@@ -952,6 +952,9 @@ impl Checker {
             (Ty::Array(t), "first" | "last") => (vec![], Ty::nullable((**t).clone())),
             (Ty::Array(t), "concat") => (vec![arr(t)], arr(t)),
             (Ty::Array(t), "take" | "drop") => (vec![Ty::Int], arr(t)),
+            (Ty::Array(_), "swap") => (vec![Ty::Int, Ty::Int], Ty::Unit),
+            (Ty::Array(t), "chunk") => (vec![Ty::Int], arr(&arr(t))),
+            (Ty::Array(t), "repeat") => (vec![Ty::Int], arr(t)),
             (Ty::Array(t), "flatten") => {
                 let inner = match self.resolve(t) {
                     Ty::Array(x) => *x,

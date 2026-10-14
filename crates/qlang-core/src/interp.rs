@@ -1856,7 +1856,22 @@ impl<'a> Interp<'a> {
             Value::Array(a)
                 if matches!(
                     name,
-                    "contains" | "index_of" | "join" | "reverse" | "insert" | "remove" | "sum" | "min" | "max" | "slice" | "sort" | "unique" | "flatten" | "take" | "drop"
+                    "contains"
+                        | "index_of"
+                        | "join"
+                        | "reverse"
+                        | "insert"
+                        | "remove"
+                        | "sum"
+                        | "min"
+                        | "max"
+                        | "slice"
+                        | "sort"
+                        | "unique"
+                        | "flatten"
+                        | "take"
+                        | "drop"
+                        | "chunk"
                 ) =>
             {
                 let n = a.borrow().len();
@@ -2262,6 +2277,32 @@ impl<'a> Interp<'a> {
             (Value::Array(a), "drop") => {
                 let n = int_arg(0).unwrap_or(0).max(0) as usize;
                 Value::array(a.borrow().iter().skip(n).cloned().collect())
+            }
+            (Value::Array(a), "swap") => {
+                let len = a.borrow().len();
+                match (int_arg(0).and_then(|i| usize::try_from(i).ok()), int_arg(1).and_then(|i| usize::try_from(i).ok())) {
+                    (Some(i), Some(j)) if i < len && j < len => {
+                        a.borrow_mut().swap(i, j);
+                        Value::Unit
+                    }
+                    _ => return self.fail("R020", format!("cannot swap these indices (length {len})"), span),
+                }
+            }
+            (Value::Array(a), "chunk") => {
+                let n = match int_arg(0) {
+                    Some(n) if n > 0 => n as usize,
+                    _ => return self.fail("R021", "the chunk size must be a positive int", span),
+                };
+                let items: Vec<Value> = a.borrow().clone();
+                Value::array(items.chunks(n).map(|c| Value::array(c.to_vec())).collect())
+            }
+            (Value::Array(a), "repeat") => {
+                let n = int_arg(0).unwrap_or(0).max(0) as usize;
+                let items: Vec<Value> = a.borrow().clone();
+                let total = items.len().saturating_mul(n);
+                self.guard_alloc(total, span)?;
+                self.charge(total, span)?;
+                Value::array(items.iter().cloned().cycle().take(total).collect())
             }
             (Value::Array(a), "flatten") => {
                 let items: Vec<Value> = a.borrow().clone();

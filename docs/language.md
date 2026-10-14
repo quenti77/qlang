@@ -1236,6 +1236,9 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `first()`, `last()`   | premier / dernier élément, ou `none` si vide (`T?`)              |
 | `concat(autre)`       | nouveau tableau avec les éléments de ce tableau puis ceux d'`autre` |
 | `take(n)`, `drop(n)`  | nouveau tableau des `n` premiers éléments / sans les `n` premiers |
+| `swap(i, j)`          | échange les éléments d'indices `i` et `j`, sur place              |
+| `chunk(taille)`       | découpe en groupes consécutifs de `taille` éléments (le dernier peut être plus petit) |
+| `repeat(n)`           | nouveau tableau avec les éléments répétés `n` fois                 |
 
 ```
 let names = ["ana", "bob", "cy"]

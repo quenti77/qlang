@@ -39,6 +39,9 @@ pub const ARRAY: &[Entry] = &[
     ("concat", "other", "New array with the elements of this array followed by `other`'s."),
     ("take", "n", "New array of the first `n` elements (fewer if there are not enough)."),
     ("drop", "n", "New array without the first `n` elements (empty if there are not enough)."),
+    ("swap", "i, j", "Swaps the elements at indices `i` and `j`, in place."),
+    ("chunk", "size", "Splits into consecutive groups of `size` elements (the last one may be smaller)."),
+    ("repeat", "times", "New array with this array's elements repeated `times` times."),
 ];
 
 pub const MAP: &[Entry] = &[

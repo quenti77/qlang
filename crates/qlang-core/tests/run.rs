@@ -880,6 +880,11 @@ fn array_higher_order_functions() {
     assert_eq!(out("print([1, 2].concat([3, 4]))\nlet a = [1, 2]\nlet b = a.concat([3])\nprint(a)\nprint(b)"), "[1, 2, 3, 4]\n[1, 2]\n[1, 2, 3]\n");
     assert_eq!(out("print([1, 2, 3, 4].take(2))\nprint([1, 2].take(10))\nprint([1, 2].take(0))"), "[1, 2]\n[1, 2]\n[]\n");
     assert_eq!(out("print([1, 2, 3, 4].drop(2))\nprint([1, 2].drop(10))\nprint([1, 2].drop(0))"), "[3, 4]\n[]\n[1, 2]\n");
+    assert_eq!(out("let a = [1, 2, 3]\na.swap(0, 2)\nprint(a)"), "[3, 2, 1]\n");
+    assert!(err("let a = [1, 2]\na.swap(0, 5)").starts_with("R020"));
+    assert_eq!(out("print([1, 2, 3, 4, 5].chunk(2))\nprint([1, 2, 3].chunk(5))"), "[[1, 2], [3, 4], [5]]\n[[1, 2, 3]]\n");
+    assert!(err("print([1].chunk(0))").starts_with("R021"));
+    assert_eq!(out("print([1, 2].repeat(3))\nprint([1, 2].repeat(0))"), "[1, 2, 1, 2, 1, 2]\n[]\n");
 }
 
 #[test]

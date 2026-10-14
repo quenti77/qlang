@@ -2010,6 +2010,24 @@ impl<'a> Interp<'a> {
             (Value::Str(s), "contains") => Value::Bool(s.contains(str_arg(0).unwrap().as_ref())),
             (Value::Str(s), "starts_with") => Value::Bool(s.starts_with(str_arg(0).unwrap().as_ref())),
             (Value::Str(s), "ends_with") => Value::Bool(s.ends_with(str_arg(0).unwrap().as_ref())),
+            (Value::Str(s), "strip_prefix") => match s.strip_prefix(str_arg(0).unwrap().as_ref()) {
+                Some(r) => Value::str(r),
+                None => Value::None,
+            },
+            (Value::Str(s), "strip_suffix") => match s.strip_suffix(str_arg(0).unwrap().as_ref()) {
+                Some(r) => Value::str(r),
+                None => Value::None,
+            },
+            (Value::Str(s), "snake_case") => Value::str(&split_words(s).join("_").to_lowercase()),
+            (Value::Str(s), "kebab_case") => Value::str(&split_words(s).join("-").to_lowercase()),
+            (Value::Str(s), "camel_case") => {
+                let words = split_words(s);
+                let mut out = String::new();
+                for (i, w) in words.iter().enumerate() {
+                    if i == 0 { out.push_str(&w.to_lowercase()) } else { out.push_str(&capitalize_word(w)) }
+                }
+                Value::str(&out)
+            }
             (Value::Str(s), "index_of") => {
                 let needle = str_arg(0).unwrap();
                 match s.find(needle.as_ref()) {
@@ -2058,6 +2076,38 @@ impl<'a> Interp<'a> {
             (Value::Map(m), "remove") => m.borrow_mut().remove(&args[0]).unwrap_or(Value::None),
             (Value::Map(m), "keys") => Value::array(m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()),
             (Value::Map(m), "values") => Value::array(m.borrow().entries.iter().map(|(_, v)| v.clone()).collect()),
+            (Value::Map(m), "merge") => {
+                let Value::Map(other) = &args[0] else { unreachable!("checked by the type checker") };
+                self.charge(m.borrow().len() + other.borrow().len(), span)?;
+                let mut out = MapObj::default();
+                for (k, v) in m.borrow().entries.iter() {
+                    out.insert(k.clone(), v.clone());
+                }
+                for (k, v) in other.borrow().entries.iter() {
+                    out.insert(k.clone(), v.clone());
+                }
+                self.guard_alloc(out.len(), span)?;
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
+            (Value::Map(m), "filter") => {
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                let mut out = MapObj::default();
+                for (k, v) in entries {
+                    if matches!(self.call_value(&args[0], vec![k.clone(), v.clone()], span)?, Value::Bool(true)) {
+                        out.insert(k, v);
+                    }
+                }
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
+            (Value::Map(m), "map_values") => {
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                let mut out = MapObj::default();
+                for (k, v) in entries {
+                    let nv = self.call_value(&args[0], vec![k.clone(), v], span)?;
+                    out.insert(k, nv);
+                }
+                Value::Map(Rc::new(RefCell::new(out)))
+            }
             (Value::Array(a), "sort") => {
                 let items: Vec<Value> = a.borrow().clone();
                 let sorted = self.merge_sort(items, span)?;
@@ -2225,6 +2275,13 @@ impl<'a> Interp<'a> {
                 Some(v) => Value::Int(v),
                 None => return self.fail("R010", "integer overflow", span),
             },
+            (Value::Int(n), "to_hex") => Value::str(&if *n < 0 { format!("-{:x}", n.unsigned_abs()) } else { format!("{n:x}") }),
+            (Value::Int(n), "to_oct") => Value::str(&if *n < 0 { format!("-{:o}", n.unsigned_abs()) } else { format!("{n:o}") }),
+            (Value::Int(n), "to_bin") => Value::str(&if *n < 0 { format!("-{:b}", n.unsigned_abs()) } else { format!("{n:b}") }),
+            (Value::Float(f), "to_fixed") => match int_arg(0) {
+                Some(n) if (0..=17).contains(&n) => Value::str(&format!("{:.*}", n as usize, f)),
+                _ => return self.fail("R021", "the number of decimals must be between 0 and 17", span),
+            },
             (Value::Float(f), "abs") => Value::Float(f.abs()),
             (Value::Float(f), "sqrt") => {
                 if *f < 0.0 {
@@ -2245,6 +2302,41 @@ impl<'a> Interp<'a> {
             }
             _ => return Ok(None),
         }))
+    }
+}
+
+/// Splits text into words for case conversion: separators are any non-alphanumeric
+/// character, plus a boundary before an upper-case letter following a lower-case
+/// letter or digit (so `camelCase` and `snake_case` both split cleanly).
+fn split_words(s: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for c in s.chars() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            continue;
+        }
+        if c.is_uppercase()
+            && let Some(prev) = cur.chars().last()
+            && (prev.is_lowercase() || prev.is_numeric())
+        {
+            words.push(std::mem::take(&mut cur));
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
+
+fn capitalize_word(w: &str) -> String {
+    let mut cs = w.chars();
+    match cs.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase(),
+        None => String::new(),
     }
 }
 

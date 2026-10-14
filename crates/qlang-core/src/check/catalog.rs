@@ -45,6 +45,9 @@ pub const MAP: &[Entry] = &[
     ("remove", "key", "Removes `key` and returns its value, or `none`."),
     ("keys", "", "The keys, in insertion order."),
     ("values", "", "The values, in the same order as `keys()`."),
+    ("merge", "other", "New map with every entry of this map and `other`; `other`'s value wins on a shared key."),
+    ("filter", "f", "New map keeping only the entries for which `f(key, value)` is `true`."),
+    ("map_values", "f", "New map with the same keys, each value replaced by `f(key, value)`."),
 ];
 
 pub const STRING: &[Entry] = &[
@@ -78,6 +81,11 @@ pub const STRING: &[Entry] = &[
     ("to_int", "", "The integer written in the string, or `none`."),
     ("to_float", "", "The number written in the string, or `none`."),
     ("substring", "start, end", "Characters from `start` (included) to `end` (excluded)."),
+    ("strip_prefix", "prefix", "The string without `prefix` at the start, or `none` if it does not start with `prefix`."),
+    ("strip_suffix", "suffix", "The string without `suffix` at the end, or `none` if it does not end with `suffix`."),
+    ("snake_case", "", "Copy in `snake_case` (words separated by `_`, lower case)."),
+    ("camel_case", "", "Copy in `camelCase` (no separators, each word but the first capitalized)."),
+    ("kebab_case", "", "Copy in `kebab-case` (words separated by `-`, lower case)."),
 ];
 
 pub const UUID: &[Entry] = &[
@@ -115,6 +123,9 @@ pub const INT: &[Entry] = &[
     ("max", "other", "The larger of the two."),
     ("pow", "exponent", "Same as `x ** exponent`."),
     ("sqrt", "", "Square root, as a float (error if negative)."),
+    ("to_hex", "", "Hexadecimal text (`255.to_hex()` is `\"ff\"`; negative numbers get a `-`)."),
+    ("to_oct", "", "Octal text."),
+    ("to_bin", "", "Binary text."),
 ];
 
 pub const FLOAT: &[Entry] = &[
@@ -126,6 +137,7 @@ pub const FLOAT: &[Entry] = &[
     ("floor", "", "Rounds down, as an int."),
     ("ceil", "", "Rounds up, as an int."),
     ("round", "", "Rounds to the nearest, as an int."),
+    ("to_fixed", "decimals", "Text with exactly `decimals` digits after the point (0 to 17)."),
 ];
 
 /// Static members of the built-in types: (type, kind, name, detail, explanation).

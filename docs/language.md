@@ -1265,6 +1265,8 @@ print(total) // 10
 | `code()`                                        | code Unicode d'une chaîne d'**un seul** caractère (`"A".code()` vaut 65)                                             |
 | `to_int()`, `to_float()`                        | comme `int.parse` / `float.parse` : `int?` / `float?`                                                                |
 | `substring(début, fin)`                         | caractères de `début` (inclus) à `fin` (exclu)                                                                       |
+| `strip_prefix(p)`, `strip_suffix(p)`            | la chaîne sans `p` au début / à la fin, ou `none` si elle ne commence / finit pas par `p`                           |
+| `snake_case()`, `camel_case()`, `kebab_case()`  | copie en `snake_case`, `camelCase` ou `kebab-case`                                                                   |
 
 `sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
 chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de
@@ -1285,6 +1287,8 @@ Nombres :
 | `x.pow(y)`                           | `x ** y` (deux `int` donnent un `int`, deux `float` un `float`)       |
 | `x.sqrt()`                           | racine carrée, un `float` (erreur si `x` est négatif)                 |
 | `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int`                         |
+| `n.to_hex()`, `n.to_oct()`, `n.to_bin()` | (`int`) texte en base 16 / 8 / 2 (`255.to_hex()` vaut `"ff"`)      |
+| `f.to_fixed(décimales)`              | (`float`) texte avec exactement `décimales` chiffres après la virgule (0 à 17) |
 | `float.PI`, `float.E`                | constantes mathématiques                                              |
 | `int.MAX`, `int.MIN`                 | plus grand / plus petit `int`                                         |
 
@@ -1292,6 +1296,8 @@ Nombres :
 print([3, 1, 2].max())             -- 3
 print(float.PI * 2.0 ** 2)         -- 12.566370614359172
 print(16.sqrt())                   -- 4.0
+print(3.14159.to_fixed(2))         -- "3.14"
+print(255.to_hex())                -- "ff"
 ```
 
 Ces opérations sont des méthodes et des constantes attachées aux types, pour ne
@@ -1344,6 +1350,16 @@ end
 | `keys()`              | `array<K>` des clés, dans l'ordre d'insertion           |
 | `values()`            | `array<V>` des valeurs, dans le même ordre              |
 | `clear()`             | vide le dictionnaire                                    |
+| `merge(autre)`        | nouveau dictionnaire avec les entrées des deux ; `autre` gagne sur une clé commune |
+| `filter(f)`           | nouveau dictionnaire ne gardant que les entrées où `f(clé, valeur)` est `true` |
+| `map_values(f)`       | nouveau dictionnaire avec les mêmes clés, chaque valeur remplacée par `f(clé, valeur)` |
+
+```
+let a = { "x": 1, "y": 2 }
+let b = { "y": 20, "z": 3 }
+print(a.merge(b))                                      -- {"x": 1, "y": 20, "z": 3}
+print(a.filter(fun(k: string, v: int) -> bool v > 1 end)) -- {"y": 2}
+```
 
 - **Parcours** : `for name, age in ages do … end` donne la clé et la valeur, dans
   l'ordre d'insertion. On peut aussi ne parcourir que les clés

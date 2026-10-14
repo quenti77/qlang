@@ -964,9 +964,17 @@ impl Checker {
             (Ty::Map(k, v), "remove") => (vec![(**k).clone()], Ty::nullable((**v).clone())),
             (Ty::Map(k, _), "keys") => (vec![], arr(k)),
             (Ty::Map(_, v), "values") => (vec![], arr(v)),
+            (Ty::Map(k, v), "merge") => (vec![Ty::Map(k.clone(), v.clone())], Ty::Map(k.clone(), v.clone())),
+            (Ty::Map(k, v), "filter") => (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Bool))], Ty::Map(k.clone(), v.clone())),
+            (Ty::Map(k, v), "map_values") => {
+                let u = self.fresh();
+                (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(u.clone()))], Ty::Map(k.clone(), Box::new(u)))
+            }
             (Ty::Str, "len") => (vec![], Ty::Int),
             (Ty::Str, "is_empty") => (vec![], Ty::Bool),
             (Ty::Str, "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse") => (vec![], Ty::Str),
+            (Ty::Str, "snake_case" | "camel_case" | "kebab_case") => (vec![], Ty::Str),
+            (Ty::Str, "strip_prefix" | "strip_suffix") => (vec![Ty::Str], Ty::nullable(Ty::Str)),
             (Ty::Str, "last_index_of") => (vec![Ty::Str], Ty::nullable(Ty::Int)),
             (Ty::Str, "count") => (vec![Ty::Str], Ty::Int),
             (Ty::Str, "lines" | "words") => (vec![], arr(&Ty::Str)),
@@ -993,9 +1001,11 @@ impl Checker {
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),
+            (Ty::Int, "to_hex" | "to_oct" | "to_bin") => (vec![], Ty::Str),
             (Ty::Float, "abs" | "sqrt") => (vec![], Ty::Float),
             (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
             (Ty::Float, "floor" | "ceil" | "round") => (vec![], Ty::Int),
+            (Ty::Float, "to_fixed") => (vec![Ty::Int], Ty::Str),
             _ => return None,
         })
     }

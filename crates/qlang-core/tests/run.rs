@@ -919,6 +919,14 @@ fn maps_counting_and_loops() {
 }
 
 #[test]
+fn maps_higher_order_functions() {
+    assert_eq!(out("let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 20, \"z\": 3 }\nprint(a.merge(b))\nprint(a)"), "{\"x\": 1, \"y\": 20, \"z\": 3}\n{\"x\": 1, \"y\": 2}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.filter(fun(k: string, v: int) -> bool v > 1 end))"), "{\"b\": 2, \"c\": 3}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> int v * 10 end))"), "{\"a\": 10, \"b\": 20}\n");
+    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> string \"{k}={v}\" end))"), "{\"a\": \"a=1\", \"b\": \"b=2\"}\n");
+}
+
+#[test]
 fn maps_are_shared_and_typed() {
     assert_eq!(out("fun add(m: map<string, int>)\nm[\"k\"] = 1\nend\nlet m: map<string, int> = {}\nadd(m)\nprint(m)\nlet n = m\nn[\"j\"] = 2\nprint(m.len())"), "{\"k\": 1}\n2\n");
     assert_eq!(out("enum C\nR\nG\nend\nlet m = { C.R: \"red\", C.G: \"green\" }\nprint(m[C.G])\nprint(m)"), "green\n{C.R: \"red\", C.G: \"green\"}\n");
@@ -1051,6 +1059,24 @@ fn string_library() {
     assert!(err("print(\"x\".count(\"\"))").starts_with("R021"));
     let o = run_files(&[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")], None, Limits { max_alloc: 1000, ..Limits::default() });
     assert!(o.error.unwrap().starts_with("R903"));
+}
+
+#[test]
+fn string_prefix_suffix_and_case_conversions() {
+    assert_eq!(out("print(\"hello.txt\".strip_suffix(\".txt\"))\nprint(\"hello.txt\".strip_suffix(\".md\"))"), "hello\nnone\n");
+    assert_eq!(out("print(\"hello world\".strip_prefix(\"hello \"))\nprint(\"hello world\".strip_prefix(\"bye\"))"), "world\nnone\n");
+    assert_eq!(out("print(\"Hello World\".snake_case())\nprint(\"helloWorld\".snake_case())\nprint(\"already_snake\".snake_case())"), "hello_world\nhello_world\nalready_snake\n");
+    assert_eq!(out("print(\"hello world\".kebab_case())\nprint(\"HelloWorld\".kebab_case())"), "hello-world\nhello-world\n");
+    assert_eq!(out("print(\"hello world\".camel_case())\nprint(\"hello-world-test\".camel_case())"), "helloWorld\nhelloWorldTest\n");
+}
+
+#[test]
+fn number_formatting() {
+    assert_eq!(out("print(255.to_hex())\nprint((-255).to_hex())\nprint(0.to_hex())"), "ff\n-ff\n0\n");
+    assert_eq!(out("print(8.to_oct())\nprint(5.to_bin())"), "10\n101\n");
+    assert_eq!(out("print(3.14159.to_fixed(2))\nprint(1.0.to_fixed(0))\nprint((-2.5).to_fixed(3))"), "3.14\n1\n-2.500\n");
+    assert!(err("print(1.5.to_fixed(-1))").starts_with("R021"));
+    assert!(err("print(1.5.to_fixed(18))").starts_with("R021"));
 }
 
 // ---------------------------------------------------------------- hardening

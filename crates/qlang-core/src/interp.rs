@@ -1485,6 +1485,22 @@ impl<'a> Interp<'a> {
                 Value::Int((*lo as i128 + draw as i128) as i64)
             }
             ("http", "send") => return self.http_send_call(&args[0], span),
+            ("fs", "read") => match self.host.read_file(&text(&args[0])) {
+                Ok(s) => self.ok_result(Value::str(&s)),
+                Err(e) => self.host_err_result(e),
+            },
+            ("fs", "write") => match self.host.write_file(&text(&args[0]), &text(&args[1])) {
+                Ok(()) => self.ok_result(Value::Bool(true)),
+                Err(e) => self.host_err_result(e),
+            },
+            ("env", "get") => match self.host.env_var(&text(&args[0])) {
+                Ok(v) => v.map_or(Value::None, |s| Value::str(&s)),
+                Err(e) => return self.fail("R065", format!("cannot read the environment: {e:?}"), span),
+            },
+            ("env", "args") => match self.host.args() {
+                Ok(xs) => Value::array(xs.iter().map(|s| Value::str(s)).collect()),
+                Err(e) => return self.fail("R065", format!("cannot read the environment: {e:?}"), span),
+            },
             ("db", "connect") => return self.db_connect_call(&text(&args[0]), span),
             ("regex", "matches") => Value::Bool(self.compile_regex(&text(&args[1]), span)?.is_match(&text(&args[0]))),
             ("regex", "find") => match self.compile_regex(&text(&args[1]), span)?.find(&text(&args[0])) {

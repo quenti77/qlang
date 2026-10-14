@@ -24,6 +24,10 @@ pub struct Capabilities {
     pub http: bool,
     /// `Db.connect(...)` is available (the host can reach a database).
     pub sql: bool,
+    /// `fs.read(...)`/`fs.write(...)` are available (the host can touch the disk).
+    pub fs: bool,
+    /// `env.get(...)`/`env.args()` are available (the host has a process environment).
+    pub env: bool,
 }
 
 /// A column value read from, or bound to, a SQL statement. Null is explicit: a database
@@ -114,6 +118,27 @@ pub trait Host {
         Err(HostError::Unsupported("sql"))
     }
 
+    /// Read a file's whole content as text. A missing file, a permission error, or content
+    /// that is not valid UTF-8 are all `Err`, never a crash.
+    fn read_file(&mut self, _path: &str) -> Result<String, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Write `content` to a file, replacing it entirely (creating it if needed).
+    fn write_file(&mut self, _path: &str, _content: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// The value of an environment variable, or `Ok(None)` if it is not set.
+    fn env_var(&mut self, _name: &str) -> Result<Option<String>, HostError> {
+        Err(HostError::Unsupported("env"))
+    }
+
+    /// The program's command-line arguments (not including the program name itself).
+    fn args(&mut self) -> Result<Vec<String>, HostError> {
+        Err(HostError::Unsupported("env"))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }
@@ -170,6 +195,12 @@ pub struct MemoryHost {
     /// Set by `sql_close`, so a later `sql_query`/`sql_execute` can report the connection
     /// is gone, the same way a real driver would.
     pub sql_closed: bool,
+    /// In-memory filesystem for `fs.read`/`fs.write`, keyed by path. `None`: no filesystem.
+    /// A path not in the map is a "not found" error, same as a real one.
+    pub fs: Option<std::collections::HashMap<String, String>>,
+    /// Environment variables for `env.get`/`env.args`. `None`: no process environment.
+    pub env: Option<std::collections::HashMap<String, String>>,
+    pub cli_args: Vec<String>,
 }
 
 impl MemoryHost {
@@ -212,6 +243,8 @@ impl Host for MemoryHost {
             random: self.seed.is_some(),
             http: self.http.is_some(),
             sql: self.sql.is_some(),
+            fs: self.fs.is_some(),
+            env: self.env.is_some(),
         }
     }
 
@@ -263,6 +296,29 @@ impl Host for MemoryHost {
         }
         self.sql_closed = true;
         Ok(())
+    }
+
+    fn read_file(&mut self, path: &str) -> Result<String, HostError> {
+        let table = self.fs.as_ref().ok_or(HostError::Unsupported("fs"))?;
+        table.get(path).cloned().ok_or_else(|| HostError::Other(format!("\"{path}\" not found")))
+    }
+
+    fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
+        let table = self.fs.as_mut().ok_or(HostError::Unsupported("fs"))?;
+        table.insert(path.to_string(), content.to_string());
+        Ok(())
+    }
+
+    fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
+        let table = self.env.as_ref().ok_or(HostError::Unsupported("env"))?;
+        Ok(table.get(name).cloned())
+    }
+
+    fn args(&mut self) -> Result<Vec<String>, HostError> {
+        if self.env.is_none() {
+            return Err(HostError::Unsupported("env"));
+        }
+        Ok(self.cli_args.clone())
     }
 
     fn now_ms(&mut self) -> Result<i64, HostError> {

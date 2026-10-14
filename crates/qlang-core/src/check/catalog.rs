@@ -86,6 +86,8 @@ pub const STRING: &[Entry] = &[
     ("snake_case", "", "Copy in `snake_case` (words separated by `_`, lower case)."),
     ("camel_case", "", "Copy in `camelCase` (no separators, each word but the first capitalized)."),
     ("kebab_case", "", "Copy in `kebab-case` (words separated by `-`, lower case)."),
+    ("title_case", "", "Copy with each word capitalized, separated by one space."),
+    ("eq_ignore_case", "other", "`true` if the strings are equal, ignoring upper/lower case."),
 ];
 
 pub const UUID: &[Entry] = &[

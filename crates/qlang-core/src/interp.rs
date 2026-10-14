@@ -2028,6 +2028,11 @@ impl<'a> Interp<'a> {
                 }
                 Value::str(&out)
             }
+            (Value::Str(s), "title_case") => {
+                let words: Vec<String> = split_words(s).iter().map(|w| capitalize_word(w)).collect();
+                Value::str(&words.join(" "))
+            }
+            (Value::Str(s), "eq_ignore_case") => Value::Bool(s.to_lowercase() == str_arg(0).unwrap().to_lowercase()),
             (Value::Str(s), "index_of") => {
                 let needle = str_arg(0).unwrap();
                 match s.find(needle.as_ref()) {

@@ -1068,6 +1068,8 @@ fn string_prefix_suffix_and_case_conversions() {
     assert_eq!(out("print(\"Hello World\".snake_case())\nprint(\"helloWorld\".snake_case())\nprint(\"already_snake\".snake_case())"), "hello_world\nhello_world\nalready_snake\n");
     assert_eq!(out("print(\"hello world\".kebab_case())\nprint(\"HelloWorld\".kebab_case())"), "hello-world\nhello-world\n");
     assert_eq!(out("print(\"hello world\".camel_case())\nprint(\"hello-world-test\".camel_case())"), "helloWorld\nhelloWorldTest\n");
+    assert_eq!(out("print(\"hello_world test\".title_case())"), "Hello World Test\n");
+    assert_eq!(out("print(\"Hello\".eq_ignore_case(\"hello\"))\nprint(\"Hello\".eq_ignore_case(\"world\"))"), "true\nfalse\n");
 }
 
 #[test]

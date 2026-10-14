@@ -1267,6 +1267,8 @@ print(total) // 10
 | `substring(début, fin)`                         | caractères de `début` (inclus) à `fin` (exclu)                                                                       |
 | `strip_prefix(p)`, `strip_suffix(p)`            | la chaîne sans `p` au début / à la fin, ou `none` si elle ne commence / finit pas par `p`                           |
 | `snake_case()`, `camel_case()`, `kebab_case()`  | copie en `snake_case`, `camelCase` ou `kebab-case`                                                                   |
+| `title_case()`                                  | copie avec chaque mot capitalisé, séparés par une espace                                                            |
+| `eq_ignore_case(autre)`                         | `bool` : égalité en ignorant majuscules / minuscules                                                                |
 
 `sort`, `min` et `max` demandent des éléments qui se comparent : nombres,
 chaînes, ou une structure qui implémente `Ord`. Sinon, c'est une erreur de

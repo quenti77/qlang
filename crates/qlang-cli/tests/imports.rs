@@ -115,14 +115,28 @@ fn the_same_file_through_a_symbolic_link_is_one_module() {
 
 #[cfg(unix)]
 #[test]
-fn a_circular_import_through_a_link_is_found() {
+fn a_cyclic_import_through_a_link_is_matched_to_the_same_module() {
+    // `b.q` reaches `a.q` through a symlink; since neither file runs top-level code,
+    // the cycle has a valid order, but only if the link is recognised as the same
+    // module `a.q` imports from directly (otherwise `a()` below would not resolve).
     let d = Dir::new("cycle");
-    d.write("a.q", "import b from \"b.q\"\nfun a()\nend\nexport a\n");
-    d.write("b.q", "import a from \"link.q\"\nfun b()\nend\nexport b\n");
+    d.write("a.q", "import b from \"b.q\"\nfun a() -> int\n  1\nend\nexport a\nprint(b())\n");
+    d.write("b.q", "import a from \"link.q\"\nfun b() -> int\n  a() + 1\nend\nexport b\n");
     std::os::unix::fs::symlink(d.0.join("a.q"), d.0.join("link.q")).unwrap();
     let o = run_in(&d.0, &["run", "a.q"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert_eq!(text(&o.stdout), "2\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cycle_with_top_level_code_in_more_than_one_module_has_no_valid_order() {
+    let d = Dir::new("cycle_runtime");
+    d.write("a.q", "import b from \"b.q\"\nfun a()\nend\nexport a\nprint(\"a\")\n");
+    d.write("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")\n");
+    let o = run_in(&d.0, &["run", "a.q"]);
     assert!(!o.status.success());
-    assert!(text(&o.stderr).contains("circular"), "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("cycle"), "{}", text(&o.stderr));
 }
 
 fn json(args: &[&str], request: &str) -> serde_json::Value {

@@ -881,15 +881,15 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &Compi
         host,
         sources: SourceMap::default(),
         diags: Vec::new(),
-        modules: Vec::new(),
+        nodes: Vec::new(),
+        edges: Vec::new(),
         done: HashMap::new(),
-        loading: Vec::new(),
         next_id: 0,
     };
-    loader.load(PRELUDE_PATH, PRELUDE_PATH.to_string(), PRELUDE_SOURCE.to_string());
+    loader.discover(PRELUDE_PATH, PRELUDE_PATH.to_string(), PRELUDE_SOURCE.to_string());
     let entry_key = loader.host.canonical_path(entry);
-    loader.load(entry, entry_key, source.to_string());
-    let Loader { sources, mut diags, modules, .. } = loader;
+    loader.discover(entry, entry_key, source.to_string());
+    let (sources, mut diags, modules) = loader.finish();
 
     let has_errors = |d: &[Diagnostic]| d.iter().any(|x| x.severity == Severity::Error);
     if has_errors(&diags) {
@@ -951,24 +951,48 @@ pub(crate) struct Loaded {
     imports: HashMap<usize, usize>,
 }
 
+/// A module as discovered, before modules are put in execution order. `imports` and
+/// `done`/edges below refer to other modules by *discovery* id, not by final [`ModId`]:
+/// those only agree once [`Loader::finish`] has decided an order.
+struct Discovered {
+    path: String,
+    file: u32,
+    ast: Rc<ast::Module>,
+    imports: HashMap<usize, usize>,
+    /// Whether this module has any top-level statement (as opposed to only
+    /// declarations), i.e. whether *when* it runs relative to other modules matters.
+    runs_code: bool,
+}
+
 struct Loader<'h> {
     host: &'h mut dyn Host,
     sources: SourceMap,
     diags: Vec<Diagnostic>,
-    modules: Vec<Loaded>,
+    nodes: Vec<Discovered>,
+    /// Every `import` edge seen, as (importer, imported, span of the import path) — kept
+    /// only to point at a concrete import if a cycle turns out to have no valid order.
+    edges: Vec<(usize, usize, Span)>,
     done: HashMap<String, usize>,
-    loading: Vec<String>,
     /// Node ids are unique across all modules.
     next_id: u32,
 }
 
 impl Loader<'_> {
     /// `key` identifies the module (see `Host::canonical_path`); `path` is how it is named.
-    fn load(&mut self, path: &str, key: String, text: String) -> usize {
+    /// Discovers every module reachable from this one. A module's discovery id is
+    /// reserved (in `done`) *before* its own imports are followed, so an import cycle
+    /// (`a.q` and `b.q` importing each other) simply links back to the id already
+    /// reserved instead of recursing forever or needing to be rejected here.
+    fn discover(&mut self, path: &str, key: String, text: String) -> usize {
         let file = self.sources.add(path, &text);
-        self.loading.push(key.clone());
         let (ast, next_id) = parse_module_from(&text, file, self.next_id, &mut self.diags);
         self.next_id = next_id;
+        let runs_code = ast.items.iter().any(|it| matches!(it, Item::Stmt(_)));
+        let id = self.nodes.len();
+        self.nodes.push(Discovered { path: path.to_string(), file, ast: Rc::new(ast), imports: HashMap::new(), runs_code });
+        self.done.insert(key, id);
+
+        let ast = self.nodes[id].ast.clone();
         let mut imports = HashMap::new();
         for (idx, item) in ast.items.iter().enumerate() {
             let Item::Import(imp) = item else { continue };
@@ -984,35 +1008,144 @@ impl Loader<'_> {
                 continue;
             };
             let target_key = self.host.canonical_path(&target);
-            if self.loading.contains(&target_key) {
-                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
-                    "T101",
-                    format!("circular import of \"{}\"", imp.path),
-                    imp.path_span,
-                ));
-                continue;
-            }
-            if let Some(&m) = self.done.get(&target_key) {
-                imports.insert(idx, m);
-                continue;
-            }
-            match self.host.load_module(&target) {
-                Ok(src) => {
-                    let m = self.load(&target, target_key, src);
-                    imports.insert(idx, m);
+            let m = if let Some(&m) = self.done.get(&target_key) {
+                m
+            } else {
+                match self.host.load_module(&target) {
+                    Ok(src) => self.discover(&target, target_key, src),
+                    Err(e) => {
+                        crate::diag::push_capped(&mut self.diags, Diagnostic::error(
+                            "T102",
+                            format!("cannot import \"{}\": {e}", imp.path),
+                            imp.path_span,
+                        ));
+                        continue;
+                    }
                 }
-                Err(e) => crate::diag::push_capped(&mut self.diags, Diagnostic::error(
-                    "T102",
-                    format!("cannot import \"{}\": {e}", imp.path),
-                    imp.path_span,
-                )),
+            };
+            imports.insert(idx, m);
+            self.edges.push((id, m, imp.path_span));
+        }
+        self.nodes[id].imports = imports;
+        id
+    }
+
+    /// Put the discovered modules in a valid execution order (a module after the
+    /// modules it imports), rejecting only the cycles for which no such order exists:
+    /// those where more than one module actually runs top-level code. Modules that
+    /// only declare things (structs, fns, traits...) can be part of a cycle freely,
+    /// since nothing about them depends on *when* they run.
+    fn order(&mut self) -> Vec<usize> {
+        let n = self.nodes.len();
+        let succ: Vec<Vec<usize>> = (0..n)
+            .map(|i| {
+                let mut v: Vec<usize> = self.nodes[i].imports.values().copied().collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            })
+            .collect();
+        let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (u, outs) in succ.iter().enumerate() {
+            for &v in outs {
+                pred[v].push(u);
             }
         }
-        self.loading.pop();
-        let idx = self.modules.len();
-        self.modules.push(Loaded { path: path.to_string(), file, ast: Rc::new(ast), imports });
-        self.done.insert(key, idx);
-        idx
+
+        // Kosaraju, step 1: finishing order of a DFS over the import graph.
+        let mut visited = vec![false; n];
+        let mut finish: Vec<usize> = Vec::with_capacity(n);
+        for start in 0..n {
+            if visited[start] {
+                continue;
+            }
+            visited[start] = true;
+            let mut stack = vec![(start, 0usize)];
+            while let Some(&mut (u, ref mut i)) = stack.last_mut() {
+                if *i < succ[u].len() {
+                    let v = succ[u][*i];
+                    *i += 1;
+                    if !visited[v] {
+                        visited[v] = true;
+                        stack.push((v, 0));
+                    }
+                } else {
+                    finish.push(u);
+                    stack.pop();
+                }
+            }
+        }
+
+        // Step 2: strongly connected components, found on the reverse graph in
+        // decreasing finishing time. This yields the SCCs in topological order of the
+        // import graph (an importer's SCC before the SCCs it imports); reversed, that
+        // becomes "a module's SCC comes after the SCCs it imports", which is what
+        // execution order needs.
+        let mut visited = vec![false; n];
+        let mut sccs: Vec<Vec<usize>> = Vec::new();
+        for &start in finish.iter().rev() {
+            if visited[start] {
+                continue;
+            }
+            visited[start] = true;
+            let mut comp = vec![start];
+            let mut stack = vec![start];
+            while let Some(u) = stack.pop() {
+                for &v in &pred[u] {
+                    if !visited[v] {
+                        visited[v] = true;
+                        comp.push(v);
+                        stack.push(v);
+                    }
+                }
+            }
+            comp.sort_unstable();
+            sccs.push(comp);
+        }
+        sccs.reverse();
+
+        for comp in &sccs {
+            if comp.len() < 2 {
+                continue;
+            }
+            let runs: Vec<usize> = comp.iter().copied().filter(|&m| self.nodes[m].runs_code).collect();
+            if runs.len() > 1 {
+                let span = self
+                    .edges
+                    .iter()
+                    .find(|&&(u, v, _)| comp.contains(&u) && comp.contains(&v))
+                    .map(|&(_, _, s)| s)
+                    .unwrap_or_default();
+                let names: Vec<&str> = runs.iter().map(|&m| self.nodes[m].path.as_str()).collect();
+                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
+                    "T101",
+                    format!(
+                        "these modules import each other in a cycle and each runs top-level code, so there is no valid order to run them: {}",
+                        names.join(", ")
+                    ),
+                    span,
+                ));
+            }
+        }
+
+        sccs.into_iter().flatten().collect()
+    }
+
+    /// Consume the loader, deciding final module order and remapping every `imports`
+    /// map from discovery ids to the resulting [`ModId`]s.
+    fn finish(mut self) -> (SourceMap, Vec<Diagnostic>, Vec<Loaded>) {
+        let order = self.order();
+        let mut pos = vec![0usize; self.nodes.len()];
+        for (new_id, &old_id) in order.iter().enumerate() {
+            pos[old_id] = new_id;
+        }
+        let mut modules: Vec<Option<Loaded>> = (0..self.nodes.len()).map(|_| None).collect();
+        for (old_id, node) in self.nodes.into_iter().enumerate() {
+            let imports = node.imports.iter().map(|(&idx, &target)| (idx, pos[target])).collect();
+            modules[pos[old_id]] = Some(Loaded { path: node.path, file: node.file, ast: node.ast, imports });
+        }
+        let modules = modules.into_iter().map(|m| m.expect("every position was assigned")).collect();
+        (self.sources, self.diags, modules)
     }
 }
 
@@ -1126,7 +1259,19 @@ impl Checker {
         // A: declare names
         for m in 0..n {
             self.cur_mod = m;
-            self.declare_module(m);
+            self.declare_items(m);
+        }
+        for m in 0..n {
+            self.cur_mod = m;
+            self.declare_own_exports(m);
+        }
+        for m in 0..n {
+            self.cur_mod = m;
+            self.resolve_imports(m);
+        }
+        for m in 0..n {
+            self.cur_mod = m;
+            self.declare_reexports(m);
         }
         // B: resolve signatures
         for m in 0..n {

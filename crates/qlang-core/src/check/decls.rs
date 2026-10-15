@@ -28,9 +28,13 @@ impl Checker {
         self.mscopes[m].items.insert(name.name.clone(), item);
     }
 
-    pub(crate) fn declare_module(&mut self, m: ModId) {
+    /// Declares a module's own items (not its imports or exports yet — see
+    /// [`Checker::resolve_imports`] and [`Checker::declare_own_exports`]/
+    /// [`Checker::declare_reexports`]). Split out so that two modules whose imports
+    /// cycle can still see each other's own declarations: this runs for every module
+    /// before any module's imports are resolved.
+    pub(crate) fn declare_items(&mut self, m: ModId) {
         let ast = self.modules[m].ast.clone();
-        let imports = self.modules[m].imports.clone();
 
         for (idx, item) in ast.items.iter().enumerate() {
             match item {
@@ -108,6 +112,29 @@ impl Checker {
                 _ => {}
             }
         }
+    }
+
+    /// Exports of a module's own items, resolvable right after [`Checker::declare_items`]
+    /// (before any import is resolved) because they don't need anything from another
+    /// module. Run for every module before [`Checker::resolve_imports`], so that an
+    /// import cycle can see its partner's exports of its own declarations.
+    /// Re-exports (`export` of a name the file itself imported) are handled afterwards,
+    /// by [`Checker::declare_reexports`].
+    pub(crate) fn declare_own_exports(&mut self, m: ModId) {
+        let ast = self.modules[m].ast.clone();
+        for item in &ast.items {
+            let Item::Export(e) = item else { continue };
+            for n in &e.names {
+                if self.mscopes[m].items.contains_key(&n.name) {
+                    self.mscopes[m].exports.insert(n.name.clone());
+                }
+            }
+        }
+    }
+
+    pub(crate) fn resolve_imports(&mut self, m: ModId) {
+        let ast = self.modules[m].ast.clone();
+        let imports = self.modules[m].imports.clone();
 
         for (idx, item) in ast.items.iter().enumerate() {
             let Item::Import(imp) = item else { continue };
@@ -132,10 +159,20 @@ impl Checker {
                 ImportKind::Module(alias) => self.add_item(alias, ItemRef::Module(src)),
             }
         }
+    }
 
+    /// Exports of a name the module itself imported (a re-export), resolved once every
+    /// module's own imports are in scope. Also where an `export` of a name that is
+    /// neither declared nor imported is finally reported: by this point `items` is as
+    /// complete as it will ever get.
+    pub(crate) fn declare_reexports(&mut self, m: ModId) {
+        let ast = self.modules[m].ast.clone();
         for item in &ast.items {
             let Item::Export(e) = item else { continue };
             for n in &e.names {
+                if self.mscopes[m].exports.contains(&n.name) {
+                    continue;
+                }
                 if self.mscopes[m].items.contains_key(&n.name) {
                     self.mscopes[m].exports.insert(n.name.clone());
                 } else {

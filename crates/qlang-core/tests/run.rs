@@ -277,8 +277,30 @@ fn module_errors() {
     assert!(o.error.unwrap().contains("not found"));
     let o = run_files(&[("main.q", "import a from \"x.q\"\n"), ("x.q", "fun a()\nend")], None, Limits::default());
     assert!(o.error.unwrap().contains("not exported"));
-    let o = run_files(&[("main.q", "import a from \"a.q\"\n"), ("a.q", "import b from \"b.q\"\nexport b\nfun a()\nend"), ("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b")], None, Limits::default());
-    assert!(o.error.unwrap().contains("circular"));
+    // a cycle of pure declarations (no top-level code anywhere in it) is fine: nothing
+    // about a struct or fn depends on which file ran first
+    let o = run_files(
+        &[
+            ("main.q", "import A from \"a.q\"\nimport B from \"b.q\"\nlet x = A { b: none }\nlet y = B { a: none }\nprint(x.b)\nprint(y.a)"),
+            ("a.q", "import B from \"b.q\"\nexport A\nstruct A\npublic b: B?\nend"),
+            ("b.q", "import A from \"a.q\"\nexport B\nstruct B\npublic a: A?\nend"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "none\nnone\n");
+    // a cycle where more than one module runs top-level code has no valid order
+    let o = run_files(
+        &[
+            ("main.q", "import a from \"a.q\"\n"),
+            ("a.q", "import b from \"b.q\"\nexport b\nfun a()\nend\nprint(\"a\")"),
+            ("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")"),
+        ],
+        None,
+        Limits::default(),
+    );
+    assert!(o.error.unwrap().contains("cycle"));
     // absolute paths are refused; a path going up is looked up like any other
     let o = run_files(&[("main.q", "import a from \"/etc/x.q\"\n")], None, Limits::default());
     assert!(o.error.unwrap().contains("not an absolute one"));
@@ -1231,14 +1253,18 @@ fn a_module_reached_by_two_paths_is_loaded_once() {
 }
 
 #[test]
-fn circular_imports_are_found_through_different_spellings() {
+fn cyclic_imports_are_matched_through_different_spellings() {
+    // `d/b.q` reaches `d/a.q` as "a.q" (relative to itself) while `d/a.q` reaches
+    // `d/b.q` as "../d/b.q": both must resolve to the same module for the cycle
+    // between them to actually share one `a`/`b`, not load each file twice.
     let o = run_files(
         &[
-            ("d/a.q", "import b from \"../d/b.q\"\nfun a()\nend\nexport a"),
-            ("d/b.q", "import a from \"a.q\"\nfun b()\nend\nexport b"),
+            ("d/a.q", "import b from \"../d/b.q\"\nexport a\nfun a() -> int\n  1\nend\nprint(b())"),
+            ("d/b.q", "import a from \"a.q\"\nfun b() -> int\n  a() + 1\nend\nexport b"),
         ],
         None,
         Limits::default(),
     );
-    assert!(o.error.unwrap().contains("circular"));
+    assert_eq!(o.error, None);
+    assert_eq!(o.output, "2\n");
 }

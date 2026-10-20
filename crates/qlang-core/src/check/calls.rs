@@ -98,10 +98,7 @@ impl Checker {
                             // namespaces: they only hold functions
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
-                            "http" => (Ty::Unit, "http"),
                             "regex" => (Ty::Unit, "regex"),
-                            "fs" => (Ty::Unit, "fs"),
-                            "env" => (Ty::Unit, "env"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -517,15 +514,13 @@ impl Checker {
         }
     }
 
-    /// `Db` calls need the host's database; the prelude's `extern fun` cannot say it
-    /// themselves (they are always declared), so the call on `Db` does.
-    fn require_database(&mut self, ext: &str, what: &str, span: Span) {
+    /// The prelude's `Db`, `fs`, `env` and `http` need something from the host. Their
+    /// `extern fun` are always declared, so it is the call on them that says so.
+    fn require_extern(&mut self, ext: &str, what: &str, why: &str, span: Span) {
         if self.missing_externs.contains(ext) {
             self.err(
                 "T250",
-                format!(
-                    "`{what}` is not available in this environment (there is no database access)"
-                ),
+                format!("`{what}` is not available in this environment ({why})"),
                 span,
             );
         }
@@ -827,7 +822,12 @@ impl Checker {
                 _ => None,
             };
             if let Some(ext) = needs {
-                self.require_database(ext, &format!("Db.{}", name.name), e.span);
+                self.require_extern(
+                    ext,
+                    &format!("Db.{}", name.name),
+                    "there is no database access",
+                    e.span,
+                );
             }
         }
         // built-in methods first for built-in types
@@ -981,67 +981,24 @@ impl Checker {
         want: &Want,
     ) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
-        if let TypeRef::Builtin("http") = tref
-            && name.name == "send"
-        {
-            self.res
-                .paths
-                .insert(callee.id, PathRes::BuiltinStatic("http", "send"));
-            if !self.caps.http {
-                self.err(
-                    "T250",
-                    "`http.send` is not available in this environment (there is no network access)"
-                        .to_string(),
-                    e.span,
-                );
+        // what the host has to provide for the prelude's `fs`, `env`, `http` and `Db`
+        if let TypeRef::Struct(sid) = tref {
+            let owner = &self.defs.structs[*sid];
+            if owner.module == PRELUDE_MOD {
+                let need = match (owner.name.as_str(), name.name.as_str()) {
+                    ("Db", "connect") => Some(("sql_connect", "there is no database access")),
+                    ("fs", "read") => Some(("fs_read", "there is no disk access")),
+                    ("fs", "write") => Some(("fs_write", "there is no disk access")),
+                    ("env", "get") => Some(("env_get", "there is no process environment")),
+                    ("env", "args") => Some(("env_args", "there is no process environment")),
+                    ("http", "send") => Some(("http_send", "there is no network access")),
+                    _ => None,
+                };
+                if let Some((ext, why)) = need {
+                    let what = format!("{}.{}", owner.name, name.name);
+                    self.require_extern(ext, &what, why, e.span);
+                }
             }
-            let request = Ty::Struct(self.prelude_struct("Request"), vec![]);
-            let response = Ty::Struct(self.prelude_struct("Response"), vec![]);
-            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
-            let result = Ty::Struct(self.prelude_struct("Result"), vec![response, error]);
-            let sig = CallSig {
-                name: "http.send".to_string(),
-                tparams: vec![],
-                params: vec![request],
-                ret: result,
-                param_names: None,
-            };
-            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
-        }
-        if let TypeRef::Builtin("fs") = tref
-            && let Some(fname) = match name.name.as_str() {
-                "read" => Some("read"),
-                "write" => Some("write"),
-                _ => None,
-            }
-        {
-            self.res
-                .paths
-                .insert(callee.id, PathRes::BuiltinStatic("fs", fname));
-            if !self.caps.fs {
-                self.err("T250", format!("`fs.{fname}` is not available in this environment (there is no disk access)"), e.span);
-            }
-            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
-            let (params, ok) = if fname == "read" {
-                (vec![Ty::Str], Ty::Str)
-            } else {
-                (vec![Ty::Str, Ty::Str], Ty::Bool)
-            };
-            let result = Ty::Struct(self.prelude_struct("Result"), vec![ok, error]);
-            let sig = CallSig {
-                name: format!("fs.{fname}"),
-                tparams: vec![],
-                params,
-                ret: result,
-                param_names: None,
-            };
-            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
-        }
-        if let TypeRef::Struct(sid) = tref
-            && *sid == self.prelude_struct("Db")
-            && name.name == "connect"
-        {
-            self.require_database("sql_connect", "Db.connect", e.span);
         }
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
@@ -1055,7 +1012,6 @@ impl Checker {
                     Needs::TimeAndRandom if !self.caps.random => {
                         Some("there is no source of randomness")
                     }
-                    Needs::Env if !self.caps.env => Some("there is no process environment"),
                     _ => None,
                 };
                 if let Some(why) = missing {
@@ -1520,7 +1476,6 @@ enum Needs {
     Time,
     Random,
     TimeAndRandom,
-    Env,
 }
 
 /// The static functions of the built-in types: (name, parameters, result, needs).
@@ -1605,8 +1560,6 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
             Ty::Array(Box::new(Ty::Str)),
             Needs::Nothing,
         ),
-        ("env", "get") => ("get", vec![Ty::Str], Ty::nullable(Ty::Str), Needs::Env),
-        ("env", "args") => ("args", vec![], Ty::Array(Box::new(Ty::Str)), Needs::Env),
         _ => return None,
     })
 }

@@ -899,6 +899,56 @@ fun sql_done(r: Result<int, Error>) -> Result<bool, Error>
     end
 end
 
+-- The host provides the disk, the process environment and the network too.
+extern fun fs_read(path: string) -> Result<string, Error>
+extern fun fs_write(path: string, content: string) -> Result<bool, Error>
+extern fun env_get(name: string) -> string?
+extern fun env_args() -> array<string>
+extern fun http_send(req: Request) -> Result<Response, Error>
+
+--" Files on disk: `fs.read(path)` and `fs.write(path, content)`. Needs disk access. --"
+struct fs
+end
+
+impl fs
+    --" Reads a file's whole content as text. Needs disk access. A missing file or a permission error is `err`, not a crash. --"
+    public fun read(path: string) -> Result<string, Error>
+        fs_read(path)
+    end
+
+    --" Writes `content` to a file, replacing it entirely (creating it if needed). Needs disk access. --"
+    public fun write(path: string, content: string) -> Result<bool, Error>
+        fs_write(path, content)
+    end
+end
+
+--" The process environment: `env.get(name)` and `env.args()`. Needs a process environment. --"
+struct env
+end
+
+impl env
+    --" The value of the environment variable `name`, or `none` if it is not set. Needs a process environment. --"
+    public fun get(name: string) -> string?
+        env_get(name)
+    end
+
+    --" The program's own command-line arguments. Needs a process environment. --"
+    public fun args() -> array<string>
+        env_args()
+    end
+end
+
+--" The network: `http.send(request)`. Needs network access. --"
+struct http
+end
+
+impl http
+    --" Sends an HTTP request and waits for the response. Needs network access. A connection failure is `err`, not a crash. --"
+    public fun send(req: Request) -> Result<Response, Error>
+        http_send(req)
+    end
+end
+
 --" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int

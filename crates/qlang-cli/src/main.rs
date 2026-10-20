@@ -302,14 +302,20 @@ impl Host for TerminalHost {
     }
 
     fn has_extern(&self, name: &str) -> bool {
-        SQL_EXTERNS.contains(&name) || self.providers.has(name)
+        SQL_EXTERNS.contains(&name)
+            || self.providers.has(name)
+            || qlang_core::host::std_has(self.capabilities(), name)
     }
 
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
         if self.providers.has(name) {
             return self.providers.call(name, args);
         }
-        sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
+        if SQL_EXTERNS.contains(&name) {
+            return sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")));
+        }
+        qlang_core::host::std_call(self, name, args)
+            .unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {

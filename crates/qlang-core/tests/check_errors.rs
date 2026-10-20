@@ -6,7 +6,11 @@ fn errors(src: &str) -> Vec<String> {
     host.allow_read = true;
     match compile("main.q", src, &mut host) {
         Ok(_) => vec![],
-        Err(e) => e.diagnostics.iter().map(|d| format!("{}: {}", d.code, d.message)).collect(),
+        Err(e) => e
+            .diagnostics
+            .iter()
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect(),
     }
 }
 
@@ -56,7 +60,10 @@ fn nullable_flow() {
 
 #[test]
 fn functions() {
-    expect("fun f(a: int) -> int\na\nend\nf(1, 2)", "expects 1 argument");
+    expect(
+        "fun f(a: int) -> int\na\nend\nf(1, 2)",
+        "expects 1 argument",
+    );
     expect("fun f(a: int) -> int\nend", "must give a value");
     expect("fun f(a: int)\nreturn 1\nend", "does not return a value");
     ok("fun f(a: int) -> int\nif a > 0 then\nreturn 1\nelse\nreturn 2\nend\nend");
@@ -72,18 +79,38 @@ fn mixed_numbers_work() {
 #[test]
 fn generics() {
     ok("fun id<T>(x: T) -> T\nx\nend\nlet a: int = id(1)\nlet b: string = id(\"s\")");
-    expect("fun add<T>(a: T, b: T) -> T\na + b\nend", "cannot apply `+`");
+    expect(
+        "fun add<T>(a: T, b: T) -> T\na + b\nend",
+        "cannot apply `+`",
+    );
     ok("fun add<T: Add>(a: T, b: T) -> T\na + b\nend\nlet x = add(1, 2)");
-    expect("fun add<T: Add>(a: T, b: T) -> T\na + b\nend\nlet x = add(true, false)", "does not implement");
+    expect(
+        "fun add<T: Add>(a: T, b: T) -> T\na + b\nend\nlet x = add(true, false)",
+        "does not implement",
+    );
 }
 
 #[test]
 fn structs() {
-    expect("struct P\npublic x: int\nend\nlet p = P { y: 1 }", "no field `y`");
-    expect("struct P\npublic x: int\nend\nlet p = P { }", "missing field");
-    expect("struct P\nprivate x: int\nend\nlet p = P { x: 1 }", "private");
-    ok("struct P\npublic x: int\nend\nimpl P\npublic fun get(self) -> int\nself.x\nend\nend\nlet p = P { x: 1 }\nprint(p.get())");
-    expect("struct P\nprivate x: int\nend\nimpl P\npublic fun new() -> P\nP { x: 1 }\nend\nend\nlet p = P.new()\nprint(p.x)", "private");
+    expect(
+        "struct P\npublic x: int\nend\nlet p = P { y: 1 }",
+        "no field `y`",
+    );
+    expect(
+        "struct P\npublic x: int\nend\nlet p = P { }",
+        "missing field",
+    );
+    expect(
+        "struct P\nprivate x: int\nend\nlet p = P { x: 1 }",
+        "private",
+    );
+    ok(
+        "struct P\npublic x: int\nend\nimpl P\npublic fun get(self) -> int\nself.x\nend\nend\nlet p = P { x: 1 }\nprint(p.get())",
+    );
+    expect(
+        "struct P\nprivate x: int\nend\nimpl P\npublic fun new() -> P\nP { x: 1 }\nend\nend\nlet p = P.new()\nprint(p.x)",
+        "private",
+    );
 }
 
 #[test]
@@ -100,8 +127,14 @@ fn inheritance() {
 
 #[test]
 fn traits_and_ops() {
-    expect("struct P\npublic x: int\nend\nlet p = P { x: 1 } + P { x: 2 }", "cannot apply `+`");
-    expect("trait T\nfun f(self) -> int\nend\nstruct S\nend\nimpl T for S\nend", "missing method `f`");
+    expect(
+        "struct P\npublic x: int\nend\nlet p = P { x: 1 } + P { x: 2 }",
+        "cannot apply `+`",
+    );
+    expect(
+        "trait T\nfun f(self) -> int\nend\nstruct S\nend\nimpl T for S\nend",
+        "missing method `f`",
+    );
 }
 
 #[test]

@@ -9,7 +9,10 @@ fn dir() -> std::path::PathBuf {
 fn tour_runs() {
     let handle = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
         let mut host = MemoryHost::new();
-        host.files.insert("tour_math.q".into(), std::fs::read_to_string(dir().join("tour_math.q")).unwrap());
+        host.files.insert(
+            "tour_math.q".into(),
+            std::fs::read_to_string(dir().join("tour_math.q")).unwrap(),
+        );
         let src = std::fs::read_to_string(dir().join("tour.q")).unwrap();
         let prog = match compile("tour.q", &src, &mut host) {
             Ok(p) => p,

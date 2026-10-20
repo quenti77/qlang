@@ -69,7 +69,12 @@ pub struct Ceiling {
 impl Default for Ceiling {
     fn default() -> Self {
         let d = Limits::default();
-        Ceiling { max_steps: d.max_steps, max_depth: d.max_depth, max_output: d.max_output, max_alloc: d.max_alloc }
+        Ceiling {
+            max_steps: d.max_steps,
+            max_depth: d.max_depth,
+            max_output: d.max_output,
+            max_alloc: d.max_alloc,
+        }
     }
 }
 
@@ -93,37 +98,81 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
         None => "main.q".to_string(),
     };
     let Some(source) = req.files.get(&entry).cloned() else {
-        return failure("request", format!("the entry file \"{entry}\" is not in `files`"));
+        return failure(
+            "request",
+            format!("the entry file \"{entry}\" is not in `files`"),
+        );
     };
-    let mut host = MemoryHost { files: req.files, allow_read: req.input.is_some(), clock: req.now, seed: req.seed, ..MemoryHost::default() };
+    let mut host = MemoryHost {
+        files: req.files,
+        allow_read: req.input.is_some(),
+        clock: req.now,
+        seed: req.seed,
+        ..MemoryHost::default()
+    };
     if let Some(lines) = req.input {
         host.input = lines.into();
     }
     let mut limits = Limits::default();
     if let Some(l) = req.limits {
-        limits.max_steps = l.max_steps.unwrap_or(limits.max_steps).min(ceiling.max_steps);
-        limits.max_depth = l.max_depth.unwrap_or(limits.max_depth).min(ceiling.max_depth);
-        limits.max_output = l.max_output.unwrap_or(limits.max_output).min(ceiling.max_output);
-        limits.max_alloc = l.max_alloc.unwrap_or(limits.max_alloc).min(ceiling.max_alloc);
+        limits.max_steps = l
+            .max_steps
+            .unwrap_or(limits.max_steps)
+            .min(ceiling.max_steps);
+        limits.max_depth = l
+            .max_depth
+            .unwrap_or(limits.max_depth)
+            .min(ceiling.max_depth);
+        limits.max_output = l
+            .max_output
+            .unwrap_or(limits.max_output)
+            .min(ceiling.max_output);
+        limits.max_alloc = l
+            .max_alloc
+            .unwrap_or(limits.max_alloc)
+            .min(ceiling.max_alloc);
     }
     limits.max_steps = limits.max_steps.min(ceiling.max_steps);
     limits.max_depth = limits.max_depth.min(ceiling.max_depth);
     limits.max_output = limits.max_output.min(ceiling.max_output);
     limits.max_alloc = limits.max_alloc.min(ceiling.max_alloc);
 
-    let options = CompileOptions { info: req.info.unwrap_or(false) };
+    let options = CompileOptions {
+        info: req.info.unwrap_or(false),
+    };
     let program = match compile_with(&entry, &source, &mut host, &options) {
         Ok(p) => p,
         Err(e) => {
-            return Response { ok: false, phase: "compile", output: String::new(), diagnostics: e.diagnostics, steps: 0, info: e.info.map(|i| *i) };
+            return Response {
+                ok: false,
+                phase: "compile",
+                output: String::new(),
+                diagnostics: e.diagnostics,
+                steps: 0,
+                info: e.info.map(|i| *i),
+            };
         }
     };
     if check_only {
-        return Response { ok: true, phase: "check", output: String::new(), diagnostics: program.warnings.clone(), steps: 0, info: program.info };
+        return Response {
+            ok: true,
+            phase: "check",
+            output: String::new(),
+            diagnostics: program.warnings.clone(),
+            steps: 0,
+            info: program.info,
+        };
     }
     let result = program.run(&mut host, limits);
     let mut diagnostics = program.warnings.clone();
     let ok = result.error.is_none();
     diagnostics.extend(result.error);
-    Response { ok, phase: "run", output: host.output, diagnostics, steps: result.steps, info: None }
+    Response {
+        ok,
+        phase: "run",
+        output: host.output,
+        diagnostics,
+        steps: result.steps,
+        info: None,
+    }
 }

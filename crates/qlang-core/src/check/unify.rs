@@ -47,7 +47,10 @@ impl Checker {
             Ty::Nullable(x) => Ty::nullable(self.resolve(x)),
             Ty::Array(x) => Ty::Array(Box::new(self.resolve(x))),
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
-            Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|p| self.resolve(p)).collect(), Box::new(self.resolve(r))),
+            Ty::Fn(ps, r) => Ty::Fn(
+                ps.iter().map(|p| self.resolve(p)).collect(),
+                Box::new(self.resolve(r)),
+            ),
             Ty::Struct(id, a) => Ty::Struct(*id, a.iter().map(|x| self.resolve(x)).collect()),
             Ty::Trait(id, a) => Ty::Trait(*id, a.iter().map(|x| self.resolve(x)).collect()),
             other => other.clone(),
@@ -75,7 +78,11 @@ impl Checker {
 
     /// Replace the struct's own generic parameters by `args`.
     pub fn ancestor_args(&self, sid: StructId, args: &[Ty], target: StructId) -> Option<Vec<Ty>> {
-        self.defs.ancestry(sid, args).into_iter().find(|(s, _)| *s == target).map(|(_, a)| a)
+        self.defs
+            .ancestry(sid, args)
+            .into_iter()
+            .find(|(s, _)| *s == target)
+            .map(|(_, a)| a)
     }
 
     /// Can a value of type `from` be used where `to` is expected?
@@ -104,10 +111,17 @@ impl Checker {
                     && (**rb == Ty::Unit || self.assignable(ra, rb))
             }
             (Ty::Struct(a, aa), Ty::Struct(b, ba)) => match self.ancestor_args(*a, aa, *b) {
-                Some(args) => args.len() == ba.len() && args.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y)),
+                Some(args) => {
+                    args.len() == ba.len()
+                        && args.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y))
+                }
                 None => false,
             },
-            (Ty::Trait(a, aa), Ty::Trait(b, ba)) => a == b && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y)),
+            (Ty::Trait(a, aa), Ty::Trait(b, ba)) => {
+                a == b
+                    && aa.len() == ba.len()
+                    && aa.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y))
+            }
             (_, Ty::Trait(tid, targs)) => self.implements(&f, *tid, targs),
             (Ty::Param(a), Ty::Param(b)) => a == b,
             (Ty::Enum(a), Ty::Enum(b)) => a == b,
@@ -129,10 +143,14 @@ impl Checker {
             (Ty::Array(x), Ty::Array(y)) => self.same(x, y),
             (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
             (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
-                pa.len() == pb.len() && pa.iter().zip(pb.iter()).all(|(x, y)| self.same(x, y)) && self.same(ra, rb)
+                pa.len() == pb.len()
+                    && pa.iter().zip(pb.iter()).all(|(x, y)| self.same(x, y))
+                    && self.same(ra, rb)
             }
             (Ty::Struct(x, xa), Ty::Struct(y, ya)) | (Ty::Trait(x, xa), Ty::Trait(y, ya)) => {
-                x == y && xa.len() == ya.len() && xa.iter().zip(ya.iter()).all(|(p, q)| self.same(p, q))
+                x == y
+                    && xa.len() == ya.len()
+                    && xa.iter().zip(ya.iter()).all(|(p, q)| self.same(p, q))
             }
             _ => a == b,
         }
@@ -179,12 +197,17 @@ impl Checker {
         match &ty {
             Ty::Error => return true,
             Ty::Trait(t, a) => {
-                return *t == tid && a.len() == targs.len() && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y));
+                return *t == tid
+                    && a.len() == targs.len()
+                    && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y));
             }
             Ty::Param(p) => {
                 let bounds = self.defs.params[*p].bounds.clone();
                 for (t, a) in bounds {
-                    if t == tid && a.len() == targs.len() && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y)) {
+                    if t == tid
+                        && a.len() == targs.len()
+                        && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
+                    {
                         return true;
                     }
                 }
@@ -203,14 +226,18 @@ impl Checker {
         }
         let cands = self.candidate_types(&ty);
         for iid in 0..self.defs.impls.len() {
-            let Some((t, a)) = self.defs.impls[iid].trait_.clone() else { continue };
+            let Some((t, a)) = self.defs.impls[iid].trait_.clone() else {
+                continue;
+            };
             if t != tid {
                 continue;
             }
             for cand in &cands {
                 if let Some(map) = self.impl_matches(iid, cand) {
                     let ia: Vec<Ty> = a.iter().map(|x| x.subst(&map)).collect();
-                    if ia.len() == targs.len() && ia.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y)) {
+                    if ia.len() == targs.len()
+                        && ia.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
+                    {
                         return true;
                     }
                 }
@@ -222,7 +249,12 @@ impl Checker {
     /// A type and its ancestors: where to look for impls and methods.
     pub fn candidate_types(&self, ty: &Ty) -> Vec<Ty> {
         match ty {
-            Ty::Struct(s, a) => self.defs.ancestry(*s, a).into_iter().map(|(s, a)| Ty::Struct(s, a)).collect(),
+            Ty::Struct(s, a) => self
+                .defs
+                .ancestry(*s, a)
+                .into_iter()
+                .map(|(s, a)| Ty::Struct(s, a))
+                .collect(),
             other => vec![other.clone()],
         }
     }
@@ -236,7 +268,11 @@ impl Checker {
             map.insert(*p, v);
         }
         let target = imp.target.subst(&map);
-        if self.same(&target, cand) { Some(map) } else { None }
+        if self.same(&target, cand) {
+            Some(map)
+        } else {
+            None
+        }
     }
 
     /// The impl method `name` for `ty`, looking in the type and its ancestors.
@@ -250,9 +286,16 @@ impl Checker {
                     if (pass == 0) != inherent {
                         continue;
                     }
-                    let Some((_, fid)) = imp.methods.iter().find(|(n, _)| n == name).cloned() else { continue };
+                    let Some((_, fid)) = imp.methods.iter().find(|(n, _)| n == name).cloned()
+                    else {
+                        continue;
+                    };
                     if let Some(map) = self.impl_matches(iid, &cand) {
-                        return Some(UserMethod { fid, impl_id: iid, map });
+                        return Some(UserMethod {
+                            fid,
+                            impl_id: iid,
+                            map,
+                        });
                     }
                 }
             }
@@ -275,7 +318,13 @@ impl Checker {
         let ty = self.resolve(ty);
         let arg = args.first().map(|a| self.resolve(a));
         match lang {
-            Lang::Add | Lang::Sub | Lang::Mul | Lang::Div | Lang::IntDiv | Lang::Mod | Lang::Pow => {
+            Lang::Add
+            | Lang::Sub
+            | Lang::Mul
+            | Lang::Div
+            | Lang::IntDiv
+            | Lang::Mod
+            | Lang::Pow => {
                 let arg = arg?;
                 if lang == Lang::Add && ty == Ty::Str && arg == Ty::Str {
                     return Some(Ty::Str);
@@ -287,7 +336,9 @@ impl Checker {
                 let (l_int, r_int) = Self::numeric_pair(&ty, &arg)?;
                 let both_int = l_int && r_int;
                 match lang {
-                    Lang::Add | Lang::Sub | Lang::Mul => Some(if both_int { Ty::Int } else { Ty::Float }),
+                    Lang::Add | Lang::Sub | Lang::Mul => {
+                        Some(if both_int { Ty::Int } else { Ty::Float })
+                    }
                     Lang::Div => Some(Ty::Float),
                     Lang::IntDiv => both_int.then_some(Ty::Int),
                     Lang::Mod | Lang::Pow => Some(if both_int { Ty::Int } else { Ty::Float }),
@@ -305,7 +356,9 @@ impl Checker {
             }
             Lang::Ord => {
                 let arg = arg?;
-                if Self::numeric_pair(&ty, &arg).is_some() || (matches!(ty, Ty::Str | Ty::Uuid | Ty::Ulid | Ty::DateTime) && ty == arg) {
+                if Self::numeric_pair(&ty, &arg).is_some()
+                    || (matches!(ty, Ty::Str | Ty::Uuid | Ty::Ulid | Ty::DateTime) && ty == arg)
+                {
                     Some(Ty::Bool)
                 } else {
                     None
@@ -325,7 +378,9 @@ impl Checker {
                 let (i, v) = (arg?, self.resolve(args.get(1)?));
                 match &ty {
                     Ty::Array(t) if i == Ty::Int && self.assignable(&v, t) => Some(Ty::Unit),
-                    Ty::Map(k, mv) if self.assignable(&i, k) && self.assignable(&v, mv) => Some(Ty::Unit),
+                    Ty::Map(k, mv) if self.assignable(&i, k) && self.assignable(&v, mv) => {
+                        Some(Ty::Unit)
+                    }
                     _ => None,
                 }
             }
@@ -351,11 +406,17 @@ impl Checker {
             (Ty::Nullable(x), Ty::Nullable(y)) => self.eq_ok(x, y),
             (Ty::Nullable(x), y) | (y, Ty::Nullable(x)) => self.eq_ok(x, y),
             (Ty::Int | Ty::Float, Ty::Int | Ty::Float) => true,
-            (Ty::Bool, Ty::Bool) | (Ty::Str, Ty::Str) | (Ty::Uuid, Ty::Uuid) | (Ty::Ulid, Ty::Ulid) | (Ty::DateTime, Ty::DateTime) => true,
+            (Ty::Bool, Ty::Bool)
+            | (Ty::Str, Ty::Str)
+            | (Ty::Uuid, Ty::Uuid)
+            | (Ty::Ulid, Ty::Ulid)
+            | (Ty::DateTime, Ty::DateTime) => true,
             (Ty::Enum(x), Ty::Enum(y)) => x == y,
             (Ty::Array(x), Ty::Array(y)) => self.eq_ok(x, y),
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => self.same(k1, k2) && self.eq_ok(v1, v2),
-            (Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..), _) => self.find_lang_impl(&a, Lang::Eq, std::slice::from_ref(&b)).is_some(),
+            (Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..), _) => self
+                .find_lang_impl(&a, Lang::Eq, std::slice::from_ref(&b))
+                .is_some(),
             _ => false,
         }
     }
@@ -367,9 +428,10 @@ impl Checker {
             return Some(LangImpl::Builtin(Ty::Error));
         }
         if !matches!(ty, Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..))
-            && let Some(out) = self.builtin_lang(&ty, lang, args) {
-                return Some(LangImpl::Builtin(out));
-            }
+            && let Some(out) = self.builtin_lang(&ty, lang, args)
+        {
+            return Some(LangImpl::Builtin(out));
+        }
         let tid = self.defs.lang(lang);
         if let Ty::Param(p) = &ty {
             let bounds = self.defs.params[*p].bounds.clone();
@@ -379,11 +441,21 @@ impl Checker {
                 }
                 let ok = match lang {
                     Lang::Eq | Lang::Ord => true,
-                    _ => a.iter().zip(args.iter()).all(|(x, y)| self.assignable(y, x)),
+                    _ => a
+                        .iter()
+                        .zip(args.iter())
+                        .all(|(x, y)| self.assignable(y, x)),
                 };
                 if ok {
                     let out = match lang {
-                        Lang::Add | Lang::Sub | Lang::Mul | Lang::Div | Lang::IntDiv | Lang::Mod | Lang::Pow | Lang::Neg => ty.clone(),
+                        Lang::Add
+                        | Lang::Sub
+                        | Lang::Mul
+                        | Lang::Div
+                        | Lang::IntDiv
+                        | Lang::Mod
+                        | Lang::Pow
+                        | Lang::Neg => ty.clone(),
                         Lang::Eq | Lang::Ord => Ty::Bool,
                         Lang::IndexSet | Lang::Push => Ty::Unit,
                         _ => Ty::Error,
@@ -395,12 +467,16 @@ impl Checker {
         }
         let cands = self.candidate_types(&ty);
         for iid in 0..self.defs.impls.len() {
-            let Some((t, a)) = self.defs.impls[iid].trait_.clone() else { continue };
+            let Some((t, a)) = self.defs.impls[iid].trait_.clone() else {
+                continue;
+            };
             if t != tid {
                 continue;
             }
             for cand in &cands {
-                let Some(map) = self.impl_matches(iid, cand) else { continue };
+                let Some(map) = self.impl_matches(iid, cand) else {
+                    continue;
+                };
                 let ok = match lang {
                     Lang::Eq | Lang::Ord => args.first().is_some_and(|r| {
                         let r = r.clone();
@@ -415,14 +491,25 @@ impl Checker {
                     }),
                     _ => {
                         let want: Vec<Ty> = a.iter().map(|x| x.subst(&map)).collect();
-                        want.len() == args.len() && want.iter().zip(args.iter()).all(|(x, y)| self.assignable(y, x))
+                        want.len() == args.len()
+                            && want
+                                .iter()
+                                .zip(args.iter())
+                                .all(|(x, y)| self.assignable(y, x))
                     }
                 };
                 if !ok {
                     continue;
                 }
                 let imp = &self.defs.impls[iid];
-                let Some((_, fid)) = imp.methods.iter().find(|(n, _)| n == lang.method_name()).cloned() else { continue };
+                let Some((_, fid)) = imp
+                    .methods
+                    .iter()
+                    .find(|(n, _)| n == lang.method_name())
+                    .cloned()
+                else {
+                    continue;
+                };
                 let ret = self.defs.fns[fid].ret.subst(&map);
                 return Some(LangImpl::User { fid, ret });
             }
@@ -445,6 +532,7 @@ impl Checker {
         if self.assignable(&f, &t) {
             return true;
         }
-        self.find_lang_impl(&f, Lang::As, std::slice::from_ref(&t)).is_some()
+        self.find_lang_impl(&f, Lang::As, std::slice::from_ref(&t))
+            .is_some()
     }
 }

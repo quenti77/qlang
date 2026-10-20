@@ -64,8 +64,13 @@ mod tests {
     use super::*;
 
     fn read(ptr: *mut u8) -> String {
-        let n = u32::from_le_bytes(unsafe { std::slice::from_raw_parts(ptr, 4) }.try_into().unwrap()) as usize;
-        let text = String::from_utf8(unsafe { std::slice::from_raw_parts(ptr.add(4), n) }.to_vec()).unwrap();
+        let n = u32::from_le_bytes(
+            unsafe { std::slice::from_raw_parts(ptr, 4) }
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let text = String::from_utf8(unsafe { std::slice::from_raw_parts(ptr.add(4), n) }.to_vec())
+            .unwrap();
         unsafe { qlang_free(ptr, 4 + n) };
         text
     }

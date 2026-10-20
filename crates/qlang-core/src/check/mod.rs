@@ -4,9 +4,9 @@
 mod body;
 mod calls;
 mod catalog;
-mod info;
 mod decls;
 mod expr;
+mod info;
 mod unify;
 
 pub use info::{ExprInfo, Info, ItemInfo, LocalInfo, Member};
@@ -48,7 +48,11 @@ pub struct CompileError {
 
 impl CompileError {
     pub fn render(&self) -> String {
-        self.diagnostics.iter().map(|d| d.render(&self.sources)).collect::<Vec<_>>().join("\n")
+        self.diagnostics
+            .iter()
+            .map(|d| d.render(&self.sources))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -65,9 +69,16 @@ pub struct CompileOptions {
 }
 
 /// Like [`compile`], with options.
-pub fn compile_with(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {
+pub fn compile_with(
+    entry: &str,
+    source: &str,
+    host: &mut dyn Host,
+    options: &CompileOptions,
+) -> Result<Program, CompileError> {
     // A bug in the compiler must not take the caller down with it (a server, an editor).
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_inner(entry, source, host, options))) {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        compile_inner(entry, source, host, options)
+    })) {
         Ok(result) => result,
         Err(payload) => Err(CompileError {
             diagnostics: vec![internal_error(&payload)],
@@ -84,7 +95,11 @@ pub(crate) fn internal_error(payload: &Box<dyn std::any::Any + Send>) -> Diagnos
         .map(|s| s.to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown error".to_string());
-    Diagnostic::error("X999", format!("internal error: {detail} (this is a bug in qlang, please report it)"), Span::default())
+    Diagnostic::error(
+        "X999",
+        format!("internal error: {detail} (this is a bug in qlang, please report it)"),
+        Span::default(),
+    )
 }
 
 /// The path given to the prelude's synthetic module, and the index it always loads at
@@ -875,7 +890,12 @@ struct Db
 end
 "#;
 
-fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &CompileOptions) -> Result<Program, CompileError> {
+fn compile_inner(
+    entry: &str,
+    source: &str,
+    host: &mut dyn Host,
+    options: &CompileOptions,
+) -> Result<Program, CompileError> {
     let caps = host.capabilities();
     let mut loader = Loader {
         host,
@@ -886,7 +906,11 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &Compi
         done: HashMap::new(),
         next_id: 0,
     };
-    loader.discover(PRELUDE_PATH, PRELUDE_PATH.to_string(), PRELUDE_SOURCE.to_string());
+    loader.discover(
+        PRELUDE_PATH,
+        PRELUDE_PATH.to_string(),
+        PRELUDE_SOURCE.to_string(),
+    );
     let entry_key = loader.host.canonical_path(entry);
     loader.discover(entry, entry_key, source.to_string());
     let (sources, mut diags, modules) = loader.finish();
@@ -914,7 +938,11 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &Compi
         modules: ck
             .modules
             .into_iter()
-            .map(|m| ModuleData { path: m.path, file: m.file, ast: m.ast })
+            .map(|m| ModuleData {
+                path: m.path,
+                file: m.file,
+                ast: m.ast,
+            })
             .collect(),
         defs: ck.defs,
         res: ck.res,
@@ -923,7 +951,11 @@ fn compile_inner(entry: &str, source: &str, host: &mut dyn Host, options: &Compi
     })
 }
 
-fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap, info: Option<Info>) -> CompileError {
+fn finish_error(
+    mut diags: Vec<Diagnostic>,
+    sources: SourceMap,
+    info: Option<Info>,
+) -> CompileError {
     // stable order: by file then position
     diags.sort_by_key(|d| (d.span.file, d.span.start));
     if diags.len() > MAX_DIAGNOSTICS {
@@ -938,7 +970,11 @@ fn finish_error(mut diags: Vec<Diagnostic>, sources: SourceMap, info: Option<Inf
     for d in &mut diags {
         d.resolve(&sources);
     }
-    CompileError { diagnostics: diags, sources, info: info.map(Box::new) }
+    CompileError {
+        diagnostics: diags,
+        sources,
+        info: info.map(Box::new),
+    }
 }
 
 // ------------------------------------------------------------------ loading
@@ -989,7 +1025,13 @@ impl Loader<'_> {
         self.next_id = next_id;
         let runs_code = ast.items.iter().any(|it| matches!(it, Item::Stmt(_)));
         let id = self.nodes.len();
-        self.nodes.push(Discovered { path: path.to_string(), file, ast: Rc::new(ast), imports: HashMap::new(), runs_code });
+        self.nodes.push(Discovered {
+            path: path.to_string(),
+            file,
+            ast: Rc::new(ast),
+            imports: HashMap::new(),
+            runs_code,
+        });
         self.done.insert(key, id);
 
         let ast = self.nodes[id].ast.clone();
@@ -997,14 +1039,17 @@ impl Loader<'_> {
         for (idx, item) in ast.items.iter().enumerate() {
             let Item::Import(imp) = item else { continue };
             let Some(target) = resolve_module_path(path, &imp.path) else {
-                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
-                    "T100",
-                    format!(
-                        "cannot import \"{}\": use a path relative to this file, written with `/` (`./x.q`, `../lib/x.q`), not an absolute one",
-                        imp.path
+                crate::diag::push_capped(
+                    &mut self.diags,
+                    Diagnostic::error(
+                        "T100",
+                        format!(
+                            "cannot import \"{}\": use a path relative to this file, written with `/` (`./x.q`, `../lib/x.q`), not an absolute one",
+                            imp.path
+                        ),
+                        imp.path_span,
                     ),
-                    imp.path_span,
-                ));
+                );
                 continue;
             };
             let target_key = self.host.canonical_path(&target);
@@ -1014,11 +1059,14 @@ impl Loader<'_> {
                 match self.host.load_module(&target) {
                     Ok(src) => self.discover(&target, target_key, src),
                     Err(e) => {
-                        crate::diag::push_capped(&mut self.diags, Diagnostic::error(
-                            "T102",
-                            format!("cannot import \"{}\": {e}", imp.path),
-                            imp.path_span,
-                        ));
+                        crate::diag::push_capped(
+                            &mut self.diags,
+                            Diagnostic::error(
+                                "T102",
+                                format!("cannot import \"{}\": {e}", imp.path),
+                                imp.path_span,
+                            ),
+                        );
                         continue;
                     }
                 }
@@ -1108,7 +1156,11 @@ impl Loader<'_> {
             if comp.len() < 2 {
                 continue;
             }
-            let runs: Vec<usize> = comp.iter().copied().filter(|&m| self.nodes[m].runs_code).collect();
+            let runs: Vec<usize> = comp
+                .iter()
+                .copied()
+                .filter(|&m| self.nodes[m].runs_code)
+                .collect();
             if runs.len() > 1 {
                 let span = self
                     .edges
@@ -1117,14 +1169,17 @@ impl Loader<'_> {
                     .map(|&(_, _, s)| s)
                     .unwrap_or_default();
                 let names: Vec<&str> = runs.iter().map(|&m| self.nodes[m].path.as_str()).collect();
-                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
-                    "T101",
-                    format!(
-                        "these modules import each other in a cycle and each runs top-level code, so there is no valid order to run them: {}",
-                        names.join(", ")
+                crate::diag::push_capped(
+                    &mut self.diags,
+                    Diagnostic::error(
+                        "T101",
+                        format!(
+                            "these modules import each other in a cycle and each runs top-level code, so there is no valid order to run them: {}",
+                            names.join(", ")
+                        ),
+                        span,
                     ),
-                    span,
-                ));
+                );
             }
         }
 
@@ -1141,10 +1196,22 @@ impl Loader<'_> {
         }
         let mut modules: Vec<Option<Loaded>> = (0..self.nodes.len()).map(|_| None).collect();
         for (old_id, node) in self.nodes.into_iter().enumerate() {
-            let imports = node.imports.iter().map(|(&idx, &target)| (idx, pos[target])).collect();
-            modules[pos[old_id]] = Some(Loaded { path: node.path, file: node.file, ast: node.ast, imports });
+            let imports = node
+                .imports
+                .iter()
+                .map(|(&idx, &target)| (idx, pos[target]))
+                .collect();
+            modules[pos[old_id]] = Some(Loaded {
+                path: node.path,
+                file: node.file,
+                ast: node.ast,
+                imports,
+            });
         }
-        let modules = modules.into_iter().map(|m| m.expect("every position was assigned")).collect();
+        let modules = modules
+            .into_iter()
+            .map(|m| m.expect("every position was assigned"))
+            .collect();
         (self.sources, self.diags, modules)
     }
 }
@@ -1245,8 +1312,18 @@ impl Checker {
         crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span));
     }
 
-    pub fn err_note(&mut self, code: &str, msg: impl Into<String>, span: Span, note: impl Into<String>, note_span: Option<Span>) {
-        crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span).with_note(note, note_span));
+    pub fn err_note(
+        &mut self,
+        code: &str,
+        msg: impl Into<String>,
+        span: Span,
+        note: impl Into<String>,
+        note_span: Option<Span>,
+    ) {
+        crate::diag::push_capped(
+            &mut self.diags,
+            Diagnostic::error(code, msg, span).with_note(note, note_span),
+        );
     }
 
     pub fn show(&self, t: &Ty) -> String {

@@ -115,11 +115,23 @@ impl Collector {
             ast::ExprKind::SelfVal => Some("self".to_string()),
             _ => None,
         };
-        self.exprs.push(RawExpr { span: e.span, ty, id: e.id, name, statics: None });
+        self.exprs.push(RawExpr {
+            span: e.span,
+            ty,
+            id: e.id,
+            name,
+            statics: None,
+        });
     }
 
     pub fn head(&mut self, e: &ast::Expr, ty: Ty, key: String, what: StaticKey) {
-        self.exprs.push(RawExpr { span: e.span, ty, id: e.id, name: None, statics: Some(key.clone()) });
+        self.exprs.push(RawExpr {
+            span: e.span,
+            ty,
+            id: e.id,
+            name: None,
+            statics: Some(key.clone()),
+        });
         self.statics.entry(key).or_insert(what);
     }
 
@@ -127,7 +139,13 @@ impl Collector {
         if name.name == "self" || name.name == "_" || local.orig.is_some() {
             return;
         }
-        self.locals.push(RawLocal { name: name.name.clone(), span: name.span, ty: local.ty.clone(), kind: local.kind, scope });
+        self.locals.push(RawLocal {
+            name: name.name.clone(),
+            span: name.span,
+            ty: local.ty.clone(),
+            kind: local.kind,
+            scope,
+        });
     }
 }
 
@@ -160,11 +178,23 @@ impl Docs {
                     }
                     Item::Enum(e) => {
                         d.put(key(e.name.span), &e.doc);
-                        d.variants.insert(key(e.name.span), e.variant_docs.iter().map(|x| x.as_ref().map(|t| t.to_string())).collect());
+                        d.variants.insert(
+                            key(e.name.span),
+                            e.variant_docs
+                                .iter()
+                                .map(|x| x.as_ref().map(|t| t.to_string()))
+                                .collect(),
+                        );
                     }
                     Item::Trait(t) => {
                         d.put(key(t.name.span), &t.doc);
-                        let sigs = t.sigs.iter().filter_map(|f| Some((f.name.as_ref()?.name.clone(), f.doc.as_ref()?.to_string()))).collect();
+                        let sigs = t
+                            .sigs
+                            .iter()
+                            .filter_map(|f| {
+                                Some((f.name.as_ref()?.name.clone(), f.doc.as_ref()?.to_string()))
+                            })
+                            .collect();
                         d.signatures.insert(key(t.name.span), sigs);
                     }
                     Item::Impl(i) => {
@@ -172,7 +202,10 @@ impl Docs {
                             d.add_fun(&m.fun);
                         }
                     }
-                    Item::Stmt(ast::Stmt { kind: ast::StmtKind::Let { doc, name, .. }, .. }) => d.put(key(name.span), doc),
+                    Item::Stmt(ast::Stmt {
+                        kind: ast::StmtKind::Let { doc, name, .. },
+                        ..
+                    }) => d.put(key(name.span), doc),
                     _ => {}
                 }
             }
@@ -213,7 +246,14 @@ impl Checker {
     }
 
     /// `name(a: int, b: int) -> int`
-    fn signature(&self, name: &str, names: &[String], params: &[Ty], ret: &Ty, map: &HashMap<ParamId, Ty>) -> String {
+    fn signature(
+        &self,
+        name: &str,
+        names: &[String],
+        params: &[Ty],
+        ret: &Ty,
+        map: &HashMap<ParamId, Ty>,
+    ) -> String {
         let shown: Vec<String> = params
             .iter()
             .enumerate()
@@ -235,7 +275,11 @@ impl Checker {
 
     fn fn_signature(&self, fid: FnId, map: &HashMap<ParamId, Ty>) -> String {
         let f = &self.defs.fns[fid];
-        let names: Vec<String> = f.decl.as_ref().map(|d| d.params.iter().map(|p| p.name.name.clone()).collect()).unwrap_or_default();
+        let names: Vec<String> = f
+            .decl
+            .as_ref()
+            .map(|d| d.params.iter().map(|p| p.name.name.clone()).collect())
+            .unwrap_or_default();
         self.signature(&f.name, &names, &f.params, &f.ret, map)
     }
 
@@ -254,23 +298,63 @@ impl Checker {
     }
 
     fn describe(&self, item: &ItemRef) -> (&'static str, String, Option<Location>, Option<String>) {
-        let fn_doc = |f: &FnId| self.defs.fns[*f].decl.as_ref().and_then(|d| d.name.as_ref()).and_then(|n| self.docs.of(n.span));
+        let fn_doc = |f: &FnId| {
+            self.defs.fns[*f]
+                .decl
+                .as_ref()
+                .and_then(|d| d.name.as_ref())
+                .and_then(|n| self.docs.of(n.span))
+        };
         match item {
-            ItemRef::Fn(f) => ("function", format!("fun {}", self.fn_signature(*f, &HashMap::new())), self.fn_name_loc(*f), fn_doc(f)),
-            ItemRef::Struct(s) => ("struct", format!("struct {}", self.defs.structs[*s].name), None, self.docs.of(self.defs.structs[*s].span)),
-            ItemRef::Enum(e) => ("enum", format!("enum {}", self.defs.enums[*e].name), None, self.docs.of(self.defs.enums[*e].span)),
-            ItemRef::Trait(t) => ("trait", format!("trait {}", self.defs.traits[*t].name), None, self.docs.of(self.defs.traits[*t].span)),
+            ItemRef::Fn(f) => (
+                "function",
+                format!("fun {}", self.fn_signature(*f, &HashMap::new())),
+                self.fn_name_loc(*f),
+                fn_doc(f),
+            ),
+            ItemRef::Struct(s) => (
+                "struct",
+                format!("struct {}", self.defs.structs[*s].name),
+                None,
+                self.docs.of(self.defs.structs[*s].span),
+            ),
+            ItemRef::Enum(e) => (
+                "enum",
+                format!("enum {}", self.defs.enums[*e].name),
+                None,
+                self.docs.of(self.defs.enums[*e].span),
+            ),
+            ItemRef::Trait(t) => (
+                "trait",
+                format!("trait {}", self.defs.traits[*t].name),
+                None,
+                self.docs.of(self.defs.traits[*t].span),
+            ),
             ItemRef::Var(m, n) => {
                 let local = self.mscopes[*m].vars.get(n);
                 let t = local.map(|l| self.show(&l.ty)).unwrap_or_default();
-                ("variable", format!("{n}: {t}"), None, local.and_then(|l| self.docs.of(l.span)))
+                (
+                    "variable",
+                    format!("{n}: {t}"),
+                    None,
+                    local.and_then(|l| self.docs.of(l.span)),
+                )
             }
-            ItemRef::Module(m) => ("module", format!("module \"{}\"", self.modules[*m].path), None, None),
+            ItemRef::Module(m) => (
+                "module",
+                format!("module \"{}\"", self.modules[*m].path),
+                None,
+                None,
+            ),
         }
     }
 
     fn fn_name_loc(&self, fid: FnId) -> Option<Location> {
-        self.defs.fns[fid].decl.as_ref().and_then(|d| d.name.as_ref()).map(|n| self.loc(n.span))
+        self.defs.fns[fid]
+            .decl
+            .as_ref()
+            .and_then(|d| d.name.as_ref())
+            .map(|n| self.loc(n.span))
     }
 
     fn item_members(&self, m: ModId, only_exported: bool) -> Vec<Member> {
@@ -283,7 +367,14 @@ impl Checker {
             }
             let item = &self.mscopes[m].items[name];
             let (kind, detail, loc, doc) = self.describe(item);
-            out.push(Member { name: name.clone(), kind, detail, loc, doc, public: true });
+            out.push(Member {
+                name: name.clone(),
+                kind,
+                detail,
+                loc,
+                doc,
+                public: true,
+            });
         }
         out
     }
@@ -293,7 +384,9 @@ impl Checker {
         let mut out: Vec<Member> = Vec::new();
         let builtin = |this: &mut Checker, owner: &str, out: &mut Vec<Member>| {
             for (name, pnames, doc) in catalog::methods(owner) {
-                let Some((params, ret)) = this.builtin_method(ty, name) else { continue };
+                let Some((params, ret)) = this.builtin_method(ty, name) else {
+                    continue;
+                };
                 let names: Vec<String> = pnames.split(',').map(|s| s.trim().to_string()).collect();
                 out.push(Member {
                     name: name.to_string(),
@@ -317,7 +410,12 @@ impl Checker {
             Ty::Struct(sid, args) => {
                 for (asid, aargs) in self.defs.ancestry(*sid, args) {
                     let def = self.defs.structs[asid].clone();
-                    let map: HashMap<ParamId, Ty> = def.tparams.iter().cloned().zip(aargs.iter().cloned()).collect();
+                    let map: HashMap<ParamId, Ty> = def
+                        .tparams
+                        .iter()
+                        .cloned()
+                        .zip(aargs.iter().cloned())
+                        .collect();
                     for f in def.fields.iter().filter(|f| !f.is_static) {
                         out.push(Member {
                             name: f.name.clone(),
@@ -341,7 +439,10 @@ impl Checker {
             }
             _ => {}
         }
-        if matches!(ty, Ty::Struct(..) | Ty::Enum(_) | Ty::Trait(..) | Ty::Param(_)) {
+        if matches!(
+            ty,
+            Ty::Struct(..) | Ty::Enum(_) | Ty::Trait(..) | Ty::Param(_)
+        ) {
             out.push(Member {
                 name: "class".to_string(),
                 kind: "method",
@@ -394,9 +495,17 @@ impl Checker {
                     continue;
                 }
                 let map = match (&imp.target, ty) {
-                    (Ty::Struct(a, targs), Ty::Struct(b, args)) if a == b => {
-                        targs.iter().zip(args.iter()).filter_map(|(t, v)| if let Ty::Param(p) = t { Some((*p, v.clone())) } else { None }).collect()
-                    }
+                    (Ty::Struct(a, targs), Ty::Struct(b, args)) if a == b => targs
+                        .iter()
+                        .zip(args.iter())
+                        .filter_map(|(t, v)| {
+                            if let Ty::Param(p) = t {
+                                Some((*p, v.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                     (Ty::Enum(a), Ty::Enum(b)) if a == b => HashMap::new(),
                     _ => continue,
                 };
@@ -417,7 +526,14 @@ impl Checker {
             StaticKey::Type(TypeRef::Builtin(b)) => {
                 for (owner, kind, name, detail, doc) in catalog::STATICS {
                     if owner == b {
-                        out.push(Member { name: name.to_string(), kind, detail: detail.to_string(), loc: None, doc: Some(doc.to_string()), public: true });
+                        out.push(Member {
+                            name: name.to_string(),
+                            kind,
+                            detail: detail.to_string(),
+                            loc: None,
+                            doc: Some(doc.to_string()),
+                            public: true,
+                        });
                     }
                 }
             }
@@ -454,7 +570,9 @@ impl Checker {
                     self.impl_methods(&Ty::Struct(asid, params), false, &mut out);
                 }
                 out.push(class_member());
-                if self.defs.structs[*sid].module == super::PRELUDE_MOD && self.defs.structs[*sid].name == "Db" {
+                if self.defs.structs[*sid].module == super::PRELUDE_MOD
+                    && self.defs.structs[*sid].name == "Db"
+                {
                     out.push(Member {
                         name: "connect".to_string(),
                         kind: "function",
@@ -472,49 +590,116 @@ impl Checker {
     /// Items defined by the source files, by position.
     fn definition_sites(&self) -> Vec<ItemInfo> {
         let mut out = Vec::new();
-        let mut push = |span: Span, name: &str, kind: &'static str, label: String, doc: Option<String>| {
-            out.push(ItemInfo { loc: self.loc(span), name: name.to_string(), kind, label, doc });
-        };
+        let mut push =
+            |span: Span, name: &str, kind: &'static str, label: String, doc: Option<String>| {
+                out.push(ItemInfo {
+                    loc: self.loc(span),
+                    name: name.to_string(),
+                    kind,
+                    label,
+                    doc,
+                });
+            };
         for (m, module) in self.modules.iter().enumerate() {
             for (idx, item) in module.ast.items.iter().enumerate() {
                 let id = self.mscopes[m].decl_ids.get(&idx).copied();
                 match item {
                     Item::Fun(f) => {
                         if let (Some(n), Some(fid)) = (&f.name, id) {
-                            push(n.span, &n.name, "function", format!("fun {}", self.fn_signature(fid, &HashMap::new())), self.docs.of(n.span));
+                            push(
+                                n.span,
+                                &n.name,
+                                "function",
+                                format!("fun {}", self.fn_signature(fid, &HashMap::new())),
+                                self.docs.of(n.span),
+                            );
                         }
                     }
                     Item::Struct(s) => {
-                        push(s.name.span, &s.name.name, "struct", format!("struct {}", s.name.name), self.docs.of(s.name.span));
+                        push(
+                            s.name.span,
+                            &s.name.name,
+                            "struct",
+                            format!("struct {}", s.name.name),
+                            self.docs.of(s.name.span),
+                        );
                         if let Some(sid) = id {
                             for f in &self.defs.structs[sid].fields {
                                 let kind = if f.is_static { "constant" } else { "field" };
-                                push(f.span, &f.name, kind, format!("{}: {}", f.name, self.show(&f.ty)), self.docs.of(f.span));
+                                push(
+                                    f.span,
+                                    &f.name,
+                                    kind,
+                                    format!("{}: {}", f.name, self.show(&f.ty)),
+                                    self.docs.of(f.span),
+                                );
                             }
                         }
                     }
                     Item::Enum(e) => {
-                        push(e.name.span, &e.name.name, "enum", format!("enum {}", e.name.name), self.docs.of(e.name.span));
+                        push(
+                            e.name.span,
+                            &e.name.name,
+                            "enum",
+                            format!("enum {}", e.name.name),
+                            self.docs.of(e.name.span),
+                        );
                         for (i, v) in e.variants.iter().enumerate() {
-                            let doc = e.variant_docs.get(i).cloned().flatten().map(|d| d.to_string());
-                            push(v.span, &v.name, "variant", format!("{}.{}", e.name.name, v.name), doc);
+                            let doc = e
+                                .variant_docs
+                                .get(i)
+                                .cloned()
+                                .flatten()
+                                .map(|d| d.to_string());
+                            push(
+                                v.span,
+                                &v.name,
+                                "variant",
+                                format!("{}.{}", e.name.name, v.name),
+                                doc,
+                            );
                         }
                     }
-                    Item::Trait(t) => push(t.name.span, &t.name.name, "trait", format!("trait {}", t.name.name), self.docs.of(t.name.span)),
+                    Item::Trait(t) => push(
+                        t.name.span,
+                        &t.name.name,
+                        "trait",
+                        format!("trait {}", t.name.name),
+                        self.docs.of(t.name.span),
+                    ),
                     Item::Impl(_) => {
                         if let Some(iid) = id {
                             for (_, fid) in &self.defs.impls[iid].methods {
                                 let f = &self.defs.fns[*fid];
                                 if let Some(n) = f.decl.as_ref().and_then(|d| d.name.as_ref()) {
-                                    push(n.span, &f.name, "method", format!("fun {}", self.fn_signature(*fid, &HashMap::new())), self.docs.of(n.span));
+                                    push(
+                                        n.span,
+                                        &f.name,
+                                        "method",
+                                        format!("fun {}", self.fn_signature(*fid, &HashMap::new())),
+                                        self.docs.of(n.span),
+                                    );
                                 }
                             }
                         }
                     }
-                    Item::Stmt(ast::Stmt { kind: ast::StmtKind::Let { name, .. }, .. }) => {
+                    Item::Stmt(ast::Stmt {
+                        kind: ast::StmtKind::Let { name, .. },
+                        ..
+                    }) => {
                         if let Some(local) = self.mscopes[m].vars.get(&name.name) {
-                            let kind = if local.kind == LocalKind::Const { "constant" } else { "variable" };
-                            push(name.span, &name.name, kind, format!("{}: {}", name.name, self.show(&local.ty)), self.docs.of(name.span));
+                            let kind = if local.kind == LocalKind::Const {
+                                "constant"
+                            } else {
+                                "variable"
+                            };
+                            push(
+                                name.span,
+                                &name.name,
+                                kind,
+                                format!("{}: {}", name.name, self.show(&local.ty)),
+                                self.docs.of(name.span),
+                            );
                         }
                     }
                     _ => {}
@@ -547,11 +732,21 @@ impl Checker {
                     bucket.push(ty.clone());
                 }
             }
-            info.exprs.push(ExprInfo { loc: self.loc(r.span), ty: shown, label, statics: r.statics, doc });
+            info.exprs.push(ExprInfo {
+                loc: self.loc(r.span),
+                ty: shown,
+                label,
+                statics: r.statics,
+                doc,
+            });
         }
         for l in collected.locals {
             let ty = self.resolve(&l.ty);
-            let scope = Span { file: l.scope.file, start: l.span.start, end: l.scope.end };
+            let scope = Span {
+                file: l.scope.file,
+                start: l.span.start,
+                end: l.scope.end,
+            };
             info.locals.push(LocalInfo {
                 loc: self.loc(l.span),
                 name: l.name,
@@ -567,7 +762,14 @@ impl Checker {
         info.items = self.definition_sites();
         info.functions = catalog::FUNCTIONS
             .iter()
-            .map(|(name, detail, doc)| Member { name: name.to_string(), kind: "function", detail: detail.to_string(), loc: None, doc: Some(doc.to_string()), public: true })
+            .map(|(name, detail, doc)| Member {
+                name: name.to_string(),
+                kind: "function",
+                detail: detail.to_string(),
+                loc: None,
+                doc: Some(doc.to_string()),
+                public: true,
+            })
             .collect();
         for (ty_name, tys) in types {
             let members = dedup(tys.iter().flat_map(|ty| self.members_of(ty)).collect());
@@ -593,14 +795,26 @@ impl Checker {
     /// The documentation comment of the function or type a name refers to.
     fn doc_of(&self, r: &RawExpr) -> Option<String> {
         match self.res.paths.get(&r.id)? {
-            PathRes::Fn(fid) => self.defs.fns[*fid].decl.as_ref().and_then(|d| d.name.as_ref()).and_then(|n| self.docs.of(n.span)),
+            PathRes::Fn(fid) => self.defs.fns[*fid]
+                .decl
+                .as_ref()
+                .and_then(|d| d.name.as_ref())
+                .and_then(|n| self.docs.of(n.span)),
             PathRes::Type(TypeRef::Struct(s)) => self.docs.of(self.defs.structs[*s].span),
             PathRes::Type(TypeRef::Enum(e)) => self.docs.of(self.defs.enums[*e].span),
             PathRes::EnumVariant(e, i) => {
                 let span = self.defs.enums[*e].span;
-                self.docs.variants.get(&(span.file, span.start)).and_then(|v| v.get(*i)).cloned().flatten()
+                self.docs
+                    .variants
+                    .get(&(span.file, span.start))
+                    .and_then(|v| v.get(*i))
+                    .cloned()
+                    .flatten()
             }
-            PathRes::Global(m, name) => self.mscopes[*m].vars.get(name).and_then(|l| self.docs.of(l.span)),
+            PathRes::Global(m, name) => self.mscopes[*m]
+                .vars
+                .get(name)
+                .and_then(|l| self.docs.of(l.span)),
             _ => None,
         }
     }
@@ -609,7 +823,9 @@ impl Checker {
         let shown = ty.show(&self.defs);
         match self.res.paths.get(&r.id)? {
             PathRes::Fn(fid) => Some(format!("fun {}", self.fn_signature(*fid, &HashMap::new()))),
-            PathRes::Type(TypeRef::Struct(s)) => Some(format!("struct {}", self.defs.structs[*s].name)),
+            PathRes::Type(TypeRef::Struct(s)) => {
+                Some(format!("struct {}", self.defs.structs[*s].name))
+            }
             PathRes::Type(TypeRef::Enum(e)) => Some(format!("enum {}", self.defs.enums[*e].name)),
             PathRes::Type(TypeRef::Builtin(b)) => Some(format!("type {b}")),
             PathRes::Module(m) => Some(format!("module \"{}\"", self.modules[*m].path)),
@@ -617,7 +833,9 @@ impl Checker {
                 let def = &self.defs.enums[*e];
                 Some(format!("{}.{}", def.name, def.variants[*i]))
             }
-            PathRes::Local | PathRes::Global(..) => r.name.as_ref().map(|n| format!("{n}: {shown}")),
+            PathRes::Local | PathRes::Global(..) => {
+                r.name.as_ref().map(|n| format!("{n}: {shown}"))
+            }
             _ => None,
         }
     }
@@ -692,7 +910,10 @@ fn db_members() -> Vec<Member> {
 
 fn dedup(items: Vec<Member>) -> Vec<Member> {
     let mut seen = std::collections::HashSet::new();
-    items.into_iter().filter(|m| seen.insert(m.name.clone())).collect()
+    items
+        .into_iter()
+        .filter(|m| seen.insert(m.name.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -713,8 +934,15 @@ mod tests {
     /// way round: a new built-in method without documentation fails here.
     #[test]
     fn catalog_matches_the_checker() {
-        let info = info_of("let a = [1]\nlet s = \"x\"\nlet m = { \"k\": 1 }\nlet i = 1\nlet f = 1.5\n");
-        for (ty, owner) in [("array<int>", "array"), ("string", "string"), ("map<string, int>", "map"), ("int", "int"), ("float", "float")] {
+        let info =
+            info_of("let a = [1]\nlet s = \"x\"\nlet m = { \"k\": 1 }\nlet i = 1\nlet f = 1.5\n");
+        for (ty, owner) in [
+            ("array<int>", "array"),
+            ("string", "string"),
+            ("map<string, int>", "map"),
+            ("int", "int"),
+            ("float", "float"),
+        ] {
             let documented: Vec<&str> = catalog::methods(owner).iter().map(|e| e.0).collect();
             let known: Vec<&str> = info.members[ty].iter().map(|m| m.name.as_str()).collect();
             assert_eq!(documented, known, "methods of {ty}");
@@ -725,13 +953,20 @@ mod tests {
     fn built_in_methods_not_in_the_catalog_are_detected() {
         // every name the checker accepts is documented: probe a list of candidate names
         let mut host = MemoryHost::default();
-        for (decl, owner) in [("[1]", "array"), ("\"x\"", "string"), ("{ \"k\": 1 }", "map"), ("1", "int"), ("1.5", "float")] {
+        for (decl, owner) in [
+            ("[1]", "array"),
+            ("\"x\"", "string"),
+            ("{ \"k\": 1 }", "map"),
+            ("1", "int"),
+            ("1.5", "float"),
+        ] {
             for name in ALL_CANDIDATES {
                 let src = format!("let v = {decl}\nlet w = v.{name}\n");
-                let accepted = match compile_with("main.q", &src, &mut host, &CompileOptions::default()) {
-                    Ok(_) => true,
-                    Err(e) => !e.diagnostics.iter().any(|d| d.code == "T161"),
-                };
+                let accepted =
+                    match compile_with("main.q", &src, &mut host, &CompileOptions::default()) {
+                        Ok(_) => true,
+                        Err(e) => !e.diagnostics.iter().any(|d| d.code == "T161"),
+                    };
                 let documented = catalog::methods(owner).iter().any(|e| e.0 == *name);
                 // `v.name` without a call is always an error; "has no field" (T161) means unknown
                 assert_eq!(accepted, documented, "{owner}.{name}");
@@ -740,19 +975,108 @@ mod tests {
     }
 
     const ALL_CANDIDATES: &[&str] = &[
-        "len", "is_empty", "push", "pop", "insert", "remove", "clear", "contains", "index_of", "reverse", "join", "sort", "min", "max",
-        "sum", "slice", "has", "get", "keys", "values", "upper", "lower", "trim", "trim_start", "trim_end", "capitalize", "starts_with",
-        "ends_with", "last_index_of", "count", "replace", "split", "repeat", "chars", "lines", "words", "pad_left", "pad_right",
-        "is_digit", "is_alpha", "is_blank", "code", "to_int", "to_float", "substring", "char", "abs", "pow", "sqrt", "floor", "ceil",
-        "round", "first", "last", "append", "extend", "find", "filter", "map", "length", "size", "swap", "copy", "clone", "to_string",
-        "reduce", "any", "all", "each", "sort_by", "unique", "flatten", "fold", "for_each", "group_by", "zip", "merge", "map_values",
-        "entries", "strip_prefix", "strip_suffix", "snake_case", "camel_case", "kebab_case", "title_case", "to_hex", "to_oct", "to_bin",
-        "to_fixed", "format", "eq_ignore_case", "concat", "take", "drop", "chunk",
+        "len",
+        "is_empty",
+        "push",
+        "pop",
+        "insert",
+        "remove",
+        "clear",
+        "contains",
+        "index_of",
+        "reverse",
+        "join",
+        "sort",
+        "min",
+        "max",
+        "sum",
+        "slice",
+        "has",
+        "get",
+        "keys",
+        "values",
+        "upper",
+        "lower",
+        "trim",
+        "trim_start",
+        "trim_end",
+        "capitalize",
+        "starts_with",
+        "ends_with",
+        "last_index_of",
+        "count",
+        "replace",
+        "split",
+        "repeat",
+        "chars",
+        "lines",
+        "words",
+        "pad_left",
+        "pad_right",
+        "is_digit",
+        "is_alpha",
+        "is_blank",
+        "code",
+        "to_int",
+        "to_float",
+        "substring",
+        "char",
+        "abs",
+        "pow",
+        "sqrt",
+        "floor",
+        "ceil",
+        "round",
+        "first",
+        "last",
+        "append",
+        "extend",
+        "find",
+        "filter",
+        "map",
+        "length",
+        "size",
+        "swap",
+        "copy",
+        "clone",
+        "to_string",
+        "reduce",
+        "any",
+        "all",
+        "each",
+        "sort_by",
+        "unique",
+        "flatten",
+        "fold",
+        "for_each",
+        "group_by",
+        "zip",
+        "merge",
+        "map_values",
+        "entries",
+        "strip_prefix",
+        "strip_suffix",
+        "snake_case",
+        "camel_case",
+        "kebab_case",
+        "title_case",
+        "to_hex",
+        "to_oct",
+        "to_bin",
+        "to_fixed",
+        "format",
+        "eq_ignore_case",
+        "concat",
+        "take",
+        "drop",
+        "chunk",
     ];
 
     #[test]
     fn types_and_members() {
-        let info = info_of("struct P\n  public x: int\nend\nimpl P\n  public fun show(self) -> string\n    return \"p\"\n  end\nend\nlet p = P { x: 1 }\nlet q = p\n");
+        let info = info_of(
+            "struct P\n  public x: int\nend\nimpl P\n  public fun show(self) -> string\n    return \"p\"\n  end\nend\nlet p = P { x: 1 }\nlet q = p\n",
+        );
         assert!(info.exprs.iter().any(|e| e.ty == "P"));
         let names: Vec<&str> = info.members["P"].iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["x", "show", "class"]);

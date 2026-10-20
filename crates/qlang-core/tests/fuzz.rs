@@ -18,7 +18,11 @@ impl Rng {
 
 fn mutate(src: &str, rng: &mut Rng, count: usize) -> String {
     let mut chars: Vec<char> = src.chars().collect();
-    let words = ["end", "then", "fun", "(", ")", "[", "]", "{", "}", "\"", "--(", "--\"", "none", "let", "x", "1", "2.5", "..", "=", "+", "\n", "struct", "impl", "match", "case", "else", "return", ".", ",", ":", "->", "?", "<", ">", "{x}", "self", "super", "import", "export"];
+    let words = [
+        "end", "then", "fun", "(", ")", "[", "]", "{", "}", "\"", "--(", "--\"", "none", "let",
+        "x", "1", "2.5", "..", "=", "+", "\n", "struct", "impl", "match", "case", "else", "return",
+        ".", ",", ":", "->", "?", "<", ">", "{x}", "self", "super", "import", "export",
+    ];
     for _ in 0..count {
         if chars.is_empty() {
             break;
@@ -52,7 +56,10 @@ fn mutate(src: &str, rng: &mut Rng, count: usize) -> String {
             4 => {
                 // replace one word by another word of the program
                 let text: String = chars.iter().collect();
-                let ws: Vec<&str> = text.split(|c: char| !c.is_alphanumeric() && c != '_').filter(|w| !w.is_empty()).collect();
+                let ws: Vec<&str> = text
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .filter(|w| !w.is_empty())
+                    .collect();
                 if ws.len() > 2 {
                     let (a, b) = (ws[rng.below(ws.len())], ws[rng.below(ws.len())]);
                     let replaced = text.replacen(a, b, 1);
@@ -95,7 +102,12 @@ fn mutated_programs_do_not_panic() {
                     host.allow_read = true;
                     match compile("main.q", &src, &mut host) {
                         Ok(p) => {
-                            let limits = Limits { max_steps: 20_000, max_depth: 200, max_output: 100_000, max_alloc: 100_000 };
+                            let limits = Limits {
+                                max_steps: 20_000,
+                                max_depth: 200,
+                                max_output: 100_000,
+                                max_alloc: 100_000,
+                            };
                             let _ = p.run(&mut host, limits);
                             true
                         }

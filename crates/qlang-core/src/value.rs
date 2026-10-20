@@ -94,7 +94,9 @@ impl MapObj {
 
     /// Insert or replace; false if `k` cannot be a key.
     pub fn insert(&mut self, k: Value, v: Value) -> bool {
-        let Some(key) = KeyVal::of(&k) else { return false };
+        let Some(key) = KeyVal::of(&k) else {
+            return false;
+        };
         match self.index.get(&key) {
             Some(&i) => self.entries[i].1 = v,
             None => {
@@ -153,7 +155,10 @@ pub type Env = Rc<Scope>;
 
 impl Scope {
     pub fn new(parent: Option<Env>) -> Env {
-        Rc::new(Scope { vars: RefCell::new(HashMap::new()), parent })
+        Rc::new(Scope {
+            vars: RefCell::new(HashMap::new()),
+            parent,
+        })
     }
 
     pub fn define(&self, name: &str, v: Value) {

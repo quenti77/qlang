@@ -24,7 +24,10 @@ const MAX_CONNECTIONS: usize = 16;
 pub fn serve(args: &[&str]) -> ExitCode {
     let mut port: u16 = 8080;
     let mut bind = "127.0.0.1".to_string();
-    let mut app = AppOptions { workers: 1, ..AppOptions::default() };
+    let mut app = AppOptions {
+        workers: 1,
+        ..AppOptions::default()
+    };
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -117,8 +120,16 @@ pub fn serve(args: &[&str]) -> ExitCode {
     if app.file.is_some() {
         return serve_app(&bind, port, app);
     }
-    if app.max_steps.is_some() || app.seed.is_some() || app.root.is_some() || app.static_dir.is_some() || app.workers != 1 || !app.script_args.is_empty() {
-        eprintln!("--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`");
+    if app.max_steps.is_some()
+        || app.seed.is_some()
+        || app.root.is_some()
+        || app.static_dir.is_some()
+        || app.workers != 1
+        || !app.script_args.is_empty()
+    {
+        eprintln!(
+            "--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`"
+        );
         return ExitCode::from(64);
     }
     let listener = match TcpListener::bind((bind.as_str(), port)) {
@@ -136,16 +147,21 @@ pub fn serve(args: &[&str]) -> ExitCode {
             continue;
         }
         let slot = Slot::take(&active);
-        let spawned = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-            // the slot is freed when the thread ends, whatever happens (including a panic)
-            let _slot = slot;
-            let reply = stream.try_clone();
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_connection(stream)));
-            if outcome.is_err()
-                && let Ok(s) = reply {
+        let spawned = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(move || {
+                // the slot is freed when the thread ends, whatever happens (including a panic)
+                let _slot = slot;
+                let reply = stream.try_clone();
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle_connection(stream)
+                }));
+                if outcome.is_err()
+                    && let Ok(s) = reply
+                {
                     let _ = respond(s, 500, "{\"error\":\"internal error\"}");
                 }
-        });
+            });
         if spawned.is_err() {
             eprintln!("cannot start a worker thread");
         }
@@ -199,21 +215,39 @@ fn reason(status: u16) -> &'static str {
 }
 
 fn respond(stream: TcpStream, status: u16, body: &str) -> std::io::Result<()> {
-    write_response(stream, status, &[("Content-Type".to_string(), "application/json".to_string())], body.as_bytes(), false)
+    write_response(
+        stream,
+        status,
+        &[("Content-Type".to_string(), "application/json".to_string())],
+        body.as_bytes(),
+        false,
+    )
 }
 
 /// Writes a response. Header names and values with line breaks are dropped (a program could
 /// otherwise split the response), and the ones this server decides itself are ignored.
-fn write_response(mut stream: TcpStream, status: u16, headers: &[(String, String)], body: &[u8], head_only: bool) -> std::io::Result<()> {
+fn write_response(
+    mut stream: TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    body: &[u8],
+    head_only: bool,
+) -> std::io::Result<()> {
     let mut head = format!("HTTP/1.1 {status} {}\r\n", reason(status));
     for (name, value) in headers {
-        let fixed = ["content-length", "connection", "transfer-encoding"].contains(&name.to_ascii_lowercase().as_str());
-        let valid = !name.is_empty() && name.bytes().all(|c| c.is_ascii_graphic() && c != b':') && !value.contains(['\r', '\n']);
+        let fixed = ["content-length", "connection", "transfer-encoding"]
+            .contains(&name.to_ascii_lowercase().as_str());
+        let valid = !name.is_empty()
+            && name.bytes().all(|c| c.is_ascii_graphic() && c != b':')
+            && !value.contains(['\r', '\n']);
         if valid && !fixed {
             head.push_str(&format!("{name}: {value}\r\n"));
         }
     }
-    head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
+    head.push_str(&format!(
+        "Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    ));
     stream.write_all(head.as_bytes())?;
     if !head_only {
         stream.write_all(body)?;
@@ -231,7 +265,10 @@ struct Parsed {
 
 /// Reads one request. On failure, the status and message to answer with (`None`: the client
 /// went away, nothing to answer).
-fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<Parsed, Option<(u16, &'static str)>> {
+fn read_request(
+    stream: &mut TcpStream,
+    max_body: usize,
+) -> Result<Parsed, Option<(u16, &'static str)>> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let mut buf: Vec<u8> = Vec::new();
     let mut chunk = [0u8; 8192];
@@ -251,7 +288,10 @@ fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<Parsed, Optio
     let mut lines = head.lines();
     let request_line = lines.next().unwrap_or("");
     let mut parts = request_line.split_whitespace();
-    let (method, target) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
+    let (method, target) = (
+        parts.next().unwrap_or("").to_string(),
+        parts.next().unwrap_or("").to_string(),
+    );
     if method.is_empty() || target.is_empty() {
         return Err(Some((400, "malformed request")));
     }
@@ -259,11 +299,18 @@ fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<Parsed, Optio
         .filter_map(|l| l.split_once(':'))
         .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
         .collect();
-    let header = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    };
     if header("transfer-encoding").is_some() {
         return Err(Some((501, "chunked requests are not supported")));
     }
-    let content_length = header("content-length").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+    let content_length = header("content-length")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
     if content_length > max_body {
         return Err(Some((413, "request too large")));
     }
@@ -275,7 +322,12 @@ fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<Parsed, Optio
         }
     }
     body.truncate(content_length);
-    Ok(Parsed { method, target, headers, body })
+    Ok(Parsed {
+        method,
+        target,
+        headers,
+        body,
+    })
 }
 
 fn handle_connection(mut stream: TcpStream) {
@@ -359,10 +411,11 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
         }
     };
     if let (Some(root), Ok(full)) = (&opts.root, Path::new(&file).canonicalize())
-        && !full.starts_with(root) {
-            eprintln!("{file} is outside of --root {}", root.display());
-            return ExitCode::from(64);
-        }
+        && !full.starts_with(root)
+    {
+        eprintln!("{file} is outside of --root {}", root.display());
+        return ExitCode::from(64);
+    }
     let (jobs, queue) = mpsc::channel::<Msg>();
     let queue = Arc::new(Mutex::new(queue));
     let active = Arc::new(AtomicUsize::new(0));
@@ -371,7 +424,15 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
 
     // the other workers start once the first one is ready (so that mistakes are reported once)
     let ready = {
-        let (jobs, queue, active, opts, file, source, bind) = (jobs.clone(), queue.clone(), active.clone(), opts.clone(), file.clone(), source.clone(), bind.clone());
+        let (jobs, queue, active, opts, file, source, bind) = (
+            jobs.clone(),
+            queue.clone(),
+            active.clone(),
+            opts.clone(),
+            file.clone(),
+            source.clone(),
+            bind.clone(),
+        );
         move || -> Result<(), ExitCode> {
             let listener = match TcpListener::bind((bind.as_str(), port)) {
                 Ok(l) => l,
@@ -381,16 +442,25 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
                 }
             };
             let workers = opts.workers;
-            let more = if workers == 1 { String::new() } else { format!(" ({workers} workers)") };
-            log(&format!("qlang serving {file} on http://{bind}:{port}{more}\n"));
+            let more = if workers == 1 {
+                String::new()
+            } else {
+                format!(" ({workers} workers)")
+            };
+            log(&format!(
+                "qlang serving {file} on http://{bind}:{port}{more}\n"
+            ));
             for index in 1..workers {
-                let (queue, opts, file, source) = (queue.clone(), opts.clone(), file.clone(), source.clone());
-                let started = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-                    if let Err(code) = worker(index, &file, &source, &opts, &queue, || Ok(())) {
-                        log(&format!("worker {index} could not start\n"));
-                        std::process::exit(if code == ExitCode::SUCCESS { 0 } else { 70 });
-                    }
-                });
+                let (queue, opts, file, source) =
+                    (queue.clone(), opts.clone(), file.clone(), source.clone());
+                let started = std::thread::Builder::new()
+                    .stack_size(256 << 20)
+                    .spawn(move || {
+                        if let Err(code) = worker(index, &file, &source, &opts, &queue, || Ok(())) {
+                            log(&format!("worker {index} could not start\n"));
+                            std::process::exit(if code == ExitCode::SUCCESS { 0 } else { 70 });
+                        }
+                    });
                 if started.is_err() {
                     log("cannot start a worker thread\n");
                 }
@@ -444,9 +514,24 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
 
 /// One interpreter: compiles the program, runs it, then answers requests until told to stop.
 /// `ready` runs once the program has started (the first worker uses it to open the port).
-fn worker(index: usize, file: &str, source: &str, opts: &AppOptions, queue: &Arc<Mutex<mpsc::Receiver<Msg>>>, ready: impl FnOnce() -> Result<(), ExitCode>) -> Result<(), ExitCode> {
-    let seed = opts.seed.map(|s| s.wrapping_add(index as u64)).unwrap_or_else(crate::system_entropy);
-    let mut host = crate::TerminalHost { root: opts.root.clone(), rng: seed, db: Default::default(), script_args: opts.script_args.clone() };
+fn worker(
+    index: usize,
+    file: &str,
+    source: &str,
+    opts: &AppOptions,
+    queue: &Arc<Mutex<mpsc::Receiver<Msg>>>,
+    ready: impl FnOnce() -> Result<(), ExitCode>,
+) -> Result<(), ExitCode> {
+    let seed = opts
+        .seed
+        .map(|s| s.wrapping_add(index as u64))
+        .unwrap_or_else(crate::system_entropy);
+    let mut host = crate::TerminalHost {
+        root: opts.root.clone(),
+        rng: seed,
+        db: Default::default(),
+        script_args: opts.script_args.clone(),
+    };
     let program = match compile(file, source, &mut host) {
         Ok(p) => p,
         Err(e) => {
@@ -481,7 +566,9 @@ fn worker(index: usize, file: &str, source: &str, opts: &AppOptions, queue: &Arc
         };
         match msg {
             Ok(Msg::Job(job)) => {
-                let answer = app.handle(job.request).map_err(|d| d.render(&program.sources));
+                let answer = app
+                    .handle(job.request)
+                    .map_err(|d| d.render(&program.sources));
                 let _ = job.reply.send(answer);
             }
             Ok(Msg::Stop) | Err(_) => return Ok(()),
@@ -496,7 +583,10 @@ fn percent_decode(text: &str, plus_is_space: bool) -> String {
     let mut i = 0;
     while i < b.len() {
         match b[i] {
-            b'%' if i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() => {
+            b'%' if i + 2 < b.len()
+                && b[i + 1].is_ascii_hexdigit()
+                && b[i + 2].is_ascii_hexdigit() =>
+            {
                 out.push(u8::from_str_radix(&text[i + 1..i + 3], 16).unwrap_or(b'?'));
                 i += 3;
             }
@@ -529,7 +619,12 @@ fn split_target(target: &str) -> (String, Vec<(String, String)>) {
 }
 
 fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("html" | "htm") => "text/html; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
         Some("js" | "mjs") => "text/javascript; charset=utf-8",
@@ -581,46 +676,101 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
     let (path, query) = split_target(&request.target);
 
     // files first, like a web server in front of the program
-    if let (Some(dir), true) = (static_dir, matches!(request.method.as_str(), "GET" | "HEAD"))
-        && let Some(file) = static_file(dir, &path)
-        && std::fs::metadata(&file).map(|m| m.len() <= MAX_STATIC).unwrap_or(false)
+    if let (Some(dir), true) = (
+        static_dir,
+        matches!(request.method.as_str(), "GET" | "HEAD"),
+    ) && let Some(file) = static_file(dir, &path)
+        && std::fs::metadata(&file)
+            .map(|m| m.len() <= MAX_STATIC)
+            .unwrap_or(false)
         && let Ok(bytes) = std::fs::read(&file)
     {
-        let headers = [("Content-Type".to_string(), content_type(&file).to_string()), ("X-Content-Type-Options".to_string(), "nosniff".to_string())];
+        let headers = [
+            ("Content-Type".to_string(), content_type(&file).to_string()),
+            ("X-Content-Type-Options".to_string(), "nosniff".to_string()),
+        ];
         let _ = write_response(stream, 200, &headers, &bytes, head_only);
-        log(&format!("{line} -> 200 static ({} ms)\n", started.elapsed().as_millis()));
+        log(&format!(
+            "{line} -> 200 static ({} ms)\n",
+            started.elapsed().as_millis()
+        ));
         return;
     }
 
-    let body = if request.body.is_empty() { None } else { Some(String::from_utf8_lossy(&request.body).to_string()) };
+    let body = if request.body.is_empty() {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&request.body).to_string())
+    };
     let (reply, answer) = mpsc::channel();
-    let app_request = AppRequest { method: request.method, url: request.target, headers: request.headers, body, path, query };
-    if STOPPING.load(Ordering::SeqCst) || jobs.send(Msg::Job(Job { request: app_request, reply })).is_err() {
+    let app_request = AppRequest {
+        method: request.method,
+        url: request.target,
+        headers: request.headers,
+        body,
+        path,
+        query,
+    };
+    if STOPPING.load(Ordering::SeqCst)
+        || jobs
+            .send(Msg::Job(Job {
+                request: app_request,
+                reply,
+            }))
+            .is_err()
+    {
         let _ = write_response(stream, 503, &[], b"server stopping", false);
         return;
     }
-    let text_plain = [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())];
+    let text_plain = [(
+        "Content-Type".to_string(),
+        "text/plain; charset=utf-8".to_string(),
+    )];
     let status = match answer.recv_timeout(ANSWER_TIMEOUT) {
         Ok(Ok(r)) => {
             let mut headers = r.headers;
-            if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            if !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
                 headers.extend(text_plain);
             }
-            let _ = write_response(stream, r.status as u16, &headers, r.body.as_bytes(), head_only);
+            let _ = write_response(
+                stream,
+                r.status as u16,
+                &headers,
+                r.body.as_bytes(),
+                head_only,
+            );
             r.status as u16
         }
         Ok(Err(diagnostic)) => {
             // the details stay in the server's log: they are not for the client
             log(&diagnostic);
-            let _ = write_response(stream, 500, &text_plain, b"Internal Server Error", head_only);
+            let _ = write_response(
+                stream,
+                500,
+                &text_plain,
+                b"Internal Server Error",
+                head_only,
+            );
             500
         }
         Err(_) => {
-            let _ = write_response(stream, 504, &[], b"the program took too long to answer", false);
+            let _ = write_response(
+                stream,
+                504,
+                &[],
+                b"the program took too long to answer",
+                false,
+            );
             504
         }
     };
-    log(&format!("{line} -> {status} ({} ms)\n", started.elapsed().as_millis()));
+    log(&format!(
+        "{line} -> {status} ({} ms)\n",
+        started.elapsed().as_millis()
+    ));
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {

@@ -1,6 +1,5 @@
 //! Positions in source files.
 
-
 /// A byte range in one source file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
@@ -78,7 +77,10 @@ impl SourceMap {
         let line_start = file.line_starts[line] as usize;
         let upto = (offset as usize).min(file.text.len());
         // columns count characters, not bytes
-        let col = file.text.get(line_start..upto).map_or(0, |s| s.chars().count());
+        let col = file
+            .text
+            .get(line_start..upto)
+            .map_or(0, |s| s.chars().count());
         (line as u32 + 1, col as u32 + 1)
     }
 
@@ -137,13 +139,18 @@ fn split_root(path: &str) -> (&str, &str) {
 /// Nothing can go above the root of an absolute importer. The importer may be written with
 /// `\` (a Windows path); the result then uses `/`.
 pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> {
-    if import_path.is_empty() || import_path.contains('\\') || !split_root(import_path).0.is_empty() {
+    if import_path.is_empty() || import_path.contains('\\') || !split_root(import_path).0.is_empty()
+    {
         return None;
     }
     let importer = importer.replace('\\', "/");
     let (root, rest) = split_root(&importer);
     let dir = rest.rfind('/').map_or("", |i| &rest[..i]);
-    let joined = if dir.is_empty() { import_path.to_string() } else { format!("{dir}/{import_path}") };
+    let joined = if dir.is_empty() {
+        import_path.to_string()
+    } else {
+        format!("{dir}/{import_path}")
+    };
     let mut parts: Vec<&str> = Vec::new();
     for part in joined.split('/') {
         match part {
@@ -184,7 +191,10 @@ mod tests {
         assert_eq!(r("../x.q", "../z.q").as_deref(), Some("../../z.q"));
         assert_eq!(r("a/b/main.q", "../../../x.q").as_deref(), Some("../x.q"));
         // the same file written two ways has the same name
-        assert_eq!(r("sub/main.q", "../sub/other.q"), r("sub/main.q", "other.q"));
+        assert_eq!(
+            r("sub/main.q", "../sub/other.q"),
+            r("sub/main.q", "other.q")
+        );
     }
 
     #[test]
@@ -193,17 +203,33 @@ mod tests {
         assert_eq!(r("main.q", ""), None);
         assert_eq!(r("main.q", ".."), None);
         assert_eq!(r("main.q", "dir/.."), None);
-        assert_eq!(r("/home/me/main.q", "../../../../x.q"), None, "above the root of the file system");
-        assert_eq!(r("/home/me/main.q", "../lib/x.q").as_deref(), Some("/home/lib/x.q"));
+        assert_eq!(
+            r("/home/me/main.q", "../../../../x.q"),
+            None,
+            "above the root of the file system"
+        );
+        assert_eq!(
+            r("/home/me/main.q", "../lib/x.q").as_deref(),
+            Some("/home/lib/x.q")
+        );
     }
 
     #[test]
     fn windows_paths_are_understood() {
         // an importer written the Windows way: the drive is the root, `..` stays under it
-        assert_eq!(r("C:\\proj\\main.q", "lib/x.q").as_deref(), Some("C:/proj/lib/x.q"));
-        assert_eq!(r("C:\\proj\\app\\main.q", "../lib/x.q").as_deref(), Some("C:/proj/lib/x.q"));
+        assert_eq!(
+            r("C:\\proj\\main.q", "lib/x.q").as_deref(),
+            Some("C:/proj/lib/x.q")
+        );
+        assert_eq!(
+            r("C:\\proj\\app\\main.q", "../lib/x.q").as_deref(),
+            Some("C:/proj/lib/x.q")
+        );
         assert_eq!(r("C:\\main.q", "../x.q"), None, "above the drive root");
-        assert_eq!(r("examples\\tour.q", "tour_math.q").as_deref(), Some("examples/tour_math.q"));
+        assert_eq!(
+            r("examples\\tour.q", "tour_math.q").as_deref(),
+            Some("examples/tour_math.q")
+        );
         // import paths use `/` everywhere and are never absolute
         assert_eq!(r("main.q", "lib\\x.q"), None);
         assert_eq!(r("main.q", "C:/x.q"), None);

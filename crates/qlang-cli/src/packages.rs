@@ -55,66 +55,154 @@ fn main_file(manifest: &Option<toml::Table>) -> String {
         .to_string()
 }
 
+/// Where a dependency comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// A directory, used where it is.
+    Path(PathBuf),
+    Git {
+        url: String,
+        spec: GitRef,
+    },
+}
+
+/// Which commit of a repository a dependency wants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitRef {
+    /// The repository's default branch.
+    Default,
+    Tag(String),
+    Rev(String),
+    Branch(String),
+}
+
+impl GitRef {
+    /// How the lock file writes it (`tag:v1.2.0`).
+    pub fn label(&self) -> String {
+        match self {
+            GitRef::Default => "default".to_string(),
+            GitRef::Tag(t) => format!("tag:{t}"),
+            GitRef::Rev(r) => format!("rev:{r}"),
+            GitRef::Branch(b) => format!("branch:{b}"),
+        }
+    }
+}
+
+/// The dependencies a `qlang.toml` lists, in file order. `base` is the directory `path`
+/// dependencies are relative to; `owner` names the manifest in messages.
+pub fn parse_dependencies(
+    manifest: &toml::Table,
+    base: &Path,
+    owner: &str,
+) -> Result<Vec<(String, Source)>, String> {
+    let Some(deps) = manifest.get("dependencies") else {
+        return Ok(Vec::new());
+    };
+    let deps = deps
+        .as_table()
+        .ok_or_else(|| format!("{owner}: `dependencies` must be a table"))?;
+    let mut out = Vec::new();
+    for (name, spec) in deps {
+        if !valid_package_name(name) {
+            return Err(format!(
+                "{owner}: `{name}` is not a valid package name (letters, digits, `_` and `-`)"
+            ));
+        }
+        let spec = spec.as_table().ok_or_else(|| {
+            format!("{owner}: dependency `{name}` must be a table like {{ path = \"../{name}\" }}")
+        })?;
+        let text = |key: &str| -> Result<Option<String>, String> {
+            match spec.get(key) {
+                None => Ok(None),
+                Some(v) => v
+                    .as_str()
+                    .map(|s| Some(s.to_string()))
+                    .ok_or_else(|| format!("{owner}: `{name}`: `{key}` must be a string")),
+            }
+        };
+        let source = match (text("path")?, text("git")?) {
+            (Some(path), None) => Source::Path(base.join(path)),
+            (None, Some(url)) => {
+                let refs: Vec<GitRef> = [
+                    text("tag")?.map(GitRef::Tag),
+                    text("rev")?.map(GitRef::Rev),
+                    text("branch")?.map(GitRef::Branch),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if refs.len() > 1 {
+                    return Err(format!(
+                        "{owner}: dependency `{name}`: choose one of `tag`, `rev` and `branch`"
+                    ));
+                }
+                Source::Git {
+                    url,
+                    spec: refs.into_iter().next().unwrap_or(GitRef::Default),
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "{owner}: dependency `{name}` needs a `path` or a `git` URL (not both)"
+                ));
+            }
+        };
+        out.push((name.clone(), source));
+    }
+    Ok(out)
+}
+
+/// Where installed (git) packages live, below the project directory.
+pub fn packages_dir(project_dir: &Path) -> PathBuf {
+    project_dir.join(".qlang").join("packages")
+}
+
+pub fn manifest_of(dir: &Path) -> Result<Option<toml::Table>, String> {
+    read_manifest(dir)
+}
+
 impl Packages {
     /// The dependencies declared by the `qlang.toml` in `project_dir`, and recursively by
-    /// the packages themselves.
+    /// the packages themselves. Git packages are expected in `.qlang/packages` (see
+    /// `qlang install`).
     pub fn load(project_dir: &Path) -> Result<Packages, String> {
         let mut packages = Packages::default();
         let manifest = read_manifest(project_dir)?;
         if let Some(m) = &manifest {
-            packages.add_dependencies(m, project_dir, "this project")?;
+            let deps = parse_dependencies(m, project_dir, "this project")?;
+            packages.add_all(deps, project_dir, "this project", true)?;
         }
         Ok(packages)
     }
 
-    fn add_dependencies(
+    fn add_all(
         &mut self,
-        manifest: &toml::Table,
-        base: &Path,
+        deps: Vec<(String, Source)>,
+        project_dir: &Path,
         owner: &str,
+        allow_path: bool,
     ) -> Result<(), String> {
-        let Some(deps) = manifest.get("dependencies") else {
-            return Ok(());
-        };
-        let deps = deps
-            .as_table()
-            .ok_or_else(|| format!("{owner}: `dependencies` must be a table"))?;
-        for (name, spec) in deps {
-            if !valid_package_name(name) {
-                return Err(format!(
-                    "{owner}: `{name}` is not a valid package name (letters, digits, `_` and `-`)"
-                ));
-            }
-            let spec = spec.as_table().ok_or_else(|| {
-                format!(
-                    "{owner}: dependency `{name}` must be a table like {{ path = \"../{name}\" }}"
-                )
-            })?;
-            let dir = match (spec.get("path"), spec.get("git")) {
-                (Some(path), None) => {
-                    let path = path
-                        .as_str()
-                        .ok_or_else(|| format!("{owner}: `{name}`: `path` must be a string"))?;
-                    let dir = base.join(path);
+        for (name, source) in deps {
+            let dir = match &source {
+                Source::Path(dir) if allow_path => dir.canonicalize().map_err(|_| {
+                    format!(
+                        "{owner}: dependency `{name}`: the directory {} does not exist",
+                        dir.display()
+                    )
+                })?,
+                Source::Path(_) => {
+                    return Err(format!(
+                        "{owner}: dependency `{name}`: a package fetched from git cannot depend on a local path"
+                    ));
+                }
+                Source::Git { .. } => {
+                    let dir = packages_dir(project_dir).join(&name);
                     dir.canonicalize().map_err(|_| {
-                        format!(
-                            "{owner}: dependency `{name}`: the directory {} does not exist",
-                            dir.display()
-                        )
+                        format!("{owner}: package `{name}` is not installed (run `qlang install`)")
                     })?
                 }
-                (None, Some(_)) => {
-                    return Err(format!(
-                        "{owner}: dependency `{name}`: git dependencies are not supported yet"
-                    ));
-                }
-                _ => {
-                    return Err(format!(
-                        "{owner}: dependency `{name}` needs a `path` (or a `git` URL)"
-                    ));
-                }
             };
-            if let Some(known) = self.by_name.get(name) {
+            if let Some(known) = self.by_name.get(&name) {
                 if known.dir == dir {
                     continue;
                 }
@@ -133,7 +221,12 @@ impl Packages {
                 },
             );
             if let Some(m) = &manifest {
-                self.add_dependencies(m, &dir, &format!("package `{name}`"))?;
+                let owner = format!("package `{name}`");
+                let nested = parse_dependencies(m, &dir, &owner)?;
+                // inside a package, `path` dependencies are only allowed for packages that
+                // are themselves local
+                let local = matches!(source, Source::Path(_));
+                self.add_all(nested, project_dir, &owner, local)?;
             }
         }
         Ok(())

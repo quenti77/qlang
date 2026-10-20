@@ -109,6 +109,31 @@ Les `import` peuvent remonter dans les dossiers (`import f from "../lib/f.q"`, c
 qlang run app/main.q --root .      # les imports restent dans le dossier courant
 ```
 
+### Paquets
+
+Un projet liste ses dépendances dans son `qlang.toml` et les importe avec `@nom` :
+
+```toml
+[dependencies]
+text = { git = "https://github.com/x/text", tag = "v1.2.0" }
+utils = { path = "../utils" }
+```
+
+```sh
+qlang add mail --git https://github.com/x/mail --tag v1.0.0   # ajoute et installe
+qlang install        # récupère les paquets git dans .qlang/packages (commits de qlang.lock)
+qlang update         # avance les tags/branches, réécrit qlang.lock
+qlang remove mail
+```
+
+```
+import "@text" as t                  -- le fichier principal du paquet
+import send from "@mail/send.q"      -- un de ses fichiers
+```
+
+Mettez `.qlang/` dans le `.gitignore` et versionnez `qlang.lock`. Voir « Paquets » dans
+[docs/language.md](docs/language.md) pour le détail.
+
 ### Fournir des `extern fun`
 
 Une `extern fun` est implémentée par un **fournisseur** : n'importe quel programme qui

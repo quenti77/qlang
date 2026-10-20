@@ -150,7 +150,7 @@ fn two_directories_for_one_name_are_a_conflict() {
 }
 
 #[test]
-fn git_dependencies_are_not_supported_yet() {
+fn a_git_dependency_must_be_installed_first() {
     let d = Dir::new("git");
     d.write(
         "app/qlang.toml",
@@ -160,7 +160,7 @@ fn git_dependencies_are_not_supported_yet() {
     let (_, err, ok) = d.qlang("app", &["run", "main.q"]);
     assert!(!ok);
     assert!(
-        err.contains("git dependencies are not supported yet"),
+        err.contains("package `x` is not installed (run `qlang install`)"),
         "{err}"
     );
 }

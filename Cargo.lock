@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "bytes",
  "ctrlc",
@@ -885,13 +885,14 @@ dependencies = [
  "serde_json",
  "tokio-postgres-rustls",
  "toml",
+ "toml_edit",
  "ureq",
  "webpki-roots 0.26.11",
 ]
 
 [[package]]
 name = "qlang-core"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "regex",
  "serde",
@@ -900,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "qlang-core",
 ]
@@ -1382,8 +1383,15 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
+ "toml_write",
  "winnow",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "typenum"

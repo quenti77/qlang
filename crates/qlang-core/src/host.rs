@@ -307,6 +307,9 @@ pub struct MemoryHost {
     pub cli_args: Vec<String>,
     /// Functions provided to `extern fun`, by name.
     pub externs: std::collections::HashMap<String, ExternFn>,
+    /// Treat every `extern fun` as provided (only to check a program that is not going
+    /// to run here, like an editor does: it must not report what the real host may have).
+    pub assume_externs: bool,
 }
 
 /// An `extern fun` implemented in Rust, for [`MemoryHost`].
@@ -346,7 +349,9 @@ impl Host for MemoryHost {
     }
 
     fn has_extern(&self, name: &str) -> bool {
-        self.externs.contains_key(name) || (self.sql.is_some() && SQL_EXTERNS.contains(&name))
+        self.assume_externs
+            || self.externs.contains_key(name)
+            || (self.sql.is_some() && SQL_EXTERNS.contains(&name))
     }
 
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {

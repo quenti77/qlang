@@ -137,7 +137,7 @@ fn split_root(path: &str) -> (&str, &str) {
 /// Nothing can go above the root of an absolute importer. The importer may be written with
 /// `\` (a Windows path); the result then uses `/`.
 pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> {
-    if import_path.is_empty() || import_path.contains('\\') || split_root(import_path).0 != "" {
+    if import_path.is_empty() || import_path.contains('\\') || !split_root(import_path).0.is_empty() {
         return None;
     }
     let importer = importer.replace('\\', "/");

@@ -3,6 +3,7 @@
 
 mod body;
 mod calls;
+mod captured;
 mod catalog;
 mod decls;
 mod expr;
@@ -1323,6 +1324,8 @@ pub(crate) struct ModScope {
     pub vars: HashMap<String, Local>,
     /// Item index in the file to the id of its definition.
     pub decl_ids: HashMap<usize, usize>,
+    /// Variables some function or lambda of this file assigns (never narrowed).
+    pub assigned_in_closures: HashSet<String>,
 }
 
 pub(crate) struct Checker {

@@ -107,6 +107,13 @@ impl Checker {
 
     /// Show `name` with a narrower type from here on (until the scope ends).
     pub fn narrow(&mut self, name: &str, ty: Ty) {
+        // a function that assigns `name` could set it back to `none` after the test
+        if self.mscopes[self.cur_mod]
+            .assigned_in_closures
+            .contains(name)
+        {
+            return;
+        }
         let Some((l, _)) = self.lookup_var(name) else {
             return;
         };

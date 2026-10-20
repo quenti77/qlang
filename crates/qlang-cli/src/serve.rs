@@ -45,6 +45,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            "--trust-externs" => app.trust_externs = true,
             "--extern" => {
                 i += 1;
                 match args.get(i) {
@@ -128,7 +129,9 @@ pub fn serve(args: &[&str]) -> ExitCode {
         i += 1;
     }
     if let Some(file) = &app.file {
-        match crate::providers::specs_for(Path::new(file), &app.extern_commands) {
+        match crate::providers::specs_for(Path::new(file), &app.extern_commands).and_then(|specs| {
+            crate::providers::ensure_trusted(&specs, app.trust_externs).map(|()| specs)
+        }) {
             Ok(specs) => app.providers = specs,
             Err(e) => {
                 eprintln!("{e}");
@@ -153,6 +156,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         || app.workers != 1
         || !app.script_args.is_empty()
         || !app.extern_commands.is_empty()
+        || app.trust_externs
     {
         eprintln!(
             "--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`"
@@ -399,6 +403,7 @@ struct AppOptions {
     script_args: Vec<String>,
     /// `--extern` commands, and the providers they and `qlang.toml` declare.
     extern_commands: Vec<String>,
+    trust_externs: bool,
     providers: Vec<crate::providers::Spec>,
     packages: crate::packages::Packages,
 }

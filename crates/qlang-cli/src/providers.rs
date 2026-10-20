@@ -33,6 +33,8 @@ pub struct Spec {
     pub label: String,
     pub command: String,
     pub dir: PathBuf,
+    /// The `qlang.toml` that declared it (`None` for `--extern`, which the user typed).
+    pub config: Option<PathBuf>,
 }
 
 struct Provider {
@@ -301,6 +303,7 @@ pub fn specs_for(program: &Path, from_cli: &[String]) -> Result<Vec<Spec>, Strin
                     label: label.clone(),
                     command: command.to_string(),
                     dir: dir.clone(),
+                    config: Some(config.clone()),
                 });
             }
         }
@@ -312,9 +315,85 @@ pub fn specs_for(program: &Path, from_cli: &[String]) -> Result<Vec<Spec>, Strin
             label: "cli".to_string(),
             command: command.clone(),
             dir: cwd.clone(),
+            config: None,
         });
     }
     Ok(specs)
+}
+
+/// Where the commands the user agreed to run are remembered.
+fn trust_file() -> Option<PathBuf> {
+    let dir = std::env::var_os("QLANG_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(|d| PathBuf::from(d).join("qlang")))
+        .or_else(|| std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("qlang")))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|d| PathBuf::from(d).join(".config").join("qlang"))
+        })?;
+    Some(dir.join("trusted-externs"))
+}
+
+fn trust_line(spec: &Spec) -> Option<String> {
+    let config = spec.config.as_ref()?;
+    Some(format!(
+        "{}\t{}\t{}",
+        config.display(),
+        spec.label,
+        spec.command
+    ))
+}
+
+/// A `qlang.toml` makes `qlang` run commands, so (like `direnv`) the first time it asks:
+/// on a terminal it shows them and asks; otherwise `--trust-externs` must say yes. What
+/// was agreed to is remembered per file, label and command; a changed command asks again.
+/// Commands given with `--extern` are the user's own and need nothing.
+pub fn ensure_trusted(specs: &[Spec], allow: bool) -> Result<(), String> {
+    use std::io::IsTerminal;
+    let known: std::collections::HashSet<String> = trust_file()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .map(|t| t.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let unknown: Vec<&Spec> = specs
+        .iter()
+        .filter(|s| trust_line(s).is_some_and(|l| !known.contains(&l)))
+        .collect();
+    if unknown.is_empty() || allow {
+        return Ok(());
+    }
+    let mut shown = String::new();
+    for s in &unknown {
+        let from = s
+            .config
+            .as_ref()
+            .map(|c| c.display().to_string())
+            .unwrap_or_default();
+        shown.push_str(&format!("  {}: {}   (from {from})\n", s.label, s.command));
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(format!(
+            "qlang.toml wants to run these commands:\n{shown}pass --trust-externs to allow them for this run, or run `qlang` in a terminal once to remember your answer"
+        ));
+    }
+    eprint!("qlang.toml wants to run these commands:\n{shown}Run them, and remember? [y/N] ");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        return Err("not trusted: nothing was run".to_string());
+    }
+    if let Some(file) = trust_file() {
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let mut text = std::fs::read_to_string(&file).unwrap_or_default();
+        for s in &unknown {
+            text.push_str(&trust_line(s).expect("checked above"));
+            text.push('\n');
+        }
+        let _ = std::fs::write(&file, text);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

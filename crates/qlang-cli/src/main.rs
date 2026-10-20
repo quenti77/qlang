@@ -21,12 +21,14 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [-- ARGS...]
+    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
+                    [-- ARGS...]
                                          run a program (imports may live anywhere, or only
                                          under DIR with --root; the same --seed gives the
                                          same random numbers; ARGS after -- are env.args();
                                          --extern CMD starts a provider of `extern fun`, as
-                                         do the [externs] of a qlang.toml near the program)
+                                         do the [externs] of a qlang.toml near the program,
+                                         once you agreed to them: --trust-externs says yes)
     qlang check <file.q> [--extern CMD]  check a program without running it
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
@@ -450,6 +452,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut limits = Limits::default();
     let mut script_args: Vec<String> = Vec::new();
     let mut externs: Vec<String> = Vec::new();
+    let mut trust = false;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -477,6 +480,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                     }
                 }
             }
+            "--trust-externs" => trust = true,
             "--extern" => {
                 i += 1;
                 match args.get(i) {
@@ -533,6 +537,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         }
     };
     let providers = match providers::specs_for(Path::new(file), &externs)
+        .and_then(|specs| providers::ensure_trusted(&specs, trust).map(|()| specs))
         .and_then(|specs| providers::Providers::start(&specs, &SQL_EXTERNS))
     {
         Ok(p) => p,

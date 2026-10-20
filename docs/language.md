@@ -58,6 +58,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Bornes](#bornes)
     - [Inférence](#inférence)
   - [13. Modules](#13-modules)
+  - [Paquets](#paquets)
   - [Fonctions fournies par l'environnement (`extern`)](#fonctions-fournies-par-lenvironnement-extern)
   - [14. Bibliothèque standard](#14-bibliothèque-standard)
     - [Dépendance à l'environnement](#dépendance-à-lenvironnement)
@@ -1162,6 +1163,34 @@ print(math.add(1, 2))
 - Un module est exécuté une seule fois, avant le fichier qui l'importe, quel que
   soit le nombre d'imports. Les imports circulaires sont refusés.
 - On ne peut pas modifier depuis un autre fichier une variable exportée.
+
+### Paquets
+
+Un **paquet** est un dossier de fichiers `.q` que l'on importe par son nom, avec un `@` :
+
+```
+import send from "@mail/send.q"      -- un fichier du paquet
+import "@mail" as m                   -- le fichier principal du paquet
+```
+
+Les paquets d'un projet se déclarent dans son `qlang.toml`, section `[dependencies]` :
+
+```toml
+[dependencies]
+mail = { path = "../mail" }           -- un dossier (utilisé sur place)
+```
+
+- Le nom d'un paquet est fait de lettres, chiffres, `_` et `-`. Un paquet a son propre
+  `qlang.toml` : `[package] main = "src/mail.q"` désigne le fichier que `import "@mail"`
+  charge (par défaut `lib.q`), et ses propres `[dependencies]` sont installées avec le
+  projet, à plat : un nom désigne le même dossier partout, sinon c'est une erreur.
+- Dans un paquet, les imports relatifs (`./helper.q`, `../x.q`) restent **dans le
+  paquet** ; il peut importer d'autres paquets par `@nom/...`. Les messages d'erreur
+  nomment les fichiers `@mail/send.q`.
+- Un fichier dont le nom commence par `@` s'importe en écrivant `./@x.q`.
+- Les paquets ne sont pas limités par `--root` : c'est le projet qui les choisit.
+- Un projet sans `qlang.toml` n'a pas de paquets ; les environnements sans disque (JSON,
+  HTTP, navigateur) les voient comme des fichiers de la requête nommés `@mail/send.q`.
 
 ### Fonctions fournies par l'environnement (`extern`)
 

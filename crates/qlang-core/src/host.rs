@@ -247,6 +247,13 @@ pub trait Host {
         Capabilities::default()
     }
 
+    /// The file `@name` (a package imported without a file) stands for, as `@name/file.q`:
+    /// the package says which of its files is the main one. Other paths are returned
+    /// unchanged. By default packages have no main file.
+    fn package_file(&mut self, path: &str) -> String {
+        path.to_string()
+    }
+
     /// A name that is the same for the same module however its path was written
     /// (`lib/a.q`, `lib/../lib/a.q`, a symbolic link...). Used to load a module once
     /// and to detect circular imports. By default the normalised path itself.

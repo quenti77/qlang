@@ -135,6 +135,15 @@ pub fn serve(args: &[&str]) -> ExitCode {
                 return ExitCode::from(1);
             }
         }
+        if let Some(dir) = crate::project_dir(Path::new(file)) {
+            match crate::packages::Packages::load(&dir) {
+                Ok(p) => app.packages = p,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ExitCode::from(1);
+                }
+            }
+        }
         return serve_app(&bind, port, app);
     }
     if app.max_steps.is_some()
@@ -391,6 +400,7 @@ struct AppOptions {
     /// `--extern` commands, and the providers they and `qlang.toml` declare.
     extern_commands: Vec<String>,
     providers: Vec<crate::providers::Spec>,
+    packages: crate::packages::Packages,
 }
 
 /// A request waiting for an interpreter, and where to send the answer.
@@ -561,6 +571,7 @@ fn worker(
         db: Default::default(),
         script_args: opts.script_args.clone(),
         providers,
+        packages: opts.packages.clone(),
     };
     let program = match compile(file, source, &mut host) {
         Ok(p) => p,

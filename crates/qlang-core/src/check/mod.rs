@@ -1110,13 +1110,18 @@ impl Loader<'_> {
                     Diagnostic::error(
                         "T100",
                         format!(
-                            "cannot import \"{}\": use a path relative to this file, written with `/` (`./x.q`, `../lib/x.q`), not an absolute one",
+                            "cannot import \"{}\": use a path relative to this file, written with `/` (`./x.q`, `../lib/x.q`) or a package (`@name/x.q`), not an absolute one",
                             imp.path
                         ),
                         imp.path_span,
                     ),
                 );
                 continue;
+            };
+            let target = if crate::span::is_package_path(&target) {
+                self.host.package_file(&target)
+            } else {
+                target
             };
             let target_key = self.host.canonical_path(&target);
             let m = if let Some(&m) = self.done.get(&target_key) {

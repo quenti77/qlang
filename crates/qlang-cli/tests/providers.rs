@@ -42,11 +42,14 @@ impl Dir {
     }
 
     fn write(&self, name: &str, text: &str) {
-        fs::write(self.0.join(name), text).unwrap();
+        let file = self.0.join(name);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, text).unwrap();
     }
 
     fn run(&self, args: &[&str]) -> (String, String, bool) {
         let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .env("QLANG_CONFIG_DIR", self.0.join("config"))
             .args(args)
             .current_dir(&self.0)
             .output()
@@ -82,7 +85,7 @@ fn a_qlang_toml_declares_the_providers() {
         &format!("[externs]\nhelper = \"{py} provider.py\"\n"),
     );
     d.write("app.q", PROGRAM);
-    let (out, err, ok) = d.run(&["run", "app.q"]);
+    let (out, err, ok) = d.run(&["run", "app.q", "--trust-externs"]);
     assert!(ok, "{err}");
     assert_eq!(out, "HI!\n42\nit broke\n");
 }
@@ -112,7 +115,7 @@ fn a_provider_that_cannot_start_is_reported() {
     let d = Dir::new("missing");
     d.write("qlang.toml", "[externs]\nx = \"no-such-program-here\"\n");
     d.write("app.q", "print(1)");
-    let (_, err, ok) = d.run(&["run", "app.q"]);
+    let (_, err, ok) = d.run(&["run", "app.q", "--trust-externs"]);
     assert!(!ok);
     assert!(err.contains("provider `x`: cannot start"), "{err}");
 }
@@ -127,7 +130,7 @@ fn the_toml_is_found_in_a_parent_directory() {
     );
     fs::create_dir_all(d.0.join("src")).unwrap();
     d.write("src/app.q", PROGRAM);
-    let (out, err, ok) = d.run(&["run", "src/app.q"]);
+    let (out, err, ok) = d.run(&["run", "src/app.q", "--trust-externs"]);
     assert!(ok, "{err}");
     assert!(out.starts_with("HI!"), "{out}");
 }
@@ -162,4 +165,44 @@ fn a_json_check_assumes_externs_are_provided_but_a_json_run_does_not() {
     assert!(checked.contains("\"ok\":true"), "{checked}");
     let run = json_request("run", &d);
     assert!(run.contains("T263"), "{run}");
+}
+
+#[test]
+fn a_qlang_toml_needs_your_agreement_to_run_commands() {
+    let Some(py) = python() else { return };
+    let d = Dir::new("trust");
+    let cmd = format!("{py} provider.py");
+    d.write("qlang.toml", &format!("[externs]\nhelper = \"{cmd}\"\n"));
+    d.write("app.q", PROGRAM);
+    // no terminal and no flag: nothing is run
+    let (out, err, ok) = d.run(&["run", "app.q"]);
+    assert!(!ok && out.is_empty());
+    assert!(
+        err.contains("wants to run these commands") && err.contains("--trust-externs"),
+        "{err}"
+    );
+    // once agreed to (what answering `y` writes), it runs without the flag
+    let config = d.0.canonicalize().unwrap().join("qlang.toml");
+    d.write(
+        "config/trusted-externs",
+        &format!("{}\thelper\t{cmd}\n", config.display()),
+    );
+    let (out, err, ok) = d.run(&["run", "app.q"]);
+    assert!(ok, "{err}");
+    assert_eq!(out, "HI!\n42\nit broke\n");
+    // a changed command asks again
+    d.write("qlang.toml", &format!("[externs]\nhelper = \"{cmd} \"\n"));
+    let (_, err, ok) = d.run(&["run", "app.q"]);
+    assert!(!ok && err.contains("wants to run"), "{err}");
+}
+
+#[test]
+fn extern_option_commands_need_no_agreement() {
+    let Some(py) = python() else { return };
+    let d = Dir::new("trust-cli");
+    d.write("app.q", PROGRAM);
+    let cmd = format!("{py} provider.py");
+    let (out, err, ok) = d.run(&["run", "app.q", "--extern", &cmd]);
+    assert!(ok, "{err}");
+    assert_eq!(out, "HI!\n42\nit broke\n");
 }

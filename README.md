@@ -160,8 +160,12 @@ Le fournisseur répond à deux messages :
 Les valeurs sont du JSON : une structure ou une table est un objet (les clés `int` ou
 `bool` s'écrivent en texte), une énumération le nom de sa variante, un `Json` sa valeur.
 Un nom déjà fourni par `qlang` (`sql_*`) ou par un autre fournisseur est refusé. Lancer les
-commandes d'un `qlang.toml` revient à exécuter ce fichier : à ne faire que sur du code de
-confiance. Les modes `--json` (éditeurs, protocole) ne lisent pas de `qlang.toml` et ne
+commandes d'un `qlang.toml` revient à exécuter ce fichier, donc `qlang` demande d'abord
+(comme `direnv`) : dans un terminal il affiche les commandes et demande `[y/N]`, puis
+retient la réponse pour ce fichier, ce nom et cette commande (`trusted-externs` dans
+`~/.config/qlang`, ou `$QLANG_CONFIG_DIR`) ; une commande modifiée redemande. Sans terminal
+(serveur, CI), rien ne se lance tant qu'on n'ajoute pas `--trust-externs`. Les commandes
+données avec `--extern` sont les vôtres et ne demandent rien. Les modes `--json` (éditeurs, protocole) ne lisent pas de `qlang.toml` et ne
 lancent aucun fournisseur : une vérification seule (`check --json`, ou `"mode": "check"`)
 suppose donc toutes les `extern fun` fournies, comme elle suppose un clavier et une
 horloge, alors qu'un `run --json` les refuse (`T263`) ; `qlang serve app.q` en lance un par worker.

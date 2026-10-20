@@ -67,6 +67,22 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// A value crossing the boundary with an `extern fun`: plain data, always copied.
+/// A qlang struct is a `Map` with its field names as `Str` keys, an enum value is the
+/// `Str` name of its variant, and `Json` is the matching JSON-shaped value (numbers are
+/// `Float`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum HostValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Array(Vec<HostValue>),
+    /// Entries in insertion order.
+    Map(Vec<(HostValue, HostValue)>),
+}
+
 pub trait Host {
     /// Output text, exactly as given (newlines included).
     fn print(&mut self, text: &str);
@@ -151,6 +167,18 @@ pub trait Host {
         Err(HostError::Unsupported("env"))
     }
 
+    /// Whether this environment provides the `extern fun` called `name`. Asked at compile
+    /// time, so that using a missing one is reported before running.
+    fn has_extern(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// Run the `extern fun` called `name`. `Err` is turned into a `Result::err` when the
+    /// function returns a `Result<T, Error>`, and stops the program otherwise.
+    fn call(&mut self, _name: &str, _args: Vec<HostValue>) -> Result<HostValue, HostError> {
+        Err(HostError::Unsupported("extern"))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }
@@ -213,7 +241,12 @@ pub struct MemoryHost {
     /// Environment variables for `env.get`/`env.args`. `None`: no process environment.
     pub env: Option<std::collections::HashMap<String, String>>,
     pub cli_args: Vec<String>,
+    /// Functions provided to `extern fun`, by name.
+    pub externs: std::collections::HashMap<String, ExternFn>,
 }
+
+/// An `extern fun` implemented in Rust, for [`MemoryHost`].
+pub type ExternFn = Box<dyn FnMut(Vec<HostValue>) -> Result<HostValue, HostError> + Send>;
 
 impl MemoryHost {
     pub fn new() -> MemoryHost {
@@ -246,6 +279,17 @@ impl Host for MemoryHost {
             .get(path)
             .cloned()
             .ok_or_else(|| format!("module \"{path}\" not found"))
+    }
+
+    fn has_extern(&self, name: &str) -> bool {
+        self.externs.contains_key(name)
+    }
+
+    fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
+        match self.externs.get_mut(name) {
+            Some(f) => f(args),
+            None => Err(HostError::Unsupported("extern")),
+        }
     }
 
     fn capabilities(&self) -> Capabilities {

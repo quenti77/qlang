@@ -20,6 +20,8 @@ enum BodyMode {
     Required,
     /// Only for trait method signatures: a body makes it a default implementation.
     Optional,
+    /// `extern fun`: never has a body.
+    Absent,
 }
 
 /// Deepest nesting of expressions, blocks and types the parser accepts.
@@ -307,6 +309,7 @@ impl<'a> Parser<'a> {
             Tok::Fun if matches!(self.toks[self.pos + 1].tok, Tok::Ident(_)) => self
                 .parse_fun(true, BodyMode::Required)
                 .map(|f| Item::Fun(Rc::new(f))),
+            Tok::Extern => self.parse_extern().map(|f| Item::Fun(Rc::new(f))),
             Tok::Struct => self.parse_struct().map(Item::Struct),
             Tok::Impl => self.parse_impl().map(Item::Impl),
             Tok::Trait => self.parse_trait().map(Item::Trait),
@@ -321,6 +324,18 @@ impl<'a> Parser<'a> {
             }
             _ => self.parse_stmt().map(Item::Stmt),
         }
+    }
+
+    /// `extern fun name(params) -> ret`: a function the host environment provides.
+    fn parse_extern(&mut self) -> PResult<FunDecl> {
+        let start = self.expect(&Tok::Extern)?;
+        if !(self.at(&Tok::Fun) && matches!(self.toks[self.pos + 1].tok, Tok::Ident(_))) {
+            let span = self.peek_span();
+            return self.error_at("P052", "`extern` must be followed by `fun name(...)`", span);
+        }
+        let mut f = self.parse_fun(true, BodyMode::Absent)?;
+        f.span = start.to(f.span);
+        Ok(f)
     }
 
     fn parse_import(&mut self) -> PResult<Import> {
@@ -459,8 +474,10 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        let body_mode = body;
         let has_body = match body {
             BodyMode::Required => true,
+            BodyMode::Absent => false,
             // a trait method has a default body unless its signature ends the line: the
             // next token is then `fun` (the next signature) or `end` (no statement can
             // start with a bare `fun` outside the top level, so this is unambiguous).
@@ -487,6 +504,7 @@ impl<'a> Parser<'a> {
             params,
             ret,
             body,
+            external: matches!(body_mode, BodyMode::Absent),
         })
     }
 
@@ -817,7 +835,13 @@ impl<'a> Parser<'a> {
                 self.bump();
                 StmtKind::Continue
             }
-            Tok::Struct | Tok::Impl | Tok::Trait | Tok::Enum | Tok::Import | Tok::Export => {
+            Tok::Struct
+            | Tok::Impl
+            | Tok::Trait
+            | Tok::Enum
+            | Tok::Import
+            | Tok::Export
+            | Tok::Extern => {
                 let t = self.peek();
                 let span = self.peek_span();
                 return self.error_at(

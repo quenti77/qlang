@@ -703,18 +703,117 @@ impl Checker {
             if f.has_self {
                 self.err("T127", "`self` is only available in methods", f.span);
             }
-            let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+            let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
             let ret = f
                 .ret
                 .as_ref()
                 .map(|r| self.resolve_type(r))
                 .unwrap_or(Ty::Unit);
+            if f.external {
+                self.check_extern_signature(f, &params, &ret);
+            }
             let def = &mut self.defs.fns[id];
             def.own_tparams = own.len();
             def.scope_params = own;
             def.params = params;
             def.ret = ret;
             self.tparam_scope.clear();
+        }
+    }
+
+    /// An `extern fun` crosses to the host: only plain data may appear in its signature
+    /// (see [`Self::boundary_problem`]), and it cannot be generic.
+    fn check_extern_signature(&mut self, f: &ast::FunDecl, params: &[Ty], ret: &Ty) {
+        if !f.tparams.is_empty() {
+            self.err("T260", "an `extern fun` cannot be generic", f.span);
+        }
+        for (p, ty) in f.params.iter().zip(params) {
+            if let Some(why) = self.boundary_problem(ty, &mut Vec::new()) {
+                self.err(
+                    "T261",
+                    format!("parameter `{}` of an `extern fun`: {why}", p.name.name),
+                    p.ty.span,
+                );
+            }
+        }
+        // `Result<T, Error>` is how a host failure is reported to the caller
+        let ok = match self.result_payload(ret) {
+            Some(t) => t.clone(),
+            None => ret.clone(),
+        };
+        if ok != Ty::Unit
+            && let Some(why) = self.boundary_problem(&ok, &mut Vec::new())
+        {
+            let span = f.ret.as_ref().map(|r| r.span).unwrap_or(f.span);
+            self.err(
+                "T262",
+                format!("return type of an `extern fun`: {why}"),
+                span,
+            );
+        }
+    }
+
+    /// The `T` of a `Result<T, Error>`.
+    pub(crate) fn result_payload<'a>(&self, ty: &'a Ty) -> Option<&'a Ty> {
+        let Ty::Struct(sid, args) = ty else {
+            return None;
+        };
+        let s = &self.defs.structs[*sid];
+        if s.module != PRELUDE_MOD || s.name != "Result" || args.len() != 2 {
+            return None;
+        }
+        match &args[1] {
+            Ty::Struct(e, a) if a.is_empty() => {
+                let e = &self.defs.structs[*e];
+                (e.module == PRELUDE_MOD && e.name == "Error").then_some(&args[0])
+            }
+            _ => None,
+        }
+    }
+
+    /// Why `ty` cannot cross to the host, if it cannot. Allowed: `int`, `float`, `bool`,
+    /// `string`, `T?`, `array<T>`, `map<K, V>`, enums, `Json`, and structs (not generic, no
+    /// parent, not recursive) whose fields are all allowed.
+    pub(crate) fn boundary_problem(&self, ty: &Ty, path: &mut Vec<StructId>) -> Option<String> {
+        match ty {
+            Ty::Error | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Enum(_) => None,
+            Ty::Nullable(t) | Ty::Array(t) => self.boundary_problem(t, path),
+            Ty::Map(k, v) => self
+                .boundary_problem(k, path)
+                .or_else(|| self.boundary_problem(v, path)),
+            Ty::Struct(sid, args) => {
+                let s = &self.defs.structs[*sid];
+                if s.module == PRELUDE_MOD && s.name == "Json" {
+                    return None;
+                }
+                if !args.is_empty() || !s.tparams.is_empty() {
+                    return Some(format!(
+                        "generic struct `{}` cannot cross to the host",
+                        s.name
+                    ));
+                }
+                if s.parent.is_some() {
+                    return Some(format!(
+                        "struct `{}` has a parent and cannot cross to the host",
+                        s.name
+                    ));
+                }
+                if path.contains(sid) {
+                    return Some(format!("struct `{}` is recursive", s.name));
+                }
+                path.push(*sid);
+                let r = s
+                    .fields
+                    .iter()
+                    .filter(|f| !f.is_static)
+                    .find_map(|f| self.boundary_problem(&f.ty, path));
+                path.pop();
+                r
+            }
+            other => Some(format!(
+                "`{}` cannot cross to the host (only int, float, bool, string, enums, arrays, maps, `Json` and plain structs can)",
+                self.show(other)
+            )),
         }
     }
 

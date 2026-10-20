@@ -145,7 +145,7 @@
         },
         {
           "name": "keyword.control.import.qlang",
-          "match": "\\b(import|export|from|as)\\b"
+          "match": "\\b(import|export|extern|from|as)\\b"
         },
         {
           "name": "keyword.operator.assignment.word.qlang",

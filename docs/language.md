@@ -58,6 +58,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Bornes](#bornes)
     - [Inférence](#inférence)
   - [13. Modules](#13-modules)
+  - [Fonctions fournies par l'environnement (`extern`)](#fonctions-fournies-par-lenvironnement-extern)
   - [14. Bibliothèque standard](#14-bibliothèque-standard)
     - [Dépendance à l'environnement](#dépendance-à-lenvironnement)
     - [Fonctions prédéfinies](#fonctions-prédéfinies)
@@ -1161,6 +1162,43 @@ print(math.add(1, 2))
 - Un module est exécuté une seule fois, avant le fichier qui l'importe, quel que
   soit le nombre d'imports. Les imports circulaires sont refusés.
 - On ne peut pas modifier depuis un autre fichier une variable exportée.
+
+### Fonctions fournies par l'environnement (`extern`)
+
+Le langage ne sait pas tout faire lui-même (base de données, réseau, disque…) : c'est
+l'**environnement d'exécution** qui le fait. `extern fun` déclare une fonction que
+l'environnement fournit, avec sa signature mais sans corps :
+
+```
+extern fun sqlite_open(path: string) -> Result<int, Error>
+extern fun sqlite_close(conn: int) -> Result<bool, Error>
+
+export sqlite_open, sqlite_close
+```
+
+Une `extern fun` s'utilise et s'exporte comme une `fun` ordinaire. Elle appelle
+l'environnement sous le nom où elle est déclarée (`sqlite_open` ici) ; deux modules qui
+déclarent le même nom appellent donc la même fonction.
+
+- **Types admis** dans la signature (arguments et retour) : `int`, `float`, `bool`,
+  `string`, les énumérations, `T?`, `array<T>`, `map<K, V>`, `Json`, et les structures
+  non génériques, sans parent et non récursives dont tous les champs sont admis. Rien
+  d'autre (fonctions, traits, `uuid`, `ulid`, `datetime`, génériques) : `T260`, `T261`
+  ou `T262`.
+- **Les valeurs sont copiées** : l'environnement ne reçoit jamais une référence vers un
+  tableau ou une structure du programme, et ce qu'il renvoie est reconstruit d'après la
+  signature. Une structure devient une table de ses champs, une énumération le nom de sa
+  variante, `Json` une valeur JSON.
+- **Erreurs** : si la signature renvoie `Result<T, Error>`, un échec de l'environnement
+  devient un `Result::err` (comme `http.send` ou `Db.connect`). Sinon il arrête le
+  programme (`R081`).
+- **Disponibilité** : l'environnement décide quels noms il fournit. Appeler une
+  `extern fun` qu'il ne fournit pas est une erreur de compilation (`T263`), comme
+  `read()` sans clavier ; la déclarer sans l'appeler ne coûte rien. Une réponse qui ne
+  correspond pas à la signature est une erreur d'exécution (`R083`).
+- Une `extern fun` n'est autorisée qu'au niveau d'un fichier, pas dans un bloc, et ne
+  peut pas être générique. Le programme `qlang` seul n'en fournit encore aucune : elles
+  servent aux programmes qui embarquent le langage (`Host::call`, voir `host.rs`).
 
 ---
 

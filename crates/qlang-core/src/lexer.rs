@@ -260,9 +260,20 @@ pub fn clean_doc(raw: &str) -> String {
     let mut lines: Vec<&str> = raw.lines().collect();
     let first = lines.first().map(|l| l.trim_start()).unwrap_or("");
     let rest = &lines[lines.len().min(1)..];
-    let indent = rest.iter().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0);
+    let indent = rest
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
     let mut out: Vec<String> = vec![first.trim_end().to_string()];
-    out.extend(rest.iter().map(|l| if l.len() >= indent { l[indent..].trim_end().to_string() } else { l.trim().to_string() }));
+    out.extend(rest.iter().map(|l| {
+        if l.len() >= indent {
+            l[indent..].trim_end().to_string()
+        } else {
+            l.trim().to_string()
+        }
+    }));
     lines.clear();
     while out.first().is_some_and(|l| l.is_empty()) {
         out.remove(0);
@@ -280,7 +291,13 @@ pub fn lex(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Ve
 }
 
 /// Like [`lex`], and the documentation comments are collected in `docs`.
-pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>, docs: &mut Vec<DocComment>) -> Vec<Token> {
+pub fn lex_with_docs(
+    src: &str,
+    file: u32,
+    base: usize,
+    diags: &mut Vec<Diagnostic>,
+    docs: &mut Vec<DocComment>,
+) -> Vec<Token> {
     let b = src.as_bytes();
     let mut toks: Vec<Token> = Vec::new();
     let mut i = 0usize;
@@ -288,7 +305,10 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
 
     macro_rules! push {
         ($t:expr, $s:expr, $e:expr) => {
-            toks.push(Token { tok: $t, span: span($s, $e) })
+            toks.push(Token {
+                tok: $t,
+                span: span($s, $e),
+            })
         };
     }
 
@@ -299,7 +319,13 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
             b'\n' => {
                 let s = i;
                 i += 1;
-                if !matches!(toks.last(), Some(Token { tok: Tok::Newline, .. })) {
+                if !matches!(
+                    toks.last(),
+                    Some(Token {
+                        tok: Tok::Newline,
+                        ..
+                    })
+                ) {
                     push!(Tok::Newline, s, i);
                 }
             }
@@ -307,17 +333,34 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
                 Some(b'(') => match src[i + 3..].find("--)") {
                     Some(p) => i = i + 3 + p + 3,
                     None => {
-                        crate::diag::push_capped(diags, Diagnostic::error("L003", "unterminated block comment (missing `--)`)", span(i, i + 3)));
+                        crate::diag::push_capped(
+                            diags,
+                            Diagnostic::error(
+                                "L003",
+                                "unterminated block comment (missing `--)`)",
+                                span(i, i + 3),
+                            ),
+                        );
                         i = b.len();
                     }
                 },
                 Some(b'"') => match src[i + 3..].find("--\"") {
                     Some(p) => {
-                        docs.push(DocComment { end: base + i + 3 + p + 3, text: clean_doc(&src[i + 3..i + 3 + p]) });
+                        docs.push(DocComment {
+                            end: base + i + 3 + p + 3,
+                            text: clean_doc(&src[i + 3..i + 3 + p]),
+                        });
                         i = i + 3 + p + 3;
                     }
                     None => {
-                        crate::diag::push_capped(diags, Diagnostic::error("L003", "unterminated documentation comment (missing `--\"`)", span(i, i + 3)));
+                        crate::diag::push_capped(
+                            diags,
+                            Diagnostic::error(
+                                "L003",
+                                "unterminated documentation comment (missing `--\"`)",
+                                span(i, i + 3),
+                            ),
+                        );
                         i = b.len();
                     }
                 },
@@ -345,11 +388,26 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
                 }
                 let content_end = i.min(b.len());
                 if closed {
-                    push!(Tok::Str(src[content_start..content_end].to_string()), start, i + 1);
+                    push!(
+                        Tok::Str(src[content_start..content_end].to_string()),
+                        start,
+                        i + 1
+                    );
                     i += 1;
                 } else {
-                    crate::diag::push_capped(diags, Diagnostic::error("L002", "unterminated string (missing closing `\"`)", span(start, start + 1)));
-                    push!(Tok::Str(src[content_start..content_end].to_string()), start, content_end);
+                    crate::diag::push_capped(
+                        diags,
+                        Diagnostic::error(
+                            "L002",
+                            "unterminated string (missing closing `\"`)",
+                            span(start, start + 1),
+                        ),
+                    );
+                    push!(
+                        Tok::Str(src[content_start..content_end].to_string()),
+                        start,
+                        content_end
+                    );
                     i = b.len();
                 }
             }
@@ -360,7 +418,9 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
                 }
                 let word = &src[start..i];
                 // `div=` and `mod=` are compound assignments (but `div ==` is not)
-                let compound = matches!(word, "div" | "mod") && b.get(i) == Some(&b'=') && b.get(i + 1) != Some(&b'=');
+                let compound = matches!(word, "div" | "mod")
+                    && b.get(i) == Some(&b'=')
+                    && b.get(i + 1) != Some(&b'=');
                 if compound {
                     i += 1;
                 }
@@ -434,14 +494,20 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
                         // one full character, possibly multi-byte
                         let ch = src[i..].chars().next().unwrap();
                         let msg = match ch {
-                            '!' => "unexpected `!` (use `not` for negation, `!=` for inequality)".to_string(),
+                            '!' => "unexpected `!` (use `not` for negation, `!=` for inequality)"
+                                .to_string(),
                             '&' => "unexpected `&` (use `and`)".to_string(),
                             '|' => "unexpected `|` (use `or`)".to_string(),
-                            ';' => "unexpected `;` (statements end at the end of the line)".to_string(),
+                            ';' => {
+                                "unexpected `;` (statements end at the end of the line)".to_string()
+                            }
                             '\'' => "unexpected `'` (strings use double quotes)".to_string(),
                             c => format!("unexpected character `{c}`"),
                         };
-                        crate::diag::push_capped(diags, Diagnostic::error("L001", msg, span(i, i + ch.len_utf8())));
+                        crate::diag::push_capped(
+                            diags,
+                            Diagnostic::error("L001", msg, span(i, i + ch.len_utf8())),
+                        );
                         i += ch.len_utf8();
                     }
                 }
@@ -455,7 +521,14 @@ pub fn lex_with_docs(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnost
     toks
 }
 
-fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<Token>, diags: &mut Vec<Diagnostic>) -> usize {
+fn lex_number(
+    src: &str,
+    start: usize,
+    file: u32,
+    base: usize,
+    toks: &mut Vec<Token>,
+    diags: &mut Vec<Diagnostic>,
+) -> usize {
     let b = src.as_bytes();
     let span = |s: usize, e: usize| Span::new(file, base + s, base + e);
     let mut i = start;
@@ -485,19 +558,38 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
             eat_digits(&mut i, |c| c == b'0' || c == b'1')
         };
         if digits.is_empty() {
-            crate::diag::push_capped(diags, Diagnostic::error(
-                "L004",
-                if hex { "expected hexadecimal digits after `0x`" } else { "expected binary digits (0 or 1) after `0b`" },
-                span(start, i),
-            ));
-            toks.push(Token { tok: Tok::Int(0), span: span(start, i) });
+            crate::diag::push_capped(
+                diags,
+                Diagnostic::error(
+                    "L004",
+                    if hex {
+                        "expected hexadecimal digits after `0x`"
+                    } else {
+                        "expected binary digits (0 or 1) after `0b`"
+                    },
+                    span(start, i),
+                ),
+            );
+            toks.push(Token {
+                tok: Tok::Int(0),
+                span: span(start, i),
+            });
             return i;
         }
         match i64::from_str_radix(&digits, if hex { 16 } else { 2 }) {
-            Ok(v) => toks.push(Token { tok: Tok::Int(v), span: span(start, i) }),
+            Ok(v) => toks.push(Token {
+                tok: Tok::Int(v),
+                span: span(start, i),
+            }),
             Err(_) => {
-                crate::diag::push_capped(diags, Diagnostic::error("L005", "integer literal is too large", span(start, i)));
-                toks.push(Token { tok: Tok::Int(0), span: span(start, i) });
+                crate::diag::push_capped(
+                    diags,
+                    Diagnostic::error("L005", "integer literal is too large", span(start, i)),
+                );
+                toks.push(Token {
+                    tok: Tok::Int(0),
+                    span: span(start, i),
+                });
             }
         }
         return i;
@@ -529,18 +621,36 @@ fn lex_number(src: &str, start: usize, file: u32, base: usize, toks: &mut Vec<To
     }
     if is_float {
         match text.parse::<f64>() {
-            Ok(v) if v.is_finite() => toks.push(Token { tok: Tok::Float(v), span: span(start, i) }),
+            Ok(v) if v.is_finite() => toks.push(Token {
+                tok: Tok::Float(v),
+                span: span(start, i),
+            }),
             _ => {
-                crate::diag::push_capped(diags, Diagnostic::error("L005", "float literal is out of range", span(start, i)));
-                toks.push(Token { tok: Tok::Float(0.0), span: span(start, i) });
+                crate::diag::push_capped(
+                    diags,
+                    Diagnostic::error("L005", "float literal is out of range", span(start, i)),
+                );
+                toks.push(Token {
+                    tok: Tok::Float(0.0),
+                    span: span(start, i),
+                });
             }
         }
     } else {
         match text.parse::<i64>() {
-            Ok(v) => toks.push(Token { tok: Tok::Int(v), span: span(start, i) }),
+            Ok(v) => toks.push(Token {
+                tok: Tok::Int(v),
+                span: span(start, i),
+            }),
             Err(_) => {
-                crate::diag::push_capped(diags, Diagnostic::error("L005", "integer literal is too large", span(start, i)));
-                toks.push(Token { tok: Tok::Int(0), span: span(start, i) });
+                crate::diag::push_capped(
+                    diags,
+                    Diagnostic::error("L005", "integer literal is too large", span(start, i)),
+                );
+                toks.push(Token {
+                    tok: Tok::Int(0),
+                    span: span(start, i),
+                });
             }
         }
     }

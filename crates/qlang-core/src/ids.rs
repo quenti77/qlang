@@ -11,7 +11,14 @@ pub const ULID_RANDOM_MASK: u128 = (1 << 80) - 1;
 /// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, in lower case.
 pub fn format_uuid(v: u128) -> String {
     let h = format!("{v:032x}");
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    )
 }
 
 pub fn parse_uuid(text: &str) -> Option<u128> {
@@ -39,7 +46,10 @@ pub fn uuid_v4(random: u128) -> u128 {
 
 /// A uuid, version 7: the time in milliseconds (48 bits) and 74 random bits.
 pub fn uuid_v7(time_ms: u128, random: u128) -> u128 {
-    with_version_and_variant((random & ((1 << 80) - 1)) | ((time_ms & TIME_MASK) << 80), 7)
+    with_version_and_variant(
+        (random & ((1 << 80) - 1)) | ((time_ms & TIME_MASK) << 80),
+        7,
+    )
 }
 
 fn with_version_and_variant(bits: u128, version: u128) -> u128 {
@@ -68,7 +78,9 @@ pub fn parse_ulid(text: &str) -> Option<u128> {
     }
     let mut v: u128 = 0;
     for (i, c) in b.iter().enumerate() {
-        let d = CROCKFORD.iter().position(|k| *k == c.to_ascii_uppercase())? as u128;
+        let d = CROCKFORD
+            .iter()
+            .position(|k| *k == c.to_ascii_uppercase())? as u128;
         // 26 * 5 = 130 bits: the first character only has 3 usable bits
         if i == 0 && d > 7 {
             return None;
@@ -119,7 +131,10 @@ mod tests {
     #[test]
     fn ulid_known_value() {
         // the example of the ulid specification
-        assert_eq!(format_ulid(make_ulid(1_469_918_176_385, 0)), "01ARYZ6S410000000000000000");
+        assert_eq!(
+            format_ulid(make_ulid(1_469_918_176_385, 0)),
+            "01ARYZ6S410000000000000000"
+        );
         let v = parse_ulid("01ARYZ6S41TSV4RRFFQ69G5FAV").unwrap();
         assert_eq!(ulid_time(v), 1_469_918_176_385);
         assert_eq!(format_ulid(v), "01ARYZ6S41TSV4RRFFQ69G5FAV");
@@ -130,6 +145,11 @@ mod tests {
         assert_eq!(parse_ulid("01ARYZ6S41TSV4RRFFQ69G5FA"), None);
         assert_eq!(parse_ulid("81ARYZ6S41TSV4RRFFQ69G5FAV"), None);
         assert_eq!(parse_ulid("01ARYZ6S41TSV4RRFFQ69G5FAU"), None);
-        assert_eq!(parse_ulid("01arYZ6S41TSV4RRFFQ69G5FAV").map(format_ulid).as_deref(), Some("01ARYZ6S41TSV4RRFFQ69G5FAV"));
+        assert_eq!(
+            parse_ulid("01arYZ6S41TSV4RRFFQ69G5FAV")
+                .map(format_ulid)
+                .as_deref(),
+            Some("01ARYZ6S41TSV4RRFFQ69G5FAV")
+        );
     }
 }

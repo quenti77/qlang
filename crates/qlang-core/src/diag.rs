@@ -127,7 +127,10 @@ impl Diagnostic {
         }
         for n in &self.notes {
             match n.span.map(|s| map.locate(s)) {
-                Some(l) => out.push_str(&format!("  note: {} ({}:{}:{})\n", n.message, l.file, l.line, l.col)),
+                Some(l) => out.push_str(&format!(
+                    "  note: {} ({}:{}:{})\n",
+                    n.message, l.file, l.line, l.col
+                )),
                 None => out.push_str(&format!("  note: {}\n", n.message)),
             }
         }

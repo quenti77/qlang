@@ -9,7 +9,10 @@ struct Outcome {
 }
 
 fn run_files(files: &[(&str, &str)], input: Option<&[&str]>, limits: Limits) -> Outcome {
-    let files: Vec<(String, String)> = files.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+    let files: Vec<(String, String)> = files
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
     let input: Option<Vec<String>> = input.map(|i| i.iter().map(|s| s.to_string()).collect());
     std::thread::Builder::new()
         .stack_size(512 << 20)
@@ -25,10 +28,18 @@ fn run_files(files: &[(&str, &str)], input: Option<&[&str]>, limits: Limits) -> 
             let main = files[0].1.clone();
             let prog = match compile(&files[0].0, &main, &mut host) {
                 Ok(p) => p,
-                Err(e) => return Outcome { output: String::new(), error: Some(format!("COMPILE: {}", e.render())) },
+                Err(e) => {
+                    return Outcome {
+                        output: String::new(),
+                        error: Some(format!("COMPILE: {}", e.render())),
+                    };
+                }
             };
             let r = prog.run(&mut host, limits);
-            Outcome { output: host.output, error: r.error.map(|d| format!("{}: {}", d.code, d.message)) }
+            Outcome {
+                output: host.output,
+                error: r.error.map(|d| format!("{}: {}", d.code, d.message)),
+            }
         })
         .unwrap()
         .join()
@@ -49,17 +60,36 @@ fn out(src: &str) -> String {
 
 fn err(src: &str) -> String {
     let o = run(src);
-    o.error.unwrap_or_else(|| panic!("expected an error, output was:\n{}", o.output))
+    o.error
+        .unwrap_or_else(|| panic!("expected an error, output was:\n{}", o.output))
 }
 
 #[test]
 fn arithmetic() {
-    assert_eq!(out("print(7 / 2)\nprint(7 div 2)\nprint(7 mod 2)\nprint(-7 div 2)\nprint(-7 mod 2)"), "3.5\n3\n1\n-3\n-1\n");
-    assert_eq!(out("print(2 ** 3 ** 2)\nprint(-2 ** 2)\nprint(2.0 ** 0.5 > 1.4)"), "512\n-4\ntrue\n");
-    assert_eq!(out("print(1 + 2 * 3)\nprint((1 + 2) * 3)\nprint(10 - 4 - 3)"), "7\n9\n3\n");
-    assert_eq!(out("print(1 + 2.5)\nprint(3 * 1.5)\nprint(10 / 4)\nprint(4 / 2)"), "3.5\n4.5\n2.5\n2.0\n");
-    assert_eq!(out("print(5.5 mod 2)\nprint(1_000 + 0xFF + 0b11)"), "1.5\n1258\n");
-    assert_eq!(out("let x = 5\nx += 2\nx *= 3\nx -= 1\nprint(x)\nlet y = 5.0\ny /= 4\nprint(y)"), "20\n1.25\n");
+    assert_eq!(
+        out("print(7 / 2)\nprint(7 div 2)\nprint(7 mod 2)\nprint(-7 div 2)\nprint(-7 mod 2)"),
+        "3.5\n3\n1\n-3\n-1\n"
+    );
+    assert_eq!(
+        out("print(2 ** 3 ** 2)\nprint(-2 ** 2)\nprint(2.0 ** 0.5 > 1.4)"),
+        "512\n-4\ntrue\n"
+    );
+    assert_eq!(
+        out("print(1 + 2 * 3)\nprint((1 + 2) * 3)\nprint(10 - 4 - 3)"),
+        "7\n9\n3\n"
+    );
+    assert_eq!(
+        out("print(1 + 2.5)\nprint(3 * 1.5)\nprint(10 / 4)\nprint(4 / 2)"),
+        "3.5\n4.5\n2.5\n2.0\n"
+    );
+    assert_eq!(
+        out("print(5.5 mod 2)\nprint(1_000 + 0xFF + 0b11)"),
+        "1.5\n1258\n"
+    );
+    assert_eq!(
+        out("let x = 5\nx += 2\nx *= 3\nx -= 1\nprint(x)\nlet y = 5.0\ny /= 4\nprint(y)"),
+        "20\n1.25\n"
+    );
 }
 
 #[test]
@@ -74,39 +104,97 @@ fn arithmetic_errors() {
 
 #[test]
 fn comparisons_and_logic() {
-    assert_eq!(out("print(1 < 2)\nprint(2 <= 2)\nprint(1 == 1.0)\nprint(\"a\" < \"b\")\nprint(1 != 2)"), "true\ntrue\ntrue\ntrue\ntrue\n");
-    assert_eq!(out("print(true and false)\nprint(true or false)\nprint(not true)"), "false\ntrue\nfalse\n");
+    assert_eq!(
+        out("print(1 < 2)\nprint(2 <= 2)\nprint(1 == 1.0)\nprint(\"a\" < \"b\")\nprint(1 != 2)"),
+        "true\ntrue\ntrue\ntrue\ntrue\n"
+    );
+    assert_eq!(
+        out("print(true and false)\nprint(true or false)\nprint(not true)"),
+        "false\ntrue\nfalse\n"
+    );
     // short-circuit: the right side must not run
-    assert_eq!(out("fun boom() -> bool\npanic(\"no\")\nend\nprint(false and boom())\nprint(true or boom())"), "false\ntrue\n");
+    assert_eq!(
+        out(
+            "fun boom() -> bool\npanic(\"no\")\nend\nprint(false and boom())\nprint(true or boom())"
+        ),
+        "false\ntrue\n"
+    );
 }
 
 #[test]
 fn strings() {
-    assert_eq!(out("let n = 3\nprint(\"n = {n}, next = {n + 1}\")"), "n = 3, next = 4\n");
+    assert_eq!(
+        out("let n = 3\nprint(\"n = {n}, next = {n + 1}\")"),
+        "n = 3, next = 4\n"
+    );
     assert_eq!(out("print(\"a\\tb\\\\c\\\"d\\{e\\}\")"), "a\tb\\c\"d{e}\n");
-    assert_eq!(out("let s = \"Hello\"\nprint(s.upper())\nprint(s.len())\nprint(s[1])\nprint(s.substring(1, 3))"), "HELLO\n5\ne\nel\n");
-    assert_eq!(out("print(\"a,b,c\".split(\",\"))\nprint(\"x\".repeat(3))\nprint(\" hi \".trim() + \"!\")"), "[\"a\", \"b\", \"c\"]\nxxx\nhi!\n");
-    assert_eq!(out("print(\"héllo\".len())\nprint(\"héllo\".index_of(\"l\"))"), "5\n2\n");
-    assert_eq!(out("print(\"ab\\ncd\")\nprint(\"line1\nline2\")"), "ab\ncd\nline1\nline2\n");
-    assert_eq!(out("for c in \"abc\" do\nwrite(c)\nwrite(\"-\")\nend\nprint(\"\")"), "a-b-c-\n");
+    assert_eq!(
+        out(
+            "let s = \"Hello\"\nprint(s.upper())\nprint(s.len())\nprint(s[1])\nprint(s.substring(1, 3))"
+        ),
+        "HELLO\n5\ne\nel\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"a,b,c\".split(\",\"))\nprint(\"x\".repeat(3))\nprint(\" hi \".trim() + \"!\")"
+        ),
+        "[\"a\", \"b\", \"c\"]\nxxx\nhi!\n"
+    );
+    assert_eq!(
+        out("print(\"héllo\".len())\nprint(\"héllo\".index_of(\"l\"))"),
+        "5\n2\n"
+    );
+    assert_eq!(
+        out("print(\"ab\\ncd\")\nprint(\"line1\nline2\")"),
+        "ab\ncd\nline1\nline2\n"
+    );
+    assert_eq!(
+        out("for c in \"abc\" do\nwrite(c)\nwrite(\"-\")\nend\nprint(\"\")"),
+        "a-b-c-\n"
+    );
 }
 
 #[test]
 fn variables_and_const() {
     assert_eq!(out("const t = [0]\nt[0] = 2\nprint(t)"), "[2]\n");
-    assert_eq!(out("const t = [0]\nlet u = t\nu[0] = 9\nprint(t[0])"), "9\n");
+    assert_eq!(
+        out("const t = [0]\nlet u = t\nu[0] = 9\nprint(t[0])"),
+        "9\n"
+    );
     assert!(err("const t = 1\nt = 2").starts_with("COMPILE"));
 }
 
 #[test]
 fn control_flow() {
     assert_eq!(out("for i in 0..3 do\nprint(i)\nend"), "0\n1\n2\n");
-    assert_eq!(out("for i in 0..=3 do\nwrite(i)\nend\nprint(\"\")"), "0123\n");
-    assert_eq!(out("for i in 10..0 step -3 do\nwrite(\"{i} \")\nend\nprint(\"\")"), "10 7 4 1 \n");
-    assert_eq!(out("for i in 5..1 do\nprint(i)\nend\nprint(\"none\")"), "none\n");
-    assert_eq!(out("let i = 0\nwhile true do\ni += 1\nif i == 2 then continue end\nif i > 4 then break end\nwrite(i)\nend\nprint(\"\")"), "134\n");
-    assert_eq!(out("let x = 5\nif x < 3 then print(\"a\") elseif x < 10 then print(\"b\") else print(\"c\") end"), "b\n");
-    assert_eq!(out("let v = if 1 > 2 then \"x\" else \"y\" end\nprint(v)"), "y\n");
+    assert_eq!(
+        out("for i in 0..=3 do\nwrite(i)\nend\nprint(\"\")"),
+        "0123\n"
+    );
+    assert_eq!(
+        out("for i in 10..0 step -3 do\nwrite(\"{i} \")\nend\nprint(\"\")"),
+        "10 7 4 1 \n"
+    );
+    assert_eq!(
+        out("for i in 5..1 do\nprint(i)\nend\nprint(\"none\")"),
+        "none\n"
+    );
+    assert_eq!(
+        out(
+            "let i = 0\nwhile true do\ni += 1\nif i == 2 then continue end\nif i > 4 then break end\nwrite(i)\nend\nprint(\"\")"
+        ),
+        "134\n"
+    );
+    assert_eq!(
+        out(
+            "let x = 5\nif x < 3 then print(\"a\") elseif x < 10 then print(\"b\") else print(\"c\") end"
+        ),
+        "b\n"
+    );
+    assert_eq!(
+        out("let v = if 1 > 2 then \"x\" else \"y\" end\nprint(v)"),
+        "y\n"
+    );
     assert_eq!(out("for x in [10, 20] do\nprint(x)\nend"), "10\n20\n");
     assert!(err("for i in 0..3 step 0 do\nend").starts_with("R031"));
 }
@@ -114,53 +202,137 @@ fn control_flow() {
 #[test]
 fn match_expressions() {
     let src = "fun f(n: int) -> string\nmatch n\ncase 0 then \"zero\"\ncase 1..=9 then \"small\"\ncase 10..20 then \"teen\"\ncase x if x < 0 then \"neg\"\nelse \"big\"\nend\nend\n";
-    assert_eq!(out(&format!("{src}print(f(0))\nprint(f(5))\nprint(f(10))\nprint(f(20))\nprint(f(-4))")), "zero\nsmall\nteen\nbig\nneg\n");
     assert_eq!(
-        out("enum C\nA\nB\nend\nlet c = C.B\nprint(match c\ncase C.A then 1\ncase C.B then 2\nend)\nprint(C.A == C.A)\nprint(C.A != C.B)\nprint(c)"),
+        out(&format!(
+            "{src}print(f(0))\nprint(f(5))\nprint(f(10))\nprint(f(20))\nprint(f(-4))"
+        )),
+        "zero\nsmall\nteen\nbig\nneg\n"
+    );
+    assert_eq!(
+        out(
+            "enum C\nA\nB\nend\nlet c = C.B\nprint(match c\ncase C.A then 1\ncase C.B then 2\nend)\nprint(C.A == C.A)\nprint(C.A != C.B)\nprint(c)"
+        ),
         "2\ntrue\ntrue\nC.B\n"
     );
-    assert_eq!(out("let s: string? = none\nprint(match s\ncase none then \"empty\"\ncase v then v.upper()\nend)"), "empty\n");
-    assert_eq!(out("print(match \"hi\"\ncase \"hi\" then 1\ncase \"yo\" then 2\nelse 3\nend)"), "1\n");
+    assert_eq!(
+        out(
+            "let s: string? = none\nprint(match s\ncase none then \"empty\"\ncase v then v.upper()\nend)"
+        ),
+        "empty\n"
+    );
+    assert_eq!(
+        out("print(match \"hi\"\ncase \"hi\" then 1\ncase \"yo\" then 2\nelse 3\nend)"),
+        "1\n"
+    );
 }
 
 #[test]
 fn nullables() {
-    assert_eq!(out("let x: int? = none\nprint(x)\nx = 4\nprint(x)\nprint(x == 4)\nprint(x == none)"), "none\n4\ntrue\nfalse\n");
-    assert_eq!(out("fun f(x: int?) -> int\nif x == none then\nreturn -1\nend\nx * 2\nend\nprint(f(none))\nprint(f(4))"), "-1\n8\n");
-    assert_eq!(out("let a: int? = 3\nif a != none and a > 2 then print(\"big\") end"), "big\n");
-    assert_eq!(out("print(int.parse(\"12\"))\nprint(int.parse(\"x\"))\nprint(float.parse(\"2.5\"))"), "12\nnone\n2.5\n");
-    assert_eq!(out("let v = [1, 2, 3]\nprint(v.pop())\nlet e: array<int> = []\nprint(e.pop())"), "3\nnone\n");
+    assert_eq!(
+        out("let x: int? = none\nprint(x)\nx = 4\nprint(x)\nprint(x == 4)\nprint(x == none)"),
+        "none\n4\ntrue\nfalse\n"
+    );
+    assert_eq!(
+        out(
+            "fun f(x: int?) -> int\nif x == none then\nreturn -1\nend\nx * 2\nend\nprint(f(none))\nprint(f(4))"
+        ),
+        "-1\n8\n"
+    );
+    assert_eq!(
+        out("let a: int? = 3\nif a != none and a > 2 then print(\"big\") end"),
+        "big\n"
+    );
+    assert_eq!(
+        out("print(int.parse(\"12\"))\nprint(int.parse(\"x\"))\nprint(float.parse(\"2.5\"))"),
+        "12\nnone\n2.5\n"
+    );
+    assert_eq!(
+        out("let v = [1, 2, 3]\nprint(v.pop())\nlet e: array<int> = []\nprint(e.pop())"),
+        "3\nnone\n"
+    );
 }
 
 #[test]
 fn functions_and_closures() {
-    assert_eq!(out("fun fib(n: int) -> int\nif n < 2 then return n end\nfib(n - 1) + fib(n - 2)\nend\nprint(fib(15))"), "610\n");
     assert_eq!(
-        out("fun make() -> fun() -> int\nlet n = 0\nfun() -> int\nn += 1\nn\nend\nend\nlet a = make()\nlet b = make()\na()\na()\nprint(a())\nprint(b())"),
+        out(
+            "fun fib(n: int) -> int\nif n < 2 then return n end\nfib(n - 1) + fib(n - 2)\nend\nprint(fib(15))"
+        ),
+        "610\n"
+    );
+    assert_eq!(
+        out(
+            "fun make() -> fun() -> int\nlet n = 0\nfun() -> int\nn += 1\nn\nend\nend\nlet a = make()\nlet b = make()\na()\na()\nprint(a())\nprint(b())"
+        ),
         "3\n1\n"
     );
-    assert_eq!(out("let fs: array<fun() -> int> = []\nfor i in 0..3 do\nfs[] = fun() -> int\ni * 10\nend\nend\nfor f in fs do\nwrite(\"{f()} \")\nend\nprint(\"\")"), "0 10 20 \n");
-    assert_eq!(out("fun twice(f: fun(int) -> int, x: int) -> int\nf(f(x))\nend\nprint(twice(fun(n: int) -> int\nn + 3\nend, 1))"), "7\n");
+    assert_eq!(
+        out(
+            "let fs: array<fun() -> int> = []\nfor i in 0..3 do\nfs[] = fun() -> int\ni * 10\nend\nend\nfor f in fs do\nwrite(\"{f()} \")\nend\nprint(\"\")"
+        ),
+        "0 10 20 \n"
+    );
+    assert_eq!(
+        out(
+            "fun twice(f: fun(int) -> int, x: int) -> int\nf(f(x))\nend\nprint(twice(fun(n: int) -> int\nn + 3\nend, 1))"
+        ),
+        "7\n"
+    );
     assert_eq!(out("fun noop()\nend\nnoop()\nprint(\"ok\")"), "ok\n");
 }
 
 #[test]
 fn named_arguments() {
-    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(name: \"ana\", greeting: \"hi\"))"), "hi ana\n");
-    assert_eq!(out("fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(\"hi\", name: \"ana\"))"), "hi ana\n");
-    assert_eq!(out("fun f(a: int, b: int) -> int\na - b\nend\nprint(f(a: 10, b: 3))"), "7\n");
-    // order of evaluation follows what's written, not the parameter order
-    assert_eq!(out("fun f(a: int, b: int) -> int\na * 10 + b\nend\nfun side(n: int, tag: string) -> int\nwrite(tag)\nn\nend\nprint(f(b: side(2, \"B\"), a: side(1, \"A\")))"), "BA12\n");
     assert_eq!(
-        out("struct P\npublic x: int\npublic y: int\nend\nimpl P\npublic fun new(x: int, y: int) -> P\nP { x, y }\nend\npublic fun show(self) -> string\n\"{self.x},{self.y}\"\nend\nend\nlet p = P.new(y: 2, x: 1)\nprint(p.show())"),
+        out(
+            "fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(name: \"ana\", greeting: \"hi\"))"
+        ),
+        "hi ana\n"
+    );
+    assert_eq!(
+        out(
+            "fun greet(greeting: string, name: string) -> string\ngreeting + \" \" + name\nend\nprint(greet(\"hi\", name: \"ana\"))"
+        ),
+        "hi ana\n"
+    );
+    assert_eq!(
+        out("fun f(a: int, b: int) -> int\na - b\nend\nprint(f(a: 10, b: 3))"),
+        "7\n"
+    );
+    // order of evaluation follows what's written, not the parameter order
+    assert_eq!(
+        out(
+            "fun f(a: int, b: int) -> int\na * 10 + b\nend\nfun side(n: int, tag: string) -> int\nwrite(tag)\nn\nend\nprint(f(b: side(2, \"B\"), a: side(1, \"A\")))"
+        ),
+        "BA12\n"
+    );
+    assert_eq!(
+        out(
+            "struct P\npublic x: int\npublic y: int\nend\nimpl P\npublic fun new(x: int, y: int) -> P\nP { x, y }\nend\npublic fun show(self) -> string\n\"{self.x},{self.y}\"\nend\nend\nlet p = P.new(y: 2, x: 1)\nprint(p.show())"
+        ),
         "1,2\n"
     );
     for (src, needle) in [
-        ("fun f(a: int, b: int)\nend\nf(a: 1, c: 2)", "no parameter named `c`"),
-        ("fun f(a: int, b: int)\nend\nf(a: 1, a: 2)", "more than once"),
-        ("fun f(a: int, b: int)\nend\nf(a: 1)", "missing the argument"),
-        ("fun f(a: int, b: int)\nend\nf(b: 2, 1)", "before named arguments"),
-        ("let f: fun(int) -> int = fun(n: int) -> int\nn\nend\nprint(f(n: 1))", "does not accept named arguments"),
+        (
+            "fun f(a: int, b: int)\nend\nf(a: 1, c: 2)",
+            "no parameter named `c`",
+        ),
+        (
+            "fun f(a: int, b: int)\nend\nf(a: 1, a: 2)",
+            "more than once",
+        ),
+        (
+            "fun f(a: int, b: int)\nend\nf(a: 1)",
+            "missing the argument",
+        ),
+        (
+            "fun f(a: int, b: int)\nend\nf(b: 2, 1)",
+            "before named arguments",
+        ),
+        (
+            "let f: fun(int) -> int = fun(n: int) -> int\nn\nend\nprint(f(n: 1))",
+            "does not accept named arguments",
+        ),
         ("print(x: 1)", "does not accept named arguments"),
     ] {
         let e = err(src);
@@ -170,90 +342,214 @@ fn named_arguments() {
 
 #[test]
 fn generics() {
-    assert_eq!(out("fun id<T>(x: T) -> T\nx\nend\nprint(id(5))\nprint(id(\"s\"))\nprint(id<float>(1.5))"), "5\ns\n1.5\n");
-    assert_eq!(out("fun big<T: Ord>(a: T, b: T) -> T\nif a > b then a else b end\nend\nprint(big(2, 7))\nprint(big(2.5, 1.5))"), "7\n2.5\n");
     assert_eq!(
-        out("struct Box<T>\npublic v: T\nend\nimpl<T> Box<T>\npublic fun new(v: T) -> Box<T>\nBox { v }\nend\npublic fun get(self) -> T\nself.v\nend\nend\nlet b = Box.new(5)\nprint(b.get() + 1)\nlet c = Box<string>.new(\"x\")\nprint(c.get() + \"y\")"),
+        out("fun id<T>(x: T) -> T\nx\nend\nprint(id(5))\nprint(id(\"s\"))\nprint(id<float>(1.5))"),
+        "5\ns\n1.5\n"
+    );
+    assert_eq!(
+        out(
+            "fun big<T: Ord>(a: T, b: T) -> T\nif a > b then a else b end\nend\nprint(big(2, 7))\nprint(big(2.5, 1.5))"
+        ),
+        "7\n2.5\n"
+    );
+    assert_eq!(
+        out(
+            "struct Box<T>\npublic v: T\nend\nimpl<T> Box<T>\npublic fun new(v: T) -> Box<T>\nBox { v }\nend\npublic fun get(self) -> T\nself.v\nend\nend\nlet b = Box.new(5)\nprint(b.get() + 1)\nlet c = Box<string>.new(\"x\")\nprint(c.get() + \"y\")"
+        ),
         "6\nxy\n"
     );
-    assert_eq!(out("fun sum<T: Add>(a: T, b: T) -> T\na + b\nend\nprint(sum(1, 2))\nprint(sum(\"a\", \"b\"))\nprint(sum(1.5, 2.5))"), "3\nab\n4.0\n");
+    assert_eq!(
+        out(
+            "fun sum<T: Add>(a: T, b: T) -> T\na + b\nend\nprint(sum(1, 2))\nprint(sum(\"a\", \"b\"))\nprint(sum(1.5, 2.5))"
+        ),
+        "3\nab\n4.0\n"
+    );
 }
 
 #[test]
 fn arrays() {
-    assert_eq!(out("let a = [1, 2]\na[] = 3\na.push(4)\nprint(a)\nprint(a.len())\na[0] += 10\nprint(a[0])"), "[1, 2, 3, 4]\n4\n11\n");
-    assert_eq!(out("let a = [3, 1, 2]\na.reverse()\nprint(a)\nprint(a.contains(1))\nprint(a.index_of(9))\nprint(a.remove(0))\na.insert(0, 7)\nprint(a)"), "[2, 1, 3]\ntrue\nnone\n2\n[7, 1, 3]\n");
-    assert_eq!(out("let a = [[1, 2], [3]]\nprint(a[0][1])\nprint(a)"), "2\n[[1, 2], [3]]\n");
-    assert_eq!(out("let names = [\"b\", \"a\"]\nprint(names.join(\"+\"))\nprint([1, 2] == [1, 2])"), "b+a\ntrue\n");
+    assert_eq!(
+        out(
+            "let a = [1, 2]\na[] = 3\na.push(4)\nprint(a)\nprint(a.len())\na[0] += 10\nprint(a[0])"
+        ),
+        "[1, 2, 3, 4]\n4\n11\n"
+    );
+    assert_eq!(
+        out(
+            "let a = [3, 1, 2]\na.reverse()\nprint(a)\nprint(a.contains(1))\nprint(a.index_of(9))\nprint(a.remove(0))\na.insert(0, 7)\nprint(a)"
+        ),
+        "[2, 1, 3]\ntrue\nnone\n2\n[7, 1, 3]\n"
+    );
+    assert_eq!(
+        out("let a = [[1, 2], [3]]\nprint(a[0][1])\nprint(a)"),
+        "2\n[[1, 2], [3]]\n"
+    );
+    assert_eq!(
+        out("let names = [\"b\", \"a\"]\nprint(names.join(\"+\"))\nprint([1, 2] == [1, 2])"),
+        "b+a\ntrue\n"
+    );
     assert!(err("let a = [1]\nprint(a[5])").starts_with("R020"));
     assert!(err("let a = [1]\nprint(a[-1])").starts_with("R020"));
-    assert_eq!(out("let a: array<float> = []\na[] = 1.5\nprint(a)"), "[1.5]\n");
+    assert_eq!(
+        out("let a: array<float> = []\na[] = 1.5\nprint(a)"),
+        "[1.5]\n"
+    );
 }
 
 #[test]
 fn structs_and_methods() {
     let src = "struct P\npublic x: int\npublic y: int = 7\nend\nimpl P\npublic fun new(x: int) -> P\nP { x }\nend\npublic fun sum(self) -> int\nself.x + self.y\nend\npublic fun bump(self)\nself.x += 1\nend\nend\n";
-    assert_eq!(out(&format!("{src}let p = P.new(1)\np.bump()\nprint(p.sum())\nlet q = p\nq.bump()\nprint(p.x)\nprint(p)")), "9\n3\nP { x: 3, y: 7 }\n");
-    assert_eq!(out(&format!("{src}let a = P {{ x: 1 }}\nlet b = P {{ ..a, y: 0 }}\nb.x = 50\nprint(a.x)\nprint(b)")), "1\nP { x: 50, y: 0 }\n");
-    assert_eq!(out(&format!("{src}let p = P {{ x: 1, y: 2 }}\nlet x = 9\nlet r = P {{ x, y: 3 }}\nprint(r.x)")), "9\n");
-    assert_eq!(out("struct C\npublic cb: fun(int) -> int\nend\nlet c = C { cb: fun(n: int) -> int\nn * 2\nend }\nprint(c.cb(4))"), "8\n");
+    assert_eq!(
+        out(&format!(
+            "{src}let p = P.new(1)\np.bump()\nprint(p.sum())\nlet q = p\nq.bump()\nprint(p.x)\nprint(p)"
+        )),
+        "9\n3\nP { x: 3, y: 7 }\n"
+    );
+    assert_eq!(
+        out(&format!(
+            "{src}let a = P {{ x: 1 }}\nlet b = P {{ ..a, y: 0 }}\nb.x = 50\nprint(a.x)\nprint(b)"
+        )),
+        "1\nP { x: 50, y: 0 }\n"
+    );
+    assert_eq!(
+        out(&format!(
+            "{src}let p = P {{ x: 1, y: 2 }}\nlet x = 9\nlet r = P {{ x, y: 3 }}\nprint(r.x)"
+        )),
+        "9\n"
+    );
+    assert_eq!(
+        out(
+            "struct C\npublic cb: fun(int) -> int\nend\nlet c = C { cb: fun(n: int) -> int\nn * 2\nend }\nprint(c.cb(4))"
+        ),
+        "8\n"
+    );
 }
 
 #[test]
 fn statics_and_privacy() {
     let src = "struct K\nprivate static n: int = 0\npublic id: int\nend\nimpl K\npublic fun new() -> K\nK.n += 1\nK { id: K.n }\nend\npublic fun count() -> int\nK.n\nend\nend\n";
-    assert_eq!(out(&format!("{src}let a = K.new()\nlet b = K.new()\nprint(b.id)\nprint(K.count())")), "2\n2\n");
+    assert_eq!(
+        out(&format!(
+            "{src}let a = K.new()\nlet b = K.new()\nprint(b.id)\nprint(K.count())"
+        )),
+        "2\n2\n"
+    );
     assert!(err(&format!("{src}print(K.n)")).starts_with("COMPILE"));
 }
 
 #[test]
 fn inheritance() {
     let src = "struct A\nprotected v: int = 1\nend\nstruct B extends A\npublic w: int = 2\nend\nimpl A\npublic fun name(self) -> string\n\"A{self.v}\"\nend\npublic fun id() -> int\n10\nend\nend\nimpl B\npublic override fun name(self) -> string\nsuper.name() + \"B{self.w}\"\nend\npublic fun total(self) -> int\nself.v + self.w\nend\nend\n";
-    assert_eq!(out(&format!("{src}let b = B {{ }}\nprint(b.name())\nprint(b.total())\nprint(B.id())")), "A1B2\n3\n10\n");
+    assert_eq!(
+        out(&format!(
+            "{src}let b = B {{ }}\nprint(b.name())\nprint(b.total())\nprint(B.id())"
+        )),
+        "A1B2\n3\n10\n"
+    );
     // a B is usable where an A is expected, and overrides still apply
-    assert_eq!(out(&format!("{src}fun show(a: A) -> string\na.name()\nend\nprint(show(B {{ }}))\nprint(show(A {{ }}))")), "A1B2\nA1\n");
+    assert_eq!(
+        out(&format!(
+            "{src}fun show(a: A) -> string\na.name()\nend\nprint(show(B {{ }}))\nprint(show(A {{ }}))"
+        )),
+        "A1B2\nA1\n"
+    );
     assert!(err(&format!("{src}let b = B {{ }}\nprint(b.v)")).starts_with("COMPILE"));
 }
 
 #[test]
 fn traits_and_operators() {
     let pt = "struct V\npublic x: int\nend\nimpl Add for V\npublic fun add(self, o: V) -> V\nV { x: self.x + o.x }\nend\nend\nimpl Sub for V\npublic fun sub(self, o: V) -> V\nV { x: self.x - o.x }\nend\nend\nimpl Neg for V\npublic fun neg(self) -> V\nV { x: -self.x }\nend\nend\nimpl Ord for V\npublic fun cmp(self, o: V) -> int\nself.x - o.x\nend\nend\nimpl Eq for V\npublic fun eq(self, o: V) -> bool\nself.x == o.x\nend\nend\n";
-    assert_eq!(out(&format!("{pt}let a = V {{ x: 5 }}\nlet b = V {{ x: 2 }}\nprint((a + b).x)\nprint((a - b).x)\nprint((-a).x)\nprint(a > b)\nprint(a == b)\nprint(a != b)")), "7\n3\n-5\ntrue\nfalse\ntrue\n");
+    assert_eq!(
+        out(&format!(
+            "{pt}let a = V {{ x: 5 }}\nlet b = V {{ x: 2 }}\nprint((a + b).x)\nprint((a - b).x)\nprint((-a).x)\nprint(a > b)\nprint(a == b)\nprint(a != b)"
+        )),
+        "7\n3\n-5\ntrue\nfalse\ntrue\n"
+    );
     // mixed numeric operators defined by the user, on a builtin left operand
-    assert_eq!(out("struct V\npublic x: int\nend\nimpl Mul<V> for int\npublic fun mul(self, v: V) -> V\nV { x: self * v.x }\nend\nend\nimpl Mul<int> for V\npublic fun mul(self, k: int) -> int\nself.x * k\nend\nend\nprint((3 * V { x: 4 }).x)\nprint(V { x: 4 } * 5)"), "12\n20\n");
+    assert_eq!(
+        out(
+            "struct V\npublic x: int\nend\nimpl Mul<V> for int\npublic fun mul(self, v: V) -> V\nV { x: self * v.x }\nend\nend\nimpl Mul<int> for V\npublic fun mul(self, k: int) -> int\nself.x * k\nend\nend\nprint((3 * V { x: 4 }).x)\nprint(V { x: 4 } * 5)"
+        ),
+        "12\n20\n"
+    );
     // operator on a generic bound resolves at runtime
-    assert_eq!(out(&format!("{pt}fun total<T: Add>(a: T, b: T) -> T\na + b\nend\nprint(total(V {{ x: 1 }}, V {{ x: 2 }}).x)")), "3\n");
+    assert_eq!(
+        out(&format!(
+            "{pt}fun total<T: Add>(a: T, b: T) -> T\na + b\nend\nprint(total(V {{ x: 1 }}, V {{ x: 2 }}).x)"
+        )),
+        "3\n"
+    );
 }
 
 #[test]
 fn index_and_push_traits() {
     let src = "struct Bag\npublic items: array<int>\nend\nimpl Index<int> for Bag\npublic fun index(self, i: int) -> int\nself.items[i] * 10\nend\nend\nimpl IndexSet<int, int> for Bag\npublic fun set_index(self, i: int, v: int)\nself.items[i] = v\nend\nend\nimpl Push<int> for Bag\npublic fun push(self, v: int)\nself.items[] = v\nend\nend\n";
-    assert_eq!(out(&format!("{src}let b = Bag {{ items: [1, 2] }}\nb[] = 3\nb[0] = 5\nb[1] += 1\nprint(b[0])\nprint(b[1])\nprint(b[2])\nprint(b.items)")), "50\n210\n30\n[5, 21, 3]\n");
+    assert_eq!(
+        out(&format!(
+            "{src}let b = Bag {{ items: [1, 2] }}\nb[] = 3\nb[0] = 5\nb[1] += 1\nprint(b[0])\nprint(b[1])\nprint(b[2])\nprint(b.items)"
+        )),
+        "50\n210\n30\n[5, 21, 3]\n"
+    );
 }
 
 #[test]
 fn conversions() {
-    assert_eq!(out("print(3 as float)\nprint(3.99 as int)\nprint(-3.99 as int)\nprint(42 as string + \"!\")\nprint(true as string)"), "3.0\n3\n-3\n42!\ntrue\n");
-    assert_eq!(out("struct P\npublic n: int\nend\nimpl As<string> for P\npublic fun convert(self) -> string\n\"P#{self.n}\"\nend\nend\nimpl As<int> for P\npublic fun convert(self) -> int\nself.n\nend\nend\nlet p = P { n: 4 }\nprint(p as string)\nprint(p as int + 1)\nprint(p)\nprint(\"v={p}\")\nprint([p])"), "P#4\n5\nP#4\nv=P#4\n[P#4]\n");
+    assert_eq!(
+        out(
+            "print(3 as float)\nprint(3.99 as int)\nprint(-3.99 as int)\nprint(42 as string + \"!\")\nprint(true as string)"
+        ),
+        "3.0\n3\n-3\n42!\ntrue\n"
+    );
+    assert_eq!(
+        out(
+            "struct P\npublic n: int\nend\nimpl As<string> for P\npublic fun convert(self) -> string\n\"P#{self.n}\"\nend\nend\nimpl As<int> for P\npublic fun convert(self) -> int\nself.n\nend\nend\nlet p = P { n: 4 }\nprint(p as string)\nprint(p as int + 1)\nprint(p)\nprint(\"v={p}\")\nprint([p])"
+        ),
+        "P#4\n5\nP#4\nv=P#4\n[P#4]\n"
+    );
 }
 
 #[test]
 fn traits_as_types() {
     let src = "trait Speak\nfun say(self) -> string\nend\nstruct Dog\nend\nstruct Cat\nend\nimpl Speak for Dog\npublic fun say(self) -> string\n\"woof\"\nend\nend\nimpl Speak for Cat\npublic fun say(self) -> string\n\"meow\"\nend\nend\n";
-    assert_eq!(out(&format!("{src}let pets: array<Speak> = [Dog {{ }}, Cat {{ }}]\nfor p in pets do\nprint(p.say())\nend")), "woof\nmeow\n");
-    assert!(err(&format!("{src}struct Rock\nend\nlet s: Speak = Rock {{ }}")).starts_with("COMPILE"));
-    assert_eq!(out("trait Named\nfun name(self) -> string\nend\nstruct T\nend\nimpl Named for T\npublic fun name(self) -> string\n\"t\"\nend\nend\nfun hi<N: Named>(n: N) -> string\n\"hi \" + n.name()\nend\nprint(hi(T { }))"), "hi t\n");
+    assert_eq!(
+        out(&format!(
+            "{src}let pets: array<Speak> = [Dog {{ }}, Cat {{ }}]\nfor p in pets do\nprint(p.say())\nend"
+        )),
+        "woof\nmeow\n"
+    );
+    assert!(
+        err(&format!("{src}struct Rock\nend\nlet s: Speak = Rock {{ }}")).starts_with("COMPILE")
+    );
+    assert_eq!(
+        out(
+            "trait Named\nfun name(self) -> string\nend\nstruct T\nend\nimpl Named for T\npublic fun name(self) -> string\n\"t\"\nend\nend\nfun hi<N: Named>(n: N) -> string\n\"hi \" + n.name()\nend\nprint(hi(T { }))"
+        ),
+        "hi t\n"
+    );
 }
 
 #[test]
 fn trait_default_methods() {
     let src = "trait Greeter\nfun name(self) -> string\nfun greet(self) -> string\n\"Hello, \" + self.name() + \"!\"\nend\nend\nstruct Dog\nend\nstruct Cat\nend\nimpl Greeter for Dog\npublic fun name(self) -> string\n\"Rex\"\nend\nend\nimpl Greeter for Cat\npublic fun name(self) -> string\n\"Tom\"\nend\npublic fun greet(self) -> string\n\"Meow, \" + self.name()\nend\nend\n";
     // Dog doesn't define `greet`, so it uses the trait's default; Cat overrides it
-    assert_eq!(out(&format!("{src}print(Dog {{ }}.greet())\nprint(Cat {{ }}.greet())")), "Hello, Rex!\nMeow, Tom\n");
+    assert_eq!(
+        out(&format!(
+            "{src}print(Dog {{ }}.greet())\nprint(Cat {{ }}.greet())"
+        )),
+        "Hello, Rex!\nMeow, Tom\n"
+    );
     // works through a generic bound too
-    assert_eq!(out(&format!("{src}fun hi<G: Greeter>(g: G) -> string\ng.greet()\nend\nprint(hi(Dog {{ }}))")), "Hello, Rex!\n");
+    assert_eq!(
+        out(&format!(
+            "{src}fun hi<G: Greeter>(g: G) -> string\ng.greet()\nend\nprint(hi(Dog {{ }}))"
+        )),
+        "Hello, Rex!\n"
+    );
     // a struct providing neither `name` nor `greet` is still missing `name`
-    assert!(err(&format!("{src}struct Fox\nend\nimpl Greeter for Fox\nend")).contains("missing method `name`"));
+    assert!(
+        err(&format!("{src}struct Fox\nend\nimpl Greeter for Fox\nend"))
+            .contains("missing method `name`")
+    );
 }
 
 #[test]
@@ -261,7 +557,10 @@ fn modules() {
     let math = "export add, Counter, PI\nconst PI = 3\nfun add(a: int, b: int) -> int\na + b\nend\nstruct Counter\npublic n: int = 0\nend\nimpl Counter\npublic fun inc(self)\nself.n += 1\nend\nend\nprint(\"math loaded\")";
     let o = run_files(
         &[
-            ("main.q", "import add as plus, Counter from \"math.q\"\nimport \"math.q\" as m\nprint(plus(1, 2))\nprint(m.add(3, 4))\nlet c = Counter { }\nc.inc()\nprint(c.n)\nlet d = m.Counter { n: 5 }\nprint(d.n)\nprint(m.PI)"),
+            (
+                "main.q",
+                "import add as plus, Counter from \"math.q\"\nimport \"math.q\" as m\nprint(plus(1, 2))\nprint(m.add(3, 4))\nlet c = Counter { }\nc.inc()\nprint(c.n)\nlet d = m.Counter { n: 5 }\nprint(d.n)\nprint(m.PI)",
+            ),
             ("math.q", math),
         ],
         None,
@@ -273,17 +572,37 @@ fn modules() {
 
 #[test]
 fn module_errors() {
-    let o = run_files(&[("main.q", "import nope from \"x.q\"\n")], None, Limits::default());
+    let o = run_files(
+        &[("main.q", "import nope from \"x.q\"\n")],
+        None,
+        Limits::default(),
+    );
     assert!(o.error.unwrap().contains("not found"));
-    let o = run_files(&[("main.q", "import a from \"x.q\"\n"), ("x.q", "fun a()\nend")], None, Limits::default());
+    let o = run_files(
+        &[
+            ("main.q", "import a from \"x.q\"\n"),
+            ("x.q", "fun a()\nend"),
+        ],
+        None,
+        Limits::default(),
+    );
     assert!(o.error.unwrap().contains("not exported"));
     // a cycle of pure declarations (no top-level code anywhere in it) is fine: nothing
     // about a struct or fn depends on which file ran first
     let o = run_files(
         &[
-            ("main.q", "import A from \"a.q\"\nimport B from \"b.q\"\nlet x = A { b: none }\nlet y = B { a: none }\nprint(x.b)\nprint(y.a)"),
-            ("a.q", "import B from \"b.q\"\nexport A\nstruct A\npublic b: B?\nend"),
-            ("b.q", "import A from \"a.q\"\nexport B\nstruct B\npublic a: A?\nend"),
+            (
+                "main.q",
+                "import A from \"a.q\"\nimport B from \"b.q\"\nlet x = A { b: none }\nlet y = B { a: none }\nprint(x.b)\nprint(y.a)",
+            ),
+            (
+                "a.q",
+                "import B from \"b.q\"\nexport A\nstruct A\npublic b: B?\nend",
+            ),
+            (
+                "b.q",
+                "import A from \"a.q\"\nexport B\nstruct B\npublic a: A?\nend",
+            ),
         ],
         None,
         Limits::default(),
@@ -294,21 +613,42 @@ fn module_errors() {
     let o = run_files(
         &[
             ("main.q", "import a from \"a.q\"\n"),
-            ("a.q", "import b from \"b.q\"\nexport b\nfun a()\nend\nprint(\"a\")"),
-            ("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")"),
+            (
+                "a.q",
+                "import b from \"b.q\"\nexport b\nfun a()\nend\nprint(\"a\")",
+            ),
+            (
+                "b.q",
+                "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")",
+            ),
         ],
         None,
         Limits::default(),
     );
     assert!(o.error.unwrap().contains("cycle"));
     // absolute paths are refused; a path going up is looked up like any other
-    let o = run_files(&[("main.q", "import a from \"/etc/x.q\"\n")], None, Limits::default());
+    let o = run_files(
+        &[("main.q", "import a from \"/etc/x.q\"\n")],
+        None,
+        Limits::default(),
+    );
     assert!(o.error.unwrap().contains("not an absolute one"));
-    let o = run_files(&[("main.q", "import a from \"../x.q\"\n")], None, Limits::default());
+    let o = run_files(
+        &[("main.q", "import a from \"../x.q\"\n")],
+        None,
+        Limits::default(),
+    );
     assert!(o.error.unwrap().contains("not found"));
     // paths are relative to the importing file
     let o = run_files(
-        &[("main.q", "import f from \"lib/a.q\"\nprint(f())"), ("lib/a.q", "import g from \"b.q\"\nfun f() -> int\ng() + 1\nend\nexport f"), ("lib/b.q", "fun g() -> int\n41\nend\nexport g")],
+        &[
+            ("main.q", "import f from \"lib/a.q\"\nprint(f())"),
+            (
+                "lib/a.q",
+                "import g from \"b.q\"\nfun f() -> int\ng() + 1\nend\nexport f",
+            ),
+            ("lib/b.q", "fun g() -> int\n41\nend\nexport g"),
+        ],
         None,
         Limits::default(),
     );
@@ -321,8 +661,14 @@ fn modules_have_separate_ids() {
     // both files have a function using a parameter at the same position
     let o = run_files(
         &[
-            ("main.q", "import add from \"m.q\"\nfun local(p: int, q: int) -> int\np * q\nend\nprint(\"s = {add(1, 2)} {local(3, 4)}\")"),
-            ("m.q", "fun add(a: int, b: int) -> int\na + b\nend\nexport add"),
+            (
+                "main.q",
+                "import add from \"m.q\"\nfun local(p: int, q: int) -> int\np * q\nend\nprint(\"s = {add(1, 2)} {local(3, 4)}\")",
+            ),
+            (
+                "m.q",
+                "fun add(a: int, b: int) -> int\na + b\nend\nexport add",
+            ),
         ],
         None,
         Limits::default(),
@@ -338,7 +684,10 @@ fn generic_struct_type_args_resolve_across_modules_in_a_trait_signature() {
     // `struct Box<T>` declaration had not been read yet
     let o = run_files(
         &[
-            ("main.q", "import Box from \"box.q\"\ntrait Holder\nfun get() -> Box<int>\nend\nprint(\"ok\")"),
+            (
+                "main.q",
+                "import Box from \"box.q\"\ntrait Holder\nfun get() -> Box<int>\nend\nprint(\"ok\")",
+            ),
             ("box.q", "struct Box<T>\nvalue: T\nend\nexport Box"),
         ],
         None,
@@ -350,8 +699,7 @@ fn generic_struct_type_args_resolve_across_modules_in_a_trait_signature() {
 
 #[test]
 fn prelude_result_and_error_need_no_import() {
-    let o = run(
-        "fun divide(a: int, b: int) -> Result<int, Error>\n\
+    let o = run("fun divide(a: int, b: int) -> Result<int, Error>\n\
          if b == 0 then\n\
          return Result<int, Error>.err(Error { message: \"division by zero\" })\n\
          end\n\
@@ -362,8 +710,7 @@ fn prelude_result_and_error_need_no_import() {
          print(r.unwrap())\n\
          let bad = divide(10, 0)\n\
          print(bad.is_err())\n\
-         print(bad.unwrap_err().message)\n",
-    );
+         print(bad.unwrap_err().message)\n");
     assert_eq!(o.error, None);
     assert_eq!(o.output, "true\n5\ntrue\ndivision by zero\n");
 }
@@ -377,8 +724,14 @@ fn prelude_names_can_be_shadowed_by_a_local_declaration() {
 
 #[test]
 fn prelude_unwrap_on_an_error_result_panics() {
-    let o = run("fun fail() -> Result<int, Error>\nResult<int, Error>.err(Error { message: \"nope\" })\nend\nprint(fail().unwrap())\n");
-    assert!(o.error.unwrap().contains("called unwrap() on an error Result"));
+    let o = run(
+        "fun fail() -> Result<int, Error>\nResult<int, Error>.err(Error { message: \"nope\" })\nend\nprint(fail().unwrap())\n",
+    );
+    assert!(
+        o.error
+            .unwrap()
+            .contains("called unwrap() on an error Result")
+    );
 }
 
 #[test]
@@ -522,7 +875,10 @@ if bad.is_err() then
 end
 "#);
     assert_eq!(o.error, None);
-    assert_eq!(o.output, "JSON parse error at offset 0: unexpected character \"n\"\n");
+    assert_eq!(
+        o.output,
+        "JSON parse error at offset 0: unexpected character \"n\"\n"
+    );
 }
 
 #[test]
@@ -697,9 +1053,20 @@ fn an_invalid_regex_pattern_stops_the_program() {
 
 #[test]
 fn input_output() {
-    let o = run_files(&[("main.q", "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")")], Some(&["Zoe"]), Limits::default());
+    let o = run_files(
+        &[(
+            "main.q",
+            "print(\"name?\")\nlet n = read()\nprint(\"hi {n}\")",
+        )],
+        Some(&["Zoe"]),
+        Limits::default(),
+    );
     assert_eq!(o.output, "name?\nhi Zoe\n");
-    let o = run_files(&[("main.q", "let n = read()\nlet m = read()")], Some(&["only"]), Limits::default());
+    let o = run_files(
+        &[("main.q", "let n = read()\nlet m = read()")],
+        Some(&["only"]),
+        Limits::default(),
+    );
     assert!(o.error.unwrap().starts_with("R040"));
     let o = run_files(&[("main.q", "let n = read()")], None, Limits::default());
     assert!(o.error.unwrap().contains("not available"));
@@ -711,10 +1078,27 @@ fn runtime_failures() {
     assert!(err("assert(1 > 2, \"math\")").contains("assertion failed: math"));
     assert!(err("assert(false)").contains("assertion failed"));
     assert_eq!(out("assert(1 < 2)\nprint(\"fine\")"), "fine\n");
-    let o = run_files(&[("main.q", "while true do\nend")], None, Limits { max_steps: 10_000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", "while true do\nend")],
+        None,
+        Limits {
+            max_steps: 10_000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R900"));
     assert!(err("fun f(n: int) -> int\nf(n + 1)\nend\nprint(f(0))").starts_with("R901"));
-    let o = run_files(&[("main.q", "for i in 0..100000 do\nprint(\"xxxxxxxxxx\")\nend")], None, Limits { max_output: 1000, ..Limits::default() });
+    let o = run_files(
+        &[(
+            "main.q",
+            "for i in 0..100000 do\nprint(\"xxxxxxxxxx\")\nend",
+        )],
+        None,
+        Limits {
+            max_output: 1000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R902"));
 }
 
@@ -727,17 +1111,30 @@ fn output_before_error_is_kept() {
 
 #[test]
 fn deep_recursion_within_limits() {
-    assert_eq!(out("fun d(n: int) -> int\nif n == 0 then return 0 end\n1 + d(n - 1)\nend\nprint(d(900))"), "900\n");
+    assert_eq!(
+        out("fun d(n: int) -> int\nif n == 0 then return 0 end\n1 + d(n - 1)\nend\nprint(d(900))"),
+        "900\n"
+    );
 }
 
 #[test]
 fn comments() {
-    assert_eq!(out("-- one\nprint(1) -- two\n--( block\n comment --)\nprint(2)\n--\" doc --\"\nprint(3)\nlet a = 5 --1\nprint(a)"), "1\n2\n3\n5\n");
+    assert_eq!(
+        out(
+            "-- one\nprint(1) -- two\n--( block\n comment --)\nprint(2)\n--\" doc --\"\nprint(3)\nlet a = 5 --1\nprint(a)"
+        ),
+        "1\n2\n3\n5\n"
+    );
 }
 
 #[test]
 fn multiline_expressions() {
-    assert_eq!(out("let total = 1 +\n  2 +\n  3\nprint(total)\nprint([\n 1,\n 2,\n].len())\nfun f(a: int,\n b: int) -> int\na + b\nend\nprint(f(\n1,\n2\n))"), "6\n2\n3\n");
+    assert_eq!(
+        out(
+            "let total = 1 +\n  2 +\n  3\nprint(total)\nprint([\n 1,\n 2,\n].len())\nfun f(a: int,\n b: int) -> int\na + b\nend\nprint(f(\n1,\n2\n))"
+        ),
+        "6\n2\n3\n"
+    );
 }
 
 #[test]
@@ -758,7 +1155,10 @@ fn static_checks_catch_common_mistakes() {
     ] {
         let o = run(src);
         let e = o.error.unwrap_or_default();
-        assert!(e.starts_with("COMPILE"), "expected a compile error for:\n{src}\ngot: {e:?}");
+        assert!(
+            e.starts_with("COMPILE"),
+            "expected a compile error for:\n{src}\ngot: {e:?}"
+        );
     }
 }
 
@@ -770,16 +1170,44 @@ fn enum_methods_and_statics() {
 
 #[test]
 fn memory_and_nesting_limits() {
-    let o = run_files(&[("main.q", "let a: array<int> = []\nwhile true do\na[] = 1\nend")], None, Limits { max_alloc: 1000, ..Limits::default() });
+    let o = run_files(
+        &[(
+            "main.q",
+            "let a: array<int> = []\nwhile true do\na[] = 1\nend",
+        )],
+        None,
+        Limits {
+            max_alloc: 1000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R903"));
-    let o = run_files(&[("main.q", "let s = \"abc\"\nwhile true do\ns = s + s\nend")], None, Limits { max_alloc: 10_000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", "let s = \"abc\"\nwhile true do\ns = s + s\nend")],
+        None,
+        Limits {
+            max_alloc: 10_000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R903"));
-    let o = run_files(&[("main.q", "print(\"x\".repeat(1000000))")], None, Limits { max_alloc: 1000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", "print(\"x\".repeat(1000000))")],
+        None,
+        Limits {
+            max_alloc: 1000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R903"));
     // absurd nesting is an error, not a crash
     let deep = format!("let x = {}1{}", "(".repeat(5000), ")".repeat(5000));
     assert!(err(&deep).contains("nested too deeply"));
-    let deep_blocks = format!("{}print(1){}", "if true then\n".repeat(3000), "\nend".repeat(3000));
+    let deep_blocks = format!(
+        "{}print(1){}",
+        "if true then\n".repeat(3000),
+        "\nend".repeat(3000)
+    );
     assert!(err(&deep_blocks).contains("nested too deeply"));
 }
 
@@ -821,7 +1249,9 @@ fn narrowing_follows_assignments() {
     // after assigning `none` it is not
     assert!(err("let x: int? = 1\nx = none\nprint(x + 1)").starts_with("COMPILE"));
     // a field cannot be narrowed in place, and the message says what to do
-    let e = err("struct N\npublic next: N?\npublic v: int\nend\nlet n = N { next: none, v: 1 }\nif n.next != none then\nprint(n.next.v)\nend");
+    let e = err(
+        "struct N\npublic next: N?\npublic v: int\nend\nlet n = N { next: none, v: 1 }\nif n.next != none then\nprint(n.next.v)\nend",
+    );
     assert!(e.contains("copy it into a variable"), "{e}");
 }
 
@@ -836,18 +1266,45 @@ fn beginner_programs() {
 #[test]
 fn advanced_generics() {
     let o = out(include_str!("../../../examples/advanced.q"));
-    assert!(o.starts_with("20\n20\n1\n[\"n1\", \"n2\", \"n3\"]\n[2, 4, 6]\n10\n"), "{o}");
-    assert!(o.ends_with("true\nfalse\ntrue\n[\"hell0\", \"w0rld\"]\n"), "{o}");
+    assert!(
+        o.starts_with("20\n20\n1\n[\"n1\", \"n2\", \"n3\"]\n[2, 4, 6]\n10\n"),
+        "{o}"
+    );
+    assert!(
+        o.ends_with("true\nfalse\ntrue\n[\"hell0\", \"w0rld\"]\n"),
+        "{o}"
+    );
 }
 
 #[test]
 fn array_sort_min_max_sum_slice() {
     assert_eq!(out("let a = [3, 1, 2]\na.sort()\nprint(a)"), "[1, 2, 3]\n");
-    assert_eq!(out("let s = [\"pear\", \"apple\", \"fig\"]\ns.sort()\nprint(s)"), "[\"apple\", \"fig\", \"pear\"]\n");
-    assert_eq!(out("let f = [2.5, -1.0, 9.75]\nf.sort()\nprint(f)\nprint(f.min())\nprint(f.max())"), "[-1.0, 2.5, 9.75]\n-1.0\n9.75\n");
-    assert_eq!(out("print([4, 9, 2].min())\nprint([4, 9, 2].max())\nlet e: array<int> = []\nprint(e.min())"), "2\n9\nnone\n");
-    assert_eq!(out("print([1, 2, 3, 4].sum())\nprint([1.5, 2.5].sum())\nlet e: array<int> = []\nlet g: array<float> = []\nprint(e.sum())\nprint(g.sum())"), "10\n4.0\n0\n0.0\n");
-    assert_eq!(out("let a = [1, 2, 3, 4, 5]\nprint(a.slice(1, 3))\nprint(a.slice(0, 0))\nlet b = a.slice(2, 5)\nb[0] = 99\nprint(a[2])"), "[2, 3]\n[]\n3\n");
+    assert_eq!(
+        out("let s = [\"pear\", \"apple\", \"fig\"]\ns.sort()\nprint(s)"),
+        "[\"apple\", \"fig\", \"pear\"]\n"
+    );
+    assert_eq!(
+        out("let f = [2.5, -1.0, 9.75]\nf.sort()\nprint(f)\nprint(f.min())\nprint(f.max())"),
+        "[-1.0, 2.5, 9.75]\n-1.0\n9.75\n"
+    );
+    assert_eq!(
+        out(
+            "print([4, 9, 2].min())\nprint([4, 9, 2].max())\nlet e: array<int> = []\nprint(e.min())"
+        ),
+        "2\n9\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "print([1, 2, 3, 4].sum())\nprint([1.5, 2.5].sum())\nlet e: array<int> = []\nlet g: array<float> = []\nprint(e.sum())\nprint(g.sum())"
+        ),
+        "10\n4.0\n0\n0.0\n"
+    );
+    assert_eq!(
+        out(
+            "let a = [1, 2, 3, 4, 5]\nprint(a.slice(1, 3))\nprint(a.slice(0, 0))\nlet b = a.slice(2, 5)\nb[0] = 99\nprint(a[2])"
+        ),
+        "[2, 3]\n[]\n3\n"
+    );
     assert!(err("print([1, 2].slice(1, 5))").starts_with("R020"));
     assert!(err("print([1, 2].slice(2, 1))").starts_with("R020"));
     // the sort is stable and works on user types through Ord
@@ -855,7 +1312,12 @@ fn array_sort_min_max_sum_slice() {
     // equal elements keep their order (stable); max/min keep the first of equals
     assert_eq!(out(src), "bac\na\nb\n");
     // a lot of elements sorts quickly and correctly
-    assert_eq!(out("let a: array<int> = []\nfor i in 0..2000 do\na[] = (i * 7919) mod 2003\nend\na.sort()\nprint(a[0])\nprint(a[1999])\nlet ok = true\nfor i in 1..2000 do\nif a[i - 1] > a[i] then ok = false end\nend\nprint(ok)"), "0\n2002\ntrue\n");
+    assert_eq!(
+        out(
+            "let a: array<int> = []\nfor i in 0..2000 do\na[] = (i * 7919) mod 2003\nend\na.sort()\nprint(a[0])\nprint(a[1999])\nlet ok = true\nfor i in 1..2000 do\nif a[i - 1] > a[i] then ok = false end\nend\nprint(ok)"
+        ),
+        "0\n2002\ntrue\n"
+    );
 }
 
 #[test]
@@ -866,7 +1328,10 @@ fn array_helpers_reject_wrong_element_types() {
         "print([\"a\"].sum())",
         "let a = [1, 2]\nprint(a.slice(1))",
     ] {
-        assert!(err(src).starts_with("COMPILE"), "expected a compile error for:\n{src}");
+        assert!(
+            err(src).starts_with("COMPILE"),
+            "expected a compile error for:\n{src}"
+        );
     }
     let e = err("print([\"a\"].sum())");
     assert!(e.contains("needs an array of numbers"), "{e}");
@@ -874,47 +1339,125 @@ fn array_helpers_reject_wrong_element_types() {
 
 #[test]
 fn array_higher_order_functions() {
-    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> int x * 2 end))"), "[2, 4, 6]\n");
-    assert_eq!(out("print([1, 2, 3].map(fun(x: int) -> string \"n{x}\" end))"), "[\"n1\", \"n2\", \"n3\"]\n");
-    assert_eq!(out("print([1, 2, 3, 4].filter(fun(x: int) -> bool x mod 2 == 0 end))"), "[2, 4]\n");
-    assert_eq!(out("print([1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end))"), "10\n");
-    assert_eq!(out("print([\"a\", \"bb\", \"ccc\"].reduce(\"\", fun(acc: string, x: string) -> string acc + x end))"), "abbccc\n");
-    assert_eq!(out("print([1, 2, 3].any(fun(x: int) -> bool x > 2 end))\nprint([1, 2, 3].any(fun(x: int) -> bool x > 9 end))"), "true\nfalse\n");
-    assert_eq!(out("print([1, 2, 3].all(fun(x: int) -> bool x > 0 end))\nprint([1, 2, 3].all(fun(x: int) -> bool x > 1 end))"), "true\nfalse\n");
-    assert_eq!(out("print([1, 2, 3].find(fun(x: int) -> bool x > 1 end))\nprint([1, 2, 3].find(fun(x: int) -> bool x > 9 end))"), "2\nnone\n");
     assert_eq!(
-        out("let log: array<int> = []\n[1, 2, 3].each(fun(x: int) log.push(x * 10) end)\nprint(log)"),
+        out("print([1, 2, 3].map(fun(x: int) -> int x * 2 end))"),
+        "[2, 4, 6]\n"
+    );
+    assert_eq!(
+        out("print([1, 2, 3].map(fun(x: int) -> string \"n{x}\" end))"),
+        "[\"n1\", \"n2\", \"n3\"]\n"
+    );
+    assert_eq!(
+        out("print([1, 2, 3, 4].filter(fun(x: int) -> bool x mod 2 == 0 end))"),
+        "[2, 4]\n"
+    );
+    assert_eq!(
+        out("print([1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end))"),
+        "10\n"
+    );
+    assert_eq!(
+        out(
+            "print([\"a\", \"bb\", \"ccc\"].reduce(\"\", fun(acc: string, x: string) -> string acc + x end))"
+        ),
+        "abbccc\n"
+    );
+    assert_eq!(
+        out(
+            "print([1, 2, 3].any(fun(x: int) -> bool x > 2 end))\nprint([1, 2, 3].any(fun(x: int) -> bool x > 9 end))"
+        ),
+        "true\nfalse\n"
+    );
+    assert_eq!(
+        out(
+            "print([1, 2, 3].all(fun(x: int) -> bool x > 0 end))\nprint([1, 2, 3].all(fun(x: int) -> bool x > 1 end))"
+        ),
+        "true\nfalse\n"
+    );
+    assert_eq!(
+        out(
+            "print([1, 2, 3].find(fun(x: int) -> bool x > 1 end))\nprint([1, 2, 3].find(fun(x: int) -> bool x > 9 end))"
+        ),
+        "2\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "let log: array<int> = []\n[1, 2, 3].each(fun(x: int) log.push(x * 10) end)\nprint(log)"
+        ),
         "[10, 20, 30]\n"
     );
-    assert_eq!(out("let a = [3, 1, 2]\na.sort_by(fun(x: int, y: int) -> int y - x end)\nprint(a)"), "[3, 2, 1]\n");
+    assert_eq!(
+        out("let a = [3, 1, 2]\na.sort_by(fun(x: int, y: int) -> int y - x end)\nprint(a)"),
+        "[3, 2, 1]\n"
+    );
     assert_eq!(out("print([1, 2, 2, 3, 1].unique())"), "[1, 2, 3]\n");
     assert_eq!(out("print([[1, 2], [], [3]].flatten())"), "[1, 2, 3]\n");
     // chaining
     assert_eq!(
-        out("print([1, 2, 3, 4, 5].filter(fun(x: int) -> bool x mod 2 == 0 end).map(fun(x: int) -> int x * x end))"),
+        out(
+            "print([1, 2, 3, 4, 5].filter(fun(x: int) -> bool x mod 2 == 0 end).map(fun(x: int) -> int x * x end))"
+        ),
         "[4, 16]\n"
     );
     // errors: flatten on a non-nested array, and a comparator that doesn't return an int
     assert!(err("print([1, 2].flatten())").starts_with("COMPILE"));
     let e = err("print([1, 2].flatten())");
     assert!(e.contains("needs an array of arrays"), "{e}");
-    assert_eq!(out("print([1, 2, 3].first())\nprint([1, 2, 3].last())\nlet e: array<int> = []\nprint(e.first())\nprint(e.last())"), "1\n3\nnone\nnone\n");
-    assert_eq!(out("print([1, 2].concat([3, 4]))\nlet a = [1, 2]\nlet b = a.concat([3])\nprint(a)\nprint(b)"), "[1, 2, 3, 4]\n[1, 2]\n[1, 2, 3]\n");
-    assert_eq!(out("print([1, 2, 3, 4].take(2))\nprint([1, 2].take(10))\nprint([1, 2].take(0))"), "[1, 2]\n[1, 2]\n[]\n");
-    assert_eq!(out("print([1, 2, 3, 4].drop(2))\nprint([1, 2].drop(10))\nprint([1, 2].drop(0))"), "[3, 4]\n[]\n[1, 2]\n");
-    assert_eq!(out("let a = [1, 2, 3]\na.swap(0, 2)\nprint(a)"), "[3, 2, 1]\n");
+    assert_eq!(
+        out(
+            "print([1, 2, 3].first())\nprint([1, 2, 3].last())\nlet e: array<int> = []\nprint(e.first())\nprint(e.last())"
+        ),
+        "1\n3\nnone\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "print([1, 2].concat([3, 4]))\nlet a = [1, 2]\nlet b = a.concat([3])\nprint(a)\nprint(b)"
+        ),
+        "[1, 2, 3, 4]\n[1, 2]\n[1, 2, 3]\n"
+    );
+    assert_eq!(
+        out("print([1, 2, 3, 4].take(2))\nprint([1, 2].take(10))\nprint([1, 2].take(0))"),
+        "[1, 2]\n[1, 2]\n[]\n"
+    );
+    assert_eq!(
+        out("print([1, 2, 3, 4].drop(2))\nprint([1, 2].drop(10))\nprint([1, 2].drop(0))"),
+        "[3, 4]\n[]\n[1, 2]\n"
+    );
+    assert_eq!(
+        out("let a = [1, 2, 3]\na.swap(0, 2)\nprint(a)"),
+        "[3, 2, 1]\n"
+    );
     assert!(err("let a = [1, 2]\na.swap(0, 5)").starts_with("R020"));
-    assert_eq!(out("print([1, 2, 3, 4, 5].chunk(2))\nprint([1, 2, 3].chunk(5))"), "[[1, 2], [3, 4], [5]]\n[[1, 2, 3]]\n");
+    assert_eq!(
+        out("print([1, 2, 3, 4, 5].chunk(2))\nprint([1, 2, 3].chunk(5))"),
+        "[[1, 2], [3, 4], [5]]\n[[1, 2, 3]]\n"
+    );
     assert!(err("print([1].chunk(0))").starts_with("R021"));
-    assert_eq!(out("print([1, 2].repeat(3))\nprint([1, 2].repeat(0))"), "[1, 2, 1, 2, 1, 2]\n[]\n");
+    assert_eq!(
+        out("print([1, 2].repeat(3))\nprint([1, 2].repeat(0))"),
+        "[1, 2, 1, 2, 1, 2]\n[]\n"
+    );
 }
 
 #[test]
 fn number_methods_and_constants() {
-    assert_eq!(out("print(3.min(8))\nprint(3.max(8))\nprint(2.pow(10))\nprint(16.sqrt())"), "3\n8\n1024\n4.0\n");
-    assert_eq!(out("print(2.5.min(1.5))\nprint(2.5.max(1.5))\nprint(2.0.pow(0.5) > 1.41)\nprint(9.0.sqrt())"), "1.5\n2.5\ntrue\n3.0\n");
-    assert_eq!(out("print(float.PI)\nprint(float.E > 2.7)\nprint(int.MAX)\nprint(int.MIN)"), "3.141592653589793\ntrue\n9223372036854775807\n-9223372036854775808\n");
-    assert_eq!(out("let r = 2.0\nprint(float.PI * r ** 2)"), "12.566370614359172\n");
+    assert_eq!(
+        out("print(3.min(8))\nprint(3.max(8))\nprint(2.pow(10))\nprint(16.sqrt())"),
+        "3\n8\n1024\n4.0\n"
+    );
+    assert_eq!(
+        out(
+            "print(2.5.min(1.5))\nprint(2.5.max(1.5))\nprint(2.0.pow(0.5) > 1.41)\nprint(9.0.sqrt())"
+        ),
+        "1.5\n2.5\ntrue\n3.0\n"
+    );
+    assert_eq!(
+        out("print(float.PI)\nprint(float.E > 2.7)\nprint(int.MAX)\nprint(int.MIN)"),
+        "3.141592653589793\ntrue\n9223372036854775807\n-9223372036854775808\n"
+    );
+    assert_eq!(
+        out("let r = 2.0\nprint(float.PI * r ** 2)"),
+        "12.566370614359172\n"
+    );
     assert!(err("print(int.MAX + 1)").starts_with("R010"));
     assert!(err("print((-4).sqrt())").starts_with("R014"));
     assert!(err("print(2.pow(-1))").starts_with("R012"));
@@ -925,19 +1468,47 @@ fn number_methods_and_constants() {
 
 #[test]
 fn maps_basics() {
-    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m)\nprint(m.len())\nprint(m[\"a\"])\nprint(m[\"zz\"])"), "{\"a\": 1, \"b\": 2}\n2\n1\nnone\n");
-    assert_eq!(out("let m: map<string, int> = {}\nprint(m)\nprint(m.is_empty())\nm[\"x\"] = 5\nm[\"x\"] = 6\nprint(m)"), "{}\ntrue\n{\"x\": 6}\n");
+    assert_eq!(
+        out(
+            "let m = { \"a\": 1, \"b\": 2 }\nprint(m)\nprint(m.len())\nprint(m[\"a\"])\nprint(m[\"zz\"])"
+        ),
+        "{\"a\": 1, \"b\": 2}\n2\n1\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "let m: map<string, int> = {}\nprint(m)\nprint(m.is_empty())\nm[\"x\"] = 5\nm[\"x\"] = 6\nprint(m)"
+        ),
+        "{}\ntrue\n{\"x\": 6}\n"
+    );
     // a missing key gives none, so the value must be checked before use
-    assert_eq!(out("let ages = { \"ana\": 31 }\nlet a = ages[\"ana\"]\nif a != none then print(a + 1) end\nlet b = ages[\"bob\"]\nprint(b == none)"), "32\ntrue\n");
-    assert_eq!(out("let m = { 1: \"one\", 2: \"two\" }\nprint(m[2])\nlet b = { true: 1, false: 0 }\nprint(b[true])"), "two\n1\n");
+    assert_eq!(
+        out(
+            "let ages = { \"ana\": 31 }\nlet a = ages[\"ana\"]\nif a != none then print(a + 1) end\nlet b = ages[\"bob\"]\nprint(b == none)"
+        ),
+        "32\ntrue\n"
+    );
+    assert_eq!(
+        out(
+            "let m = { 1: \"one\", 2: \"two\" }\nprint(m[2])\nlet b = { true: 1, false: 0 }\nprint(b[true])"
+        ),
+        "two\n1\n"
+    );
 }
 
 #[test]
 fn maps_methods() {
     let src = "let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.has(\"b\"))\nprint(m.has(\"z\"))\nprint(m.get(\"z\", -1))\nprint(m.get(\"a\", -1))\nprint(m.remove(\"b\"))\nprint(m.remove(\"b\"))\nprint(m.keys())\nprint(m.values())\nprint(m)\nm.clear()\nprint(m.len())";
-    assert_eq!(out(src), "true\nfalse\n-1\n1\n2\nnone\n[\"a\", \"c\"]\n[1, 3]\n{\"a\": 1, \"c\": 3}\n0\n");
+    assert_eq!(
+        out(src),
+        "true\nfalse\n-1\n1\n2\nnone\n[\"a\", \"c\"]\n[1, 3]\n{\"a\": 1, \"c\": 3}\n0\n"
+    );
     // insertion order is kept, and removal keeps lookups correct
-    assert_eq!(out("let m: map<int, string> = {}\nm[5] = \"e\"\nm[1] = \"a\"\nm[9] = \"i\"\nm.remove(1)\nm[7] = \"g\"\nprint(m.keys())\nprint(m[9])\nprint(m[7])\nprint(m[5])"), "[5, 9, 7]\ni\ng\ne\n");
+    assert_eq!(
+        out(
+            "let m: map<int, string> = {}\nm[5] = \"e\"\nm[1] = \"a\"\nm[9] = \"i\"\nm.remove(1)\nm[7] = \"g\"\nprint(m.keys())\nprint(m[9])\nprint(m[7])\nprint(m[5])"
+        ),
+        "[5, 9, 7]\ni\ng\ne\n"
+    );
 }
 
 #[test]
@@ -945,31 +1516,83 @@ fn maps_counting_and_loops() {
     let src = "let words = \"the cat and the dog and the bird\".split(\" \")\nlet counts: map<string, int> = {}\nfor w in words do\ncounts[w] = counts.get(w, 0) + 1\nend\nfor w in counts.keys() do\nwrite(\"{w}={counts[w]} \")\nend\nprint(\"\")";
     assert_eq!(out(src), "the=3 cat=1 and=2 dog=1 bird=1 \n");
     // `m[k] += 1` works when the key exists, and is an error when it does not
-    assert_eq!(out("let m = { \"n\": 1 }\nm[\"n\"] += 5\nprint(m[\"n\"])"), "6\n");
+    assert_eq!(
+        out("let m = { \"n\": 1 }\nm[\"n\"] += 5\nprint(m[\"n\"])"),
+        "6\n"
+    );
     assert!(err("let m: map<string, int> = {}\nm[\"n\"] += 1").starts_with("R022"));
 }
 
 #[test]
 fn maps_higher_order_functions() {
-    assert_eq!(out("let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 20, \"z\": 3 }\nprint(a.merge(b))\nprint(a)"), "{\"x\": 1, \"y\": 20, \"z\": 3}\n{\"x\": 1, \"y\": 2}\n");
-    assert_eq!(out("let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.filter(fun(k: string, v: int) -> bool v > 1 end))"), "{\"b\": 2, \"c\": 3}\n");
-    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> int v * 10 end))"), "{\"a\": 10, \"b\": 20}\n");
-    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> string \"{k}={v}\" end))"), "{\"a\": \"a=1\", \"b\": \"b=2\"}\n");
+    assert_eq!(
+        out(
+            "let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 20, \"z\": 3 }\nprint(a.merge(b))\nprint(a)"
+        ),
+        "{\"x\": 1, \"y\": 20, \"z\": 3}\n{\"x\": 1, \"y\": 2}\n"
+    );
+    assert_eq!(
+        out(
+            "let m = { \"a\": 1, \"b\": 2, \"c\": 3 }\nprint(m.filter(fun(k: string, v: int) -> bool v > 1 end))"
+        ),
+        "{\"b\": 2, \"c\": 3}\n"
+    );
+    assert_eq!(
+        out(
+            "let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> int v * 10 end))"
+        ),
+        "{\"a\": 10, \"b\": 20}\n"
+    );
+    assert_eq!(
+        out(
+            "let m = { \"a\": 1, \"b\": 2 }\nprint(m.map_values(fun(k: string, v: int) -> string \"{k}={v}\" end))"
+        ),
+        "{\"a\": \"a=1\", \"b\": \"b=2\"}\n"
+    );
 }
 
 #[test]
 fn maps_are_shared_and_typed() {
-    assert_eq!(out("fun add(m: map<string, int>)\nm[\"k\"] = 1\nend\nlet m: map<string, int> = {}\nadd(m)\nprint(m)\nlet n = m\nn[\"j\"] = 2\nprint(m.len())"), "{\"k\": 1}\n2\n");
-    assert_eq!(out("enum C\nR\nG\nend\nlet m = { C.R: \"red\", C.G: \"green\" }\nprint(m[C.G])\nprint(m)"), "green\n{C.R: \"red\", C.G: \"green\"}\n");
-    assert_eq!(out("let m: map<string, int?> = { \"a\": none, \"b\": 2 }\nprint(m)"), "{\"a\": none, \"b\": 2}\n");
-    assert_eq!(out("let nested = { \"xs\": [1, 2], \"ys\": [3] }\nprint(nested[\"xs\"])\nlet inner = nested[\"ys\"]\nif inner != none then print(inner.len()) end"), "[1, 2]\n1\n");
-    assert_eq!(out("fun f<K, V>(m: map<K, V>) -> int\nm.len()\nend\nprint(f({ 1: \"a\" }))\nprint(f({ \"x\": 1.5, \"y\": 2.5 }))"), "1\n2\n");
+    assert_eq!(
+        out(
+            "fun add(m: map<string, int>)\nm[\"k\"] = 1\nend\nlet m: map<string, int> = {}\nadd(m)\nprint(m)\nlet n = m\nn[\"j\"] = 2\nprint(m.len())"
+        ),
+        "{\"k\": 1}\n2\n"
+    );
+    assert_eq!(
+        out("enum C\nR\nG\nend\nlet m = { C.R: \"red\", C.G: \"green\" }\nprint(m[C.G])\nprint(m)"),
+        "green\n{C.R: \"red\", C.G: \"green\"}\n"
+    );
+    assert_eq!(
+        out("let m: map<string, int?> = { \"a\": none, \"b\": 2 }\nprint(m)"),
+        "{\"a\": none, \"b\": 2}\n"
+    );
+    assert_eq!(
+        out(
+            "let nested = { \"xs\": [1, 2], \"ys\": [3] }\nprint(nested[\"xs\"])\nlet inner = nested[\"ys\"]\nif inner != none then print(inner.len()) end"
+        ),
+        "[1, 2]\n1\n"
+    );
+    assert_eq!(
+        out(
+            "fun f<K, V>(m: map<K, V>) -> int\nm.len()\nend\nprint(f({ 1: \"a\" }))\nprint(f({ \"x\": 1.5, \"y\": 2.5 }))"
+        ),
+        "1\n2\n"
+    );
 }
 
 #[test]
 fn maps_accept_float_keys() {
-    assert_eq!(out("let m: map<float, string> = { 1.5: \"a\", 2.5: \"b\" }\nprint(m[1.5])\nprint(m.len())"), "a\n2\n");
-    assert_eq!(out("let m: map<float, int> = {}\nm[0.0] = 1\nm[-0.0] = 2\nprint(m.len())\nprint(m[0.0])"), "1\n2\n");
+    assert_eq!(
+        out(
+            "let m: map<float, string> = { 1.5: \"a\", 2.5: \"b\" }\nprint(m[1.5])\nprint(m.len())"
+        ),
+        "a\n2\n"
+    );
+    assert_eq!(
+        out("let m: map<float, int> = {}\nm[0.0] = 1\nm[-0.0] = 2\nprint(m.len())\nprint(m[0.0])"),
+        "1\n2\n"
+    );
     assert_eq!(out("let m = { 1.5: 2 }\nprint(m[1.5])"), "2\n");
 }
 
@@ -981,7 +1604,10 @@ fn maps_static_errors() {
         ("let m = { [1]: 2 }", "cannot be a map key"),
         ("let m = { \"a\": 1, 2: 3 }", "same type"),
         ("let m = { \"a\": 1, \"b\": \"x\" }", "same type"),
-        ("let m = { \"a\": 1 }\nlet x: int = m[\"a\"]", "may be `none`"),
+        (
+            "let m = { \"a\": 1 }\nlet x: int = m[\"a\"]",
+            "may be `none`",
+        ),
         ("let m = { \"a\": 1 }\nm[1] = 2", "cannot set an element"),
         ("let m = { \"a\": 1 }\nm[\"a\"] = \"s\"", "cannot store"),
         ("let m = { \"a\": 1 }\nfor k in m do\nend", "m.keys()"),
@@ -990,13 +1616,26 @@ fn maps_static_errors() {
         ("let m = { \"a\": 1 }\nm.nope()", "no method"),
     ] {
         let e = err(src);
-        assert!(e.starts_with("COMPILE") && e.contains(needle), "for:\n{src}\nexpected an error containing {needle:?}, got:\n{e}");
+        assert!(
+            e.starts_with("COMPILE") && e.contains(needle),
+            "for:\n{src}\nexpected an error containing {needle:?}, got:\n{e}"
+        );
     }
 }
 
 #[test]
 fn maps_limits() {
-    let o = run_files(&[("main.q", "let m: map<int, int> = {}\nlet i = 0\nwhile true do\nm[i] = i\ni += 1\nend")], None, Limits { max_alloc: 500, ..Limits::default() });
+    let o = run_files(
+        &[(
+            "main.q",
+            "let m: map<int, int> = {}\nlet i = 0\nwhile true do\nm[i] = i\ni += 1\nend",
+        )],
+        None,
+        Limits {
+            max_alloc: 500,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R903"));
 }
 
@@ -1004,53 +1643,102 @@ fn maps_limits() {
 fn braces_still_work_for_structs_and_blocks() {
     // a struct literal and a map literal can share a program and a line
     assert_eq!(
-        out("struct P\npublic x: int\nend\nlet m = { \"p\": P { x: 1 } }\nlet p = m[\"p\"]\nif p != none then print(p.x) end\nprint({ 1: P { x: 2 } }[1] != none)"),
+        out(
+            "struct P\npublic x: int\nend\nlet m = { \"p\": P { x: 1 } }\nlet p = m[\"p\"]\nif p != none then print(p.x) end\nprint({ 1: P { x: 2 } }[1] != none)"
+        ),
         "1\ntrue\n"
     );
     // multi-line literals, with a trailing comma
-    assert_eq!(out("let m = {\n  \"a\": 1,\n  \"b\": 2,\n}\nprint(m.len())"), "2\n");
+    assert_eq!(
+        out("let m = {\n  \"a\": 1,\n  \"b\": 2,\n}\nprint(m.len())"),
+        "2\n"
+    );
 }
 
 #[test]
 fn for_with_two_variables() {
     // maps: key and value, in insertion order
-    assert_eq!(out("let m = { \"a\": 1, \"b\": 2 }\nfor k, v in m do\nwrite(\"{k}={v} \")\nend\nprint(\"\")"), "a=1 b=2 \n");
+    assert_eq!(
+        out(
+            "let m = { \"a\": 1, \"b\": 2 }\nfor k, v in m do\nwrite(\"{k}={v} \")\nend\nprint(\"\")"
+        ),
+        "a=1 b=2 \n"
+    );
     // arrays: index and item
-    assert_eq!(out("for i, x in [\"x\", \"y\", \"z\"] do\nwrite(\"{i}:{x} \")\nend\nprint(\"\")"), "0:x 1:y 2:z \n");
+    assert_eq!(
+        out("for i, x in [\"x\", \"y\", \"z\"] do\nwrite(\"{i}:{x} \")\nend\nprint(\"\")"),
+        "0:x 1:y 2:z \n"
+    );
     // strings: index and character
-    assert_eq!(out("for i, c in \"héy\" do\nwrite(\"{i}{c} \")\nend\nprint(\"\")"), "0h 1é 2y \n");
+    assert_eq!(
+        out("for i, c in \"héy\" do\nwrite(\"{i}{c} \")\nend\nprint(\"\")"),
+        "0h 1é 2y \n"
+    );
     // break and continue still work; the body may change the map (the loop sees a snapshot)
-    assert_eq!(out("let m = { 1: 10, 2: 20, 3: 30 }\nfor k, v in m do\nif k == 1 then continue end\nm.remove(3)\nwrite(\"{k}:{v} \")\nif k == 2 then break end\nend\nprint(m.len())"), "2:20 2\n");
+    assert_eq!(
+        out(
+            "let m = { 1: 10, 2: 20, 3: 30 }\nfor k, v in m do\nif k == 1 then continue end\nm.remove(3)\nwrite(\"{k}:{v} \")\nif k == 2 then break end\nend\nprint(m.len())"
+        ),
+        "2:20 2\n"
+    );
     // each iteration has its own variables (closures)
-    assert_eq!(out("let fs: array<fun() -> int> = []\nfor i, x in [5, 6] do\nfs[] = fun() -> int\ni * 100 + x\nend\nend\nfor f in fs do\nwrite(\"{f()} \")\nend\nprint(\"\")"), "5 106 \n");
+    assert_eq!(
+        out(
+            "let fs: array<fun() -> int> = []\nfor i, x in [5, 6] do\nfs[] = fun() -> int\ni * 100 + x\nend\nend\nfor f in fs do\nwrite(\"{f()} \")\nend\nprint(\"\")"
+        ),
+        "5 106 \n"
+    );
     // typed: the value has the map's value type
-    assert_eq!(out("let m = { \"a\": 1.5 }\nfor k, v in m do\nprint(v * 2)\nend"), "3.0\n");
+    assert_eq!(
+        out("let m = { \"a\": 1.5 }\nfor k, v in m do\nprint(v * 2)\nend"),
+        "3.0\n"
+    );
     // an array of arrays, with an item that is itself a collection
-    assert_eq!(out("let rows = [[1, 2], [3]]\nfor i, r in rows do\nprint(\"{i}: {r.len()}\")\nend"), "0: 2\n1: 1\n");
+    assert_eq!(
+        out("let rows = [[1, 2], [3]]\nfor i, r in rows do\nprint(\"{i}: {r.len()}\")\nend"),
+        "0: 2\n1: 1\n"
+    );
 }
 
 #[test]
 fn for_with_two_variables_errors() {
     for (src, needle) in [
         ("for k, v in 0..3 do\nend", "with two variables"),
-        ("let m = { 1: 2 }\nfor k in m do\nend", "for key, value in m"),
+        (
+            "let m = { 1: 2 }\nfor k in m do\nend",
+            "for key, value in m",
+        ),
         ("for a, a in [1] do\nend", "already declared"),
         ("for i, x in [1] step 2 do\nend", "`step`"),
         ("for k, v in 5 do\nend", "with two variables"),
         ("for k, in [1] do\nend", "expected"),
     ] {
         let e = err(src);
-        assert!(e.starts_with("COMPILE") && e.contains(needle), "for:\n{src}\nexpected {needle:?}, got:\n{e}");
+        assert!(
+            e.starts_with("COMPILE") && e.contains(needle),
+            "for:\n{src}\nexpected {needle:?}, got:\n{e}"
+        );
     }
 }
 
 #[test]
 fn div_and_mod_assignment() {
-    assert_eq!(out("let n = 17\nn div= 5\nprint(n)\nn mod= 2\nprint(n)\nn = 100\nn %= 7\nprint(n)"), "3\n1\n2\n");
-    assert_eq!(out("let a = [20]\na[0] div= 3\nprint(a[0])\nlet m = { \"k\": 9 }\nm[\"k\"] mod= 4\nprint(m[\"k\"])"), "6\n1\n");
+    assert_eq!(
+        out("let n = 17\nn div= 5\nprint(n)\nn mod= 2\nprint(n)\nn = 100\nn %= 7\nprint(n)"),
+        "3\n1\n2\n"
+    );
+    assert_eq!(
+        out(
+            "let a = [20]\na[0] div= 3\nprint(a[0])\nlet m = { \"k\": 9 }\nm[\"k\"] mod= 4\nprint(m[\"k\"])"
+        ),
+        "6\n1\n"
+    );
     assert_eq!(out("let x = 7.5\nx mod= 2\nprint(x)"), "1.5\n");
     // `div ==` and `mod ==` are not compound assignments; spaces keep them apart
-    assert_eq!(out("let n = 7\nprint(n div 2 == 3)\nprint(n mod 2 == 1)"), "true\ntrue\n");
+    assert_eq!(
+        out("let n = 7\nprint(n div 2 == 3)\nprint(n mod 2 == 1)"),
+        "true\ntrue\n"
+    );
     // the old way still works, and `/=` on an int is still an error
     assert!(err("let n = 8\nn /= 2").starts_with("COMPILE"));
     assert!(err("let x = 7.5\nx div= 2").starts_with("COMPILE"));
@@ -1058,29 +1746,83 @@ fn div_and_mod_assignment() {
 
 #[test]
 fn map_equality() {
-    assert_eq!(out("let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 2, \"x\": 1 }\nprint(a == b)\nprint(a != b)"), "true\nfalse\n");
-    assert_eq!(out("let a = { \"x\": 1 }\nprint(a == { \"x\": 2 })\nprint(a == { \"x\": 1, \"z\": 0 })\nprint(a == { \"q\": 1 })"), "false\nfalse\nfalse\n");
-    assert_eq!(out("let e1: map<int, string> = {}\nlet e2: map<int, string> = {}\nprint(e1 == e2)\nlet n = { 1: [1, 2] }\nprint(n == { 1: [1, 2] })\nprint(n == { 1: [2] })"), "true\ntrue\nfalse\n");
+    assert_eq!(
+        out(
+            "let a = { \"x\": 1, \"y\": 2 }\nlet b = { \"y\": 2, \"x\": 1 }\nprint(a == b)\nprint(a != b)"
+        ),
+        "true\nfalse\n"
+    );
+    assert_eq!(
+        out(
+            "let a = { \"x\": 1 }\nprint(a == { \"x\": 2 })\nprint(a == { \"x\": 1, \"z\": 0 })\nprint(a == { \"q\": 1 })"
+        ),
+        "false\nfalse\nfalse\n"
+    );
+    assert_eq!(
+        out(
+            "let e1: map<int, string> = {}\nlet e2: map<int, string> = {}\nprint(e1 == e2)\nlet n = { 1: [1, 2] }\nprint(n == { 1: [1, 2] })\nprint(n == { 1: [2] })"
+        ),
+        "true\ntrue\nfalse\n"
+    );
     // nested maps, and maps inside arrays
-    assert_eq!(out("print([{ 1: 2 }] == [{ 1: 2 }])\nprint({ \"a\": { 1: 2 } } == { \"a\": { 1: 3 } })"), "true\nfalse\n");
+    assert_eq!(
+        out("print([{ 1: 2 }] == [{ 1: 2 }])\nprint({ \"a\": { 1: 2 } } == { \"a\": { 1: 3 } })"),
+        "true\nfalse\n"
+    );
     // the maps must have the same kind of keys and comparable values
-    for src in ["print({ 1: 2 } == { \"a\": 2 })", "print({ 1: 2 } == { 1: \"s\" })"] {
+    for src in [
+        "print({ 1: 2 } == { \"a\": 2 })",
+        "print({ 1: 2 } == { 1: \"s\" })",
+    ] {
         assert!(err(src).starts_with("COMPILE"), "{src}");
     }
 }
 
 #[test]
 fn string_library() {
-    assert_eq!(out("print(\"  hi  \".trim_start() + \"|\")\nprint(\"  hi  \".trim_end() + \"|\")\nprint(\"héllo\".reverse())\nprint(\"hello world\".capitalize())\nprint(\"\".capitalize() == \"\")"), "hi  |\n  hi|\nolléh\nHello world\ntrue\n");
-    assert_eq!(out("print(\"a-b-c\".last_index_of(\"-\"))\nprint(\"abc\".last_index_of(\"z\"))\nprint(\"banana\".count(\"an\"))\nprint(\"aaa\".count(\"aa\"))"), "3\nnone\n2\n1\n");
-    assert_eq!(out("print(\"a\\nb\\r\\nc\\n\".lines())\nprint(\"  the  quick\\tfox \".words())"), "[\"a\", \"b\", \"c\"]\n[\"the\", \"quick\", \"fox\"]\n");
-    assert_eq!(out("print(\"7\".pad_left(3, \"0\"))\nprint(\"ab\".pad_right(5, \".\") + \"|\")\nprint(\"toolong\".pad_left(3, \"0\"))\nprint(\"é\".pad_left(3, \"*\"))"), "007\nab...|\ntoolong\n**é\n");
-    assert_eq!(out("print(\"123\".is_digit())\nprint(\"12a\".is_digit())\nprint(\"\".is_digit())\nprint(\"héé\".is_alpha())\nprint(\"a1\".is_alpha())\nprint(\"  \".is_blank())\nprint(\"\".is_blank())\nprint(\" x\".is_blank())"), "true\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n");
-    assert_eq!(out("print(\"A\".code())\nprint(\"é\".code())\nprint(97.char())\nprint(8364.char())"), "65\n233\na\n€\n");
-    assert_eq!(out("print(\"42\".to_int())\nprint(\"4x\".to_int())\nprint(\"2.5\".to_float())\nprint(\"x\".to_float())\nlet n = \" 12 \".to_int()\nif n != none then print(n + 1) end"), "42\nnone\n2.5\nnone\n13\n");
+    assert_eq!(
+        out(
+            "print(\"  hi  \".trim_start() + \"|\")\nprint(\"  hi  \".trim_end() + \"|\")\nprint(\"héllo\".reverse())\nprint(\"hello world\".capitalize())\nprint(\"\".capitalize() == \"\")"
+        ),
+        "hi  |\n  hi|\nolléh\nHello world\ntrue\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"a-b-c\".last_index_of(\"-\"))\nprint(\"abc\".last_index_of(\"z\"))\nprint(\"banana\".count(\"an\"))\nprint(\"aaa\".count(\"aa\"))"
+        ),
+        "3\nnone\n2\n1\n"
+    );
+    assert_eq!(
+        out("print(\"a\\nb\\r\\nc\\n\".lines())\nprint(\"  the  quick\\tfox \".words())"),
+        "[\"a\", \"b\", \"c\"]\n[\"the\", \"quick\", \"fox\"]\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"7\".pad_left(3, \"0\"))\nprint(\"ab\".pad_right(5, \".\") + \"|\")\nprint(\"toolong\".pad_left(3, \"0\"))\nprint(\"é\".pad_left(3, \"*\"))"
+        ),
+        "007\nab...|\ntoolong\n**é\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"123\".is_digit())\nprint(\"12a\".is_digit())\nprint(\"\".is_digit())\nprint(\"héé\".is_alpha())\nprint(\"a1\".is_alpha())\nprint(\"  \".is_blank())\nprint(\"\".is_blank())\nprint(\" x\".is_blank())"
+        ),
+        "true\nfalse\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\n"
+    );
+    assert_eq!(
+        out("print(\"A\".code())\nprint(\"é\".code())\nprint(97.char())\nprint(8364.char())"),
+        "65\n233\na\n€\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"42\".to_int())\nprint(\"4x\".to_int())\nprint(\"2.5\".to_float())\nprint(\"x\".to_float())\nlet n = \" 12 \".to_int()\nif n != none then print(n + 1) end"
+        ),
+        "42\nnone\n2.5\nnone\n13\n"
+    );
     // a Caesar cipher uses code() and char()
     assert_eq!(
-        out("fun shift(s: string, k: int) -> string\nlet out = \"\"\nfor c in s do\nlet base = 97\nout += ((c.code() - base + k) mod 26 + base).char()\nend\nout\nend\nprint(shift(\"hello\", 3))"),
+        out(
+            "fun shift(s: string, k: int) -> string\nlet out = \"\"\nfor c in s do\nlet base = 97\nout += ((c.code() - base + k) mod 26 + base).char()\nend\nout\nend\nprint(shift(\"hello\", 3))"
+        ),
         "khoor\n"
     );
     assert!(err("print(\"ab\".code())").starts_with("R024"));
@@ -1088,26 +1830,68 @@ fn string_library() {
     assert!(err("print(55296.char())").starts_with("R024"));
     assert!(err("print(\"x\".pad_left(3, \"ab\"))").starts_with("R021"));
     assert!(err("print(\"x\".count(\"\"))").starts_with("R021"));
-    let o = run_files(&[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")], None, Limits { max_alloc: 1000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", "print(\"x\".pad_left(1000000, \"0\"))")],
+        None,
+        Limits {
+            max_alloc: 1000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R903"));
 }
 
 #[test]
 fn string_prefix_suffix_and_case_conversions() {
-    assert_eq!(out("print(\"hello.txt\".strip_suffix(\".txt\"))\nprint(\"hello.txt\".strip_suffix(\".md\"))"), "hello\nnone\n");
-    assert_eq!(out("print(\"hello world\".strip_prefix(\"hello \"))\nprint(\"hello world\".strip_prefix(\"bye\"))"), "world\nnone\n");
-    assert_eq!(out("print(\"Hello World\".snake_case())\nprint(\"helloWorld\".snake_case())\nprint(\"already_snake\".snake_case())"), "hello_world\nhello_world\nalready_snake\n");
-    assert_eq!(out("print(\"hello world\".kebab_case())\nprint(\"HelloWorld\".kebab_case())"), "hello-world\nhello-world\n");
-    assert_eq!(out("print(\"hello world\".camel_case())\nprint(\"hello-world-test\".camel_case())"), "helloWorld\nhelloWorldTest\n");
-    assert_eq!(out("print(\"hello_world test\".title_case())"), "Hello World Test\n");
-    assert_eq!(out("print(\"Hello\".eq_ignore_case(\"hello\"))\nprint(\"Hello\".eq_ignore_case(\"world\"))"), "true\nfalse\n");
+    assert_eq!(
+        out(
+            "print(\"hello.txt\".strip_suffix(\".txt\"))\nprint(\"hello.txt\".strip_suffix(\".md\"))"
+        ),
+        "hello\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"hello world\".strip_prefix(\"hello \"))\nprint(\"hello world\".strip_prefix(\"bye\"))"
+        ),
+        "world\nnone\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"Hello World\".snake_case())\nprint(\"helloWorld\".snake_case())\nprint(\"already_snake\".snake_case())"
+        ),
+        "hello_world\nhello_world\nalready_snake\n"
+    );
+    assert_eq!(
+        out("print(\"hello world\".kebab_case())\nprint(\"HelloWorld\".kebab_case())"),
+        "hello-world\nhello-world\n"
+    );
+    assert_eq!(
+        out("print(\"hello world\".camel_case())\nprint(\"hello-world-test\".camel_case())"),
+        "helloWorld\nhelloWorldTest\n"
+    );
+    assert_eq!(
+        out("print(\"hello_world test\".title_case())"),
+        "Hello World Test\n"
+    );
+    assert_eq!(
+        out(
+            "print(\"Hello\".eq_ignore_case(\"hello\"))\nprint(\"Hello\".eq_ignore_case(\"world\"))"
+        ),
+        "true\nfalse\n"
+    );
 }
 
 #[test]
 fn number_formatting() {
-    assert_eq!(out("print(255.to_hex())\nprint((-255).to_hex())\nprint(0.to_hex())"), "ff\n-ff\n0\n");
+    assert_eq!(
+        out("print(255.to_hex())\nprint((-255).to_hex())\nprint(0.to_hex())"),
+        "ff\n-ff\n0\n"
+    );
     assert_eq!(out("print(8.to_oct())\nprint(5.to_bin())"), "10\n101\n");
-    assert_eq!(out("print(3.14159.to_fixed(2))\nprint(1.0.to_fixed(0))\nprint((-2.5).to_fixed(3))"), "3.14\n1\n-2.500\n");
+    assert_eq!(
+        out("print(3.14159.to_fixed(2))\nprint(1.0.to_fixed(0))\nprint((-2.5).to_fixed(3))"),
+        "3.14\n1\n-2.500\n"
+    );
     assert!(err("print(1.5.to_fixed(-1))").starts_with("R021"));
     assert!(err("print(1.5.to_fixed(18))").starts_with("R021"));
 }
@@ -1117,16 +1901,24 @@ fn number_formatting() {
 #[test]
 fn printing_cyclic_or_deep_values_does_not_crash() {
     // a structure that points to itself: printing stops at a fixed depth
-    let o = out("struct Node\npublic next: Node?\nend\nlet n = Node { next: none }\nn.next = n\nprint(\"built\")\nlet s = n as string\nprint(s.len() > 100)\nprint(s.ends_with(\"...\" + \" }\".repeat(1)) or s.contains(\"...\"))");
+    let o = out(
+        "struct Node\npublic next: Node?\nend\nlet n = Node { next: none }\nn.next = n\nprint(\"built\")\nlet s = n as string\nprint(s.len() > 100)\nprint(s.ends_with(\"...\" + \" }\".repeat(1)) or s.contains(\"...\"))",
+    );
     assert!(o.starts_with("built\ntrue\ntrue"), "{o}");
     // a very long linked list prints without a stack overflow
     let src = "struct Node\npublic v: int\npublic next: Node?\nend\nlet head = Node { v: 0, next: none }\nlet cur = head\nfor i in 1..5000 do\nlet n = Node { v: i, next: none }\ncur.next = n\ncur = n\nend\nprint((head as string).contains(\"...\"))";
     assert_eq!(out(src), "true\n");
     // two links to itself would print 2^64 nodes: the size limit stops it with an error
     let o = run_files(
-        &[("main.q", "struct T\npublic a: T?\npublic b: T?\nend\nlet t = T { a: none, b: none }\nt.a = t\nt.b = t\nprint(t)")],
+        &[(
+            "main.q",
+            "struct T\npublic a: T?\npublic b: T?\nend\nlet t = T { a: none, b: none }\nt.a = t\nt.b = t\nprint(t)",
+        )],
         None,
-        Limits { max_alloc: 100_000, ..Limits::default() },
+        Limits {
+            max_alloc: 100_000,
+            ..Limits::default()
+        },
     );
     assert!(o.error.unwrap().starts_with("R903"));
 }
@@ -1164,7 +1956,10 @@ fn internal_panics_become_errors() {
         .expect("the panic must not escape `run`");
     let (code, message) = result.expect("an error is reported");
     assert_eq!(code, "X999");
-    assert!(message.contains("the host blew up") && message.contains("bug in qlang"), "{message}");
+    assert!(
+        message.contains("the host blew up") && message.contains("bug in qlang"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1173,17 +1968,38 @@ fn builtin_work_is_charged_to_the_step_budget() {
     // charged, the step limit stops it quickly; before, it ran for minutes.
     let src = "let big: array<int> = []\nfor i in 0..100_000 do\nbig[] = i\nend\nlet n = 0\nwhile n < 20_000 do\nbig.contains(-1)\nn += 1\nend\nprint(n)";
     let start = std::time::Instant::now();
-    let o = run_files(&[("main.q", src)], None, Limits { max_steps: 3_000_000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", src)],
+        None,
+        Limits {
+            max_steps: 3_000_000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R900"));
-    assert!(start.elapsed().as_secs() < 10, "the limit should stop it quickly: {:?}", start.elapsed());
+    assert!(
+        start.elapsed().as_secs() < 10,
+        "the limit should stop it quickly: {:?}",
+        start.elapsed()
+    );
     // string building by repeated concatenation is charged too
     let src = "let s = \"x\".repeat(1_000_000)\nlet n = 0\nwhile n < 100_000 do\nlet t = s + s\nn += 1\nend";
     let start = std::time::Instant::now();
-    let o = run_files(&[("main.q", src)], None, Limits { max_steps: 3_000_000, ..Limits::default() });
+    let o = run_files(
+        &[("main.q", src)],
+        None,
+        Limits {
+            max_steps: 3_000_000,
+            ..Limits::default()
+        },
+    );
     assert!(o.error.unwrap().starts_with("R900"));
     assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
     // a normal program is not affected
-    assert_eq!(out("let a = [1, 2, 3]\nprint(a.contains(3))\nprint(\"hello\".upper())"), "true\nHELLO\n");
+    assert_eq!(
+        out("let a = [1, 2, 3]\nprint(a.contains(3))\nprint(\"hello\".upper())"),
+        "true\nHELLO\n"
+    );
 }
 
 #[test]
@@ -1196,18 +2012,38 @@ fn a_huge_broken_file_gives_a_short_error_list() {
         Err(e) => e,
     };
     assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
-    assert!(e.diagnostics.len() <= 101, "{} diagnostics", e.diagnostics.len());
-    assert!(e.diagnostics.last().unwrap().message.contains("too many errors"));
+    assert!(
+        e.diagnostics.len() <= 101,
+        "{} diagnostics",
+        e.diagnostics.len()
+    );
+    assert!(
+        e.diagnostics
+            .last()
+            .unwrap()
+            .message
+            .contains("too many errors")
+    );
     // type errors are capped as well
-    let many: String = (0..500).map(|i| format!("let v{i}: int = \"x\"\n")).collect();
+    let many: String = (0..500)
+        .map(|i| format!("let v{i}: int = \"x\"\n"))
+        .collect();
     let e = match compile("main.q", &many, &mut host) {
         Ok(_) => panic!("expected errors"),
         Err(e) => e,
     };
     assert!(e.diagnostics.len() <= 101, "{}", e.diagnostics.len());
-    assert!(e.diagnostics.iter().any(|d| d.message.contains("too many errors")));
+    assert!(
+        e.diagnostics
+            .iter()
+            .any(|d| d.message.contains("too many errors"))
+    );
     // a few errors are all kept, in order
-    let e = match compile("main.q", "let a: int = \"x\"\nlet b: int = \"y\"", &mut host) {
+    let e = match compile(
+        "main.q",
+        "let a: int = \"x\"\nlet b: int = \"y\"",
+        &mut host,
+    ) {
         Ok(_) => panic!("expected errors"),
         Err(e) => e,
     };
@@ -1220,7 +2056,10 @@ fn imports_may_go_up_and_down() {
     let o = run_files(
         &[
             ("app/main.q", "import f from \"../lib/f.q\"\nprint(f())"),
-            ("lib/f.q", "import g from \"g.q\"\nfun f() -> int\n  g() + 1\nend\nexport f"),
+            (
+                "lib/f.q",
+                "import g from \"g.q\"\nfun f() -> int\n  g() + 1\nend\nexport f",
+            ),
             ("lib/g.q", "fun g() -> int\n  41\nend\nexport g"),
         ],
         None,
@@ -1230,7 +2069,10 @@ fn imports_may_go_up_and_down() {
     assert_eq!(o.output, "42\n");
     // a module above the entry file's directory (a virtual name in a request)
     let o = run_files(
-        &[("main.q", "import v from \"../shared.q\"\nprint(v)"), ("../shared.q", "const v = 7\nexport v")],
+        &[
+            ("main.q", "import v from \"../shared.q\"\nprint(v)"),
+            ("../shared.q", "const v = 7\nexport v"),
+        ],
         None,
         Limits::default(),
     );
@@ -1242,8 +2084,14 @@ fn imports_may_go_up_and_down() {
 fn a_module_reached_by_two_paths_is_loaded_once() {
     let o = run_files(
         &[
-            ("sub/main.q", "import a from \"other.q\"\nimport \"../sub/other.q\" as again\nprint(a() + again.a())"),
-            ("sub/other.q", "print(\"loading\")\nfun a() -> int\n  1\nend\nexport a"),
+            (
+                "sub/main.q",
+                "import a from \"other.q\"\nimport \"../sub/other.q\" as again\nprint(a() + again.a())",
+            ),
+            (
+                "sub/other.q",
+                "print(\"loading\")\nfun a() -> int\n  1\nend\nexport a",
+            ),
         ],
         None,
         Limits::default(),
@@ -1259,8 +2107,14 @@ fn cyclic_imports_are_matched_through_different_spellings() {
     // between them to actually share one `a`/`b`, not load each file twice.
     let o = run_files(
         &[
-            ("d/a.q", "import b from \"../d/b.q\"\nexport a\nfun a() -> int\n  1\nend\nprint(b())"),
-            ("d/b.q", "import a from \"a.q\"\nfun b() -> int\n  a() + 1\nend\nexport b"),
+            (
+                "d/a.q",
+                "import b from \"../d/b.q\"\nexport a\nfun a() -> int\n  1\nend\nprint(b())",
+            ),
+            (
+                "d/b.q",
+                "import a from \"a.q\"\nfun b() -> int\n  a() + 1\nend\nexport b",
+            ),
         ],
         None,
         Limits::default(),

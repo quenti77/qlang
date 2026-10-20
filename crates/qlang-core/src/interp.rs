@@ -5,10 +5,10 @@
 
 use crate::ast::*;
 use crate::check::Program;
-use crate::diag::Diagnostic;
 use crate::datetime;
-use crate::ids;
+use crate::diag::Diagnostic;
 use crate::host::{Host, HostError, HttpRequest, HttpResponse, Limits, SqlValue};
+use crate::ids;
 use crate::span::Span;
 use crate::types::*;
 use crate::value::*;
@@ -44,7 +44,10 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
         Ok(Err(_)) => None,
         Err(payload) => Some(crate::check::internal_error(&payload)),
     };
-    RunResult { error, steps: it.steps }
+    RunResult {
+        error,
+        steps: it.steps,
+    }
 }
 
 /// An HTTP request for a program started with [`Program::start_app`]: the fields of the
@@ -82,18 +85,41 @@ pub struct App<'a> {
 impl Program {
     /// Run the program's top-level code, then keep it ready to answer requests with its
     /// `fun handle(req: Request) -> Response`.
-    pub fn start_app<'a>(&'a self, host: &'a mut dyn Host, limits: Limits) -> Result<App<'a>, Box<Diagnostic>> {
+    pub fn start_app<'a>(
+        &'a self,
+        host: &'a mut dyn Host,
+        limits: Limits,
+    ) -> Result<App<'a>, Box<Diagnostic>> {
         let entry = self.modules.len().saturating_sub(1);
-        let found = self.defs.fns.iter().position(|f| f.name == "handle" && f.module == entry && f.impl_id.is_none() && !f.has_self && f.decl.is_some());
+        let found = self.defs.fns.iter().position(|f| {
+            f.name == "handle"
+                && f.module == entry
+                && f.impl_id.is_none()
+                && !f.has_self
+                && f.decl.is_some()
+        });
         let Some(handler) = found else {
-            return Err(Box::new(Diagnostic::error("R070", "a program that serves requests needs `fun handle(req: Request) -> Response`", Default::default())));
+            return Err(Box::new(Diagnostic::error(
+                "R070",
+                "a program that serves requests needs `fun handle(req: Request) -> Response`",
+                Default::default(),
+            )));
         };
-        let prelude = |name: &str| self.defs.structs.iter().position(|s| s.module == crate::check::PRELUDE_MOD && s.name == name);
+        let prelude = |name: &str| {
+            self.defs
+                .structs
+                .iter()
+                .position(|s| s.module == crate::check::PRELUDE_MOD && s.name == name)
+        };
         let (req, resp) = (prelude("Request"), prelude("Response"));
         let f = &self.defs.fns[handler];
         let right = matches!((&f.params[..], &f.ret), ([Ty::Struct(a, _)], Ty::Struct(b, _)) if Some(*a) == req && Some(*b) == resp);
         if !right {
-            return Err(Box::new(Diagnostic::error("R070", "`handle` must be `fun handle(req: Request) -> Response`", f.span)));
+            return Err(Box::new(Diagnostic::error(
+                "R070",
+                "`handle` must be `fun handle(req: Request) -> Response`",
+                f.span,
+            )));
         }
         let mut it = Interp::new(self, host, limits);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
@@ -132,13 +158,21 @@ impl App<'_> {
                     d.resolve(&prog.sources);
                     d
                 }
-                _ => Box::new(Diagnostic::error("X999", "internal error", Default::default())),
+                _ => Box::new(Diagnostic::error(
+                    "X999",
+                    "internal error",
+                    Default::default(),
+                )),
             }),
             Ok(Err(Ctrl::Error(mut d))) => {
                 d.resolve(&prog.sources);
                 Err(d)
             }
-            Ok(Err(_)) => Err(Box::new(Diagnostic::error("X999", "internal error", Default::default()))),
+            Ok(Err(_)) => Err(Box::new(Diagnostic::error(
+                "X999",
+                "internal error",
+                Default::default(),
+            ))),
             Err(payload) => Err(Box::new(crate::check::internal_error(&payload))),
         }
     }
@@ -163,7 +197,9 @@ impl Interp<'_> {
     /// Reads the fields of the `Response` the handler returned.
     fn response_of(&self, v: &Value) -> R<AppResponse> {
         let bad = |msg: &str| self.fail("R071", msg, Default::default());
-        let Value::Struct(o) = v else { return bad("`handle` must return a `Response`") };
+        let Value::Struct(o) = v else {
+            return bad("`handle` must return a `Response`");
+        };
         let fields = o.fields.borrow();
         let status = match fields.get("status") {
             Some(Value::Int(s)) if (100..=599).contains(s) => *s,
@@ -185,7 +221,11 @@ impl Interp<'_> {
                 .collect(),
             _ => Vec::new(),
         };
-        Ok(AppResponse { status, headers, body })
+        Ok(AppResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }
 
@@ -264,7 +304,11 @@ impl<'a> Interp<'a> {
             }
         }
         for (name, call_span, count) in groups.into_iter().take(8) {
-            let times = if count > 1 { format!(" ({count} times)") } else { String::new() };
+            let times = if count > 1 {
+                format!(" ({count} times)")
+            } else {
+                String::new()
+            };
             d = d.with_note(format!("called from `{name}`{times}"), Some(call_span));
         }
         Ctrl::Error(Box::new(d))
@@ -277,7 +321,11 @@ impl<'a> Interp<'a> {
     fn tick(&mut self, span: Span) -> R<()> {
         self.steps += 1;
         if self.steps > self.limits.max_steps {
-            return self.fail("R900", "the program ran for too long (step limit reached: infinite loop?)", span);
+            return self.fail(
+                "R900",
+                "the program ran for too long (step limit reached: infinite loop?)",
+                span,
+            );
         }
         Ok(())
     }
@@ -287,7 +335,11 @@ impl<'a> Interp<'a> {
     fn charge(&mut self, elements: usize, span: Span) -> R<()> {
         self.steps = self.steps.saturating_add((elements / 4) as u64);
         if self.steps > self.limits.max_steps {
-            return self.fail("R900", "the program ran for too long (step limit reached: infinite loop?)", span);
+            return self.fail(
+                "R900",
+                "the program ran for too long (step limit reached: infinite loop?)",
+                span,
+            );
         }
         Ok(())
     }
@@ -300,7 +352,11 @@ impl<'a> Interp<'a> {
     /// Refuse arrays and strings that grow beyond the configured size.
     fn guard_alloc(&self, len: usize, span: Span) -> R<()> {
         if len > self.limits.max_alloc {
-            return self.fail("R903", "a value became too large (memory limit reached)", span);
+            return self.fail(
+                "R903",
+                "a value became too large (memory limit reached)",
+                span,
+            );
         }
         Ok(())
     }
@@ -308,7 +364,11 @@ impl<'a> Interp<'a> {
     fn emit(&mut self, text: &str, span: Span) -> R<()> {
         self.out_bytes += text.len();
         if self.out_bytes > self.limits.max_output {
-            return self.fail("R902", "the program printed too much (output limit reached)", span);
+            return self.fail(
+                "R902",
+                "the program printed too much (output limit reached)",
+                span,
+            );
         }
         self.host.print(text);
         Ok(())
@@ -404,7 +464,13 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Value::Unit)
             }
-            StmtKind::For { var, var2, iter, step, body } => {
+            StmtKind::For {
+                var,
+                var2,
+                iter,
+                step,
+                body,
+            } => {
                 let it = self.eval(iter, env)?;
                 let step_v = match step {
                     Some(st) => match self.eval(st, env)? {
@@ -537,12 +603,20 @@ impl<'a> Interp<'a> {
             ExprKind::Ident(name, _) => match prog.res.paths.get(&e.id) {
                 Some(PathRes::Global(m, n)) => match self.envs[*m].get(n) {
                     Some(v) => Ok(v),
-                    None => self.fail("R002", format!("`{n}` is used before it has a value"), e.span),
+                    None => self.fail(
+                        "R002",
+                        format!("`{n}` is used before it has a value"),
+                        e.span,
+                    ),
                 },
                 Some(PathRes::Fn(fid)) => Ok(self.fn_value(*fid)),
                 _ => match env.get(name) {
                     Some(v) => Ok(v),
-                    None => self.fail("R002", format!("`{name}` is used before it has a value"), e.span),
+                    None => self.fail(
+                        "R002",
+                        format!("`{name}` is used before it has a value"),
+                        e.span,
+                    ),
                 },
             },
             ExprKind::SelfVal => match env.get("self") {
@@ -579,7 +653,12 @@ impl<'a> Interp<'a> {
                         None => self.fail("R010", "integer overflow", e.span),
                     },
                     (UnOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
-                    (UnOp::Neg, _) => match self.find_method(&v, Lang::Neg.method_name(), Some(prog.defs.lang(Lang::Neg)), None) {
+                    (UnOp::Neg, _) => match self.find_method(
+                        &v,
+                        Lang::Neg.method_name(),
+                        Some(prog.defs.lang(Lang::Neg)),
+                        None,
+                    ) {
                         Some(fid) => self.call_fid(fid, Some(v), vec![], e.span),
                         None => self.fail("R004", "this value cannot be negated", e.span),
                     },
@@ -606,7 +685,11 @@ impl<'a> Interp<'a> {
                 }
             },
             ExprKind::Assign { op, target, value } => self.eval_assign(e, *op, target, value, env),
-            ExprKind::Range { start, end, inclusive } => {
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 let (a, b) = (self.eval(start, env)?, self.eval(end, env)?);
                 match (a, b) {
                     (Value::Int(a), Value::Int(b)) => Ok(Value::Range(a, b, *inclusive)),
@@ -626,7 +709,10 @@ impl<'a> Interp<'a> {
             }
             ExprKind::Append(_) => self.fail("R003", "`x[]` can only be assigned to", e.span),
             ExprKind::Field(obj, name, _) => self.eval_field(e, obj, name, env),
-            ExprKind::If { branches, else_block } => {
+            ExprKind::If {
+                branches,
+                else_block,
+            } => {
                 for (cond, block) in branches {
                     if self.eval_bool(cond, env)? {
                         return self.exec_block(block, env);
@@ -637,7 +723,11 @@ impl<'a> Interp<'a> {
                     None => Ok(Value::Unit),
                 }
             }
-            ExprKind::Match { scrutinee, cases, else_block } => {
+            ExprKind::Match {
+                scrutinee,
+                cases,
+                else_block,
+            } => {
                 let v = self.eval(scrutinee, env)?;
                 for (i, case) in cases.iter().enumerate() {
                     let scope = Scope::new(Some(env.clone()));
@@ -645,9 +735,10 @@ impl<'a> Interp<'a> {
                         continue;
                     }
                     if let Some(g) = &case.guard
-                        && !self.eval_bool(g, &scope)? {
-                            continue;
-                        }
+                        && !self.eval_bool(g, &scope)?
+                    {
+                        continue;
+                    }
                     return self.exec_stmts(&case.body.stmts, &scope);
                 }
                 match else_block {
@@ -655,7 +746,11 @@ impl<'a> Interp<'a> {
                     None => Ok(Value::Unit),
                 }
             }
-            ExprKind::Lambda(f) => Ok(Value::Func(Rc::new(FuncVal { decl: f.clone(), env: env.clone(), name: "<function>".into() }))),
+            ExprKind::Lambda(f) => Ok(Value::Func(Rc::new(FuncVal {
+                decl: f.clone(),
+                env: env.clone(),
+                name: "<function>".into(),
+            }))),
         }
     }
 
@@ -699,7 +794,10 @@ impl<'a> Interp<'a> {
                 }
             }
         }
-        Ok(Value::Struct(Rc::new(StructObj { def: sid, fields: RefCell::new(fields) })))
+        Ok(Value::Struct(Rc::new(StructObj {
+            def: sid,
+            fields: RefCell::new(fields),
+        })))
     }
 
     fn eval_field(&mut self, e: &Expr, obj: &Expr, name: &Ident, env: &Env) -> R<Value> {
@@ -709,7 +807,11 @@ impl<'a> Interp<'a> {
             Some(PathRes::StaticField(sid, n)) => {
                 return match self.statics.get(&(*sid, n.clone())) {
                     Some(v) => Ok(v.clone()),
-                    None => self.fail("R002", format!("static field `{n}` has no value yet"), e.span),
+                    None => self.fail(
+                        "R002",
+                        format!("static field `{n}` has no value yet"),
+                        e.span,
+                    ),
                 };
             }
             Some(PathRes::BuiltinStatic(ty, name)) => {
@@ -727,7 +829,11 @@ impl<'a> Interp<'a> {
             Some(PathRes::Global(m, n)) => {
                 return match self.envs[*m].get(n) {
                     Some(v) => Ok(v),
-                    None => self.fail("R002", format!("`{n}` is used before it has a value"), e.span),
+                    None => self.fail(
+                        "R002",
+                        format!("`{n}` is used before it has a value"),
+                        e.span,
+                    ),
                 };
             }
             _ => {}
@@ -737,11 +843,23 @@ impl<'a> Interp<'a> {
                 let v = o.fields.borrow().get(&name.name).cloned();
                 match v {
                     Some(v) => Ok(v),
-                    None => self.fail("R005", format!("this value has no field `{}`", name.name), name.span),
+                    None => self.fail(
+                        "R005",
+                        format!("this value has no field `{}`", name.name),
+                        name.span,
+                    ),
                 }
             }
-            Value::None => self.fail("R006", format!("cannot read `.{}`: the value is `none`", name.name), e.span),
-            _ => self.fail("R005", format!("this value has no field `{}`", name.name), name.span),
+            Value::None => self.fail(
+                "R006",
+                format!("cannot read `.{}`: the value is `none`", name.name),
+                e.span,
+            ),
+            _ => self.fail(
+                "R005",
+                format!("this value has no field `{}`", name.name),
+                name.span,
+            ),
         }
     }
 
@@ -755,7 +873,10 @@ impl<'a> Interp<'a> {
             for (a, slot) in args.iter().zip(order.iter()) {
                 out[*slot] = Some(self.eval(&a.value, env)?);
             }
-            return Ok(out.into_iter().map(|v| v.expect("every parameter slot filled by the checker")).collect());
+            return Ok(out
+                .into_iter()
+                .map(|v| v.expect("every parameter slot filled by the checker"))
+                .collect());
         }
         let mut out = Vec::with_capacity(args.len());
         for a in args {
@@ -790,7 +911,10 @@ impl<'a> Interp<'a> {
                         return self.call_fid(*fid, this, argv, e.span);
                     }
                     // a module member that is a variable holding a function, or a method call
-                    if !matches!(prog.res.paths.get(&obj.id), Some(PathRes::Module(_)) | Some(PathRes::Type(_))) {
+                    if !matches!(
+                        prog.res.paths.get(&obj.id),
+                        Some(PathRes::Module(_)) | Some(PathRes::Type(_))
+                    ) {
                         let recv = self.eval(obj, env)?;
                         let argv = self.eval_args(e.id, args, env)?;
                         self.cur_call = e.id;
@@ -815,7 +939,13 @@ impl<'a> Interp<'a> {
         }
     }
 
-    fn call_fid(&mut self, fid: FnId, this: Option<Value>, args: Vec<Value>, span: Span) -> R<Value> {
+    fn call_fid(
+        &mut self,
+        fid: FnId,
+        this: Option<Value>,
+        args: Vec<Value>,
+        span: Span,
+    ) -> R<Value> {
         let prog = self.prog;
         let def = &prog.defs.fns[fid];
         let decl = def.decl.clone().expect("function without body");
@@ -823,7 +953,15 @@ impl<'a> Interp<'a> {
         self.call_function(&decl, &env, this, args, &def.name, span)
     }
 
-    fn call_function(&mut self, decl: &Rc<FunDecl>, parent: &Env, this: Option<Value>, args: Vec<Value>, name: &str, span: Span) -> R<Value> {
+    fn call_function(
+        &mut self,
+        decl: &Rc<FunDecl>,
+        parent: &Env,
+        this: Option<Value>,
+        args: Vec<Value>,
+        name: &str,
+        span: Span,
+    ) -> R<Value> {
         if self.depth >= self.limits.max_depth {
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }
@@ -852,7 +990,11 @@ impl<'a> Interp<'a> {
 
     fn call_method(&mut self, recv: Value, name: &Ident, args: Vec<Value>, span: Span) -> R<Value> {
         if let Value::None = recv {
-            return self.fail("R006", format!("cannot call `.{}()`: the value is `none`", name.name), span);
+            return self.fail(
+                "R006",
+                format!("cannot call `.{}()`: the value is `none`", name.name),
+                span,
+            );
         }
         if self.prog.res.class_calls.contains(&self.cur_call) {
             return Ok(Value::str(self.class_name_of(&recv)));
@@ -866,9 +1008,10 @@ impl<'a> Interp<'a> {
         let via_trait = self.prog.res.trait_calls.contains(&self.cur_call);
         if !via_trait
             && !matches!(recv, Value::Struct(_) | Value::Enum(..))
-            && let Some(v) = self.builtin_method(&recv, &name.name, &args, span)? {
-                return Ok(v);
-            }
+            && let Some(v) = self.builtin_method(&recv, &name.name, &args, span)?
+        {
+            return Ok(v);
+        }
         if let Some(fid) = self.find_method(&recv, &name.name, None, args.first()) {
             return self.call_fid(fid, Some(recv), args, span);
         }
@@ -879,7 +1022,11 @@ impl<'a> Interp<'a> {
                 return self.call_value(&f, args, span);
             }
         }
-        self.fail("R008", format!("this value has no method `{}`", name.name), span)
+        self.fail(
+            "R008",
+            format!("this value has no method `{}`", name.name),
+            span,
+        )
     }
 
     /// The name of a value's concrete struct or enum, for `.class()`.
@@ -897,18 +1044,27 @@ impl<'a> Interp<'a> {
         let defs = &self.prog.defs;
         match (v, t) {
             (_, Ty::Error | Ty::Param(_) | Ty::Infer(_)) => true,
-            (Value::Int(_), Ty::Int) | (Value::Float(_), Ty::Float) | (Value::Bool(_), Ty::Bool) => true,
+            (Value::Int(_), Ty::Int)
+            | (Value::Float(_), Ty::Float)
+            | (Value::Bool(_), Ty::Bool) => true,
             (Value::Str(_), Ty::Str) | (Value::Range(..), Ty::Range) => true,
-            (Value::Uuid(_), Ty::Uuid) | (Value::Ulid(_), Ty::Ulid) | (Value::DateTime(_), Ty::DateTime) => true,
+            (Value::Uuid(_), Ty::Uuid)
+            | (Value::Ulid(_), Ty::Ulid)
+            | (Value::DateTime(_), Ty::DateTime) => true,
             (Value::None, Ty::NoneT | Ty::Nullable(_)) => true,
             (_, Ty::Nullable(inner)) => self.value_matches_ty(v, inner),
             (Value::Array(_), Ty::Array(_)) => true,
             (Value::Map(_), Ty::Map(..)) => true,
             (Value::Struct(o), Ty::Struct(sid, _)) => defs.is_subclass(o.def, *sid),
             (Value::Struct(o), Ty::Trait(tid, _)) => {
-                let classes: Vec<StructId> = defs.ancestry(o.def, &[]).into_iter().map(|(s, _)| s).collect();
+                let classes: Vec<StructId> = defs
+                    .ancestry(o.def, &[])
+                    .into_iter()
+                    .map(|(s, _)| s)
+                    .collect();
                 defs.impls.iter().any(|imp| {
-                    matches!(&imp.trait_, Some((t2, _)) if t2 == tid) && matches!(&imp.target, Ty::Struct(s, _) if classes.contains(s))
+                    matches!(&imp.trait_, Some((t2, _)) if t2 == tid)
+                        && matches!(&imp.target, Ty::Struct(s, _) if classes.contains(s))
                 })
             }
             (Value::Enum(e, _), Ty::Enum(x)) => e == x,
@@ -919,10 +1075,20 @@ impl<'a> Interp<'a> {
 
     /// The impl method `name` for a value, optionally restricted to a trait and
     /// to the impl whose first parameter accepts `arg`.
-    fn find_method(&self, recv: &Value, name: &str, tid: Option<TraitId>, arg: Option<&Value>) -> Option<FnId> {
+    fn find_method(
+        &self,
+        recv: &Value,
+        name: &str,
+        tid: Option<TraitId>,
+        arg: Option<&Value>,
+    ) -> Option<FnId> {
         let defs = &self.prog.defs;
         let classes: Vec<Option<StructId>> = match recv {
-            Value::Struct(o) => defs.ancestry(o.def, &[]).into_iter().map(|(s, _)| Some(s)).collect(),
+            Value::Struct(o) => defs
+                .ancestry(o.def, &[])
+                .into_iter()
+                .map(|(s, _)| Some(s))
+                .collect(),
             _ => vec![None],
         };
         for cls in classes {
@@ -932,9 +1098,10 @@ impl<'a> Interp<'a> {
                         continue;
                     }
                     if let Some(t) = tid
-                        && !matches!(&imp.trait_, Some((x, _)) if *x == t) {
-                            continue;
-                        }
+                        && !matches!(&imp.trait_, Some((x, _)) if *x == t)
+                    {
+                        continue;
+                    }
                     let target_ok = match (&imp.target, cls) {
                         (Ty::Struct(s, _), Some(c)) => *s == c,
                         (Ty::Struct(..), None) => false,
@@ -944,12 +1111,15 @@ impl<'a> Interp<'a> {
                     if !target_ok {
                         continue;
                     }
-                    let Some((_, fid)) = imp.methods.iter().find(|(n, _)| n == name) else { continue };
+                    let Some((_, fid)) = imp.methods.iter().find(|(n, _)| n == name) else {
+                        continue;
+                    };
                     if let Some(a) = arg
                         && let Some(p0) = defs.fns[*fid].params.first()
-                            && !self.value_matches_ty(a, p0) {
-                                continue;
-                            }
+                        && !self.value_matches_ty(a, p0)
+                    {
+                        continue;
+                    }
                     return Some(*fid);
                 }
             }
@@ -962,7 +1132,11 @@ impl<'a> Interp<'a> {
         let defs = &self.prog.defs;
         let tid = defs.lang(Lang::As);
         let classes: Vec<Option<StructId>> = match recv {
-            Value::Struct(o) => defs.ancestry(o.def, &[]).into_iter().map(|(s, _)| Some(s)).collect(),
+            Value::Struct(o) => defs
+                .ancestry(o.def, &[])
+                .into_iter()
+                .map(|(s, _)| Some(s))
+                .collect(),
             _ => vec![None],
         };
         for cls in classes {
@@ -978,7 +1152,11 @@ impl<'a> Interp<'a> {
                     _ => false,
                 };
                 if ok {
-                    return imp.methods.iter().find(|(n, _)| n == "convert").map(|(_, f)| *f);
+                    return imp
+                        .methods
+                        .iter()
+                        .find(|(n, _)| n == "convert")
+                        .map(|(_, f)| *f);
                 }
             }
         }
@@ -1020,7 +1198,11 @@ impl<'a> Interp<'a> {
         }
         self.fmt_nodes += 1;
         if self.fmt_nodes > self.limits.max_alloc {
-            return self.fail("R903", "this value is too large to print (memory limit reached)", span);
+            return self.fail(
+                "R903",
+                "this value is too large to print (memory limit reached)",
+                span,
+            );
         }
         self.tick(span)?;
         self.fmt_depth += 1;
@@ -1085,7 +1267,11 @@ impl<'a> Interp<'a> {
                         }
                     }
                     let name = &self.prog.defs.structs[o.def].name;
-                    if parts.is_empty() { name.clone() } else { format!("{name} {{ {} }}", parts.join(", ")) }
+                    if parts.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{name} {{ {} }}", parts.join(", "))
+                    }
                 }
             },
         })
@@ -1094,7 +1280,11 @@ impl<'a> Interp<'a> {
     /// Like `stringify`, but strings are quoted (used inside arrays and structs).
     fn repr(&mut self, v: &Value, span: Span) -> R<String> {
         if let Value::Str(s) = v {
-            let esc = s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t");
+            let esc = s
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\t', "\\t");
             return Ok(format!("\"{esc}\""));
         }
         self.stringify(v, span)
@@ -1112,7 +1302,11 @@ impl<'a> Interp<'a> {
                 if let (Some(a), Some(b)) = (num(&l), num(&r)) {
                     let both_int = matches!((&l, &r), (Value::Int(_), Value::Int(_)));
                     let ord = if both_int {
-                        if let (Value::Int(x), Value::Int(y)) = (&l, &r) { Some(x.cmp(y)) } else { None }
+                        if let (Value::Int(x), Value::Int(y)) = (&l, &r) {
+                            Some(x.cmp(y))
+                        } else {
+                            None
+                        }
                     } else {
                         a.partial_cmp(&b)
                     };
@@ -1120,13 +1314,22 @@ impl<'a> Interp<'a> {
                 }
                 let ord = match (&l, &r) {
                     (Value::Str(a), Value::Str(b)) => Some(a.as_ref().cmp(b.as_ref())),
-                    (Value::Uuid(a), Value::Uuid(b)) | (Value::Ulid(a), Value::Ulid(b)) => Some(a.cmp(b)),
+                    (Value::Uuid(a), Value::Uuid(b)) | (Value::Ulid(a), Value::Ulid(b)) => {
+                        Some(a.cmp(b))
+                    }
                     (Value::DateTime(a), Value::DateTime(b)) => Some(a.cmp(b)),
-                    _ => match self.find_method(&l, Lang::Ord.method_name(), Some(prog.defs.lang(Lang::Ord)), Some(&r)) {
-                        Some(fid) => match self.call_fid(fid, Some(l.clone()), vec![r.clone()], span)? {
-                            Value::Int(i) => Some(i.cmp(&0)),
-                            _ => return self.fail("R001", "`cmp` must return an int", span),
-                        },
+                    _ => match self.find_method(
+                        &l,
+                        Lang::Ord.method_name(),
+                        Some(prog.defs.lang(Lang::Ord)),
+                        Some(&r),
+                    ) {
+                        Some(fid) => {
+                            match self.call_fid(fid, Some(l.clone()), vec![r.clone()], span)? {
+                                Value::Int(i) => Some(i.cmp(&0)),
+                                _ => return self.fail("R001", "`cmp` must return an int", span),
+                            }
+                        }
                         None => return self.fail("R004", "these values cannot be ordered", span),
                     },
                 };
@@ -1148,7 +1351,11 @@ impl<'a> Interp<'a> {
         };
         match self.find_method(&l, lang.method_name(), Some(prog.defs.lang(lang)), Some(&r)) {
             Some(fid) => self.call_fid(fid, Some(l), vec![r], span),
-            None => self.fail("R004", format!("cannot apply `{}` to these values", op.symbol()), span),
+            None => self.fail(
+                "R004",
+                format!("cannot apply `{}` to these values", op.symbol()),
+                span,
+            ),
         }
     }
 
@@ -1156,7 +1363,8 @@ impl<'a> Interp<'a> {
         match (l, r) {
             (Value::Int(a), Value::Int(b)) => {
                 let (a, b) = (*a, *b);
-                let overflow = |this: &Self| this.fail::<Option<Value>>("R010", "integer overflow", span);
+                let overflow =
+                    |this: &Self| this.fail::<Option<Value>>("R010", "integer overflow", span);
                 let res = match op {
                     BinOp::Add => a.checked_add(b),
                     BinOp::Sub => a.checked_sub(b),
@@ -1181,7 +1389,11 @@ impl<'a> Interp<'a> {
                     }
                     BinOp::Pow => {
                         if b < 0 {
-                            return self.fail("R012", "negative exponent: use decimals (`2.0 ** -1`) for fractions", span);
+                            return self.fail(
+                                "R012",
+                                "negative exponent: use decimals (`2.0 ** -1`) for fractions",
+                                span,
+                            );
                         }
                         match u32::try_from(b) {
                             Ok(e) => a.checked_pow(e),
@@ -1196,7 +1408,9 @@ impl<'a> Interp<'a> {
                 }
             }
             // the time between two instants, in milliseconds
-            (Value::DateTime(a), Value::DateTime(b)) if op == BinOp::Sub => Ok(Some(Value::Int(a - b))),
+            (Value::DateTime(a), Value::DateTime(b)) if op == BinOp::Sub => {
+                Ok(Some(Value::Int(a - b)))
+            }
             (Value::Str(a), Value::Str(b)) if op == BinOp::Add => {
                 self.guard_alloc(a.len() + b.len(), span)?;
                 self.charge_bytes(a.len() + b.len(), span)?;
@@ -1206,7 +1420,9 @@ impl<'a> Interp<'a> {
                 Ok(Some(Value::str(&s)))
             }
             _ => {
-                let (Some(a), Some(b)) = (num(l), num(r)) else { return Ok(None) };
+                let (Some(a), Some(b)) = (num(l), num(r)) else {
+                    return Ok(None);
+                };
                 let v = match op {
                     BinOp::Add => a + b,
                     BinOp::Sub => a - b,
@@ -1278,11 +1494,18 @@ impl<'a> Interp<'a> {
                 if Rc::ptr_eq(x, y) {
                     return Ok(true);
                 }
-                match self.find_method(a, Lang::Eq.method_name(), Some(prog.defs.lang(Lang::Eq)), Some(b)) {
-                    Some(fid) => match self.call_fid(fid, Some(a.clone()), vec![b.clone()], span)? {
-                        Value::Bool(r) => r,
-                        _ => return self.fail("R001", "`eq` must return a bool", span),
-                    },
+                match self.find_method(
+                    a,
+                    Lang::Eq.method_name(),
+                    Some(prog.defs.lang(Lang::Eq)),
+                    Some(b),
+                ) {
+                    Some(fid) => {
+                        match self.call_fid(fid, Some(a.clone()), vec![b.clone()], span)? {
+                            Value::Bool(r) => r,
+                            _ => return self.fail("R001", "`eq` must return a bool", span),
+                        }
+                    }
                     None => false,
                 }
             }
@@ -1301,7 +1524,11 @@ impl<'a> Interp<'a> {
                 let a = a.borrow();
                 match usize::try_from(*i).ok().and_then(|u| a.get(u)) {
                     Some(v) => Ok(v.clone()),
-                    None => self.fail("R020", format!("index {i} is out of bounds (length {})", a.len()), span),
+                    None => self.fail(
+                        "R020",
+                        format!("index {i} is out of bounds (length {})", a.len()),
+                        span,
+                    ),
                 }
             }
             (Value::Map(m), k) => Ok(m.borrow().get(k).cloned().unwrap_or(Value::None)),
@@ -1310,10 +1537,19 @@ impl<'a> Interp<'a> {
                 self.charge_bytes((*i).max(0) as usize, span)?;
                 match usize::try_from(*i).ok().and_then(|u| s.chars().nth(u)) {
                     Some(c) => Ok(Value::str(&c.to_string())),
-                    None => self.fail("R020", format!("index {i} is out of bounds (length {})", s.chars().count()), span),
+                    None => self.fail(
+                        "R020",
+                        format!("index {i} is out of bounds (length {})", s.chars().count()),
+                        span,
+                    ),
                 }
             }
-            _ => match self.find_method(base, Lang::Index.method_name(), Some(self.prog.defs.lang(Lang::Index)), Some(idx)) {
+            _ => match self.find_method(
+                base,
+                Lang::Index.method_name(),
+                Some(self.prog.defs.lang(Lang::Index)),
+                Some(idx),
+            ) {
                 Some(fid) => self.call_fid(fid, Some(base.clone()), vec![idx.clone()], span),
                 None => self.fail("R004", "this value cannot be indexed", span),
             },
@@ -1333,8 +1569,16 @@ impl<'a> Interp<'a> {
                 }
                 match self.eval(obj, env)? {
                     Value::Struct(o) => Ok(Place::Field(o, name.name.clone())),
-                    Value::None => self.fail("R006", format!("cannot set `.{}`: the value is `none`", name.name), target.span),
-                    _ => self.fail("R005", format!("this value has no field `{}`", name.name), name.span),
+                    Value::None => self.fail(
+                        "R006",
+                        format!("cannot set `.{}`: the value is `none`", name.name),
+                        target.span,
+                    ),
+                    _ => self.fail(
+                        "R005",
+                        format!("this value has no field `{}`", name.name),
+                        name.span,
+                    ),
                 }
             }
             ExprKind::Index(base, idx) => {
@@ -1346,7 +1590,11 @@ impl<'a> Interp<'a> {
                         let len = a.borrow().len();
                         match usize::try_from(*n).ok().filter(|u| *u < len) {
                             Some(u) => Ok(Place::Elem(a.clone(), u)),
-                            None => self.fail("R020", format!("index {n} is out of bounds (length {len})"), target.span),
+                            None => self.fail(
+                                "R020",
+                                format!("index {n} is out of bounds (length {len})"),
+                                target.span,
+                            ),
                         }
                     }
                     _ => Ok(Place::UserIndex(b, i)),
@@ -1416,18 +1664,33 @@ impl<'a> Interp<'a> {
             }
             Place::UserIndex(b, i) => match b {
                 Value::Array(a) => {
-                    let Value::Int(n) = i else { return self.fail("R020", "an array index must be an int", span) };
+                    let Value::Int(n) = i else {
+                        return self.fail("R020", "an array index must be an int", span);
+                    };
                     let len = a.borrow().len();
                     match usize::try_from(*n).ok().filter(|u| *u < len) {
                         Some(u) => a.borrow_mut()[u] = v,
-                        None => return self.fail("R020", format!("index {n} is out of bounds (length {len})"), span),
+                        None => {
+                            return self.fail(
+                                "R020",
+                                format!("index {n} is out of bounds (length {len})"),
+                                span,
+                            );
+                        }
                     }
                 }
-                _ => match self.find_method(b, Lang::IndexSet.method_name(), Some(prog.defs.lang(Lang::IndexSet)), Some(i)) {
+                _ => match self.find_method(
+                    b,
+                    Lang::IndexSet.method_name(),
+                    Some(prog.defs.lang(Lang::IndexSet)),
+                    Some(i),
+                ) {
                     Some(fid) => {
                         self.call_fid(fid, Some(b.clone()), vec![i.clone(), v], span)?;
                     }
-                    None => return self.fail("R004", "this value cannot be assigned by index", span),
+                    None => {
+                        return self.fail("R004", "this value cannot be assigned by index", span);
+                    }
                 },
             },
             Place::Append(b) => match b {
@@ -1435,7 +1698,12 @@ impl<'a> Interp<'a> {
                     self.guard_alloc(a.borrow().len() + 1, span)?;
                     a.borrow_mut().push(v)
                 }
-                _ => match self.find_method(b, Lang::Push.method_name(), Some(prog.defs.lang(Lang::Push)), Some(&v)) {
+                _ => match self.find_method(
+                    b,
+                    Lang::Push.method_name(),
+                    Some(prog.defs.lang(Lang::Push)),
+                    Some(&v),
+                ) {
                     Some(fid) => {
                         self.call_fid(fid, Some(b.clone()), vec![v], span)?;
                     }
@@ -1446,7 +1714,14 @@ impl<'a> Interp<'a> {
         Ok(())
     }
 
-    fn eval_assign(&mut self, e: &Expr, op: Option<BinOp>, target: &Expr, value: &Expr, env: &Env) -> R<Value> {
+    fn eval_assign(
+        &mut self,
+        e: &Expr,
+        op: Option<BinOp>,
+        target: &Expr,
+        value: &Expr,
+        env: &Env,
+    ) -> R<Value> {
         let place = self.eval_place(target, env)?;
         let v = match op {
             None => self.eval(value, env)?,
@@ -1462,9 +1737,19 @@ impl<'a> Interp<'a> {
 
     // --------------------------------------------------------------- patterns
 
-    fn match_pattern(&mut self, p: &Pattern, v: &Value, mid: NodeId, idx: usize, scope: &Env) -> R<bool> {
+    fn match_pattern(
+        &mut self,
+        p: &Pattern,
+        v: &Value,
+        mid: NodeId,
+        idx: usize,
+        scope: &Env,
+    ) -> R<bool> {
         Ok(match p {
-            Pattern::Int(n) => matches!(v, Value::Int(x) if x == n) || matches!(v, Value::Float(f) if *f == *n as f64),
+            Pattern::Int(n) => {
+                matches!(v, Value::Int(x) if x == n)
+                    || matches!(v, Value::Float(f) if *f == *n as f64)
+            }
             Pattern::Float(f) => num(v).is_some_and(|x| x == *f),
             Pattern::Str(s) => matches!(v, Value::Str(x) if x.as_ref() == s),
             Pattern::Bool(b) => matches!(v, Value::Bool(x) if x == b),
@@ -1475,7 +1760,9 @@ impl<'a> Interp<'a> {
                     Pattern::Float(f) => *f,
                     _ => f64::NAN,
                 };
-                let (Some(x), l, h) = (num(v), bound(lo), bound(hi)) else { return Ok(false) };
+                let (Some(x), l, h) = (num(v), bound(lo), bound(hi)) else {
+                    return Ok(false);
+                };
                 x >= l && if *inclusive { x <= h } else { x < h }
             }
             Pattern::Path(_) => match (self.prog.res.patterns.get(&(mid, idx)), v) {
@@ -1507,10 +1794,12 @@ impl<'a> Interp<'a> {
                 }
                 let ord = self.prog.defs.lang(Lang::Ord);
                 match self.find_method(a, Lang::Ord.method_name(), Some(ord), Some(b)) {
-                    Some(fid) => match self.call_fid(fid, Some(a.clone()), vec![b.clone()], span)? {
-                        Value::Int(i) => Ok(i.cmp(&0)),
-                        _ => self.fail("R001", "`cmp` must return an int", span),
-                    },
+                    Some(fid) => {
+                        match self.call_fid(fid, Some(a.clone()), vec![b.clone()], span)? {
+                            Value::Int(i) => Ok(i.cmp(&0)),
+                            _ => self.fail("R001", "`cmp` must return an int", span),
+                        }
+                    }
                     None => self.fail("R004", "these values cannot be ordered", span),
                 }
             }
@@ -1554,7 +1843,13 @@ impl<'a> Interp<'a> {
         while i < left.len() && j < right.len() {
             let ord = match self.call_value(cmp, vec![left[i].clone(), right[j].clone()], span)? {
                 Value::Int(n) => n,
-                _ => return self.fail("R001", "the comparator passed to `sort_by` must return an int", span),
+                _ => {
+                    return self.fail(
+                        "R001",
+                        "the comparator passed to `sort_by` must return an int",
+                        span,
+                    );
+                }
             };
             if ord <= 0 {
                 out.push(left[i].clone());
@@ -1585,8 +1880,12 @@ impl<'a> Interp<'a> {
             "read" => match self.host.read_line() {
                 Ok(Some(line)) => Ok(Value::str(&line)),
                 Ok(None) => self.fail("R040", "no more input to read", span),
-                Err(HostError::Unsupported(_)) => self.fail("R041", "`read` is not available in this environment", span),
-                Err(HostError::Other(m)) => self.fail("R041", format!("cannot read input: {m}"), span),
+                Err(HostError::Unsupported(_)) => {
+                    self.fail("R041", "`read` is not available in this environment", span)
+                }
+                Err(HostError::Other(m)) => {
+                    self.fail("R041", format!("cannot read input: {m}"), span)
+                }
             },
             "panic" => {
                 let msg = self.stringify(&args[0], span)?;
@@ -1618,21 +1917,46 @@ impl<'a> Interp<'a> {
             ("uuid", "parse") => ids::parse_uuid(&text(&args[0])).map_or(Value::None, Value::Uuid),
             ("ulid", "parse") => ids::parse_ulid(&text(&args[0])).map_or(Value::None, Value::Ulid),
             ("time", "now") => Value::Int(self.now(span)?),
-            ("datetime", "now") => Value::DateTime(self.now(span)?.clamp(datetime::MIN_MS, datetime::MAX_MS)),
-            ("datetime", "parse") => datetime::parse(&text(&args[0])).map_or(Value::None, Value::DateTime),
+            ("datetime", "now") => {
+                Value::DateTime(self.now(span)?.clamp(datetime::MIN_MS, datetime::MAX_MS))
+            }
+            ("datetime", "parse") => {
+                datetime::parse(&text(&args[0])).map_or(Value::None, Value::DateTime)
+            }
             ("datetime", "at") => {
-                let Value::Int(ms) = args[0] else { return Ok(Value::None) };
+                let Value::Int(ms) = args[0] else {
+                    return Ok(Value::None);
+                };
                 if !datetime::in_range(ms) {
-                    return self.fail("R064", "a datetime must be between the years 1 and 9999", span);
+                    return self.fail(
+                        "R064",
+                        "a datetime must be between the years 1 and 9999",
+                        span,
+                    );
                 }
                 Value::DateTime(ms)
             }
             ("datetime", "of") => {
-                let n: Vec<i64> = args.iter().map(|a| if let Value::Int(i) = a { *i } else { 0 }).collect();
+                let n: Vec<i64> = args
+                    .iter()
+                    .map(|a| if let Value::Int(i) = a { *i } else { 0 })
+                    .collect();
                 let at = |i: usize| n.get(i).copied().unwrap_or(0);
                 match datetime::from_parts(at(0), at(1), at(2), at(3), at(4), at(5), 0) {
                     Some(t) => Value::DateTime(t),
-                    None => return self.fail("R064", format!("this date does not exist: {}", n.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")), span),
+                    None => {
+                        return self.fail(
+                            "R064",
+                            format!(
+                                "this date does not exist: {}",
+                                n.iter()
+                                    .map(|x| x.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            span,
+                        );
+                    }
                 }
             }
             ("uuid", "v4") => Value::Uuid(ids::uuid_v4(self.random_bits(span)?)),
@@ -1641,7 +1965,9 @@ impl<'a> Interp<'a> {
                 Value::Uuid(ids::uuid_v7(now as u128, self.random_bits(span)?))
             }
             ("ulid", "at") => {
-                let Value::Int(t) = args[0] else { return Ok(Value::None) };
+                let Value::Int(t) = args[0] else {
+                    return Ok(Value::None);
+                };
                 if !(0..=ids::TIME_MASK as i64).contains(&t) {
                     return self.fail("R061", "a ulid can only hold a time between 0 and 281 474 976 710 655 milliseconds", span);
                 }
@@ -1657,11 +1983,19 @@ impl<'a> Interp<'a> {
                 self.last_ulid = id;
                 Value::Ulid(id)
             }
-            ("random", "float") => Value::Float((self.random(span)? >> 11) as f64 / (1u64 << 53) as f64),
+            ("random", "float") => {
+                Value::Float((self.random(span)? >> 11) as f64 / (1u64 << 53) as f64)
+            }
             ("random", "int") => {
-                let (Value::Int(lo), Value::Int(hi)) = (&args[0], &args[1]) else { return Ok(Value::None) };
+                let (Value::Int(lo), Value::Int(hi)) = (&args[0], &args[1]) else {
+                    return Ok(Value::None);
+                };
                 if lo > hi {
-                    return self.fail("R062", format!("random.int needs min <= max, found {lo} and {hi}"), span);
+                    return self.fail(
+                        "R062",
+                        format!("random.int needs min <= max, found {lo} and {hi}"),
+                        span,
+                    );
                 }
                 let width = (*hi as i128 - *lo as i128 + 1) as u128;
                 let draw = self.random_bits(span)? % width;
@@ -1678,35 +2012,59 @@ impl<'a> Interp<'a> {
             },
             ("env", "get") => match self.host.env_var(&text(&args[0])) {
                 Ok(v) => v.map_or(Value::None, |s| Value::str(&s)),
-                Err(e) => return self.fail("R065", format!("cannot read the environment: {e:?}"), span),
+                Err(e) => {
+                    return self.fail("R065", format!("cannot read the environment: {e:?}"), span);
+                }
             },
             ("env", "args") => match self.host.args() {
                 Ok(xs) => Value::array(xs.iter().map(|s| Value::str(s)).collect()),
-                Err(e) => return self.fail("R065", format!("cannot read the environment: {e:?}"), span),
+                Err(e) => {
+                    return self.fail("R065", format!("cannot read the environment: {e:?}"), span);
+                }
             },
             ("db", "connect") => return self.db_connect_call(&text(&args[0]), span),
-            ("regex", "matches") => Value::Bool(self.compile_regex(&text(&args[1]), span)?.is_match(&text(&args[0]))),
-            ("regex", "find") => match self.compile_regex(&text(&args[1]), span)?.find(&text(&args[0])) {
+            ("regex", "matches") => Value::Bool(
+                self.compile_regex(&text(&args[1]), span)?
+                    .is_match(&text(&args[0])),
+            ),
+            ("regex", "find") => match self
+                .compile_regex(&text(&args[1]), span)?
+                .find(&text(&args[0]))
+            {
                 Some(m) => Value::str(m.as_str()),
                 None => Value::None,
             },
             ("regex", "find_all") => {
                 let re = self.compile_regex(&text(&args[1]), span)?;
-                let matches: Vec<Value> = re.find_iter(&text(&args[0])).map(|m| Value::str(m.as_str())).collect();
+                let matches: Vec<Value> = re
+                    .find_iter(&text(&args[0]))
+                    .map(|m| Value::str(m.as_str()))
+                    .collect();
                 Value::array(matches)
             }
             ("regex", "captures") => {
                 let re = self.compile_regex(&text(&args[1]), span)?;
                 match re.captures(&text(&args[0])) {
                     Some(caps) => {
-                        let groups: Vec<Value> = caps.iter().map(|g| g.map_or(Value::None, |m| Value::str(m.as_str()))).collect();
+                        let groups: Vec<Value> = caps
+                            .iter()
+                            .map(|g| g.map_or(Value::None, |m| Value::str(m.as_str())))
+                            .collect();
                         Value::array(groups)
                     }
                     None => Value::None,
                 }
             }
-            ("regex", "replace") => Value::str(&self.compile_regex(&text(&args[1]), span)?.replace(&text(&args[0]), text(&args[2]).as_str())),
-            ("regex", "replace_all") => Value::str(&self.compile_regex(&text(&args[1]), span)?.replace_all(&text(&args[0]), text(&args[2]).as_str())),
+            ("regex", "replace") => Value::str(
+                &self
+                    .compile_regex(&text(&args[1]), span)?
+                    .replace(&text(&args[0]), text(&args[2]).as_str()),
+            ),
+            ("regex", "replace_all") => Value::str(
+                &self
+                    .compile_regex(&text(&args[1]), span)?
+                    .replace_all(&text(&args[0]), text(&args[2]).as_str()),
+            ),
             ("regex", "split") => {
                 let re = self.compile_regex(&text(&args[1]), span)?;
                 let parts: Vec<Value> = re.split(&text(&args[0])).map(Value::str).collect();
@@ -1719,7 +2077,8 @@ impl<'a> Interp<'a> {
     /// Compiles a regular expression; a malformed pattern stops the program (like a
     /// malformed date in `datetime.of`), it is not something to recover from at run time.
     fn compile_regex(&self, pattern: &str, span: Span) -> R<regex::Regex> {
-        regex::Regex::new(pattern).map_err(|e| self.error("R070", format!("invalid regular expression: {e}"), span))
+        regex::Regex::new(pattern)
+            .map_err(|e| self.error("R070", format!("invalid regular expression: {e}"), span))
     }
 
     /// The id of a struct declared in the prelude, by name.
@@ -1733,26 +2092,43 @@ impl<'a> Interp<'a> {
     }
 
     fn new_struct(&self, sid: StructId, fields: &[(&str, Value)]) -> Value {
-        let map: HashMap<String, Value> = fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
-        Value::Struct(Rc::new(StructObj { def: sid, fields: RefCell::new(map) }))
+        let map: HashMap<String, Value> = fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        Value::Struct(Rc::new(StructObj {
+            def: sid,
+            fields: RefCell::new(map),
+        }))
     }
 
     /// Builds a `Result::ok(data)` value of the prelude's `Result` struct.
     fn ok_result(&self, data: Value) -> Value {
-        self.new_struct(self.prelude_struct("Result"), &[("data", data), ("err", Value::None)])
+        self.new_struct(
+            self.prelude_struct("Result"),
+            &[("data", data), ("err", Value::None)],
+        )
     }
 
     /// Builds a `Result::err(Error { message })` value.
     fn err_result(&self, message: &str) -> Value {
-        let error = self.new_struct(self.prelude_struct("Error"), &[("message", Value::str(message))]);
-        self.new_struct(self.prelude_struct("Result"), &[("data", Value::None), ("err", error)])
+        let error = self.new_struct(
+            self.prelude_struct("Error"),
+            &[("message", Value::str(message))],
+        );
+        self.new_struct(
+            self.prelude_struct("Result"),
+            &[("data", Value::None), ("err", error)],
+        )
     }
 
     /// Turns a [`HostError`] into a `Result::err`: a host without the capability, or one
     /// that failed for its own reasons, are both reported the same way to qlang code.
     fn host_err_result(&self, err: HostError) -> Value {
         match err {
-            HostError::Unsupported(what) => self.err_result(&format!("{what} is not available in this environment")),
+            HostError::Unsupported(what) => {
+                self.err_result(&format!("{what} is not available in this environment"))
+            }
             HostError::Other(m) => self.err_result(&m),
         }
     }
@@ -1768,14 +2144,23 @@ impl<'a> Interp<'a> {
 
     fn http_ok(&self, resp: HttpResponse) -> Value {
         let headers = Self::string_map(&resp.headers);
-        let response = self.new_struct(self.prelude_struct("Response"), &[("status", Value::Int(resp.status)), ("headers", headers), ("body", Value::str(&resp.body))]);
+        let response = self.new_struct(
+            self.prelude_struct("Response"),
+            &[
+                ("status", Value::Int(resp.status)),
+                ("headers", headers),
+                ("body", Value::str(&resp.body)),
+            ],
+        );
         self.ok_result(response)
     }
 
     /// `http.send(req)`: never fails the program itself, even on a connection error — it
     /// always returns a `Result<Response, Error>` value.
     fn http_send_call(&mut self, req: &Value, span: Span) -> R<Value> {
-        let Value::Struct(o) = req else { return self.fail("R005", "`http.send` expects a `Request`", span) };
+        let Value::Struct(o) = req else {
+            return self.fail("R005", "`http.send` expects a `Request`", span);
+        };
         let fields = o.fields.borrow();
         let text = |k: &str| match fields.get(k) {
             Some(Value::Str(s)) => s.to_string(),
@@ -1800,7 +2185,12 @@ impl<'a> Interp<'a> {
             _ => vec![],
         };
         drop(fields);
-        let request = HttpRequest { method, url, headers, body };
+        let request = HttpRequest {
+            method,
+            url,
+            headers,
+            body,
+        };
         match self.host.http_send(request) {
             Ok(resp) => Ok(self.http_ok(resp)),
             Err(e) => Ok(self.host_err_result(e)),
@@ -1811,7 +2201,9 @@ impl<'a> Interp<'a> {
     /// does not matter whether the value really is the prelude's `Json`, only that it has
     /// the same shape), turned into the matching [`SqlValue`] bind parameter.
     fn json_to_sql(&self, v: &Value) -> SqlValue {
-        let Value::Struct(o) = v else { return SqlValue::Null };
+        let Value::Struct(o) = v else {
+            return SqlValue::Null;
+        };
         let fields = o.fields.borrow();
         match fields.get("kind") {
             Some(Value::Str(k)) => match k.as_ref() {
@@ -1843,14 +2235,27 @@ impl<'a> Interp<'a> {
             SqlValue::Float(f) => ("number", Value::None, Value::Float(*f), Value::None),
             SqlValue::Bool(b) => ("bool", Value::None, Value::None, Value::Bool(*b)),
         };
-        self.new_struct(self.prelude_struct("Json"), &[("kind", Value::str(kind)), ("str", str_v), ("num", num_v), ("bool_", bool_v), ("arr", Value::None), ("obj", Value::None)])
+        self.new_struct(
+            self.prelude_struct("Json"),
+            &[
+                ("kind", Value::str(kind)),
+                ("str", str_v),
+                ("num", num_v),
+                ("bool_", bool_v),
+                ("arr", Value::None),
+                ("obj", Value::None),
+            ],
+        )
     }
 
     /// `Db.connect(url)`.
     fn db_connect_call(&mut self, url: &str, span: Span) -> R<Value> {
         let _ = span;
         match self.host.sql_connect(url) {
-            Ok(id) => Ok(self.ok_result(self.new_struct(self.prelude_struct("Db"), &[("conn", Value::Int(id as i64))]))),
+            Ok(id) => Ok(self.ok_result(self.new_struct(
+                self.prelude_struct("Db"),
+                &[("conn", Value::Int(id as i64))],
+            ))),
             Err(e) => Ok(self.host_err_result(e)),
         }
     }
@@ -1868,7 +2273,9 @@ impl<'a> Interp<'a> {
     /// `rollback`): `op` is what the checker recorded in `Resolutions::db_calls` for
     /// this call expression.
     fn db_call(&mut self, op: &'static str, recv: Value, args: Vec<Value>, span: Span) -> R<Value> {
-        let Value::Struct(o) = &recv else { return self.fail("R005", "`Db` methods need a `Db` value", span) };
+        let Value::Struct(o) = &recv else {
+            return self.fail("R005", "`Db` methods need a `Db` value", span);
+        };
         let conn = match o.fields.borrow().get("conn") {
             Some(Value::Int(i)) => *i as u64,
             _ => 0,
@@ -1925,7 +2332,13 @@ impl<'a> Interp<'a> {
     }
 
     #[inline(never)]
-    fn datetime_method(&mut self, t: i64, name: &str, args: &[Value], span: Span) -> R<Option<Value>> {
+    fn datetime_method(
+        &mut self,
+        t: i64,
+        name: &str,
+        args: &[Value],
+        span: Span,
+    ) -> R<Option<Value>> {
         let p = datetime::parts(t);
         let n = match args.first() {
             Some(Value::Int(n)) => *n,
@@ -1947,14 +2360,36 @@ impl<'a> Interp<'a> {
             "weekday" => Value::Int(datetime::weekday(t)),
             "ms" => Value::Int(t),
             "start_of_day" => Value::DateTime(datetime::start_of_day(t)),
-            "add_years" => return moved(self, n.checked_mul(12).and_then(|m| datetime::add_months(t, m))),
+            "add_years" => {
+                return moved(
+                    self,
+                    n.checked_mul(12).and_then(|m| datetime::add_months(t, m)),
+                );
+            }
             "add_months" => return moved(self, datetime::add_months(t, n)),
-            "add_days" => return moved(self, n.checked_mul(datetime::DAY_MS).and_then(|d| t.checked_add(d))),
-            "add_hours" => return moved(self, n.checked_mul(3_600_000).and_then(|d| t.checked_add(d))),
-            "add_minutes" => return moved(self, n.checked_mul(60_000).and_then(|d| t.checked_add(d))),
-            "add_seconds" => return moved(self, n.checked_mul(1000).and_then(|d| t.checked_add(d))),
+            "add_days" => {
+                return moved(
+                    self,
+                    n.checked_mul(datetime::DAY_MS)
+                        .and_then(|d| t.checked_add(d)),
+                );
+            }
+            "add_hours" => {
+                return moved(
+                    self,
+                    n.checked_mul(3_600_000).and_then(|d| t.checked_add(d)),
+                );
+            }
+            "add_minutes" => {
+                return moved(self, n.checked_mul(60_000).and_then(|d| t.checked_add(d)));
+            }
+            "add_seconds" => {
+                return moved(self, n.checked_mul(1000).and_then(|d| t.checked_add(d)));
+            }
             "days_until" => match args.first() {
-                Some(Value::DateTime(o)) => Value::Int((datetime::start_of_day(*o) - datetime::start_of_day(t)) / datetime::DAY_MS),
+                Some(Value::DateTime(o)) => Value::Int(
+                    (datetime::start_of_day(*o) - datetime::start_of_day(t)) / datetime::DAY_MS,
+                ),
                 _ => return Ok(None),
             },
             "format" => match args.first() {
@@ -1971,16 +2406,28 @@ impl<'a> Interp<'a> {
     fn now(&mut self, span: Span) -> R<i64> {
         match self.host.now_ms() {
             Ok(t) => Ok(t),
-            Err(HostError::Unsupported(_)) => self.fail("R060", "the time is not available in this environment", span),
-            Err(HostError::Other(m)) => self.fail("R060", format!("cannot read the time: {m}"), span),
+            Err(HostError::Unsupported(_)) => self.fail(
+                "R060",
+                "the time is not available in this environment",
+                span,
+            ),
+            Err(HostError::Other(m)) => {
+                self.fail("R060", format!("cannot read the time: {m}"), span)
+            }
         }
     }
 
     fn random(&mut self, span: Span) -> R<u64> {
         match self.host.random_u64() {
             Ok(r) => Ok(r),
-            Err(HostError::Unsupported(_)) => self.fail("R063", "randomness is not available in this environment", span),
-            Err(HostError::Other(m)) => self.fail("R063", format!("cannot get random numbers: {m}"), span),
+            Err(HostError::Unsupported(_)) => self.fail(
+                "R063",
+                "randomness is not available in this environment",
+                span,
+            ),
+            Err(HostError::Other(m)) => {
+                self.fail("R063", format!("cannot get random numbers: {m}"), span)
+            }
         }
     }
 
@@ -1990,7 +2437,9 @@ impl<'a> Interp<'a> {
     }
 
     fn parse_number(&mut self, ty: &str, v: &Value) -> R<Value> {
-        let Value::Str(s) = v else { return Ok(Value::None) };
+        let Value::Str(s) = v else {
+            return Ok(Value::None);
+        };
         let t = s.trim();
         Ok(if ty == "int" {
             match t.replace('_', "").parse::<i64>() {
@@ -2005,7 +2454,13 @@ impl<'a> Interp<'a> {
         })
     }
 
-    fn builtin_method(&mut self, recv: &Value, name: &str, args: &[Value], span: Span) -> R<Option<Value>> {
+    fn builtin_method(
+        &mut self,
+        recv: &Value,
+        name: &str,
+        args: &[Value],
+        span: Span,
+    ) -> R<Option<Value>> {
         // linear built-ins pay for the elements they visit
         match recv {
             Value::Str(s) => self.charge_bytes(s.len(), span)?,
@@ -2062,20 +2517,38 @@ impl<'a> Interp<'a> {
             (Value::Array(a), "pop") => a.borrow_mut().pop().unwrap_or(Value::None),
             (Value::Array(a), "insert") => {
                 let len = a.borrow().len();
-                match int_arg(0).and_then(|i| usize::try_from(i).ok()).filter(|i| *i <= len) {
+                match int_arg(0)
+                    .and_then(|i| usize::try_from(i).ok())
+                    .filter(|i| *i <= len)
+                {
                     Some(i) => {
                         self.guard_alloc(len + 1, span)?;
                         a.borrow_mut().insert(i, args[1].clone());
                         Value::Unit
                     }
-                    None => return self.fail("R020", format!("cannot insert at this index (length {len})"), span),
+                    None => {
+                        return self.fail(
+                            "R020",
+                            format!("cannot insert at this index (length {len})"),
+                            span,
+                        );
+                    }
                 }
             }
             (Value::Array(a), "remove") => {
                 let len = a.borrow().len();
-                match int_arg(0).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len) {
+                match int_arg(0)
+                    .and_then(|i| usize::try_from(i).ok())
+                    .filter(|i| *i < len)
+                {
                     Some(i) => a.borrow_mut().remove(i),
-                    None => return self.fail("R020", format!("cannot remove at this index (length {len})"), span),
+                    None => {
+                        return self.fail(
+                            "R020",
+                            format!("cannot remove at this index (length {len})"),
+                            span,
+                        );
+                    }
                 }
             }
             (Value::Array(a), "clear") => {
@@ -2126,7 +2599,9 @@ impl<'a> Interp<'a> {
             (Value::Str(s), "capitalize") => {
                 let mut cs = s.chars();
                 match cs.next() {
-                    Some(first) => Value::str(&(first.to_uppercase().collect::<String>() + cs.as_str())),
+                    Some(first) => {
+                        Value::str(&(first.to_uppercase().collect::<String>() + cs.as_str()))
+                    }
                     None => Value::Str(s.clone()),
                 }
             }
@@ -2142,7 +2617,9 @@ impl<'a> Interp<'a> {
                 Value::Int(s.matches(needle.as_ref()).count() as i64)
             }
             (Value::Str(s), "lines") => Value::array(s.lines().map(Value::str).collect()),
-            (Value::Str(s), "words") => Value::array(s.split_whitespace().map(Value::str).collect()),
+            (Value::Str(s), "words") => {
+                Value::array(s.split_whitespace().map(Value::str).collect())
+            }
             (Value::Str(s), "pad_left" | "pad_right") => {
                 let fill = str_arg(1).unwrap();
                 let mut fc = fill.chars();
@@ -2156,30 +2633,48 @@ impl<'a> Interp<'a> {
                     Value::Str(s.clone())
                 } else {
                     let pad: String = std::iter::repeat_n(f, width - n).collect();
-                    Value::str(&if name == "pad_left" { format!("{pad}{s}") } else { format!("{s}{pad}") })
+                    Value::str(&if name == "pad_left" {
+                        format!("{pad}{s}")
+                    } else {
+                        format!("{s}{pad}")
+                    })
                 }
             }
-            (Value::Str(s), "is_digit") => Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_ascii_digit())),
-            (Value::Str(s), "is_alpha") => Value::Bool(!s.is_empty() && s.chars().all(char::is_alphabetic)),
+            (Value::Str(s), "is_digit") => {
+                Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+            }
+            (Value::Str(s), "is_alpha") => {
+                Value::Bool(!s.is_empty() && s.chars().all(char::is_alphabetic))
+            }
             (Value::Str(s), "is_blank") => Value::Bool(s.chars().all(char::is_whitespace)),
             (Value::Str(s), "code") => {
                 let mut cs = s.chars();
                 match (cs.next(), cs.next()) {
                     (Some(c), None) => Value::Int(c as i64),
-                    _ => return self.fail("R024", "`code()` needs a string of exactly one character", span),
+                    _ => {
+                        return self.fail(
+                            "R024",
+                            "`code()` needs a string of exactly one character",
+                            span,
+                        );
+                    }
                 }
             }
             (Value::Str(_), "to_int") => self.parse_number("int", recv)?,
             (Value::Str(_), "to_float") => self.parse_number("float", recv)?,
             (Value::Int(n), "char") => match u32::try_from(*n).ok().and_then(char::from_u32) {
                 Some(c) => Value::str(&c.to_string()),
-                None => return self.fail("R024", format!("{n} is not a valid character code"), span),
+                None => {
+                    return self.fail("R024", format!("{n} is not a valid character code"), span);
+                }
             },
             (Value::Str(s), "upper") => Value::str(&s.to_uppercase()),
             (Value::Str(s), "lower") => Value::str(&s.to_lowercase()),
             (Value::Str(s), "trim") => Value::str(s.trim()),
             (Value::Str(s), "contains") => Value::Bool(s.contains(str_arg(0).unwrap().as_ref())),
-            (Value::Str(s), "starts_with") => Value::Bool(s.starts_with(str_arg(0).unwrap().as_ref())),
+            (Value::Str(s), "starts_with") => {
+                Value::Bool(s.starts_with(str_arg(0).unwrap().as_ref()))
+            }
             (Value::Str(s), "ends_with") => Value::Bool(s.ends_with(str_arg(0).unwrap().as_ref())),
             (Value::Str(s), "strip_prefix") => match s.strip_prefix(str_arg(0).unwrap().as_ref()) {
                 Some(r) => Value::str(r),
@@ -2195,15 +2690,22 @@ impl<'a> Interp<'a> {
                 let words = split_words(s);
                 let mut out = String::new();
                 for (i, w) in words.iter().enumerate() {
-                    if i == 0 { out.push_str(&w.to_lowercase()) } else { out.push_str(&capitalize_word(w)) }
+                    if i == 0 {
+                        out.push_str(&w.to_lowercase())
+                    } else {
+                        out.push_str(&capitalize_word(w))
+                    }
                 }
                 Value::str(&out)
             }
             (Value::Str(s), "title_case") => {
-                let words: Vec<String> = split_words(s).iter().map(|w| capitalize_word(w)).collect();
+                let words: Vec<String> =
+                    split_words(s).iter().map(|w| capitalize_word(w)).collect();
                 Value::str(&words.join(" "))
             }
-            (Value::Str(s), "eq_ignore_case") => Value::Bool(s.to_lowercase() == str_arg(0).unwrap().to_lowercase()),
+            (Value::Str(s), "eq_ignore_case") => {
+                Value::Bool(s.to_lowercase() == str_arg(0).unwrap().to_lowercase())
+            }
             (Value::Str(s), "index_of") => {
                 let needle = str_arg(0).unwrap();
                 match s.find(needle.as_ref()) {
@@ -2232,14 +2734,25 @@ impl<'a> Interp<'a> {
                 }
                 None => return self.fail("R021", "invalid repeat count", span),
             },
-            (Value::Str(s), "chars") => Value::array(s.chars().map(|c| Value::str(&c.to_string())).collect()),
+            (Value::Str(s), "chars") => {
+                Value::array(s.chars().map(|c| Value::str(&c.to_string())).collect())
+            }
             (Value::Str(s), "substring") => {
                 let n = s.chars().count();
                 let (a, b) = (int_arg(0).unwrap_or(-1), int_arg(1).unwrap_or(-1));
                 if a < 0 || b < a || b as usize > n {
-                    return self.fail("R020", format!("invalid substring range {a}..{b} (length {n})"), span);
+                    return self.fail(
+                        "R020",
+                        format!("invalid substring range {a}..{b} (length {n})"),
+                        span,
+                    );
                 }
-                Value::str(&s.chars().skip(a as usize).take((b - a) as usize).collect::<String>())
+                Value::str(
+                    &s.chars()
+                        .skip(a as usize)
+                        .take((b - a) as usize)
+                        .collect::<String>(),
+                )
             }
             (Value::Map(m), "len") => Value::Int(m.borrow().len() as i64),
             (Value::Map(m), "is_empty") => Value::Bool(m.borrow().is_empty()),
@@ -2248,12 +2761,22 @@ impl<'a> Interp<'a> {
                 Value::Unit
             }
             (Value::Map(m), "has") => Value::Bool(m.borrow().get(&args[0]).is_some()),
-            (Value::Map(m), "get") => m.borrow().get(&args[0]).cloned().unwrap_or_else(|| args[1].clone()),
+            (Value::Map(m), "get") => m
+                .borrow()
+                .get(&args[0])
+                .cloned()
+                .unwrap_or_else(|| args[1].clone()),
             (Value::Map(m), "remove") => m.borrow_mut().remove(&args[0]).unwrap_or(Value::None),
-            (Value::Map(m), "keys") => Value::array(m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()),
-            (Value::Map(m), "values") => Value::array(m.borrow().entries.iter().map(|(_, v)| v.clone()).collect()),
+            (Value::Map(m), "keys") => {
+                Value::array(m.borrow().entries.iter().map(|(k, _)| k.clone()).collect())
+            }
+            (Value::Map(m), "values") => {
+                Value::array(m.borrow().entries.iter().map(|(_, v)| v.clone()).collect())
+            }
             (Value::Map(m), "merge") => {
-                let Value::Map(other) = &args[0] else { unreachable!("checked by the type checker") };
+                let Value::Map(other) = &args[0] else {
+                    unreachable!("checked by the type checker")
+                };
                 self.charge(m.borrow().len() + other.borrow().len(), span)?;
                 let mut out = MapObj::default();
                 for (k, v) in m.borrow().entries.iter() {
@@ -2269,7 +2792,10 @@ impl<'a> Interp<'a> {
                 let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
                 let mut out = MapObj::default();
                 for (k, v) in entries {
-                    if matches!(self.call_value(&args[0], vec![k.clone(), v.clone()], span)?, Value::Bool(true)) {
+                    if matches!(
+                        self.call_value(&args[0], vec![k.clone(), v.clone()], span)?,
+                        Value::Bool(true)
+                    ) {
                         out.insert(k, v);
                     }
                 }
@@ -2298,7 +2824,13 @@ impl<'a> Interp<'a> {
                         None => it,
                         Some(b) => {
                             let o = self.order(&it, &b, span)?;
-                            if (name == "min" && o == Ordering::Less) || (name == "max" && o == Ordering::Greater) { it } else { b }
+                            if (name == "min" && o == Ordering::Less)
+                                || (name == "max" && o == Ordering::Greater)
+                            {
+                                it
+                            } else {
+                                b
+                            }
                         }
                     });
                 }
@@ -2308,7 +2840,11 @@ impl<'a> Interp<'a> {
                 let items: Vec<Value> = a.borrow().clone();
                 let all_int = items.iter().all(|v| matches!(v, Value::Int(_)));
                 if items.is_empty() {
-                    if self.prog.res.float_sums.contains(&self.cur_call) { Value::Float(0.0) } else { Value::Int(0) }
+                    if self.prog.res.float_sums.contains(&self.cur_call) {
+                        Value::Float(0.0)
+                    } else {
+                        Value::Int(0)
+                    }
                 } else if all_int {
                     let mut total: i64 = 0;
                     for v in &items {
@@ -2328,7 +2864,11 @@ impl<'a> Interp<'a> {
                 let len = a.borrow().len();
                 let (s, e) = (int_arg(0).unwrap_or(-1), int_arg(1).unwrap_or(-1));
                 if s < 0 || e < s || e as usize > len {
-                    return self.fail("R020", format!("invalid slice {s}..{e} (length {len})"), span);
+                    return self.fail(
+                        "R020",
+                        format!("invalid slice {s}..{e} (length {len})"),
+                        span,
+                    );
                 }
                 Value::array(a.borrow()[s as usize..e as usize].to_vec())
             }
@@ -2345,7 +2885,10 @@ impl<'a> Interp<'a> {
                 let items: Vec<Value> = a.borrow().clone();
                 let mut out = Vec::new();
                 for it in items {
-                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                    if matches!(
+                        self.call_value(&args[0], vec![it.clone()], span)?,
+                        Value::Bool(true)
+                    ) {
                         out.push(it);
                     }
                 }
@@ -2363,7 +2906,10 @@ impl<'a> Interp<'a> {
                 let items: Vec<Value> = a.borrow().clone();
                 let mut result = name == "all";
                 for it in items {
-                    let ok = matches!(self.call_value(&args[0], vec![it], span)?, Value::Bool(true));
+                    let ok = matches!(
+                        self.call_value(&args[0], vec![it], span)?,
+                        Value::Bool(true)
+                    );
                     if name == "any" && ok {
                         result = true;
                         break;
@@ -2379,7 +2925,10 @@ impl<'a> Interp<'a> {
                 let items: Vec<Value> = a.borrow().clone();
                 let mut found = Value::None;
                 for it in items {
-                    if matches!(self.call_value(&args[0], vec![it.clone()], span)?, Value::Bool(true)) {
+                    if matches!(
+                        self.call_value(&args[0], vec![it.clone()], span)?,
+                        Value::Bool(true)
+                    ) {
                         found = it;
                         break;
                     }
@@ -2419,7 +2968,9 @@ impl<'a> Interp<'a> {
             (Value::Array(a), "first") => a.borrow().first().cloned().unwrap_or(Value::None),
             (Value::Array(a), "last") => a.borrow().last().cloned().unwrap_or(Value::None),
             (Value::Array(a), "concat") => {
-                let Value::Array(other) = &args[0] else { unreachable!("checked by the type checker") };
+                let Value::Array(other) = &args[0] else {
+                    unreachable!("checked by the type checker")
+                };
                 self.charge(other.borrow().len(), span)?;
                 let mut out = a.borrow().clone();
                 out.extend(other.borrow().iter().cloned());
@@ -2436,12 +2987,21 @@ impl<'a> Interp<'a> {
             }
             (Value::Array(a), "swap") => {
                 let len = a.borrow().len();
-                match (int_arg(0).and_then(|i| usize::try_from(i).ok()), int_arg(1).and_then(|i| usize::try_from(i).ok())) {
+                match (
+                    int_arg(0).and_then(|i| usize::try_from(i).ok()),
+                    int_arg(1).and_then(|i| usize::try_from(i).ok()),
+                ) {
                     (Some(i), Some(j)) if i < len && j < len => {
                         a.borrow_mut().swap(i, j);
                         Value::Unit
                     }
-                    _ => return self.fail("R020", format!("cannot swap these indices (length {len})"), span),
+                    _ => {
+                        return self.fail(
+                            "R020",
+                            format!("cannot swap these indices (length {len})"),
+                            span,
+                        );
+                    }
                 }
             }
             (Value::Array(a), "chunk") => {
@@ -2474,7 +3034,11 @@ impl<'a> Interp<'a> {
             }
             (Value::Int(x), "min" | "max") => {
                 let y = int_arg(0).unwrap_or(0);
-                Value::Int(if name == "min" { (*x).min(y) } else { (*x).max(y) })
+                Value::Int(if name == "min" {
+                    (*x).min(y)
+                } else {
+                    (*x).max(y)
+                })
             }
             (Value::Int(_), "pow") => match self.arith(BinOp::Pow, recv, &args[0], span)? {
                 Some(v) => v,
@@ -2495,12 +3059,30 @@ impl<'a> Interp<'a> {
                 Some(v) => Value::Int(v),
                 None => return self.fail("R010", "integer overflow", span),
             },
-            (Value::Int(n), "to_hex") => Value::str(&if *n < 0 { format!("-{:x}", n.unsigned_abs()) } else { format!("{n:x}") }),
-            (Value::Int(n), "to_oct") => Value::str(&if *n < 0 { format!("-{:o}", n.unsigned_abs()) } else { format!("{n:o}") }),
-            (Value::Int(n), "to_bin") => Value::str(&if *n < 0 { format!("-{:b}", n.unsigned_abs()) } else { format!("{n:b}") }),
+            (Value::Int(n), "to_hex") => Value::str(&if *n < 0 {
+                format!("-{:x}", n.unsigned_abs())
+            } else {
+                format!("{n:x}")
+            }),
+            (Value::Int(n), "to_oct") => Value::str(&if *n < 0 {
+                format!("-{:o}", n.unsigned_abs())
+            } else {
+                format!("{n:o}")
+            }),
+            (Value::Int(n), "to_bin") => Value::str(&if *n < 0 {
+                format!("-{:b}", n.unsigned_abs())
+            } else {
+                format!("{n:b}")
+            }),
             (Value::Float(f), "to_fixed") => match int_arg(0) {
                 Some(n) if (0..=17).contains(&n) => Value::str(&format!("{:.*}", n as usize, f)),
-                _ => return self.fail("R021", "the number of decimals must be between 0 and 17", span),
+                _ => {
+                    return self.fail(
+                        "R021",
+                        "the number of decimals must be between 0 and 17",
+                        span,
+                    );
+                }
             },
             (Value::Float(f), "abs") => Value::Float(f.abs()),
             (Value::Float(f), "sqrt") => {
@@ -2585,7 +3167,11 @@ fn fmt_float(f: f64) -> String {
     if f.is_nan() {
         "nan".to_string()
     } else if f.is_infinite() {
-        if f > 0.0 { "inf".to_string() } else { "-inf".to_string() }
+        if f > 0.0 {
+            "inf".to_string()
+        } else {
+            "-inf".to_string()
+        }
     } else {
         format!("{f:?}")
     }

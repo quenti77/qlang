@@ -42,8 +42,14 @@ fn run_in(cwd: &Path, args: &[&str]) -> Output {
 }
 
 fn project(d: &Dir) {
-    d.write("app/main.q", "import twice from \"../lib/util.q\"\nprint(twice(21))\n");
-    d.write("lib/util.q", "fun twice(n: int) -> int\n  n * 2\nend\nexport twice\n");
+    d.write(
+        "app/main.q",
+        "import twice from \"../lib/util.q\"\nprint(twice(21))\n",
+    );
+    d.write(
+        "lib/util.q",
+        "fun twice(n: int) -> int\n  n * 2\nend\nexport twice\n",
+    );
 }
 
 #[test]
@@ -67,7 +73,11 @@ fn root_confines_imports() {
     project(&d);
     let o = run_in(&d.0, &["run", "app/main.q", "--root", "app"]);
     assert!(!o.status.success());
-    assert!(text(&o.stderr).contains("outside of --root"), "{}", text(&o.stderr));
+    assert!(
+        text(&o.stderr).contains("outside of --root"),
+        "{}",
+        text(&o.stderr)
+    );
     // a root that holds everything is fine
     let o = run_in(&d.0, &["run", "app/main.q", "--root", "."]);
     assert!(o.status.success(), "{}", text(&o.stderr));
@@ -88,26 +98,42 @@ fn only_qlang_files_can_be_imported() {
     assert!(!o.status.success());
     let err = text(&o.stderr);
     assert!(err.contains("only .q files can be imported"), "{err}");
-    assert!(!err.contains("top secret"), "the file content must not leak: {err}");
+    assert!(
+        !err.contains("top secret"),
+        "the file content must not leak: {err}"
+    );
 }
 
 #[test]
 fn absolute_paths_are_refused() {
     let d = Dir::new("abs");
     d.write("lib.q", "fun f()\nend\nexport f\n");
-    d.write("main.q", &format!("import f from \"{}\"\n", d.0.join("lib.q").display()));
+    d.write(
+        "main.q",
+        &format!("import f from \"{}\"\n", d.0.join("lib.q").display()),
+    );
     let o = run_in(&d.0, &["run", "main.q"]);
     assert!(!o.status.success());
-    assert!(text(&o.stderr).contains("not an absolute one"), "{}", text(&o.stderr));
+    assert!(
+        text(&o.stderr).contains("not an absolute one"),
+        "{}",
+        text(&o.stderr)
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn the_same_file_through_a_symbolic_link_is_one_module() {
     let d = Dir::new("link");
-    d.write("lib/a.q", "print(\"loading a\")\nfun a() -> int\n  1\nend\nexport a\n");
+    d.write(
+        "lib/a.q",
+        "print(\"loading a\")\nfun a() -> int\n  1\nend\nexport a\n",
+    );
     std::os::unix::fs::symlink(d.0.join("lib/a.q"), d.0.join("alias.q")).unwrap();
-    d.write("main.q", "import a from \"lib/a.q\"\nimport \"alias.q\" as again\nprint(a() + again.a())\n");
+    d.write(
+        "main.q",
+        "import a from \"lib/a.q\"\nimport \"alias.q\" as again\nprint(a() + again.a())\n",
+    );
     let o = run_in(&d.0, &["run", "main.q"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
     assert_eq!(text(&o.stdout), "loading a\n2\n");
@@ -120,8 +146,14 @@ fn a_cyclic_import_through_a_link_is_matched_to_the_same_module() {
     // the cycle has a valid order, but only if the link is recognised as the same
     // module `a.q` imports from directly (otherwise `a()` below would not resolve).
     let d = Dir::new("cycle");
-    d.write("a.q", "import b from \"b.q\"\nfun a() -> int\n  1\nend\nexport a\nprint(b())\n");
-    d.write("b.q", "import a from \"link.q\"\nfun b() -> int\n  a() + 1\nend\nexport b\n");
+    d.write(
+        "a.q",
+        "import b from \"b.q\"\nfun a() -> int\n  1\nend\nexport a\nprint(b())\n",
+    );
+    d.write(
+        "b.q",
+        "import a from \"link.q\"\nfun b() -> int\n  a() + 1\nend\nexport b\n",
+    );
     std::os::unix::fs::symlink(d.0.join("a.q"), d.0.join("link.q")).unwrap();
     let o = run_in(&d.0, &["run", "a.q"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
@@ -132,16 +164,32 @@ fn a_cyclic_import_through_a_link_is_matched_to_the_same_module() {
 #[test]
 fn a_cycle_with_top_level_code_in_more_than_one_module_has_no_valid_order() {
     let d = Dir::new("cycle_runtime");
-    d.write("a.q", "import b from \"b.q\"\nfun a()\nend\nexport a\nprint(\"a\")\n");
-    d.write("b.q", "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")\n");
+    d.write(
+        "a.q",
+        "import b from \"b.q\"\nfun a()\nend\nexport a\nprint(\"a\")\n",
+    );
+    d.write(
+        "b.q",
+        "import a from \"a.q\"\nfun b()\nend\nexport b\nprint(\"b\")\n",
+    );
     let o = run_in(&d.0, &["run", "a.q"]);
     assert!(!o.status.success());
     assert!(text(&o.stderr).contains("cycle"), "{}", text(&o.stderr));
 }
 
 fn json(args: &[&str], request: &str) -> serde_json::Value {
-    let mut child = qlang().args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(request.as_bytes()).unwrap();
+    let mut child = qlang()
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(request.as_bytes())
+        .unwrap();
     let o = child.wait_with_output().unwrap();
     serde_json::from_slice(&o.stdout).unwrap()
 }
@@ -170,5 +218,11 @@ fn json_requests_use_the_same_import_rules_without_touching_the_disk() {
     .to_string();
     let r = json(&["run", "--json"], &req);
     assert_eq!(r["ok"], false);
-    assert!(r["diagnostics"][0]["message"].as_str().unwrap().contains("not found"), "{r}");
+    assert!(
+        r["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found"),
+        "{r}"
+    );
 }

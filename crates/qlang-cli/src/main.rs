@@ -6,7 +6,9 @@ mod json;
 mod serve;
 
 use qlang_core::check::compile;
-use qlang_core::host::{Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits, SqlRow, SqlValue};
+use qlang_core::host::{
+    Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits, SqlRow, SqlValue,
+};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -57,7 +59,11 @@ fn real_main(args: Vec<String>) -> ExitCode {
         }
         Some("check") => {
             let rest: Vec<&str> = it.collect();
-            if rest.contains(&"--json") { json::run_stdin(true) } else { run_file(&rest, false) }
+            if rest.contains(&"--json") {
+                json::run_stdin(true)
+            } else {
+                run_file(&rest, false)
+            }
         }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
         Some("--version") | Some("-V") => {
@@ -92,20 +98,30 @@ struct TerminalHost {
 fn system_entropy() -> u64 {
     use std::io::Read;
     let mut bytes = [0u8; 8];
-    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok() {
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .is_ok()
+    {
         return u64::from_le_bytes(bytes);
     }
     use std::hash::{BuildHasher, Hasher};
-    std::collections::hash_map::RandomState::new().build_hasher().finish()
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
 }
 
 impl TerminalHost {
     /// `fs.read`/`fs.write` honour `--root` the same way imports do.
     fn check_fs_root(&self, full: &Path) -> Result<(), HostError> {
         if let Some(root) = &self.root
-            && !full.starts_with(root) {
-                return Err(HostError::Other(format!("\"{}\" is outside of --root {}", full.display(), root.display())));
-            }
+            && !full.starts_with(root)
+        {
+            return Err(HostError::Other(format!(
+                "\"{}\" is outside of --root {}",
+                full.display(),
+                root.display()
+            )));
+        }
         Ok(())
     }
 }
@@ -129,13 +145,21 @@ impl Host for TerminalHost {
     fn load_module(&mut self, path: &str) -> Result<String, String> {
         // only qlang sources: importing any file would show its lines in error messages
         if !path.ends_with(".q") {
-            return Err(format!("\"{path}\" is not a qlang file (only .q files can be imported)"));
+            return Err(format!(
+                "\"{path}\" is not a qlang file (only .q files can be imported)"
+            ));
         }
-        let full = Path::new(path).canonicalize().map_err(|_| format!("file \"{path}\" not found"))?;
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| format!("file \"{path}\" not found"))?;
         if let Some(root) = &self.root
-            && !full.starts_with(root) {
-                return Err(format!("\"{path}\" is outside of --root {}", root.display()));
-            }
+            && !full.starts_with(root)
+        {
+            return Err(format!(
+                "\"{path}\" is outside of --root {}",
+                root.display()
+            ));
+        }
         std::fs::read_to_string(&full).map_err(|e| e.to_string())
     }
 
@@ -149,7 +173,9 @@ impl Host for TerminalHost {
 
     fn now_ms(&mut self) -> Result<i64, HostError> {
         let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
-        since.map(|d| d.as_millis() as i64).map_err(|e| HostError::Other(e.to_string()))
+        since
+            .map(|d| d.as_millis() as i64)
+            .map_err(|e| HostError::Other(e.to_string()))
     }
 
     fn random_u64(&mut self) -> Result<u64, HostError> {
@@ -157,22 +183,39 @@ impl Host for TerminalHost {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { read: true, time: true, random: true, http: true, sql: true, fs: true, env: true }
+        Capabilities {
+            read: true,
+            time: true,
+            random: true,
+            http: true,
+            sql: true,
+            fs: true,
+            env: true,
+        }
     }
 
     fn read_file(&mut self, path: &str) -> Result<String, HostError> {
-        let full = Path::new(path).canonicalize().map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
         self.check_fs_root(&full)?;
         std::fs::read_to_string(&full).map_err(|e| HostError::Other(e.to_string()))
     }
 
     fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
         let p = Path::new(path);
-        let parent = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
-        let full_parent = parent.canonicalize().map_err(|e| HostError::Other(e.to_string()))?;
+        let parent = p
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let full_parent = parent
+            .canonicalize()
+            .map_err(|e| HostError::Other(e.to_string()))?;
         self.check_fs_root(&full_parent)?;
         let Some(name) = p.file_name() else {
-            return Err(HostError::Other(format!("\"{path}\" is not a valid file name")));
+            return Err(HostError::Other(format!(
+                "\"{path}\" is not a valid file name"
+            )));
         };
         std::fs::write(full_parent.join(name), content).map_err(|e| HostError::Other(e.to_string()))
     }
@@ -189,11 +232,21 @@ impl Host for TerminalHost {
         self.db.connect(url)
     }
 
-    fn sql_query(&mut self, conn: u64, sql: &str, params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+    fn sql_query(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<Vec<SqlRow>, HostError> {
         self.db.query(conn, sql, params)
     }
 
-    fn sql_execute(&mut self, conn: u64, sql: &str, params: Vec<SqlValue>) -> Result<u64, HostError> {
+    fn sql_execute(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<u64, HostError> {
         self.db.execute(conn, sql, params)
     }
 
@@ -214,14 +267,26 @@ impl Host for TerminalHost {
             Ok(resp) => {
                 let status = resp.status() as i64;
                 let headers = response_headers(&resp);
-                let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
-                Ok(HttpResponse { status, headers, body })
+                let body = resp
+                    .into_string()
+                    .map_err(|e| HostError::Other(e.to_string()))?;
+                Ok(HttpResponse {
+                    status,
+                    headers,
+                    body,
+                })
             }
             // a non-2xx/3xx status is still a response, not a failure
             Err(ureq::Error::Status(status, resp)) => {
                 let headers = response_headers(&resp);
-                let body = resp.into_string().map_err(|e| HostError::Other(e.to_string()))?;
-                Ok(HttpResponse { status: status as i64, headers, body })
+                let body = resp
+                    .into_string()
+                    .map_err(|e| HostError::Other(e.to_string()))?;
+                Ok(HttpResponse {
+                    status: status as i64,
+                    headers,
+                    body,
+                })
             }
             Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
         }
@@ -232,7 +297,10 @@ impl Host for TerminalHost {
 fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
     resp.headers_names()
         .into_iter()
-        .filter_map(|name| resp.header(&name).map(|v| (name.to_ascii_lowercase(), v.to_string())))
+        .filter_map(|name| {
+            resp.header(&name)
+                .map(|v| (name.to_ascii_lowercase(), v.to_string()))
+        })
         .collect()
 }
 
@@ -299,11 +367,17 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         }
     };
     if let (Some(root), Ok(full)) = (&root, Path::new(file).canonicalize())
-        && !full.starts_with(root) {
-            eprintln!("{file} is outside of --root {}", root.display());
-            return ExitCode::from(64);
-        }
-    let mut host = TerminalHost { root, rng: seed.unwrap_or_else(system_entropy), db: db::SqlConns::default(), script_args };
+        && !full.starts_with(root)
+    {
+        eprintln!("{file} is outside of --root {}", root.display());
+        return ExitCode::from(64);
+    }
+    let mut host = TerminalHost {
+        root,
+        rng: seed.unwrap_or_else(system_entropy),
+        db: db::SqlConns::default(),
+        script_args,
+    };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,
         Err(e) => {

@@ -78,7 +78,10 @@ impl Ty {
             Ty::Nullable(t) => Ty::nullable(t.subst(map)),
             Ty::Array(t) => Ty::Array(Box::new(t.subst(map))),
             Ty::Map(k, v) => Ty::Map(Box::new(k.subst(map)), Box::new(v.subst(map))),
-            Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|p| p.subst(map)).collect(), Box::new(r.subst(map))),
+            Ty::Fn(ps, r) => Ty::Fn(
+                ps.iter().map(|p| p.subst(map)).collect(),
+                Box::new(r.subst(map)),
+            ),
             Ty::Struct(id, args) => Ty::Struct(*id, args.iter().map(|a| a.subst(map)).collect()),
             Ty::Trait(id, args) => Ty::Trait(*id, args.iter().map(|a| a.subst(map)).collect()),
             other => other.clone(),
@@ -354,7 +357,10 @@ impl Defs {
     }
 
     pub fn new_param(&mut self, name: &str) -> ParamId {
-        self.params.push(ParamDef { name: name.to_string(), bounds: Vec::new() });
+        self.params.push(ParamDef {
+            name: name.to_string(),
+            bounds: Vec::new(),
+        });
         self.params.len() - 1
     }
 
@@ -368,32 +374,44 @@ impl Defs {
 
     fn make_lang_trait(&mut self, lang: Lang) -> TraitId {
         let this = Ty::Param(SELF_PARAM);
-        let (tparams, defaults, params, ret): (Vec<ParamId>, Vec<Option<Ty>>, Vec<Ty>, Option<Ty>) = match lang {
-            Lang::Add | Lang::Sub | Lang::Mul | Lang::Div | Lang::IntDiv | Lang::Mod | Lang::Pow => {
-                let rhs = self.new_param("Rhs");
-                (vec![rhs], vec![Some(this)], vec![Ty::Param(rhs)], None)
-            }
-            Lang::Neg => (vec![], vec![], vec![], None),
-            Lang::Eq => (vec![], vec![], vec![this], Some(Ty::Bool)),
-            Lang::Ord => (vec![], vec![], vec![this], Some(Ty::Int)),
-            Lang::Index => {
-                let i = self.new_param("I");
-                (vec![i], vec![None], vec![Ty::Param(i)], None)
-            }
-            Lang::IndexSet => {
-                let i = self.new_param("I");
-                let v = self.new_param("V");
-                (vec![i, v], vec![None, None], vec![Ty::Param(i), Ty::Param(v)], Some(Ty::Unit))
-            }
-            Lang::Push => {
-                let t = self.new_param("T");
-                (vec![t], vec![None], vec![Ty::Param(t)], Some(Ty::Unit))
-            }
-            Lang::As => {
-                let t = self.new_param("T");
-                (vec![t], vec![None], vec![], Some(Ty::Param(t)))
-            }
-        };
+        let (tparams, defaults, params, ret): (Vec<ParamId>, Vec<Option<Ty>>, Vec<Ty>, Option<Ty>) =
+            match lang {
+                Lang::Add
+                | Lang::Sub
+                | Lang::Mul
+                | Lang::Div
+                | Lang::IntDiv
+                | Lang::Mod
+                | Lang::Pow => {
+                    let rhs = self.new_param("Rhs");
+                    (vec![rhs], vec![Some(this)], vec![Ty::Param(rhs)], None)
+                }
+                Lang::Neg => (vec![], vec![], vec![], None),
+                Lang::Eq => (vec![], vec![], vec![this], Some(Ty::Bool)),
+                Lang::Ord => (vec![], vec![], vec![this], Some(Ty::Int)),
+                Lang::Index => {
+                    let i = self.new_param("I");
+                    (vec![i], vec![None], vec![Ty::Param(i)], None)
+                }
+                Lang::IndexSet => {
+                    let i = self.new_param("I");
+                    let v = self.new_param("V");
+                    (
+                        vec![i, v],
+                        vec![None, None],
+                        vec![Ty::Param(i), Ty::Param(v)],
+                        Some(Ty::Unit),
+                    )
+                }
+                Lang::Push => {
+                    let t = self.new_param("T");
+                    (vec![t], vec![None], vec![Ty::Param(t)], Some(Ty::Unit))
+                }
+                Lang::As => {
+                    let t = self.new_param("T");
+                    (vec![t], vec![None], vec![], Some(Ty::Param(t)))
+                }
+            };
         self.traits.push(TraitDef {
             name: lang.trait_name().to_string(),
             module: 0,
@@ -438,7 +456,9 @@ impl Defs {
     }
 
     pub fn is_subclass(&self, child: StructId, ancestor: StructId) -> bool {
-        self.ancestry(child, &[]).iter().any(|(s, _)| *s == ancestor)
+        self.ancestry(child, &[])
+            .iter()
+            .any(|(s, _)| *s == ancestor)
     }
 }
 

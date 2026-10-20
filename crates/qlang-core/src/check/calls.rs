@@ -20,7 +20,8 @@ pub(crate) struct CallSig {
 
 /// The parameter names of a declared function, for named-argument resolution.
 fn fn_param_names(decl: &Option<Rc<FunDecl>>) -> Option<Vec<String>> {
-    decl.as_ref().map(|d| d.params.iter().map(|p| p.name.name.clone()).collect())
+    decl.as_ref()
+        .map(|d| d.params.iter().map(|p| p.name.name.clone()).collect())
 }
 
 pub(crate) enum Head {
@@ -46,12 +47,22 @@ impl Checker {
                         TypeRef::Builtin(b) => b.to_string(),
                     };
                     if let Some(c) = &mut self.collect {
-                        c.head(e, Ty::Unit, format!("type {key}"), super::info::StaticKey::Type(tref.clone()));
+                        c.head(
+                            e,
+                            Ty::Unit,
+                            format!("type {key}"),
+                            super::info::StaticKey::Type(tref.clone()),
+                        );
                     }
                 }
                 Some(Head::Module(m)) => {
                     if let Some(c) = &mut self.collect {
-                        c.head(e, Ty::Unit, format!("module {m}"), super::info::StaticKey::Module(*m));
+                        c.head(
+                            e,
+                            Ty::Unit,
+                            format!("module {m}"),
+                            super::info::StaticKey::Module(*m),
+                        );
                     }
                 }
                 _ => {}
@@ -71,7 +82,9 @@ impl Checker {
                         self.res.paths.insert(e.id, PathRes::Module(m));
                         Some(Head::Module(m))
                     }
-                    Some(item @ (ItemRef::Struct(_) | ItemRef::Enum(_))) => Some(self.type_head(e, item, targs)),
+                    Some(item @ (ItemRef::Struct(_) | ItemRef::Enum(_))) => {
+                        Some(self.type_head(e, item, targs))
+                    }
                     Some(_) => None,
                     None => {
                         let (ty, b) = match name.as_str() {
@@ -95,20 +108,26 @@ impl Checker {
                             }
                             _ => return None,
                         };
-                        self.res.paths.insert(e.id, PathRes::Type(TypeRef::Builtin(b)));
+                        self.res
+                            .paths
+                            .insert(e.id, PathRes::Type(TypeRef::Builtin(b)));
                         Some(Head::Type(ty, TypeRef::Builtin(b)))
                     }
                 }
             }
             ExprKind::Field(obj, name, targs) => match self.try_head(obj)? {
                 Head::Module(m) => {
-                    let Some(item) = self.module_member(m, name) else { return Some(Head::Error) };
+                    let Some(item) = self.module_member(m, name) else {
+                        return Some(Head::Error);
+                    };
                     match item {
                         ItemRef::Module(m2) => {
                             self.res.paths.insert(e.id, PathRes::Module(m2));
                             Some(Head::Module(m2))
                         }
-                        ItemRef::Struct(_) | ItemRef::Enum(_) => Some(self.type_head(e, item, targs)),
+                        ItemRef::Struct(_) | ItemRef::Enum(_) => {
+                            Some(self.type_head(e, item, targs))
+                        }
                         _ => None,
                     }
                 }
@@ -128,14 +147,25 @@ impl Checker {
                 } else if targs.len() == n {
                     targs.iter().map(|t| self.resolve_type(t)).collect()
                 } else {
-                    self.err("T121", format!("`{}` expects {n} type argument(s)", self.defs.structs[id].name), e.span);
+                    self.err(
+                        "T121",
+                        format!(
+                            "`{}` expects {n} type argument(s)",
+                            self.defs.structs[id].name
+                        ),
+                        e.span,
+                    );
                     return Head::Error;
                 };
-                self.res.paths.insert(e.id, PathRes::Type(TypeRef::Struct(id)));
+                self.res
+                    .paths
+                    .insert(e.id, PathRes::Type(TypeRef::Struct(id)));
                 Head::Type(Ty::Struct(id, args), TypeRef::Struct(id))
             }
             ItemRef::Enum(id) => {
-                self.res.paths.insert(e.id, PathRes::Type(TypeRef::Enum(id)));
+                self.res
+                    .paths
+                    .insert(e.id, PathRes::Type(TypeRef::Enum(id)));
                 Head::Type(Ty::Enum(id), TypeRef::Enum(id))
             }
             _ => Head::Error,
@@ -148,7 +178,9 @@ impl Checker {
         match self.try_head(obj) {
             Some(Head::Error) => Ty::Error,
             Some(Head::Module(m)) => {
-                let Some(item) = self.module_member(m, name) else { return Ty::Error };
+                let Some(item) = self.module_member(m, name) else {
+                    return Ty::Error;
+                };
                 match item {
                     ItemRef::Fn(fid) => self.fn_value(e, fid, targs),
                     ItemRef::Var(m2, vn) => match self.mscopes[m2].vars.get(&vn).cloned() {
@@ -159,7 +191,11 @@ impl Checker {
                         None => Ty::Error,
                     },
                     _ => {
-                        self.err("T154", format!("`{}` is a type or a module, not a value", name.name), e.span);
+                        self.err(
+                            "T154",
+                            format!("`{}` is a type or a module, not a value", name.name),
+                            e.span,
+                        );
                         Ty::Error
                     }
                 }
@@ -173,30 +209,72 @@ impl Checker {
         }
     }
 
-    pub fn check_field_target(&mut self, target: &Expr, obj: &Expr, name: &Ident, targs: &[TypeExpr]) -> Ty {
+    pub fn check_field_target(
+        &mut self,
+        target: &Expr,
+        obj: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+    ) -> Ty {
         let t = self.check_field(target, obj, name, targs);
-        if matches!(self.res.paths.get(&target.id), Some(PathRes::EnumVariant(..) | PathRes::Fn(_) | PathRes::Module(_))) {
-            self.err("T212", format!("cannot assign to `{}`", name.name), target.span);
+        if matches!(
+            self.res.paths.get(&target.id),
+            Some(PathRes::EnumVariant(..) | PathRes::Fn(_) | PathRes::Module(_))
+        ) {
+            self.err(
+                "T212",
+                format!("cannot assign to `{}`", name.name),
+                target.span,
+            );
         }
         t
     }
 
-    fn static_member_value(&mut self, e: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr]) -> Ty {
+    fn static_member_value(
+        &mut self,
+        e: &Expr,
+        ty: &Ty,
+        tref: &TypeRef,
+        name: &Ident,
+        targs: &[TypeExpr],
+    ) -> Ty {
         match tref {
             TypeRef::Enum(eid) => {
-                if let Some(vi) = self.defs.enums[*eid].variants.iter().position(|v| *v == name.name) {
+                if let Some(vi) = self.defs.enums[*eid]
+                    .variants
+                    .iter()
+                    .position(|v| *v == name.name)
+                {
                     self.res.paths.insert(e.id, PathRes::EnumVariant(*eid, vi));
                     return Ty::Enum(*eid);
                 }
             }
             TypeRef::Struct(sid) => {
-                let Ty::Struct(_, args) = ty else { return Ty::Error };
+                let Ty::Struct(_, args) = ty else {
+                    return Ty::Error;
+                };
                 for (asid, aargs) in self.defs.ancestry(*sid, args) {
                     let ad = self.defs.structs[asid].clone();
-                    if let Some(f) = ad.fields.iter().find(|f| f.is_static && f.name == name.name) {
-                        let map: HashMap<ParamId, Ty> = ad.tparams.iter().cloned().zip(aargs.iter().cloned()).collect();
-                        self.check_vis(f.vis, asid, name.span, &format!("static field `{}`", name.name));
-                        self.res.paths.insert(e.id, PathRes::StaticField(asid, name.name.clone()));
+                    if let Some(f) = ad
+                        .fields
+                        .iter()
+                        .find(|f| f.is_static && f.name == name.name)
+                    {
+                        let map: HashMap<ParamId, Ty> = ad
+                            .tparams
+                            .iter()
+                            .cloned()
+                            .zip(aargs.iter().cloned())
+                            .collect();
+                        self.check_vis(
+                            f.vis,
+                            asid,
+                            name.span,
+                            &format!("static field `{}`", name.name),
+                        );
+                        self.res
+                            .paths
+                            .insert(e.id, PathRes::StaticField(asid, name.name.clone()));
                         return f.ty.subst(&map);
                     }
                 }
@@ -221,7 +299,10 @@ impl Checker {
             if !f.has_self {
                 self.res.paths.insert(e.id, PathRes::Fn(um.fid));
                 let _ = targs;
-                return Ty::Fn(f.params.iter().map(|p| p.subst(&um.map)).collect(), Box::new(f.ret.subst(&um.map)));
+                return Ty::Fn(
+                    f.params.iter().map(|p| p.subst(&um.map)).collect(),
+                    Box::new(f.ret.subst(&um.map)),
+                );
             }
         }
         if name.name == "class" {
@@ -236,7 +317,11 @@ impl Checker {
             }
         }
         let shown = self.show(ty);
-        self.err("T161", format!("`{shown}` has no static member `{}`", name.name), name.span);
+        self.err(
+            "T161",
+            format!("`{shown}` has no static member `{}`", name.name),
+            name.span,
+        );
         Ty::Error
     }
 
@@ -246,7 +331,11 @@ impl Checker {
             Ty::Error => Ty::Error,
             Ty::Nullable(_) | Ty::NoneT => {
                 let shown = self.show(&ot);
-                let hint = if obj_is_variable { "" } else { " (a field or a call cannot be checked in place: copy it into a variable first, then test the variable)" };
+                let hint = if obj_is_variable {
+                    ""
+                } else {
+                    " (a field or a call cannot be checked in place: copy it into a variable first, then test the variable)"
+                };
                 self.err(
                     "T162",
                     format!("this value may be `none` (`{shown}`): check `!= none` before using `.{}`{hint}", name.name),
@@ -261,12 +350,20 @@ impl Checker {
                         if f.is_static {
                             self.err(
                                 "T163",
-                                format!("`{}` is a static field: use `{}.{}`", name.name, ad.name, name.name),
+                                format!(
+                                    "`{}` is a static field: use `{}.{}`",
+                                    name.name, ad.name, name.name
+                                ),
                                 name.span,
                             );
                             return Ty::Error;
                         }
-                        let map: HashMap<ParamId, Ty> = ad.tparams.iter().cloned().zip(aargs.iter().cloned()).collect();
+                        let map: HashMap<ParamId, Ty> = ad
+                            .tparams
+                            .iter()
+                            .cloned()
+                            .zip(aargs.iter().cloned())
+                            .collect();
                         self.check_vis(f.vis, asid, name.span, &format!("field `{}`", name.name));
                         return f.ty.subst(&map);
                     }
@@ -274,18 +371,40 @@ impl Checker {
                 let is_method = self.find_user_method(&ot, &name.name).is_some();
                 let shown = self.show(&ot);
                 if is_method {
-                    self.err("T164", format!("`{}` is a method of `{shown}`: call it with `()`", name.name), name.span);
+                    self.err(
+                        "T164",
+                        format!(
+                            "`{}` is a method of `{shown}`: call it with `()`",
+                            name.name
+                        ),
+                        name.span,
+                    );
                 } else {
-                    self.err("T161", format!("`{shown}` has no field `{}`", name.name), name.span);
+                    self.err(
+                        "T161",
+                        format!("`{shown}` has no field `{}`", name.name),
+                        name.span,
+                    );
                 }
                 Ty::Error
             }
             other => {
                 let shown = other.show(&self.defs);
                 if self.builtin_method(other, &name.name).is_some() {
-                    self.err("T164", format!("`{}` is a method of `{shown}`: call it with `()`", name.name), name.span);
+                    self.err(
+                        "T164",
+                        format!(
+                            "`{}` is a method of `{shown}`: call it with `()`",
+                            name.name
+                        ),
+                        name.span,
+                    );
                 } else {
-                    self.err("T161", format!("`{shown}` has no field `{}`", name.name), name.span);
+                    self.err(
+                        "T161",
+                        format!("`{shown}` has no field `{}`", name.name),
+                        name.span,
+                    );
                 }
                 Ty::Error
             }
@@ -318,9 +437,18 @@ impl Checker {
                             return Ty::Error;
                         };
                         match item {
-                            ItemRef::Fn(fid) => return self.call_fn_item(e, callee, fid, targs, args, want),
+                            ItemRef::Fn(fid) => {
+                                return self.call_fn_item(e, callee, fid, targs, args, want);
+                            }
                             ItemRef::Struct(_) => {
-                                self.err("T154", format!("`{0}` is a type: use `{0}.new(...)` or `{0} {{ ... }}`", name.name), callee.span);
+                                self.err(
+                                    "T154",
+                                    format!(
+                                        "`{0}` is a type: use `{0}.new(...)` or `{0} {{ ... }}`",
+                                        name.name
+                                    ),
+                                    callee.span,
+                                );
                                 self.check_args_loose(args);
                                 return Ty::Error;
                             }
@@ -328,37 +456,48 @@ impl Checker {
                         }
                         // a variable holding a function: fall through to a value call
                     }
-                    Some(Head::Type(ty, tref)) => return self.call_static(e, callee, &ty, &tref, name, targs, args, want),
+                    Some(Head::Type(ty, tref)) => {
+                        return self.call_static(e, callee, &ty, &tref, name, targs, args, want);
+                    }
                     None => {
                         let rt = self.expr(obj, &Want::Any);
                         return self.call_method(e, callee, &rt, name, targs, args, want);
                     }
                 }
             }
-            ExprKind::Ident(name, targs)
-                if self.lookup_var(name).is_none() => {
-                    match self.lookup_item(name) {
-                        Some(ItemRef::Fn(fid)) => return self.call_fn_item(e, callee, fid, targs, args, want),
-                        Some(ItemRef::Struct(_) | ItemRef::Enum(_)) => {
-                            self.err(
+            ExprKind::Ident(name, targs) if self.lookup_var(name).is_none() => {
+                match self.lookup_item(name) {
+                    Some(ItemRef::Fn(fid)) => {
+                        return self.call_fn_item(e, callee, fid, targs, args, want);
+                    }
+                    Some(ItemRef::Struct(_) | ItemRef::Enum(_)) => {
+                        self.err(
                                 "T154",
                                 format!("`{name}` is a type, not a function: use `{name}.new(...)` or `{name} {{ ... }}`"),
                                 callee.span,
                             );
-                            self.check_args_loose(args);
-                            return Ty::Error;
-                        }
-                        None if decls::BUILTIN_FNS.contains(&name.as_str()) => return self.call_builtin_fn(e, callee, name, args),
-                        _ => {}
+                        self.check_args_loose(args);
+                        return Ty::Error;
                     }
+                    None if decls::BUILTIN_FNS.contains(&name.as_str()) => {
+                        return self.call_builtin_fn(e, callee, name, args);
+                    }
+                    _ => {}
                 }
+            }
             _ => {}
         }
         // call a value: a variable or an expression of function type
         let ct = self.expr(callee, &Want::Any);
         match self.resolve(&ct) {
             Ty::Fn(params, ret) => {
-                let sig = CallSig { name: callee_name(callee), tparams: vec![], params, ret: *ret, param_names: None };
+                let sig = CallSig {
+                    name: callee_name(callee),
+                    tparams: vec![],
+                    params,
+                    ret: *ret,
+                    param_names: None,
+                };
                 self.check_args(e, &sig, &[], HashMap::new(), args, want)
             }
             Ty::Error => {
@@ -367,39 +506,86 @@ impl Checker {
             }
             other => {
                 let shown = other.show(&self.defs);
-                self.err("T241", format!("cannot call a `{shown}`: it is not a function"), callee.span);
+                self.err(
+                    "T241",
+                    format!("cannot call a `{shown}`: it is not a function"),
+                    callee.span,
+                );
                 self.check_args_loose(args);
                 Ty::Error
             }
         }
     }
 
-    fn call_fn_item(&mut self, e: &Expr, callee: &Expr, fid: FnId, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
+    fn call_fn_item(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        fid: FnId,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
         if let Some(c) = &mut self.collect {
-            c.expr(callee, Ty::Fn(def.params.clone(), Box::new(def.ret.clone())));
+            c.expr(
+                callee,
+                Ty::Fn(def.params.clone(), Box::new(def.ret.clone())),
+            );
         }
-        let own: Vec<ParamId> = def.scope_params.iter().rev().take(def.own_tparams).rev().map(|(_, p)| *p).collect();
+        let own: Vec<ParamId> = def
+            .scope_params
+            .iter()
+            .rev()
+            .take(def.own_tparams)
+            .rev()
+            .map(|(_, p)| *p)
+            .collect();
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
-        let sig = CallSig { name: def.name.clone(), tparams: own, params: def.params.clone(), ret: def.ret.clone(), param_names: fn_param_names(&def.decl) };
+        let sig = CallSig {
+            name: def.name.clone(),
+            tparams: own,
+            params: def.params.clone(),
+            ret: def.ret.clone(),
+            param_names: fn_param_names(&def.decl),
+        };
         self.check_args(e, &sig, &explicit, HashMap::new(), args, want)
     }
 
     /// Resolve `args` (possibly mixing positional and named arguments) into one value
     /// expression per parameter, in parameter order. Reports and returns `None` on any
     /// arity/name mismatch, after still checking every argument loosely for other errors.
-    fn order_args<'a>(&mut self, e: &Expr, sig: &CallSig, params: &[Ty], args: &'a [CallArg]) -> Option<Vec<&'a Expr>> {
+    fn order_args<'a>(
+        &mut self,
+        e: &Expr,
+        sig: &CallSig,
+        params: &[Ty],
+        args: &'a [CallArg],
+    ) -> Option<Vec<&'a Expr>> {
         if args.iter().all(|a| a.name.is_none()) {
             if args.len() != params.len() {
-                self.err("T240", format!("`{}` expects {} argument(s), found {}", sig.name, params.len(), args.len()), e.span);
+                self.err(
+                    "T240",
+                    format!(
+                        "`{}` expects {} argument(s), found {}",
+                        sig.name,
+                        params.len(),
+                        args.len()
+                    ),
+                    e.span,
+                );
                 self.check_args_loose(args);
                 return None;
             }
             return Some(args.iter().map(|a| &a.value).collect());
         }
         let Some(names) = &sig.param_names else {
-            self.err("T245", format!("`{}` does not accept named arguments", sig.name), e.span);
+            self.err(
+                "T245",
+                format!("`{}` does not accept named arguments", sig.name),
+                e.span,
+            );
             self.check_args_loose(args);
             return None;
         };
@@ -413,7 +599,11 @@ impl Checker {
             match &a.name {
                 None => {
                     if seen_named {
-                        self.err("T246", "positional arguments must come before named arguments", a.value.span);
+                        self.err(
+                            "T246",
+                            "positional arguments must come before named arguments",
+                            a.value.span,
+                        );
                         ok = false;
                     } else if i < slots.len() {
                         slots[i] = Some(&a.value);
@@ -425,12 +615,20 @@ impl Checker {
                 Some(n) => {
                     seen_named = true;
                     let Some(idx) = names.iter().position(|p| p == &n.name) else {
-                        self.err("T247", format!("`{}` has no parameter named `{}`", sig.name, n.name), n.span);
+                        self.err(
+                            "T247",
+                            format!("`{}` has no parameter named `{}`", sig.name, n.name),
+                            n.span,
+                        );
                         ok = false;
                         continue;
                     };
                     if slots[idx].is_some() {
-                        self.err("T248", format!("parameter `{}` is given more than once", n.name), n.span);
+                        self.err(
+                            "T248",
+                            format!("parameter `{}` is given more than once", n.name),
+                            n.span,
+                        );
                         ok = false;
                         continue;
                     }
@@ -445,7 +643,11 @@ impl Checker {
         }
         if let Some(missing) = slots.iter().position(|s| s.is_none()) {
             let pn = names.get(missing).map(|s| s.as_str()).unwrap_or("?");
-            self.err("T249", format!("`{}` is missing the argument for `{pn}`", sig.name), e.span);
+            self.err(
+                "T249",
+                format!("`{}` is missing the argument for `{pn}`", sig.name),
+                e.span,
+            );
             self.check_args_loose(args);
             return None;
         }
@@ -457,10 +659,27 @@ impl Checker {
     /// type expected of the call's result: when an argument leaves some type parameters
     /// unresolved, matching the result against `want` can resolve the rest (`let x: Box<int>
     /// = Box.empty()`, `return Result.ok(1)` inside a function returning `Result<int, E>`...).
-    pub fn check_args(&mut self, e: &Expr, sig: &CallSig, explicit: &[Ty], mut map: HashMap<ParamId, Ty>, args: &[CallArg], want: &Want) -> Ty {
+    pub fn check_args(
+        &mut self,
+        e: &Expr,
+        sig: &CallSig,
+        explicit: &[Ty],
+        mut map: HashMap<ParamId, Ty>,
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
         if !explicit.is_empty() {
             if explicit.len() != sig.tparams.len() {
-                self.err("T121", format!("`{}` expects {} type argument(s), found {}", sig.name, sig.tparams.len(), explicit.len()), e.span);
+                self.err(
+                    "T121",
+                    format!(
+                        "`{}` expects {} type argument(s), found {}",
+                        sig.name,
+                        sig.tparams.len(),
+                        explicit.len()
+                    ),
+                    e.span,
+                );
                 self.check_args_loose(args);
                 return Ty::Error;
             }
@@ -488,7 +707,9 @@ impl Checker {
             }
         }
         for p in &sig.tparams {
-            let Some(arg) = map.get(p).cloned() else { continue };
+            let Some(arg) = map.get(p).cloned() else {
+                continue;
+            };
             let arg = self.resolve(&arg);
             if arg.contains_infer() {
                 continue;
@@ -498,7 +719,14 @@ impl Checker {
                 if !self.implements(&arg, tid, &targs) {
                     let (a, tn) = (self.show(&arg), self.show(&Ty::Trait(tid, targs)));
                     let pn = self.defs.params[*p].name.clone();
-                    self.err("T242", format!("`{a}` cannot be used for `{pn}` in `{}`: it does not implement `{tn}`", sig.name), e.span);
+                    self.err(
+                        "T242",
+                        format!(
+                            "`{a}` cannot be used for `{pn}` in `{}`: it does not implement `{tn}`",
+                            sig.name
+                        ),
+                        e.span,
+                    );
                 }
             }
         }
@@ -521,7 +749,16 @@ impl Checker {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
+    fn call_method(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        rt: &Ty,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
         let rt = self.resolve(rt);
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         match &rt {
@@ -553,46 +790,72 @@ impl Checker {
                     name: "Db.query".to_string(),
                     tparams: vec![],
                     params: vec![Ty::Str, json_array.clone()],
-                    ret: result(Ty::Array(Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])))))),
+                    ret: result(Ty::Array(Box::new(Ty::Map(
+                        Box::new(Ty::Str),
+                        Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])),
+                    )))),
                     param_names: None,
                 }),
-                "execute" => {
-                    Some(CallSig { name: "Db.execute".to_string(), tparams: vec![], params: vec![Ty::Str, json_array], ret: result(Ty::Int), param_names: None })
-                }
-                "close" | "begin" | "commit" | "rollback" => {
-                    Some(CallSig { name: format!("Db.{}", name.name), tparams: vec![], params: vec![], ret: result(Ty::Bool), param_names: None })
-                }
+                "execute" => Some(CallSig {
+                    name: "Db.execute".to_string(),
+                    tparams: vec![],
+                    params: vec![Ty::Str, json_array],
+                    ret: result(Ty::Int),
+                    param_names: None,
+                }),
+                "close" | "begin" | "commit" | "rollback" => Some(CallSig {
+                    name: format!("Db.{}", name.name),
+                    tparams: vec![],
+                    params: vec![],
+                    ret: result(Ty::Bool),
+                    param_names: None,
+                }),
                 _ => None,
             };
             if let Some(sig) = sig {
                 if !self.caps.sql {
                     self.err("T250", format!("`Db.{}` is not available in this environment (there is no database access)", name.name), e.span);
                 }
-                self.res.db_calls.insert(e.id, match name.name.as_str() {
-                    "query" => "query",
-                    "execute" => "execute",
-                    "begin" => "begin",
-                    "commit" => "commit",
-                    "rollback" => "rollback",
-                    _ => "close",
-                });
+                self.res.db_calls.insert(
+                    e.id,
+                    match name.name.as_str() {
+                        "query" => "query",
+                        "execute" => "execute",
+                        "begin" => "begin",
+                        "commit" => "commit",
+                        "rollback" => "rollback",
+                        _ => "close",
+                    },
+                );
                 return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
         }
         // built-in methods first for built-in types
-        if !matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..))
-            && let Some((params, ret)) = self.builtin_method(&rt, &name.name) {
-                self.check_builtin_constraint(e, &rt, &name.name, callee.span);
-                let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret, param_names: None };
-                return self.check_args(e, &sig, &[], HashMap::new(), args, want);
-            }
+        if !matches!(
+            rt,
+            Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)
+        ) && let Some((params, ret)) = self.builtin_method(&rt, &name.name)
+        {
+            self.check_builtin_constraint(e, &rt, &name.name, callee.span);
+            let sig = CallSig {
+                name: name.name.clone(),
+                tparams: vec![],
+                params,
+                ret,
+                param_names: None,
+            };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+        }
         if let Some(um) = self.find_user_method(&rt, &name.name) {
             let f = self.defs.fns[um.fid].clone();
             if !f.has_self {
                 let shown = self.show(&rt);
                 self.err(
                     "T243",
-                    format!("`{0}` is a static method: call it as `{shown}.{0}(...)`, not on a value", name.name),
+                    format!(
+                        "`{0}` is a static method: call it as `{shown}.{0}(...)`, not on a value",
+                        name.name
+                    ),
                     callee.span,
                 );
                 self.check_args_loose(args);
@@ -600,11 +863,25 @@ impl Checker {
             }
             let imp = self.defs.impls[um.impl_id].clone();
             if imp.trait_.is_none()
-                && let Ty::Struct(owner, _) = imp.target {
-                    self.check_vis(f.vis, owner, name.span, &format!("method `{}`", name.name));
-                }
-            let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+                && let Ty::Struct(owner, _) = imp.target
+            {
+                self.check_vis(f.vis, owner, name.span, &format!("method `{}`", name.name));
+            }
+            let own: Vec<ParamId> = f
+                .scope_params
+                .iter()
+                .rev()
+                .take(f.own_tparams)
+                .rev()
+                .map(|(_, p)| *p)
+                .collect();
+            let sig = CallSig {
+                name: name.name.clone(),
+                tparams: own,
+                params: f.params.clone(),
+                ret: f.ret.clone(),
+                param_names: fn_param_names(&f.decl),
+            };
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // trait methods through a generic bound or a trait-typed value
@@ -634,12 +911,21 @@ impl Checker {
         }
         // a field holding a function: `obj.callback(x)`
         if let Ty::Struct(..) = &rt {
-            let probe = Ident { name: name.name.clone(), span: name.span };
+            let probe = Ident {
+                name: name.name.clone(),
+                span: name.span,
+            };
             let before = self.diags.len();
             let ft = self.field_of(e, &rt, &probe, true);
             if self.diags.len() == before {
                 if let Ty::Fn(params, ret) = self.resolve(&ft) {
-                    let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret, param_names: None };
+                    let sig = CallSig {
+                        name: name.name.clone(),
+                        tparams: vec![],
+                        params,
+                        ret: *ret,
+                        param_names: None,
+                    };
                     return self.check_args(e, &sig, &[], HashMap::new(), args, want);
                 }
             } else {
@@ -647,13 +933,28 @@ impl Checker {
             }
         }
         // `value.class()`: the concrete type's name, even through a trait or a generic bound
-        if name.name == "class" && matches!(rt, Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)) {
+        if name.name == "class"
+            && matches!(
+                rt,
+                Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)
+            )
+        {
             self.res.class_calls.insert(e.id);
-            let sig = CallSig { name: name.name.clone(), tparams: vec![], params: vec![], ret: Ty::Str, param_names: None };
+            let sig = CallSig {
+                name: name.name.clone(),
+                tparams: vec![],
+                params: vec![],
+                ret: Ty::Str,
+                param_names: None,
+            };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         let shown = self.show(&rt);
-        self.err("T161", format!("`{shown}` has no method `{}`", name.name), name.span);
+        self.err(
+            "T161",
+            format!("`{shown}` has no method `{}`", name.name),
+            name.span,
+        );
         self.check_args_loose(args);
         Ty::Error
     }
@@ -668,20 +969,43 @@ impl Checker {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
+    fn call_static(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        ty: &Ty,
+        tref: &TypeRef,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin("http") = tref
             && name.name == "send"
         {
-            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("http", "send"));
+            self.res
+                .paths
+                .insert(callee.id, PathRes::BuiltinStatic("http", "send"));
             if !self.caps.http {
-                self.err("T250", "`http.send` is not available in this environment (there is no network access)".to_string(), e.span);
+                self.err(
+                    "T250",
+                    "`http.send` is not available in this environment (there is no network access)"
+                        .to_string(),
+                    e.span,
+                );
             }
             let request = Ty::Struct(self.prelude_struct("Request"), vec![]);
             let response = Ty::Struct(self.prelude_struct("Response"), vec![]);
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let result = Ty::Struct(self.prelude_struct("Result"), vec![response, error]);
-            let sig = CallSig { name: "http.send".to_string(), tparams: vec![], params: vec![request], ret: result, param_names: None };
+            let sig = CallSig {
+                name: "http.send".to_string(),
+                tparams: vec![],
+                params: vec![request],
+                ret: result,
+                param_names: None,
+            };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Builtin("fs") = tref
@@ -691,48 +1015,86 @@ impl Checker {
                 _ => None,
             }
         {
-            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("fs", fname));
+            self.res
+                .paths
+                .insert(callee.id, PathRes::BuiltinStatic("fs", fname));
             if !self.caps.fs {
                 self.err("T250", format!("`fs.{fname}` is not available in this environment (there is no disk access)"), e.span);
             }
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
-            let (params, ok) = if fname == "read" { (vec![Ty::Str], Ty::Str) } else { (vec![Ty::Str, Ty::Str], Ty::Bool) };
+            let (params, ok) = if fname == "read" {
+                (vec![Ty::Str], Ty::Str)
+            } else {
+                (vec![Ty::Str, Ty::Str], Ty::Bool)
+            };
             let result = Ty::Struct(self.prelude_struct("Result"), vec![ok, error]);
-            let sig = CallSig { name: format!("fs.{fname}"), tparams: vec![], params, ret: result, param_names: None };
+            let sig = CallSig {
+                name: format!("fs.{fname}"),
+                tparams: vec![],
+                params,
+                ret: result,
+                param_names: None,
+            };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Struct(sid) = tref
             && *sid == self.prelude_struct("Db")
             && name.name == "connect"
         {
-            self.res.paths.insert(callee.id, PathRes::BuiltinStatic("db", "connect"));
+            self.res
+                .paths
+                .insert(callee.id, PathRes::BuiltinStatic("db", "connect"));
             if !self.caps.sql {
                 self.err("T250", "`Db.connect` is not available in this environment (there is no database access)".to_string(), e.span);
             }
             let db = Ty::Struct(*sid, vec![]);
             let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
             let result = Ty::Struct(self.prelude_struct("Result"), vec![db, error]);
-            let sig = CallSig { name: "Db.connect".to_string(), tparams: vec![], params: vec![Ty::Str], ret: result, param_names: None };
+            let sig = CallSig {
+                name: "Db.connect".to_string(),
+                tparams: vec![],
+                params: vec![Ty::Str],
+                ret: result,
+                param_names: None,
+            };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {
-                self.res.paths.insert(callee.id, PathRes::BuiltinStatic(b, fname));
+                self.res
+                    .paths
+                    .insert(callee.id, PathRes::BuiltinStatic(b, fname));
                 let missing = match needs {
                     Needs::Time if !self.caps.time => Some("there is no clock"),
                     Needs::Random if !self.caps.random => Some("there is no source of randomness"),
                     Needs::TimeAndRandom if !self.caps.time => Some("there is no clock"),
-                    Needs::TimeAndRandom if !self.caps.random => Some("there is no source of randomness"),
+                    Needs::TimeAndRandom if !self.caps.random => {
+                        Some("there is no source of randomness")
+                    }
                     Needs::Env if !self.caps.env => Some("there is no process environment"),
                     _ => None,
                 };
                 if let Some(why) = missing {
-                    self.err("T250", format!("`{b}.{fname}` is not available in this environment ({why})"), e.span);
+                    self.err(
+                        "T250",
+                        format!("`{b}.{fname}` is not available in this environment ({why})"),
+                        e.span,
+                    );
                 }
-                let sig = CallSig { name: format!("{b}.{fname}"), tparams: vec![], params, ret, param_names: None };
+                let sig = CallSig {
+                    name: format!("{b}.{fname}"),
+                    tparams: vec![],
+                    params,
+                    ret,
+                    param_names: None,
+                };
                 return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
-            self.err("T161", format!("`{b}` has no static member `{}`", name.name), name.span);
+            self.err(
+                "T161",
+                format!("`{b}` has no static member `{}`", name.name),
+                name.span,
+            );
             self.check_args_loose(args);
             return Ty::Error;
         }
@@ -751,30 +1113,61 @@ impl Checker {
             }
             let imp = self.defs.impls[um.impl_id].clone();
             if imp.trait_.is_none()
-                && let Ty::Struct(owner, _) = imp.target {
-                    self.check_vis(f.vis, owner, name.span, &format!("method `{}`", name.name));
-                }
+                && let Ty::Struct(owner, _) = imp.target
+            {
+                self.check_vis(f.vis, owner, name.span, &format!("method `{}`", name.name));
+            }
             self.res.paths.insert(callee.id, PathRes::Fn(um.fid));
-            let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-            let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+            let own: Vec<ParamId> = f
+                .scope_params
+                .iter()
+                .rev()
+                .take(f.own_tparams)
+                .rev()
+                .map(|(_, p)| *p)
+                .collect();
+            let sig = CallSig {
+                name: name.name.clone(),
+                tparams: own,
+                params: f.params.clone(),
+                ret: f.ret.clone(),
+                param_names: fn_param_names(&f.decl),
+            };
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // otherwise a static field/variant: evaluate as a value and call it
         let before = self.diags.len();
         let vt = self.static_member_value(callee, ty, tref, name, targs);
         if let Ty::Fn(params, ret) = self.resolve(&vt) {
-            let sig = CallSig { name: name.name.clone(), tparams: vec![], params, ret: *ret, param_names: None };
+            let sig = CallSig {
+                name: name.name.clone(),
+                tparams: vec![],
+                params,
+                ret: *ret,
+                param_names: None,
+            };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         if self.diags.len() == before {
             let shown = self.show(&vt);
-            self.err("T241", format!("cannot call a `{shown}`: it is not a function"), callee.span);
+            self.err(
+                "T241",
+                format!("cannot call a `{shown}`: it is not a function"),
+                callee.span,
+            );
         }
         self.check_args_loose(args);
         Ty::Error
     }
 
-    fn call_super(&mut self, e: &Expr, callee: &Expr, name: &Ident, args: &[CallArg], want: &Want) -> Ty {
+    fn call_super(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        name: &Ident,
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
         let fail = |this: &mut Checker, msg: String| {
             this.err("T152", msg, callee.span);
             this.check_args_loose(args);
@@ -788,25 +1181,58 @@ impl Checker {
         };
         let target = self.defs.impls[iid].target.clone();
         let Ty::Struct(sid, sargs) = target else {
-            return fail(self, "`super` can only be used in methods of a struct".to_string());
+            return fail(
+                self,
+                "`super` can only be used in methods of a struct".to_string(),
+            );
         };
         let Some((pid, pargs)) = self.defs.structs[sid].parent.clone() else {
             let n = self.defs.structs[sid].name.clone();
-            return fail(self, format!("`super` needs a parent: struct `{n}` does not extend another struct"));
+            return fail(
+                self,
+                format!("`super` needs a parent: struct `{n}` does not extend another struct"),
+            );
         };
-        let map: HashMap<ParamId, Ty> = self.defs.structs[sid].tparams.iter().cloned().zip(sargs.iter().cloned()).collect();
+        let map: HashMap<ParamId, Ty> = self.defs.structs[sid]
+            .tparams
+            .iter()
+            .cloned()
+            .zip(sargs.iter().cloned())
+            .collect();
         let pty = Ty::Struct(pid, pargs.iter().map(|t| t.subst(&map)).collect());
         let Some(um) = self.find_user_method(&pty, &name.name) else {
             let pn = self.defs.structs[pid].name.clone();
-            return fail(self, format!("the parent struct `{pn}` has no method `{}`", name.name));
+            return fail(
+                self,
+                format!("the parent struct `{pn}` has no method `{}`", name.name),
+            );
         };
         let f = self.defs.fns[um.fid].clone();
         if !f.has_self {
-            return fail(self, format!("`{}` is a static method, it cannot be called with `super`", name.name));
+            return fail(
+                self,
+                format!(
+                    "`{}` is a static method, it cannot be called with `super`",
+                    name.name
+                ),
+            );
         }
         self.res.super_calls.insert(callee.id, um.fid);
-        let own: Vec<ParamId> = f.scope_params.iter().rev().take(f.own_tparams).rev().map(|(_, p)| *p).collect();
-        let sig = CallSig { name: name.name.clone(), tparams: own, params: f.params.clone(), ret: f.ret.clone(), param_names: fn_param_names(&f.decl) };
+        let own: Vec<ParamId> = f
+            .scope_params
+            .iter()
+            .rev()
+            .take(f.own_tparams)
+            .rev()
+            .map(|(_, p)| *p)
+            .collect();
+        let sig = CallSig {
+            name: name.name.clone(),
+            tparams: own,
+            params: f.params.clone(),
+            ret: f.ret.clone(),
+            param_names: fn_param_names(&f.decl),
+        };
         self.check_args(e, &sig, &[], um.map, args, want)
     }
 
@@ -818,18 +1244,32 @@ impl Checker {
             "panic" => "panic",
             _ => "assert",
         };
-        self.res.paths.insert(callee.id, PathRes::BuiltinFn(static_name));
+        self.res
+            .paths
+            .insert(callee.id, PathRes::BuiltinFn(static_name));
         for a in args {
             if let Some(n) = &a.name {
-                self.err("T245", format!("`{name}` does not accept named arguments"), n.span);
+                self.err(
+                    "T245",
+                    format!("`{name}` does not accept named arguments"),
+                    n.span,
+                );
             }
         }
         let args: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
         let args = args.as_slice();
         let arity = |this: &mut Checker, min: usize, max: usize| -> bool {
             if args.len() < min || args.len() > max {
-                let n = if min == max { format!("{min}") } else { format!("{min} to {max}") };
-                this.err("T240", format!("`{name}` expects {n} argument(s), found {}", args.len()), e.span);
+                let n = if min == max {
+                    format!("{min}")
+                } else {
+                    format!("{min} to {max}")
+                };
+                this.err(
+                    "T240",
+                    format!("`{name}` expects {n} argument(s), found {}", args.len()),
+                    e.span,
+                );
                 for a in args.iter().copied() {
                     this.expr(a, &Want::Any);
                 }
@@ -851,7 +1291,11 @@ impl Checker {
             }
             "read" => {
                 if !self.caps.read {
-                    self.err("T250", "`read` is not available in this environment (there is no input to read)", e.span);
+                    self.err(
+                        "T250",
+                        "`read` is not available in this environment (there is no input to read)",
+                        e.span,
+                    );
                 }
                 arity(self, 0, 0);
                 Ty::Str
@@ -888,7 +1332,10 @@ impl Checker {
         }
         match name {
             "sort" | "min" | "max" => {
-                if self.find_lang_impl(&t, Lang::Ord, std::slice::from_ref(&t)).is_none() {
+                if self
+                    .find_lang_impl(&t, Lang::Ord, std::slice::from_ref(&t))
+                    .is_none()
+                {
                     let shown = self.show(&t);
                     self.err(
                         "T260",
@@ -900,7 +1347,11 @@ impl Checker {
             "flatten" => {
                 if !matches!(t, Ty::Array(_)) {
                     let shown = self.show(&t);
-                    self.err("T261", format!("`flatten()` needs an array of arrays, not `array<{shown}>`"), span);
+                    self.err(
+                        "T261",
+                        format!("`flatten()` needs an array of arrays, not `array<{shown}>`"),
+                        span,
+                    );
                 }
             }
             "sum" => match t {
@@ -910,7 +1361,11 @@ impl Checker {
                 }
                 _ => {
                     let shown = self.show(&t);
-                    self.err("T260", format!("`sum()` needs an array of numbers, not `array<{shown}>`"), span);
+                    self.err(
+                        "T260",
+                        format!("`sum()` needs an array of numbers, not `array<{shown}>`"),
+                        span,
+                    );
                 }
             },
             _ => {}
@@ -939,17 +1394,44 @@ impl Checker {
             (Ty::Array(t), "slice") => (vec![Ty::Int, Ty::Int], arr(t)),
             (Ty::Array(t), "map") => {
                 let u = self.fresh();
-                (vec![Ty::Fn(vec![(**t).clone()], Box::new(u.clone()))], arr(&u))
+                (
+                    vec![Ty::Fn(vec![(**t).clone()], Box::new(u.clone()))],
+                    arr(&u),
+                )
             }
-            (Ty::Array(t), "filter") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], arr(t)),
+            (Ty::Array(t), "filter") => (
+                vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))],
+                arr(t),
+            ),
             (Ty::Array(t), "reduce") => {
                 let u = self.fresh();
-                (vec![u.clone(), Ty::Fn(vec![u.clone(), (**t).clone()], Box::new(u.clone()))], u)
+                (
+                    vec![
+                        u.clone(),
+                        Ty::Fn(vec![u.clone(), (**t).clone()], Box::new(u.clone())),
+                    ],
+                    u,
+                )
             }
-            (Ty::Array(t), "any" | "all") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::Bool),
-            (Ty::Array(t), "find") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))], Ty::nullable((**t).clone())),
-            (Ty::Array(t), "each") => (vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unit))], Ty::Unit),
-            (Ty::Array(t), "sort_by") => (vec![Ty::Fn(vec![(**t).clone(), (**t).clone()], Box::new(Ty::Int))], Ty::Unit),
+            (Ty::Array(t), "any" | "all") => (
+                vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))],
+                Ty::Bool,
+            ),
+            (Ty::Array(t), "find") => (
+                vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Bool))],
+                Ty::nullable((**t).clone()),
+            ),
+            (Ty::Array(t), "each") => (
+                vec![Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unit))],
+                Ty::Unit,
+            ),
+            (Ty::Array(t), "sort_by") => (
+                vec![Ty::Fn(
+                    vec![(**t).clone(), (**t).clone()],
+                    Box::new(Ty::Int),
+                )],
+                Ty::Unit,
+            ),
             (Ty::Array(t), "unique") => (vec![], arr(t)),
             (Ty::Array(t), "first" | "last") => (vec![], Ty::nullable((**t).clone())),
             (Ty::Array(t), "concat") => (vec![arr(t)], arr(t)),
@@ -972,16 +1454,36 @@ impl Checker {
             (Ty::Map(k, v), "remove") => (vec![(**k).clone()], Ty::nullable((**v).clone())),
             (Ty::Map(k, _), "keys") => (vec![], arr(k)),
             (Ty::Map(_, v), "values") => (vec![], arr(v)),
-            (Ty::Map(k, v), "merge") => (vec![Ty::Map(k.clone(), v.clone())], Ty::Map(k.clone(), v.clone())),
-            (Ty::Map(k, v), "filter") => (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Bool))], Ty::Map(k.clone(), v.clone())),
+            (Ty::Map(k, v), "merge") => (
+                vec![Ty::Map(k.clone(), v.clone())],
+                Ty::Map(k.clone(), v.clone()),
+            ),
+            (Ty::Map(k, v), "filter") => (
+                vec![Ty::Fn(
+                    vec![(**k).clone(), (**v).clone()],
+                    Box::new(Ty::Bool),
+                )],
+                Ty::Map(k.clone(), v.clone()),
+            ),
             (Ty::Map(k, v), "map_values") => {
                 let u = self.fresh();
-                (vec![Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(u.clone()))], Ty::Map(k.clone(), Box::new(u)))
+                (
+                    vec![Ty::Fn(
+                        vec![(**k).clone(), (**v).clone()],
+                        Box::new(u.clone()),
+                    )],
+                    Ty::Map(k.clone(), Box::new(u)),
+                )
             }
             (Ty::Str, "len") => (vec![], Ty::Int),
             (Ty::Str, "is_empty") => (vec![], Ty::Bool),
-            (Ty::Str, "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse") => (vec![], Ty::Str),
-            (Ty::Str, "snake_case" | "camel_case" | "kebab_case" | "title_case") => (vec![], Ty::Str),
+            (
+                Ty::Str,
+                "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse",
+            ) => (vec![], Ty::Str),
+            (Ty::Str, "snake_case" | "camel_case" | "kebab_case" | "title_case") => {
+                (vec![], Ty::Str)
+            }
             (Ty::Str, "strip_prefix" | "strip_suffix") => (vec![Ty::Str], Ty::nullable(Ty::Str)),
             (Ty::Str, "eq_ignore_case") => (vec![Ty::Str], Ty::Bool),
             (Ty::Str, "last_index_of") => (vec![Ty::Str], Ty::nullable(Ty::Int)),
@@ -1002,8 +1504,15 @@ impl Checker {
             (Ty::Str, "substring") => (vec![Ty::Int, Ty::Int], Ty::Str),
             (Ty::Uuid, "version") => (vec![], Ty::Int),
             (Ty::Ulid, "time") => (vec![], Ty::Int),
-            (Ty::DateTime, "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms") => (vec![], Ty::Int),
-            (Ty::DateTime, "add_years" | "add_months" | "add_days" | "add_hours" | "add_minutes" | "add_seconds") => (vec![Ty::Int], Ty::DateTime),
+            (
+                Ty::DateTime,
+                "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms",
+            ) => (vec![], Ty::Int),
+            (
+                Ty::DateTime,
+                "add_years" | "add_months" | "add_days" | "add_hours" | "add_minutes"
+                | "add_seconds",
+            ) => (vec![Ty::Int], Ty::DateTime),
             (Ty::DateTime, "start_of_day") => (vec![], Ty::DateTime),
             (Ty::DateTime, "days_until") => (vec![Ty::DateTime], Ty::Int),
             (Ty::DateTime, "format") => (vec![Ty::Str], Ty::Str),
@@ -1033,12 +1542,32 @@ enum Needs {
 /// The static functions of the built-in types: (name, parameters, result, needs).
 fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec<Ty>, Ty, Needs)> {
     Some(match (owner, name) {
-        ("int", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Int), Needs::Nothing),
-        ("float", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Float), Needs::Nothing),
-        ("uuid", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Uuid), Needs::Nothing),
+        ("int", "parse") => (
+            "parse",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Int),
+            Needs::Nothing,
+        ),
+        ("float", "parse") => (
+            "parse",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Float),
+            Needs::Nothing,
+        ),
+        ("uuid", "parse") => (
+            "parse",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Uuid),
+            Needs::Nothing,
+        ),
         ("uuid", "v4") => ("v4", vec![], Ty::Uuid, Needs::Random),
         ("uuid", "v7") => ("v7", vec![], Ty::Uuid, Needs::TimeAndRandom),
-        ("ulid", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::Ulid), Needs::Nothing),
+        ("ulid", "parse") => (
+            "parse",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Ulid),
+            Needs::Nothing,
+        ),
         ("ulid", "new") => ("new", vec![], Ty::Ulid, Needs::TimeAndRandom),
         ("ulid", "at") => ("at", vec![Ty::Int], Ty::Ulid, Needs::Random),
         ("datetime", "now") => ("now", vec![], Ty::DateTime, Needs::Time),
@@ -1046,17 +1575,52 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
         ("datetime", "of") if nargs == 6 => ("of", vec![Ty::Int; 6], Ty::DateTime, Needs::Nothing),
         ("datetime", "of") => ("of", vec![Ty::Int; 3], Ty::DateTime, Needs::Nothing),
         ("datetime", "at") => ("at", vec![Ty::Int], Ty::DateTime, Needs::Nothing),
-        ("datetime", "parse") => ("parse", vec![Ty::Str], Ty::nullable(Ty::DateTime), Needs::Nothing),
+        ("datetime", "parse") => (
+            "parse",
+            vec![Ty::Str],
+            Ty::nullable(Ty::DateTime),
+            Needs::Nothing,
+        ),
         ("time", "now") => ("now", vec![], Ty::Int, Needs::Time),
         ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
         ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),
         ("regex", "matches") => ("matches", vec![Ty::Str, Ty::Str], Ty::Bool, Needs::Nothing),
-        ("regex", "find") => ("find", vec![Ty::Str, Ty::Str], Ty::nullable(Ty::Str), Needs::Nothing),
-        ("regex", "find_all") => ("find_all", vec![Ty::Str, Ty::Str], Ty::Array(Box::new(Ty::Str)), Needs::Nothing),
-        ("regex", "captures") => ("captures", vec![Ty::Str, Ty::Str], Ty::nullable(Ty::Array(Box::new(Ty::nullable(Ty::Str)))), Needs::Nothing),
-        ("regex", "replace") => ("replace", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
-        ("regex", "replace_all") => ("replace_all", vec![Ty::Str, Ty::Str, Ty::Str], Ty::Str, Needs::Nothing),
-        ("regex", "split") => ("split", vec![Ty::Str, Ty::Str], Ty::Array(Box::new(Ty::Str)), Needs::Nothing),
+        ("regex", "find") => (
+            "find",
+            vec![Ty::Str, Ty::Str],
+            Ty::nullable(Ty::Str),
+            Needs::Nothing,
+        ),
+        ("regex", "find_all") => (
+            "find_all",
+            vec![Ty::Str, Ty::Str],
+            Ty::Array(Box::new(Ty::Str)),
+            Needs::Nothing,
+        ),
+        ("regex", "captures") => (
+            "captures",
+            vec![Ty::Str, Ty::Str],
+            Ty::nullable(Ty::Array(Box::new(Ty::nullable(Ty::Str)))),
+            Needs::Nothing,
+        ),
+        ("regex", "replace") => (
+            "replace",
+            vec![Ty::Str, Ty::Str, Ty::Str],
+            Ty::Str,
+            Needs::Nothing,
+        ),
+        ("regex", "replace_all") => (
+            "replace_all",
+            vec![Ty::Str, Ty::Str, Ty::Str],
+            Ty::Str,
+            Needs::Nothing,
+        ),
+        ("regex", "split") => (
+            "split",
+            vec![Ty::Str, Ty::Str],
+            Ty::Array(Box::new(Ty::Str)),
+            Needs::Nothing,
+        ),
         ("env", "get") => ("get", vec![Ty::Str], Ty::nullable(Ty::Str), Needs::Env),
         ("env", "args") => ("args", vec![], Ty::Array(Box::new(Ty::Str)), Needs::Env),
         _ => return None,

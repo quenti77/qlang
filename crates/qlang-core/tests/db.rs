@@ -6,7 +6,10 @@ use qlang_core::host::{Limits, MemoryHost, SqlRow, SqlValue};
 use std::collections::HashMap;
 
 fn host_with(responses: HashMap<String, Result<Vec<SqlRow>, String>>) -> MemoryHost {
-    MemoryHost { sql: Some(responses), ..MemoryHost::default() }
+    MemoryHost {
+        sql: Some(responses),
+        ..MemoryHost::default()
+    }
 }
 
 fn canned(sql: &str, result: Result<Vec<SqlRow>, String>) -> MemoryHost {
@@ -16,7 +19,12 @@ fn canned(sql: &str, result: Result<Vec<SqlRow>, String>) -> MemoryHost {
 }
 
 fn row(columns: &[(&str, SqlValue)]) -> SqlRow {
-    SqlRow { columns: columns.iter().map(|(n, v)| (n.to_string(), v.clone())).collect() }
+    SqlRow {
+        columns: columns
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect(),
+    }
 }
 
 /// Output of the program, or `CODE: message` (compile or run error).
@@ -27,7 +35,16 @@ fn exec(src: &str, mut host: MemoryHost) -> String {
         .spawn(move || {
             let prog = match compile("main.q", &src, &mut host) {
                 Ok(p) => p,
-                Err(e) => return format!("COMPILE: {}", e.diagnostics.iter().map(|d| format!("{}: {}", d.code, d.message)).collect::<Vec<_>>().join("; ")),
+                Err(e) => {
+                    return format!(
+                        "COMPILE: {}",
+                        e.diagnostics
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.message))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    );
+                }
             };
             let r = prog.run(&mut host, Limits::default());
             match r.error {
@@ -42,7 +59,10 @@ fn exec(src: &str, mut host: MemoryHost) -> String {
 
 #[test]
 fn db_connect_needs_the_sql_capability() {
-    let out = exec(r#"let c = Db.connect("sqlite://x.db")"#, MemoryHost::default());
+    let out = exec(
+        r#"let c = Db.connect("sqlite://x.db")"#,
+        MemoryHost::default(),
+    );
     assert!(out.starts_with("COMPILE: T250"), "{out}");
 }
 
@@ -50,7 +70,10 @@ fn db_connect_needs_the_sql_capability() {
 fn query_returns_rows_as_maps_of_json() {
     let host = canned(
         "SELECT id, name FROM people",
-        Ok(vec![row(&[("id", SqlValue::Int(1)), ("name", SqlValue::Text("Rex".to_string()))])]),
+        Ok(vec![row(&[
+            ("id", SqlValue::Int(1)),
+            ("name", SqlValue::Text("Rex".to_string())),
+        ])]),
     );
     let out = exec(
         r#"
@@ -68,7 +91,10 @@ print(r.get("name", Json.null()).as_string())
 
 #[test]
 fn a_query_error_is_a_result_err_not_a_crash() {
-    let host = canned("SELECT * FROM missing", Err("no such table: missing".to_string()));
+    let host = canned(
+        "SELECT * FROM missing",
+        Err("no such table: missing".to_string()),
+    );
     let out = exec(
         r#"
 let db = Db.connect("sqlite://x.db").unwrap()
@@ -131,7 +157,10 @@ print(db.rollback().unwrap())
 fn a_failed_commit_is_a_result_err_not_a_crash() {
     let mut m = HashMap::new();
     m.insert("BEGIN".to_string(), Ok(vec![]));
-    m.insert("COMMIT".to_string(), Err("no transaction in progress".to_string()));
+    m.insert(
+        "COMMIT".to_string(),
+        Err("no transaction in progress".to_string()),
+    );
     let host = host_with(m);
     let out = exec(
         r#"
@@ -154,7 +183,10 @@ end
 /// to compile at all, since the prelude's bodies are checked unconditionally.
 #[test]
 fn programs_that_never_use_db_do_not_need_the_sql_capability() {
-    let out = exec("print(1 + 1)\nlet j = Json.string(\"x\")\nprint(j.as_string())\n", MemoryHost::default());
+    let out = exec(
+        "print(1 + 1)\nlet j = Json.string(\"x\")\nprint(j.as_string())\n",
+        MemoryHost::default(),
+    );
     assert_eq!(out, "2\nx\n");
 }
 

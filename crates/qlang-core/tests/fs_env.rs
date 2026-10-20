@@ -13,7 +13,16 @@ fn exec(src: &str, mut host: MemoryHost) -> String {
         .spawn(move || {
             let prog = match compile("main.q", &src, &mut host) {
                 Ok(p) => p,
-                Err(e) => return format!("COMPILE: {}", e.diagnostics.iter().map(|d| format!("{}: {}", d.code, d.message)).collect::<Vec<_>>().join("; ")),
+                Err(e) => {
+                    return format!(
+                        "COMPILE: {}",
+                        e.diagnostics
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.message))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    );
+                }
             };
             let r = prog.run(&mut host, Limits::default());
             match r.error {
@@ -42,14 +51,20 @@ fn fs_write_needs_the_fs_capability() {
 fn fs_read_returns_the_files_content() {
     let mut files = HashMap::new();
     files.insert("greeting.txt".to_string(), "hello".to_string());
-    let host = MemoryHost { fs: Some(files), ..MemoryHost::default() };
+    let host = MemoryHost {
+        fs: Some(files),
+        ..MemoryHost::default()
+    };
     let out = exec(r#"print(fs.read("greeting.txt").unwrap())"#, host);
     assert_eq!(out, "hello\n");
 }
 
 #[test]
 fn fs_read_of_a_missing_file_is_a_result_err_not_a_crash() {
-    let host = MemoryHost { fs: Some(HashMap::new()), ..MemoryHost::default() };
+    let host = MemoryHost {
+        fs: Some(HashMap::new()),
+        ..MemoryHost::default()
+    };
     let out = exec(
         r#"
 let r = fs.read("missing.txt")
@@ -62,7 +77,10 @@ print(r.is_err())
 
 #[test]
 fn fs_write_then_read_round_trips() {
-    let host = MemoryHost { fs: Some(HashMap::new()), ..MemoryHost::default() };
+    let host = MemoryHost {
+        fs: Some(HashMap::new()),
+        ..MemoryHost::default()
+    };
     let out = exec(
         r#"
 fs.write("out.txt", "written").unwrap()
@@ -81,7 +99,10 @@ fn env_get_needs_the_env_capability() {
 
 #[test]
 fn env_get_returns_none_for_an_unset_variable() {
-    let host = MemoryHost { env: Some(HashMap::new()), ..MemoryHost::default() };
+    let host = MemoryHost {
+        env: Some(HashMap::new()),
+        ..MemoryHost::default()
+    };
     let out = exec(
         r#"
 let v = env.get("NOPE")
@@ -96,14 +117,21 @@ print(v == none)
 fn env_get_returns_a_set_variables_value() {
     let mut vars = HashMap::new();
     vars.insert("LANG".to_string(), "fr_FR".to_string());
-    let host = MemoryHost { env: Some(vars), ..MemoryHost::default() };
+    let host = MemoryHost {
+        env: Some(vars),
+        ..MemoryHost::default()
+    };
     let out = exec(r#"print(env.get("LANG"))"#, host);
     assert_eq!(out, "fr_FR\n");
 }
 
 #[test]
 fn env_args_returns_the_programs_own_arguments() {
-    let host = MemoryHost { env: Some(HashMap::new()), cli_args: vec!["a".to_string(), "b".to_string()], ..MemoryHost::default() };
+    let host = MemoryHost {
+        env: Some(HashMap::new()),
+        cli_args: vec!["a".to_string(), "b".to_string()],
+        ..MemoryHost::default()
+    };
     let out = exec(r#"print(env.args())"#, host);
     assert_eq!(out, "[\"a\", \"b\"]\n");
 }

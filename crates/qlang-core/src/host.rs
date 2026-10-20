@@ -105,13 +105,23 @@ pub trait Host {
     }
 
     /// Run a statement that returns rows (`SELECT`), with positional `?` parameters.
-    fn sql_query(&mut self, _conn: u64, _sql: &str, _params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+    fn sql_query(
+        &mut self,
+        _conn: u64,
+        _sql: &str,
+        _params: Vec<SqlValue>,
+    ) -> Result<Vec<SqlRow>, HostError> {
         Err(HostError::Unsupported("sql"))
     }
 
     /// Run a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL),
     /// returning the number of rows affected.
-    fn sql_execute(&mut self, _conn: u64, _sql: &str, _params: Vec<SqlValue>) -> Result<u64, HostError> {
+    fn sql_execute(
+        &mut self,
+        _conn: u64,
+        _sql: &str,
+        _params: Vec<SqlValue>,
+    ) -> Result<u64, HostError> {
         Err(HostError::Unsupported("sql"))
     }
 
@@ -255,7 +265,9 @@ impl Host for MemoryHost {
         match table.get(&(req.method, req.url)) {
             Some(Ok(r)) => Ok(r.clone()),
             Some(Err(m)) => Err(HostError::Other(m.clone())),
-            None => Err(HostError::Other("no canned response for this request".to_string())),
+            None => Err(HostError::Other(
+                "no canned response for this request".to_string(),
+            )),
         }
     }
 
@@ -268,9 +280,16 @@ impl Host for MemoryHost {
         }
     }
 
-    fn sql_query(&mut self, _conn: u64, sql: &str, _params: Vec<SqlValue>) -> Result<Vec<SqlRow>, HostError> {
+    fn sql_query(
+        &mut self,
+        _conn: u64,
+        sql: &str,
+        _params: Vec<SqlValue>,
+    ) -> Result<Vec<SqlRow>, HostError> {
         if self.sql_closed {
-            return Err(HostError::Other("this database connection is closed".to_string()));
+            return Err(HostError::Other(
+                "this database connection is closed".to_string(),
+            ));
         }
         let table = self.sql.as_ref().ok_or(HostError::Unsupported("sql"))?;
         match table.get(sql) {
@@ -280,9 +299,16 @@ impl Host for MemoryHost {
         }
     }
 
-    fn sql_execute(&mut self, _conn: u64, sql: &str, _params: Vec<SqlValue>) -> Result<u64, HostError> {
+    fn sql_execute(
+        &mut self,
+        _conn: u64,
+        sql: &str,
+        _params: Vec<SqlValue>,
+    ) -> Result<u64, HostError> {
         if self.sql_closed {
-            return Err(HostError::Other("this database connection is closed".to_string()));
+            return Err(HostError::Other(
+                "this database connection is closed".to_string(),
+            ));
         }
         let table = self.sql.as_ref().ok_or(HostError::Unsupported("sql"))?;
         match table.get(sql) {
@@ -302,7 +328,10 @@ impl Host for MemoryHost {
 
     fn read_file(&mut self, path: &str) -> Result<String, HostError> {
         let table = self.fs.as_ref().ok_or(HostError::Unsupported("fs"))?;
-        table.get(path).cloned().ok_or_else(|| HostError::Other(format!("\"{path}\" not found")))
+        table
+            .get(path)
+            .cloned()
+            .ok_or_else(|| HostError::Other(format!("\"{path}\" not found")))
     }
 
     fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {

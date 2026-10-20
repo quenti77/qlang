@@ -61,12 +61,28 @@ pub fn parts(ms: i64) -> Parts {
     let days = ms.div_euclid(DAY_MS);
     let rest = ms.rem_euclid(DAY_MS);
     let (year, month, day) = civil_from_days(days);
-    Parts { year, month, day, hour: rest / 3_600_000, minute: rest / 60_000 % 60, second: rest / 1000 % 60, ms: rest % 1000 }
+    Parts {
+        year,
+        month,
+        day,
+        hour: rest / 3_600_000,
+        minute: rest / 60_000 % 60,
+        second: rest / 1000 % 60,
+        ms: rest % 1000,
+    }
 }
 
 /// The instant for these parts, or `None` if the date does not exist (30 February, hour 25,
 /// year 0...).
-pub fn from_parts(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, ms: i64) -> Option<i64> {
+pub fn from_parts(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+    ms: i64,
+) -> Option<i64> {
     if !(1..=9999).contains(&year)
         || !(1..=12).contains(&month)
         || !(1..=days_in_month(year, month)).contains(&day)
@@ -77,7 +93,13 @@ pub fn from_parts(year: i64, month: i64, day: i64, hour: i64, minute: i64, secon
     {
         return None;
     }
-    Some(days_from_civil(year, month, day) * DAY_MS + hour * 3_600_000 + minute * 60_000 + second * 1000 + ms)
+    Some(
+        days_from_civil(year, month, day) * DAY_MS
+            + hour * 3_600_000
+            + minute * 60_000
+            + second * 1000
+            + ms,
+    )
 }
 
 /// Monday is 1, Sunday is 7.
@@ -106,8 +128,15 @@ pub fn add_months(ms: i64, n: i64) -> Option<i64> {
 /// `2026-10-11T14:30:00Z`, with `.123` before the `Z` when there are milliseconds.
 pub fn to_iso(ms: i64) -> String {
     let p = parts(ms);
-    let frac = if p.ms != 0 { format!(".{:03}", p.ms) } else { String::new() };
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{frac}Z", p.year, p.month, p.day, p.hour, p.minute, p.second)
+    let frac = if p.ms != 0 {
+        format!(".{:03}", p.ms)
+    } else {
+        String::new()
+    };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{frac}Z",
+        p.year, p.month, p.day, p.hour, p.minute, p.second
+    )
 }
 
 /// Formats with these tokens: `YYYY` `MM` `DD` `HH` `mm` `ss` `SSS`. Any other character is
@@ -184,7 +213,10 @@ mod tests {
     #[test]
     fn known_instants() {
         assert_eq!(from_parts(1970, 1, 1, 0, 0, 0, 0), Some(0));
-        assert_eq!(from_parts(2023, 11, 14, 22, 13, 20, 0), Some(1_700_000_000_000));
+        assert_eq!(
+            from_parts(2023, 11, 14, 22, 13, 20, 0),
+            Some(1_700_000_000_000)
+        );
         assert_eq!(from_parts(1, 1, 1, 0, 0, 0, 0), Some(MIN_MS));
         assert_eq!(from_parts(9999, 12, 31, 23, 59, 59, 999), Some(MAX_MS));
         assert_eq!(from_parts(1969, 12, 31, 23, 59, 59, 999), Some(-1));
@@ -195,7 +227,11 @@ mod tests {
         let mut ms = MIN_MS;
         while ms <= MAX_MS {
             let p = parts(ms);
-            assert_eq!(from_parts(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms), Some(ms), "{ms}");
+            assert_eq!(
+                from_parts(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms),
+                Some(ms),
+                "{ms}"
+            );
             ms += 86_399_999 * 13;
         }
     }
@@ -221,10 +257,22 @@ mod tests {
     #[test]
     fn months_clamp_to_the_end_of_the_month() {
         let jan31 = from_parts(2026, 1, 31, 10, 0, 0, 0).unwrap();
-        assert_eq!(to_iso(add_months(jan31, 1).unwrap()), "2026-02-28T10:00:00Z");
-        assert_eq!(to_iso(add_months(jan31, 13).unwrap()), "2027-02-28T10:00:00Z");
-        assert_eq!(to_iso(add_months(jan31, -2).unwrap()), "2025-11-30T10:00:00Z");
-        assert_eq!(add_months(from_parts(9999, 12, 1, 0, 0, 0, 0).unwrap(), 1), None);
+        assert_eq!(
+            to_iso(add_months(jan31, 1).unwrap()),
+            "2026-02-28T10:00:00Z"
+        );
+        assert_eq!(
+            to_iso(add_months(jan31, 13).unwrap()),
+            "2027-02-28T10:00:00Z"
+        );
+        assert_eq!(
+            to_iso(add_months(jan31, -2).unwrap()),
+            "2025-11-30T10:00:00Z"
+        );
+        assert_eq!(
+            add_months(from_parts(9999, 12, 1, 0, 0, 0, 0).unwrap(), 1),
+            None
+        );
     }
 
     #[test]
@@ -235,8 +283,21 @@ mod tests {
         assert_eq!(parse("2026-10-11 14:30:05"), Some(t));
         assert_eq!(parse("2026-10-11T14:30"), Some(t - 5000));
         assert_eq!(parse("2026-10-11"), Some(start_of_day(t)));
-        assert_eq!(to_iso(parse("2026-10-11T14:30:05.042Z").unwrap()), "2026-10-11T14:30:05.042Z");
-        for bad in ["", "2026-10", "2026-13-01", "2026-02-30", "2026-10-11T25:00", "2026-10-11T14:30:05+02:00", "2026/10/11", "26-10-11", "2026-10-11x"] {
+        assert_eq!(
+            to_iso(parse("2026-10-11T14:30:05.042Z").unwrap()),
+            "2026-10-11T14:30:05.042Z"
+        );
+        for bad in [
+            "",
+            "2026-10",
+            "2026-13-01",
+            "2026-02-30",
+            "2026-10-11T25:00",
+            "2026-10-11T14:30:05+02:00",
+            "2026/10/11",
+            "26-10-11",
+            "2026-10-11x",
+        ] {
             assert_eq!(parse(bad), None, "{bad}");
         }
     }
@@ -244,7 +305,10 @@ mod tests {
     #[test]
     fn format_tokens() {
         let t = from_parts(2026, 3, 9, 4, 5, 6, 7).unwrap();
-        assert_eq!(format(t, "YYYY-MM-DD HH:mm:ss.SSS"), "2026-03-09 04:05:06.007");
+        assert_eq!(
+            format(t, "YYYY-MM-DD HH:mm:ss.SSS"),
+            "2026-03-09 04:05:06.007"
+        );
         assert_eq!(format(t, "DD/MM/YYYY"), "09/03/2026");
         assert_eq!(format(t, "at HH:mm"), "at 04:05");
         assert_eq!(format(t, "M D Y"), "M D Y");

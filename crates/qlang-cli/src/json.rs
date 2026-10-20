@@ -1,7 +1,7 @@
 //! The JSON protocol on standard input and output (`qlang run --json`, `qlang check --json`).
 
-pub use qlang_core::protocol::{Ceiling, handle};
 use qlang_core::protocol::handle_with;
+pub use qlang_core::protocol::{Ceiling, handle};
 use std::io::Read;
 use std::process::ExitCode;
 

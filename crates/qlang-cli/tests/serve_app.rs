@@ -18,7 +18,11 @@ impl Drop for Server {
 }
 
 fn free_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+    TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 fn app_file(name: &str, source: &str) -> PathBuf {
@@ -45,7 +49,9 @@ fn start(name: &str, source: &str, extra: &[&str]) -> Server {
             .unwrap();
         // the server says it is listening on its standard error
         let mut line = String::new();
-        BufReader::new(child.stderr.take().unwrap()).read_line(&mut line).unwrap();
+        BufReader::new(child.stderr.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
         if line.contains("serving") {
             return Server { child, port };
         }
@@ -98,11 +104,17 @@ fn answers_get_and_post_and_keeps_its_state() {
     let a = exchange(&server, "GET /one?x=1 HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(a.starts_with("HTTP/1.1 200 OK\r\n"), "{a}");
     assert!(a.ends_with("hello /one?x=1 #1"), "{a}");
-    assert!(a.contains("Content-Type: text/plain; charset=utf-8\r\n"), "{a}");
+    assert!(
+        a.contains("Content-Type: text/plain; charset=utf-8\r\n"),
+        "{a}"
+    );
     assert!(a.contains("Content-Length: 17\r\n"), "{a}");
     let b = exchange(&server, "GET /two HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(b.ends_with("hello /two #2"), "{b}");
-    let p = exchange(&server, "POST /form HTTP/1.1\r\nHost: t\r\nUser-Agent: curl\r\nContent-Length: 5\r\n\r\nhello");
+    let p = exchange(
+        &server,
+        "POST /form HTTP/1.1\r\nHost: t\r\nUser-Agent: curl\r\nContent-Length: 5\r\n\r\nhello",
+    );
     assert!(p.starts_with("HTTP/1.1 201 Created\r\n"), "{p}");
     assert!(p.ends_with("got hello from curl"), "{p}");
 }
@@ -123,7 +135,10 @@ fn the_program_chooses_its_headers() {
 fn an_error_is_a_500_without_details_and_the_server_goes_on() {
     let server = start("errors", APP, &[]);
     let r = exchange(&server, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{r}");
+    assert!(
+        r.starts_with("HTTP/1.1 500 Internal Server Error\r\n"),
+        "{r}"
+    );
     assert!(!r.contains("secret detail"), "{r}");
     let r = exchange(&server, "GET /after HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.starts_with("HTTP/1.1 200 OK\r\n"), "{r}");
@@ -133,9 +148,18 @@ fn an_error_is_a_500_without_details_and_the_server_goes_on() {
 fn bad_requests_are_refused() {
     let server = start("bad", APP, &[]);
     assert!(exchange(&server, "garbage\r\n\r\n").starts_with("HTTP/1.1 400"));
-    let huge = format!("POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n", 5 << 20);
+    let huge = format!(
+        "POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n",
+        5 << 20
+    );
     assert!(exchange(&server, &huge).starts_with("HTTP/1.1 413"));
-    assert!(exchange(&server, "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n").starts_with("HTTP/1.1 501"));
+    assert!(
+        exchange(
+            &server,
+            "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n"
+        )
+        .starts_with("HTTP/1.1 501")
+    );
 }
 
 #[test]
@@ -157,7 +181,12 @@ fn the_step_limit_applies_to_each_request() {
 #[test]
 fn a_program_without_handle_does_not_start() {
     let file = app_file("nohandle", "print(1)");
-    let out = Command::new(env!("CARGO_BIN_EXE_qlang")).arg("serve").arg(&file).args(["--port", &free_port().to_string()]).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .arg("serve")
+        .arg(&file)
+        .args(["--port", &free_port().to_string()])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("handle"));
 }
@@ -165,24 +194,46 @@ fn a_program_without_handle_does_not_start() {
 #[test]
 fn the_json_server_still_works() {
     let port = free_port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang")).args(["serve", "--port", &port.to_string()]).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .args(["serve", "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
     let mut line = String::new();
-    BufReader::new(child.stderr.take().unwrap()).read_line(&mut line).unwrap();
+    BufReader::new(child.stderr.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
     let server = Server { child, port };
     let body = r#"{"files":{"main.q":"print(6 * 7)"}}"#;
-    let r = exchange(&server, &format!("POST /run HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+    let r = exchange(
+        &server,
+        &format!(
+            "POST /run HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
     assert!(r.contains("\"output\":\"42\\n\""), "{r}");
-    assert!(exchange(&server, "GET /health HTTP/1.1\r\nHost: t\r\n\r\n").contains("\"status\":\"ok\""));
+    assert!(
+        exchange(&server, "GET /health HTTP/1.1\r\nHost: t\r\n\r\n").contains("\"status\":\"ok\"")
+    );
 }
 
 #[test]
 fn the_example_serves() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/app.q")).unwrap();
+    let source =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/app.q"))
+            .unwrap();
     let server = start("example", Box::leak(source.into_boxed_str()), &[]);
     let r = exchange(&server, "GET /hello?name=Ada HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.ends_with("Bonjour Ada !\n"), "{r}");
-    assert!(exchange(&server, "GET /visits HTTP/1.1\r\nHost: t\r\n\r\n").contains("application/json"));
-    let r = exchange(&server, "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\n\r\nabc");
+    assert!(
+        exchange(&server, "GET /visits HTTP/1.1\r\nHost: t\r\n\r\n").contains("application/json")
+    );
+    let r = exchange(
+        &server,
+        "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\n\r\nabc",
+    );
     assert!(r.ends_with("abc"), "{r}");
     assert!(exchange(&server, "GET /x HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 404"));
 }
@@ -200,8 +251,14 @@ end
 #[test]
 fn the_path_and_the_query_are_decoded() {
     let server = start("query", ECHO_APP, &[]);
-    let r = exchange(&server, "GET /a%20b/c?x=1&x=2&y=%C3%A9+z HTTP/1.1\r\nHost: t\r\nUser-Agent: curl\r\n\r\n");
-    assert!(r.ends_with("path=/a b/c x=2 y=é z agent=curl url=/a%20b/c?x=1&x=2&y=%C3%A9+z"), "{r}");
+    let r = exchange(
+        &server,
+        "GET /a%20b/c?x=1&x=2&y=%C3%A9+z HTTP/1.1\r\nHost: t\r\nUser-Agent: curl\r\n\r\n",
+    );
+    assert!(
+        r.ends_with("path=/a b/c x=2 y=é z agent=curl url=/a%20b/c?x=1&x=2&y=%C3%A9+z"),
+        "{r}"
+    );
     let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.ends_with("path=/ x=- y=- agent=- url=/"), "{r}");
 }
@@ -218,20 +275,42 @@ fn static_files_are_served_before_the_program_and_cannot_escape() {
     let server = start("static", ECHO_APP, &["--static", public.to_str().unwrap()]);
 
     let r = exchange(&server, "GET /hello.txt HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.starts_with("HTTP/1.1 200 OK\r\n") && r.contains("Content-Type: text/plain; charset=utf-8\r\n") && r.ends_with("static hello"), "{r}");
+    assert!(
+        r.starts_with("HTTP/1.1 200 OK\r\n")
+            && r.contains("Content-Type: text/plain; charset=utf-8\r\n")
+            && r.ends_with("static hello"),
+        "{r}"
+    );
     let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.contains("Content-Type: text/html; charset=utf-8\r\n") && r.ends_with("<h1>home</h1>"), "{r}");
+    assert!(
+        r.contains("Content-Type: text/html; charset=utf-8\r\n") && r.ends_with("<h1>home</h1>"),
+        "{r}"
+    );
     let r = exchange(&server, "GET /sub/style.css HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.contains("Content-Type: text/css; charset=utf-8\r\n"), "{r}");
+    assert!(
+        r.contains("Content-Type: text/css; charset=utf-8\r\n"),
+        "{r}"
+    );
     // what is not a file goes to the program
     let r = exchange(&server, "GET /nothing?x=7 HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.contains("path=/nothing x=7"), "{r}");
     // only GET and HEAD read files
-    let r = exchange(&server, "POST /hello.txt HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n");
+    let r = exchange(
+        &server,
+        "POST /hello.txt HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n",
+    );
     assert!(r.contains("path=/hello.txt"), "{r}");
     // nothing outside the folder, whatever the spelling
-    for target in ["/../secret.txt", "/%2e%2e/secret.txt", "/sub/../../secret.txt", "/%2E%2E%2Fsecret.txt"] {
-        let r = exchange(&server, &format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n"));
+    for target in [
+        "/../secret.txt",
+        "/%2e%2e/secret.txt",
+        "/sub/../../secret.txt",
+        "/%2E%2E%2Fsecret.txt",
+    ] {
+        let r = exchange(
+            &server,
+            &format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n"),
+        );
         assert!(!r.contains("TOP SECRET"), "{target}: {r}");
     }
 }
@@ -259,7 +338,8 @@ fn flag_file(name: &str) -> PathBuf {
 
 fn send_get(port: u16, target: &str) -> TcpStream {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.write_all(format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n").as_bytes()).unwrap();
+    s.write_all(format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n").as_bytes())
+        .unwrap();
     s
 }
 
@@ -273,7 +353,11 @@ fn finish(mut s: TcpStream) -> String {
 fn workers_answer_while_another_one_is_busy() {
     let flag = flag_file("two");
     let source: &'static str = Box::leak(busy_app(&flag).into_boxed_str());
-    let server = start("workers2", source, &["--workers", "2", "--max-steps", "2000000000"]);
+    let server = start(
+        "workers2",
+        source,
+        &["--workers", "2", "--max-steps", "2000000000"],
+    );
     let slow = send_get(server.port, "/slow");
     std::thread::sleep(std::time::Duration::from_millis(300));
     // the other worker answers while /slow is still spinning
@@ -291,13 +375,18 @@ fn with_one_worker_a_busy_request_makes_the_others_wait() {
     let slow = send_get(server.port, "/slow");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let fast = send_get(server.port, "/fast");
-    fast.set_read_timeout(Some(std::time::Duration::from_millis(700))).unwrap();
+    fast.set_read_timeout(Some(std::time::Duration::from_millis(700)))
+        .unwrap();
     let mut early = String::new();
     let mut fast = fast;
-    assert!(fast.read_to_string(&mut early).is_err(), "answered while the only worker was busy: {early}");
+    assert!(
+        fast.read_to_string(&mut early).is_err(),
+        "answered while the only worker was busy: {early}"
+    );
     std::fs::write(&flag, "go").unwrap();
     assert!(finish(slow).ends_with("done /slow"));
-    fast.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    fast.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
     assert!((early + &finish(fast)).ends_with("done /fast"));
 }
 
@@ -307,13 +396,22 @@ fn it_stops_cleanly_when_asked() {
     let mut server = start("stop", APP, &[]);
     assert!(exchange(&server, "GET /x HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 200"));
     let pid = server.child.id().to_string();
-    assert!(Command::new("kill").args(["-TERM", &pid]).status().unwrap().success());
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let status = loop {
         if let Some(s) = server.child.try_wait().unwrap() {
             break s;
         }
-        assert!(std::time::Instant::now() < deadline, "the server did not stop");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server did not stop"
+        );
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
     assert!(status.success(), "{status:?}");
@@ -321,16 +419,42 @@ fn it_stops_cleanly_when_asked() {
 
 #[test]
 fn the_api_example_routes_requests() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/api.q")).unwrap();
+    let source =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/api.q"))
+            .unwrap();
     let server = start("api", Box::leak(source.into_boxed_str()), &[]);
     let r = exchange(&server, "GET /items HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.contains("application/json") && r.ends_with("[]"), "{r}");
-    assert!(exchange(&server, "POST /items/ordinateur HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n").starts_with("HTTP/1.1 201"));
-    assert!(exchange(&server, "POST /items/c%C3%A2ble HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n").starts_with("HTTP/1.1 201"));
+    assert!(
+        exchange(
+            &server,
+            "POST /items/ordinateur HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n"
+        )
+        .starts_with("HTTP/1.1 201")
+    );
+    assert!(
+        exchange(
+            &server,
+            "POST /items/c%C3%A2ble HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n"
+        )
+        .starts_with("HTTP/1.1 201")
+    );
     let r = exchange(&server, "GET /items HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(r.ends_with("[\"ordinateur\",\"câble\"]"), "{r}");
-    assert!(exchange(&server, "GET /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n").ends_with("ordinateur"));
-    assert!(exchange(&server, "GET /items/absent HTTP/1.1\r\nHost: t\r\n\r\n").starts_with("HTTP/1.1 404"));
-    let r = exchange(&server, "DELETE /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n");
-    assert!(r.starts_with("HTTP/1.1 405") && r.contains("Allow: GET, POST"), "{r}");
+    assert!(
+        exchange(&server, "GET /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n")
+            .ends_with("ordinateur")
+    );
+    assert!(
+        exchange(&server, "GET /items/absent HTTP/1.1\r\nHost: t\r\n\r\n")
+            .starts_with("HTTP/1.1 404")
+    );
+    let r = exchange(
+        &server,
+        "DELETE /items/ordinateur HTTP/1.1\r\nHost: t\r\n\r\n",
+    );
+    assert!(
+        r.starts_with("HTTP/1.1 405") && r.contains("Allow: GET, POST"),
+        "{r}"
+    );
 }

@@ -156,9 +156,15 @@ pub struct TypeExpr {
 #[derive(Clone, Debug)]
 pub enum TypeExprKind {
     /// `a.b.C<args>`
-    Named { path: Vec<Ident>, args: Vec<TypeExpr> },
+    Named {
+        path: Vec<Ident>,
+        args: Vec<TypeExpr>,
+    },
     Nullable(Box<TypeExpr>),
-    Fun { params: Vec<TypeExpr>, ret: Option<Box<TypeExpr>> },
+    Fun {
+        params: Vec<TypeExpr>,
+        ret: Option<Box<TypeExpr>>,
+    },
 }
 
 #[derive(Debug)]
@@ -184,7 +190,10 @@ pub enum StmtKind {
         init: Expr,
     },
     Return(Option<Expr>),
-    While { cond: Expr, body: Block },
+    While {
+        cond: Expr,
+        body: Block,
+    },
     For {
         var: Ident,
         /// `for key, value in map` / `for index, item in array`
@@ -288,7 +297,11 @@ pub enum Pattern {
     Bool(bool),
     None,
     /// `1..5`, `1..=5`
-    Range { lo: Box<Pattern>, hi: Box<Pattern>, inclusive: bool },
+    Range {
+        lo: Box<Pattern>,
+        hi: Box<Pattern>,
+        inclusive: bool,
+    },
     /// `Color.Red`, `m.Color.Red`
     Path(Vec<Ident>),
     /// `x`: matches anything and binds the value.
@@ -332,7 +345,10 @@ pub enum ExprKind {
         inclusive: bool,
     },
     Cast(Box<Expr>, TypeExpr),
-    Call { callee: Box<Expr>, args: Vec<CallArg> },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<CallArg>,
+    },
     Index(Box<Expr>, Box<Expr>),
     /// `target[]`: only valid as the target of `=` (appends a value).
     Append(Box<Expr>),

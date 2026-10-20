@@ -62,20 +62,29 @@ impl Checker {
             None => &mut self.mscopes[m].vars,
         };
         if let Some(prev) = target.get(&name.name)
-            && prev.orig.is_none() && name.name != "_" {
-                crate::diag::push_capped(&mut self.diags, Diagnostic::error(
+            && prev.orig.is_none()
+            && name.name != "_"
+        {
+            crate::diag::push_capped(
+                &mut self.diags,
+                Diagnostic::error(
                     "T150",
                     format!("`{}` is already declared in this scope", name.name),
                     name.span,
-                ));
-                return;
-            }
+                ),
+            );
+            return;
+        }
         target.insert(name.name.clone(), local.clone());
         if self.collect.is_some() {
             // a variable can be used from here to the end of its function (or file)
             let scope = match self.cur_fn.and_then(|f| self.defs.fns[f].decl.clone()) {
                 Some(d) => d.span,
-                None => Span { file: name.span.file, start: 0, end: u32::MAX },
+                None => Span {
+                    file: name.span.file,
+                    start: 0,
+                    end: u32::MAX,
+                },
             };
             if let Some(c) = &mut self.collect {
                 c.local(name, &local, scope);
@@ -98,9 +107,15 @@ impl Checker {
 
     /// Show `name` with a narrower type from here on (until the scope ends).
     pub fn narrow(&mut self, name: &str, ty: Ty) {
-        let Some((l, _)) = self.lookup_var(name) else { return };
+        let Some((l, _)) = self.lookup_var(name) else {
+            return;
+        };
         let orig = l.orig.clone().unwrap_or_else(|| l.ty.clone());
-        let entry = Local { ty, orig: Some(orig), ..l };
+        let entry = Local {
+            ty,
+            orig: Some(orig),
+            ..l
+        };
         let m = self.cur_mod;
         match self.scopes.last_mut() {
             Some(s) => {
@@ -118,13 +133,22 @@ impl Checker {
         match &c.kind {
             ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), l, r) => {
                 let name = match (&l.kind, &r.kind) {
-                    (ExprKind::Ident(n, _), ExprKind::None) | (ExprKind::None, ExprKind::Ident(n, _)) => n.clone(),
+                    (ExprKind::Ident(n, _), ExprKind::None)
+                    | (ExprKind::None, ExprKind::Ident(n, _)) => n.clone(),
                     _ => return (vec![], vec![]),
                 };
-                let Some((local, _)) = self.lookup_var(&name) else { return (vec![], vec![]) };
-                let Ty::Nullable(inner) = self.resolve(&local.ty) else { return (vec![], vec![]) };
+                let Some((local, _)) = self.lookup_var(&name) else {
+                    return (vec![], vec![]);
+                };
+                let Ty::Nullable(inner) = self.resolve(&local.ty) else {
+                    return (vec![], vec![]);
+                };
                 let fact = vec![(name, *inner)];
-                if *op == BinOp::NotEq { (fact, vec![]) } else { (vec![], fact) }
+                if *op == BinOp::NotEq {
+                    (fact, vec![])
+                } else {
+                    (vec![], fact)
+                }
             }
             ExprKind::Binary(BinOp::And, a, b) => {
                 let (mut ta, _) = self.cond_facts(a);
@@ -178,11 +202,17 @@ impl Checker {
         let ok = match vis {
             Visibility::Public => true,
             Visibility::Private => self.cur_impl_struct == Some(owner),
-            Visibility::Protected => self.cur_impl_struct.is_some_and(|s| self.defs.is_subclass(s, owner)),
+            Visibility::Protected => self
+                .cur_impl_struct
+                .is_some_and(|s| self.defs.is_subclass(s, owner)),
         };
         if !ok {
             let owner_name = self.defs.structs[owner].name.clone();
-            let kind = if vis == Visibility::Private { "private" } else { "protected" };
+            let kind = if vis == Visibility::Private {
+                "private"
+            } else {
+                "protected"
+            };
             self.err("T160", format!("{what} is {kind} in `{owner_name}`"), span);
         }
     }
@@ -216,7 +246,13 @@ impl Checker {
     pub fn check_stmt(&mut self, s: &Stmt, want: &Want) -> Ty {
         match &s.kind {
             StmtKind::Expr(e) => self.expr(e, want),
-            StmtKind::Let { is_const, name, ty, init, .. } => {
+            StmtKind::Let {
+                is_const,
+                name,
+                ty,
+                init,
+                ..
+            } => {
                 let ann = ty.as_ref().map(|t| self.resolve_type(t));
                 let w = match &ann {
                     Some(t) => Want::Exp(t.clone()),
@@ -266,8 +302,20 @@ impl Checker {
                         }
                     }
                 };
-                let kind = if *is_const { LocalKind::Const } else { LocalKind::Var };
-                self.declare(name, Local { ty: var_ty, kind, orig: None, span: name.span });
+                let kind = if *is_const {
+                    LocalKind::Const
+                } else {
+                    LocalKind::Var
+                };
+                self.declare(
+                    name,
+                    Local {
+                        ty: var_ty,
+                        kind,
+                        orig: None,
+                        span: name.span,
+                    },
+                );
                 Ty::Unit
             }
             StmtKind::Return(value) => {
@@ -288,7 +336,11 @@ impl Checker {
                     None => {
                         if ret != Ty::Unit {
                             let r = self.show(&ret);
-                            self.err("T180", format!("`return` needs a value of type `{r}`"), s.span);
+                            self.err(
+                                "T180",
+                                format!("`return` needs a value of type `{r}`"),
+                                s.span,
+                            );
                         }
                     }
                 }
@@ -307,7 +359,13 @@ impl Checker {
                 self.loop_depth -= 1;
                 Ty::Unit
             }
-            StmtKind::For { var, var2, iter, step, body } => {
+            StmtKind::For {
+                var,
+                var2,
+                iter,
+                step,
+                body,
+            } => {
                 let it = self.expr(iter, &Want::Any);
                 let it = self.resolve(&it);
                 // the type of the (first, second) loop variables
@@ -322,11 +380,17 @@ impl Checker {
                     (other, two) => {
                         let shown = other.show(&self.defs);
                         let msg = if two {
-                            format!("cannot loop over `{shown}` with two variables (use a map, an array or a string)")
+                            format!(
+                                "cannot loop over `{shown}` with two variables (use a map, an array or a string)"
+                            )
                         } else if matches!(other, Ty::Map(..)) {
-                            format!("a `{shown}` has keys and values: write `for key, value in m do` or `for key in m.keys() do`")
+                            format!(
+                                "a `{shown}` has keys and values: write `for key, value in m do` or `for key in m.keys() do`"
+                            )
                         } else {
-                            format!("cannot loop over `{shown}` (use a range like `0..10`, an array, a string or a map)")
+                            format!(
+                                "cannot loop over `{shown}` (use a range like `0..10`, an array, a string or a map)"
+                            )
                         };
                         self.err("T190", msg, iter.span);
                         (Ty::Error, Ty::Error)
@@ -343,9 +407,25 @@ impl Checker {
                 }
                 self.loop_depth += 1;
                 self.push_scope();
-                self.declare(var, Local { ty: elem, kind: LocalKind::Var, orig: None, span: var.span });
+                self.declare(
+                    var,
+                    Local {
+                        ty: elem,
+                        kind: LocalKind::Var,
+                        orig: None,
+                        span: var.span,
+                    },
+                );
                 if let Some(v2) = var2 {
-                    self.declare(v2, Local { ty: elem2, kind: LocalKind::Var, orig: None, span: v2.span });
+                    self.declare(
+                        v2,
+                        Local {
+                            ty: elem2,
+                            kind: LocalKind::Var,
+                            orig: None,
+                            span: v2.span,
+                        },
+                    );
                 }
                 self.check_block(body, &Want::Unused);
                 self.pop_scope();
@@ -354,8 +434,16 @@ impl Checker {
             }
             StmtKind::Break | StmtKind::Continue => {
                 if self.loop_depth == 0 {
-                    let w = if matches!(s.kind, StmtKind::Break) { "break" } else { "continue" };
-                    self.err("T191", format!("`{w}` is only allowed inside a loop"), s.span);
+                    let w = if matches!(s.kind, StmtKind::Break) {
+                        "break"
+                    } else {
+                        "continue"
+                    };
+                    self.err(
+                        "T191",
+                        format!("`{w}` is only allowed inside a loop"),
+                        s.span,
+                    );
                 }
                 Ty::Never
             }
@@ -404,12 +492,20 @@ impl Checker {
             ExprKind::SelfVal => match self.lookup_var("self") {
                 Some((l, _)) => l.ty,
                 None => {
-                    self.err("T151", "`self` is only available inside a method that takes `self`", e.span);
+                    self.err(
+                        "T151",
+                        "`self` is only available inside a method that takes `self`",
+                        e.span,
+                    );
                     Ty::Error
                 }
             },
             ExprKind::Super => {
-                self.err("T152", "`super` can only be used as `super.method(...)`", e.span);
+                self.err(
+                    "T152",
+                    "`super` can only be used as `super.method(...)`",
+                    e.span,
+                );
                 Ty::Error
             }
             ExprKind::Array(items) => self.check_array(items, want),
@@ -421,7 +517,11 @@ impl Checker {
                     UnOp::Not => {
                         if !self.assignable(&t, &Ty::Bool) {
                             let shown = self.show(&t);
-                            self.err("T004", format!("`not` needs a `bool`, found `{shown}`"), inner.span);
+                            self.err(
+                                "T004",
+                                format!("`not` needs a `bool`, found `{shown}`"),
+                                inner.span,
+                            );
                         }
                         Ty::Bool
                     }
@@ -452,7 +552,11 @@ impl Checker {
                 let to = self.resolve_type(te);
                 if !self.cast_ok(&from, &to) {
                     let (a, b) = (self.show(&from), self.show(&to));
-                    let hint = if matches!(self.resolve(&from), Ty::Nullable(_)) { " (this value may be `none`)" } else { "" };
+                    let hint = if matches!(self.resolve(&from), Ty::Nullable(_)) {
+                        " (this value may be `none`)"
+                    } else {
+                        ""
+                    };
                     self.err(
                         "T006",
                         format!("cannot convert `{a}` to `{b}` with `as` (a conversion needs an `impl As<{b}> for {a}`){hint}"),
@@ -470,19 +574,38 @@ impl Checker {
                     Some(i) => i.ret(),
                     None => {
                         let (b, i) = (self.show(&bt), self.show(&it));
-                        let hint = if matches!(self.resolve(&bt), Ty::Nullable(_)) { " (this value may be `none`)" } else { "" };
-                        self.err("T007", format!("cannot index a `{b}` with a `{i}`{hint}"), e.span);
+                        let hint = if matches!(self.resolve(&bt), Ty::Nullable(_)) {
+                            " (this value may be `none`)"
+                        } else {
+                            ""
+                        };
+                        self.err(
+                            "T007",
+                            format!("cannot index a `{b}` with a `{i}`{hint}"),
+                            e.span,
+                        );
                         Ty::Error
                     }
                 }
             }
             ExprKind::Append(_) => {
-                self.err("T008", "`x[]` can only be used as the target of an assignment: `x[] = value`", e.span);
+                self.err(
+                    "T008",
+                    "`x[]` can only be used as the target of an assignment: `x[] = value`",
+                    e.span,
+                );
                 Ty::Error
             }
             ExprKind::Field(obj, name, targs) => self.check_field(e, obj, name, targs),
-            ExprKind::If { branches, else_block } => self.check_if(e, branches, else_block.as_ref(), want),
-            ExprKind::Match { scrutinee, cases, else_block } => self.check_match(e, scrutinee, cases, else_block.as_ref(), want),
+            ExprKind::If {
+                branches,
+                else_block,
+            } => self.check_if(e, branches, else_block.as_ref(), want),
+            ExprKind::Match {
+                scrutinee,
+                cases,
+                else_block,
+            } => self.check_match(e, scrutinee, cases, else_block.as_ref(), want),
             ExprKind::Lambda(f) => self.check_lambda(f),
         }
     }
@@ -504,7 +627,11 @@ impl Checker {
                     l.ty
                 }
                 None => {
-                    self.err("T153", format!("`{name}` is used before it is declared"), e.span);
+                    self.err(
+                        "T153",
+                        format!("`{name}` is used before it is declared"),
+                        e.span,
+                    );
                     Ty::Error
                 }
             },
@@ -524,13 +651,21 @@ impl Checker {
             }
             Some(ItemRef::Module(_)) => {
                 self.record_head(e);
-                self.err("T154", format!("`{name}` is a module: use `{name}.something`"), e.span);
+                self.err(
+                    "T154",
+                    format!("`{name}` is a module: use `{name}.something`"),
+                    e.span,
+                );
                 Ty::Error
             }
             None => {
                 self.record_head(e);
                 if decls::BUILTIN_FNS.contains(&name) {
-                    self.err("T155", format!("`{name}` is a built-in function: call it as `{name}(...)`"), e.span);
+                    self.err(
+                        "T155",
+                        format!("`{name}` is a built-in function: call it as `{name}(...)`"),
+                        e.span,
+                    );
                 } else {
                     self.err("T001", format!("unknown name `{name}`"), e.span);
                 }
@@ -543,7 +678,14 @@ impl Checker {
     pub fn fn_value(&mut self, e: &Expr, fid: FnId, targs: &[TypeExpr]) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.res.paths.insert(e.id, PathRes::Fn(fid));
-        let own: Vec<ParamId> = def.scope_params.iter().rev().take(def.own_tparams).rev().map(|(_, p)| *p).collect();
+        let own: Vec<ParamId> = def
+            .scope_params
+            .iter()
+            .rev()
+            .take(def.own_tparams)
+            .rev()
+            .map(|(_, p)| *p)
+            .collect();
         if own.is_empty() {
             if !targs.is_empty() {
                 self.err("T121", format!("`{}` is not generic", def.name), e.span);
@@ -553,13 +695,23 @@ impl Checker {
         if targs.len() != own.len() {
             self.err(
                 "T121",
-                format!("`{}` is generic: it must be called, or given its type arguments (`{}<...>`)", def.name, def.name),
+                format!(
+                    "`{}` is generic: it must be called, or given its type arguments (`{}<...>`)",
+                    def.name, def.name
+                ),
                 e.span,
             );
             return Ty::Error;
         }
-        let map: HashMap<ParamId, Ty> = own.iter().cloned().zip(targs.iter().map(|t| self.resolve_type(t))).collect();
-        Ty::Fn(def.params.iter().map(|p| p.subst(&map)).collect(), Box::new(def.ret.subst(&map)))
+        let map: HashMap<ParamId, Ty> = own
+            .iter()
+            .cloned()
+            .zip(targs.iter().map(|t| self.resolve_type(t)))
+            .collect();
+        Ty::Fn(
+            def.params.iter().map(|p| p.subst(&map)).collect(),
+            Box::new(def.ret.subst(&map)),
+        )
     }
 
     fn check_map(&mut self, items: &[(Expr, Expr)], want: &Want) -> Ty {
@@ -581,7 +733,9 @@ impl Checker {
         for (k, v) in items {
             for (is_key, x) in [(true, k), (false, v)] {
                 let slot = if is_key { &kt } else { &vt };
-                let h = hint.as_ref().map(|(hk, hv)| if is_key { hk.clone() } else { hv.clone() });
+                let h = hint
+                    .as_ref()
+                    .map(|(hk, hv)| if is_key { hk.clone() } else { hv.clone() });
                 let w = match (slot, &h) {
                     (Some(t), _) => Want::Exp(t.clone()),
                     (None, Some(h)) => Want::Exp(h.clone()),
@@ -599,7 +753,13 @@ impl Checker {
                         None => {
                             let (a, b) = (self.show(&prev), self.show(&t));
                             let what = if is_key { "keys" } else { "values" };
-                            self.err("T009", format!("map {what} must have the same type: found `{a}` and `{b}`"), x.span);
+                            self.err(
+                                "T009",
+                                format!(
+                                    "map {what} must have the same type: found `{a}` and `{b}`"
+                                ),
+                                x.span,
+                            );
                             prev
                         }
                     },
@@ -646,7 +806,13 @@ impl Checker {
                     Some(j) => j,
                     None => {
                         let (a, b) = (self.show(&prev), self.show(&t));
-                        self.err("T009", format!("array elements must have the same type: found `{a}` and `{b}`"), it.span);
+                        self.err(
+                            "T009",
+                            format!(
+                                "array elements must have the same type: found `{a}` and `{b}`"
+                            ),
+                            it.span,
+                        );
                         prev
                     }
                 },
@@ -663,7 +829,11 @@ impl Checker {
                     self.push_scope();
                     if i == 1 {
                         let (when_true, when_false) = self.cond_facts(l);
-                        for (n, t) in if op == BinOp::And { when_true } else { when_false } {
+                        for (n, t) in if op == BinOp::And {
+                            when_true
+                        } else {
+                            when_false
+                        } {
                             self.narrow(&n, t);
                         }
                     }
@@ -671,7 +841,11 @@ impl Checker {
                     self.pop_scope();
                     if !self.assignable(&t, &Ty::Bool) {
                         let shown = self.show(&t);
-                        self.err("T004", format!("`{}` needs `bool` operands, found `{shown}`", op.symbol()), x.span);
+                        self.err(
+                            "T004",
+                            format!("`{}` needs `bool` operands, found `{shown}`", op.symbol()),
+                            x.span,
+                        );
                     }
                 }
                 Ty::Bool
@@ -700,9 +874,9 @@ impl Checker {
                     return Ty::Bool;
                 }
             }
-            BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => {
-                self.find_lang_impl(&lt, Lang::Ord, std::slice::from_ref(&rt)).map(|_| Ty::Bool)
-            }
+            BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => self
+                .find_lang_impl(&lt, Lang::Ord, std::slice::from_ref(&rt))
+                .map(|_| Ty::Bool),
             _ => {
                 let lang = match op {
                     BinOp::Add => Lang::Add,
@@ -713,7 +887,8 @@ impl Checker {
                     BinOp::Mod => Lang::Mod,
                     _ => Lang::Pow,
                 };
-                self.find_lang_impl(&lt, lang, std::slice::from_ref(&rt)).map(|i: LangImpl| i.ret())
+                self.find_lang_impl(&lt, lang, std::slice::from_ref(&rt))
+                    .map(|i: LangImpl| i.ret())
             }
         };
         match ok {
@@ -727,7 +902,11 @@ impl Checker {
                 } else {
                     ""
                 };
-                self.err("T005", format!("cannot apply `{}` to `{a}` and `{b}`{hint}", op.symbol()), span);
+                self.err(
+                    "T005",
+                    format!("cannot apply `{}` to `{a}` and `{b}`{hint}", op.symbol()),
+                    span,
+                );
                 Ty::Error
             }
         }
@@ -738,45 +917,51 @@ impl Checker {
         let mut assigned_var: Option<(String, Ty)> = None;
         // the type the target holds
         let tt: Ty = match &target.kind {
-            ExprKind::Ident(name, _) => match self.lookup_var(name) {
-                Some((l, origin)) => {
-                    self.res.paths.insert(
-                        target.id,
-                        match origin {
-                            VarOrigin::Local => PathRes::Local,
-                            VarOrigin::Module(m) => PathRes::Global(m, name.clone()),
-                        },
-                    );
-                    if l.kind == LocalKind::Const {
-                        self.err_note(
+            ExprKind::Ident(name, _) => {
+                match self.lookup_var(name) {
+                    Some((l, origin)) => {
+                        self.res.paths.insert(
+                            target.id,
+                            match origin {
+                                VarOrigin::Local => PathRes::Local,
+                                VarOrigin::Module(m) => PathRes::Global(m, name.clone()),
+                            },
+                        );
+                        if l.kind == LocalKind::Const {
+                            self.err_note(
                             "T210",
                             format!("cannot assign to `{name}`: it is a constant"),
                             target.span,
                             "constants (`const`) cannot be reassigned; use `let` for a variable",
                             Some(l.span),
                         );
+                        }
+                        let declared = l.orig.clone().unwrap_or_else(|| l.ty.clone());
+                        assigned_var = Some((name.clone(), declared.clone()));
+                        declared
                     }
-                    let declared = l.orig.clone().unwrap_or_else(|| l.ty.clone());
-                    assigned_var = Some((name.clone(), declared.clone()));
-                    declared
-                }
-                None => {
-                    if let Some(ItemRef::Var(m, vname)) = self.lookup_item(name) {
-                        if let Some(l) = self.mscopes[m].vars.get(&vname).cloned() {
-                            if m != self.cur_mod {
-                                self.err("T211", format!("cannot assign to `{name}`: it belongs to another module"), target.span);
+                    None => {
+                        if let Some(ItemRef::Var(m, vname)) = self.lookup_item(name) {
+                            if let Some(l) = self.mscopes[m].vars.get(&vname).cloned() {
+                                if m != self.cur_mod {
+                                    self.err("T211", format!("cannot assign to `{name}`: it belongs to another module"), target.span);
+                                }
+                                self.res.paths.insert(target.id, PathRes::Global(m, vname));
+                                l.ty
+                            } else {
+                                Ty::Error
                             }
-                            self.res.paths.insert(target.id, PathRes::Global(m, vname));
-                            l.ty
                         } else {
+                            self.err(
+                                "T212",
+                                format!("cannot assign to `{name}`: it is not a variable"),
+                                target.span,
+                            );
                             Ty::Error
                         }
-                    } else {
-                        self.err("T212", format!("cannot assign to `{name}`: it is not a variable"), target.span);
-                        Ty::Error
                     }
                 }
-            },
+            }
             ExprKind::Field(obj, name, targs) => self.check_field_target(target, obj, name, targs),
             ExprKind::Index(base, idx) => {
                 let bt = self.expr(base, &Want::Any);
@@ -788,9 +973,15 @@ impl Checker {
                         return self.finish_index_assign(e, &bt, &it, &vt, value.span);
                     }
                     Some(bop) => {
-                        let Some(read) = self.find_lang_impl(&bt, Lang::Index, std::slice::from_ref(&it)) else {
+                        let Some(read) =
+                            self.find_lang_impl(&bt, Lang::Index, std::slice::from_ref(&it))
+                        else {
                             let (b, i) = (self.show(&bt), self.show(&it));
-                            self.err("T007", format!("cannot index a `{b}` with a `{i}`"), target.span);
+                            self.err(
+                                "T007",
+                                format!("cannot index a `{b}` with a `{i}`"),
+                                target.span,
+                            );
                             self.expr(value, &Want::Any);
                             return Ty::Error;
                         };
@@ -807,7 +998,11 @@ impl Checker {
             }
             ExprKind::Append(base) => {
                 if op.is_some() {
-                    self.err("T008", "`x[]` only works with `=`: `x[] = value`", target.span);
+                    self.err(
+                        "T008",
+                        "`x[]` only works with `=`: `x[] = value`",
+                        target.span,
+                    );
                 }
                 let bt = self.expr(base, &Want::Any);
                 let hint = match self.resolve(&bt) {
@@ -815,7 +1010,10 @@ impl Checker {
                     _ => Want::Any,
                 };
                 let vt = self.expr(value, &hint);
-                if self.find_lang_impl(&bt, Lang::Push, std::slice::from_ref(&vt)).is_none() {
+                if self
+                    .find_lang_impl(&bt, Lang::Push, std::slice::from_ref(&vt))
+                    .is_none()
+                {
                     let (b, v) = (self.show(&bt), self.show(&vt));
                     self.err(
                         "T008",
@@ -826,7 +1024,11 @@ impl Checker {
                 return vt;
             }
             _ => {
-                self.err("T213", "invalid assignment target (use a variable, `a.field` or `a[i]`)", target.span);
+                self.err(
+                    "T213",
+                    "invalid assignment target (use a variable, `a.field` or `a[i]`)",
+                    target.span,
+                );
                 Ty::Error
             }
         };
@@ -860,7 +1062,11 @@ impl Checker {
             return;
         }
         let value_ty = self.resolve(value_ty);
-        let now = if matches!(value_ty, Ty::NoneT | Ty::Nullable(_) | Ty::Error) { declared.clone() } else { declared.non_null() };
+        let now = if matches!(value_ty, Ty::NoneT | Ty::Nullable(_) | Ty::Error) {
+            declared.clone()
+        } else {
+            declared.non_null()
+        };
         self.narrow(name, now);
     }
 
@@ -868,7 +1074,9 @@ impl Checker {
         let args = [it.clone(), vt.clone()];
         if self.find_lang_impl(bt, Lang::IndexSet, &args).is_none() {
             let (b, i, v) = (self.show(bt), self.show(it), self.show(vt));
-            let readable = self.find_lang_impl(bt, Lang::Index, std::slice::from_ref(it)).is_some();
+            let readable = self
+                .find_lang_impl(bt, Lang::Index, std::slice::from_ref(it))
+                .is_some();
             let msg = if readable {
                 format!("cannot store a `{v}` at index `{i}` of a `{b}`")
             } else {
@@ -882,7 +1090,13 @@ impl Checker {
 
     // --------------------------------------------------------- conditionals
 
-    fn check_if(&mut self, e: &Expr, branches: &[(Expr, Block)], else_block: Option<&Block>, want: &Want) -> Ty {
+    fn check_if(
+        &mut self,
+        e: &Expr,
+        branches: &[(Expr, Block)],
+        else_block: Option<&Block>,
+        want: &Want,
+    ) -> Ty {
         let used = want.used();
         let mut result: Option<Ty> = None;
         let mut acc_else: Vec<(String, Ty)> = Vec::new();
@@ -899,7 +1113,11 @@ impl Checker {
                     None => {
                         if !*failed {
                             let (a, b) = (this.show(&prev), this.show(&bt));
-                            this.err("T009", format!("the branches have different types: `{a}` and `{b}`"), e.span);
+                            this.err(
+                                "T009",
+                                format!("the branches have different types: `{a}` and `{b}`"),
+                                e.span,
+                            );
                             *failed = true;
                         }
                         Ty::Error
@@ -951,7 +1169,14 @@ impl Checker {
         }
     }
 
-    fn check_match(&mut self, e: &Expr, scrutinee: &Expr, cases: &[MatchCase], else_block: Option<&Block>, want: &Want) -> Ty {
+    fn check_match(
+        &mut self,
+        e: &Expr,
+        scrutinee: &Expr,
+        cases: &[MatchCase],
+        else_block: Option<&Block>,
+        want: &Want,
+    ) -> Ty {
         let used = want.used();
         let st = self.expr(scrutinee, &Want::Any);
         let st = self.require_value(st, scrutinee.span);
@@ -999,7 +1224,11 @@ impl Checker {
                         None => {
                             if !failed {
                                 let (a, b) = (self.show(&prev), self.show(&bt));
-                                self.err("T009", format!("the cases have different types: `{a}` and `{b}`"), case.span);
+                                self.err(
+                                    "T009",
+                                    format!("the cases have different types: `{a}` and `{b}`"),
+                                    case.span,
+                                );
                                 failed = true;
                             }
                             Ty::Error
@@ -1018,7 +1247,11 @@ impl Checker {
                         None => {
                             if !failed {
                                 let (a, b2) = (self.show(&prev), self.show(&bt));
-                                self.err("T009", format!("the cases have different types: `{a}` and `{b2}`"), b.span);
+                                self.err(
+                                    "T009",
+                                    format!("the cases have different types: `{a}` and `{b2}`"),
+                                    b.span,
+                                );
                             }
                             Ty::Error
                         }
@@ -1027,9 +1260,10 @@ impl Checker {
             }
         }
         if let Some(eid) = enum_id
-            && variants_seen.len() == self.defs.enums[eid].variants.len() {
-                exhaustive = true;
-            }
+            && variants_seen.len() == self.defs.enums[eid].variants.len()
+        {
+            exhaustive = true;
+        }
         if bools_seen.0 && bools_seen.1 {
             exhaustive = true;
         }
@@ -1039,13 +1273,25 @@ impl Checker {
         result.unwrap_or(Ty::Unit)
     }
 
-    fn check_pattern(&mut self, mid: NodeId, idx: usize, p: &Pattern, span: Span, st: &Ty, none_seen: bool) {
+    fn check_pattern(
+        &mut self,
+        mid: NodeId,
+        idx: usize,
+        p: &Pattern,
+        span: Span,
+        st: &Ty,
+        none_seen: bool,
+    ) {
         let st_r = self.resolve(st);
         let inner = st_r.non_null();
         let expect = |this: &mut Checker, got: Ty| {
             if !this.assignable(&got, &inner) && !this.eq_ok(&got, &inner) {
                 let (a, b) = (this.show(&inner), this.show(&got));
-                this.err("T220", format!("this pattern has type `{b}`, but the value matched has type `{a}`"), span);
+                this.err(
+                    "T220",
+                    format!("this pattern has type `{b}`, but the value matched has type `{a}`"),
+                    span,
+                );
             }
         };
         match p {
@@ -1076,21 +1322,41 @@ impl Checker {
                     }
                     return;
                 };
-                match self.defs.enums[eid].variants.iter().position(|v| *v == last[0].name) {
+                match self.defs.enums[eid]
+                    .variants
+                    .iter()
+                    .position(|v| *v == last[0].name)
+                {
                     Some(vi) => {
                         self.res.patterns.insert((mid, idx), (eid, vi));
                         expect(self, Ty::Enum(eid));
                     }
                     None => {
                         let en = self.defs.enums[eid].name.clone();
-                        self.err("T221", format!("enum `{en}` has no variant `{}`", last[0].name), last[0].span);
+                        self.err(
+                            "T221",
+                            format!("enum `{en}` has no variant `{}`", last[0].name),
+                            last[0].span,
+                        );
                     }
                 }
             }
             Pattern::Bind(name) => {
                 if name.name != "_" {
-                    let ty = if none_seen { inner.clone() } else { st_r.clone() };
-                    self.declare(name, Local { ty, kind: LocalKind::Var, orig: None, span: name.span });
+                    let ty = if none_seen {
+                        inner.clone()
+                    } else {
+                        st_r.clone()
+                    };
+                    self.declare(
+                        name,
+                        Local {
+                            ty,
+                            kind: LocalKind::Var,
+                            orig: None,
+                            span: name.span,
+                        },
+                    );
                 }
             }
         }
@@ -1100,7 +1366,11 @@ impl Checker {
 
     fn check_lambda(&mut self, f: &Rc<FunDecl>) -> Ty {
         if f.has_self {
-            self.err("T127", "`self` is not a parameter of an anonymous function", f.span);
+            self.err(
+                "T127",
+                "`self` is not a parameter of an anonymous function",
+                f.span,
+            );
         }
         let mark = self.tparam_scope.len();
         let own = self.make_tparams(&f.tparams);
@@ -1108,13 +1378,25 @@ impl Checker {
             self.err("T128", "anonymous functions cannot be generic", f.span);
         }
         let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-        let ret = f.ret.as_ref().map(|r| self.resolve_type(r)).unwrap_or(Ty::Unit);
+        let ret = f
+            .ret
+            .as_ref()
+            .map(|r| self.resolve_type(r))
+            .unwrap_or(Ty::Unit);
         self.tparam_scope.truncate(mark);
         let saved_loop = std::mem::replace(&mut self.loop_depth, 0);
         self.ret_stack.push(ret.clone());
         self.push_scope();
         for (p, t) in f.params.iter().zip(params.iter()) {
-            self.declare(&p.name, Local { ty: t.clone(), kind: LocalKind::Param, orig: None, span: p.name.span });
+            self.declare(
+                &p.name,
+                Local {
+                    ty: t.clone(),
+                    kind: LocalKind::Param,
+                    orig: None,
+                    span: p.name.span,
+                },
+            );
         }
         if let Some(body) = &f.body {
             self.check_body_result(body, &ret, f.span, "this function");
@@ -1127,7 +1409,11 @@ impl Checker {
 
     /// Check a function body against its return type.
     pub fn check_body_result(&mut self, body: &Block, ret: &Ty, fn_span: Span, what: &str) {
-        let want = if *ret == Ty::Unit { Want::Unused } else { Want::Exp(ret.clone()) };
+        let want = if *ret == Ty::Unit {
+            Want::Unused
+        } else {
+            Want::Exp(ret.clone())
+        };
         let t = self.check_block(body, &want);
         if *ret == Ty::Unit {
             return;
@@ -1136,7 +1422,10 @@ impl Checker {
             return;
         }
         match body.stmts.last() {
-            Some(Stmt { kind: StmtKind::Expr(e), .. }) if t != Ty::Unit => self.mismatch(e.span, ret, &t),
+            Some(Stmt {
+                kind: StmtKind::Expr(e),
+                ..
+            }) if t != Ty::Unit => self.mismatch(e.span, ret, &t),
             _ => {
                 let r = self.show(ret);
                 self.err_note(
@@ -1167,7 +1456,15 @@ impl Checker {
         let sdef = self.defs.structs[sid].clone();
         let args: Vec<Ty> = if !lit.targs.is_empty() {
             if lit.targs.len() != sdef.tparams.len() {
-                self.err("T121", format!("`{}` expects {} type argument(s)", sdef.name, sdef.tparams.len()), e.span);
+                self.err(
+                    "T121",
+                    format!(
+                        "`{}` expects {} type argument(s)",
+                        sdef.name,
+                        sdef.tparams.len()
+                    ),
+                    e.span,
+                );
                 return Ty::Error;
             }
             lit.targs.iter().map(|t| self.resolve_type(t)).collect()
@@ -1176,11 +1473,12 @@ impl Checker {
         };
         let st = Ty::Struct(sid, args.clone());
         if let Some(Ty::Struct(wid, wargs)) = want.expected().map(|t| self.resolve(t))
-            && wid == sid {
-                for (a, b) in args.iter().zip(wargs.iter()) {
-                    self.same(a, b);
-                }
+            && wid == sid
+        {
+            for (a, b) in args.iter().zip(wargs.iter()) {
+                self.same(a, b);
             }
+        }
         // all instance fields, own and inherited
         struct F {
             ty: Ty,
@@ -1191,51 +1489,74 @@ impl Checker {
         let mut fields: Vec<(String, F)> = Vec::new();
         for (asid, aargs) in self.defs.ancestry(sid, &args) {
             let ad = self.defs.structs[asid].clone();
-            let map: HashMap<ParamId, Ty> = ad.tparams.iter().cloned().zip(aargs.iter().cloned()).collect();
+            let map: HashMap<ParamId, Ty> = ad
+                .tparams
+                .iter()
+                .cloned()
+                .zip(aargs.iter().cloned())
+                .collect();
             for f in &ad.fields {
                 if f.is_static {
                     continue;
                 }
-                fields.push((f.name.clone(), F { ty: f.ty.subst(&map), vis: f.vis, owner: asid, has_default: f.default.is_some() }));
+                fields.push((
+                    f.name.clone(),
+                    F {
+                        ty: f.ty.subst(&map),
+                        vis: f.vis,
+                        owner: asid,
+                        has_default: f.default.is_some(),
+                    },
+                ));
             }
         }
         let mut covered: HashSet<String> = HashSet::new();
         if let Some(b) = &lit.base {
             let bt = self.expr(b, &Want::Any);
             match self.resolve(&bt) {
-                Ty::Struct(bsid, bargs) => {
-                    match self.ancestor_args(sid, &args, bsid) {
-                        Some(want_args) => {
-                            for (x, y) in bargs.iter().zip(want_args.iter()) {
-                                self.same(x, y);
-                            }
-                            for (asid, _) in self.defs.ancestry(bsid, &bargs) {
-                                for f in &self.defs.structs[asid].fields {
-                                    if !f.is_static {
-                                        covered.insert(f.name.clone());
-                                    }
+                Ty::Struct(bsid, bargs) => match self.ancestor_args(sid, &args, bsid) {
+                    Some(want_args) => {
+                        for (x, y) in bargs.iter().zip(want_args.iter()) {
+                            self.same(x, y);
+                        }
+                        for (asid, _) in self.defs.ancestry(bsid, &bargs) {
+                            for f in &self.defs.structs[asid].fields {
+                                if !f.is_static {
+                                    covered.insert(f.name.clone());
                                 }
                             }
                         }
-                        None => {
-                            let (a, b2) = (self.show(&bt), self.show(&st));
-                            self.err("T231", format!("`..base` must be a value of `{b2}` or of one of its parent structs, found `{a}`"), b.span);
-                        }
                     }
-                }
+                    None => {
+                        let (a, b2) = (self.show(&bt), self.show(&st));
+                        self.err("T231", format!("`..base` must be a value of `{b2}` or of one of its parent structs, found `{a}`"), b.span);
+                    }
+                },
                 Ty::Error => {}
                 other => {
                     let shown = other.show(&self.defs);
-                    self.err("T231", format!("`..base` must be a struct value, found `{shown}`"), b.span);
+                    self.err(
+                        "T231",
+                        format!("`..base` must be a struct value, found `{shown}`"),
+                        b.span,
+                    );
                 }
             }
         }
         let mut given: HashSet<String> = HashSet::new();
         for item in &lit.fields {
             let Some((_, f)) = fields.iter().find(|(n, _)| *n == item.name.name) else {
-                let in_static = self.defs.ancestry(sid, &args).iter().any(|(a, _)| self.defs.structs[*a].fields.iter().any(|f| f.is_static && f.name == item.name.name));
+                let in_static = self.defs.ancestry(sid, &args).iter().any(|(a, _)| {
+                    self.defs.structs[*a]
+                        .fields
+                        .iter()
+                        .any(|f| f.is_static && f.name == item.name.name)
+                });
                 let msg = if in_static {
-                    format!("`{}` is a static field: it belongs to the type, not to each value", item.name.name)
+                    format!(
+                        "`{}` is a static field: it belongs to the type, not to each value",
+                        item.name.name
+                    )
                 } else {
                     format!("struct `{}` has no field `{}`", sdef.name, item.name.name)
                 };
@@ -1245,9 +1566,18 @@ impl Checker {
             };
             let (fty, fvis, fowner) = (f.ty.clone(), f.vis, f.owner);
             if !given.insert(item.name.name.clone()) {
-                self.err("T233", format!("field `{}` is given twice", item.name.name), item.name.span);
+                self.err(
+                    "T233",
+                    format!("field `{}` is given twice", item.name.name),
+                    item.name.span,
+                );
             }
-            self.check_vis(fvis, fowner, item.name.span, &format!("field `{}`", item.name.name));
+            self.check_vis(
+                fvis,
+                fowner,
+                item.name.span,
+                &format!("field `{}`", item.name.name),
+            );
             let vt = self.expr(&item.value, &Want::Exp(fty.clone()));
             if !self.assignable(&vt, &fty) {
                 self.mismatch(item.value.span, &fty, &vt);
@@ -1259,13 +1589,25 @@ impl Checker {
             .map(|(n, _)| format!("`{n}`"))
             .collect();
         if !missing.is_empty() {
-            self.err("T234", format!("missing field(s) for `{}`: {}", sdef.name, missing.join(", ")), e.span);
+            self.err(
+                "T234",
+                format!(
+                    "missing field(s) for `{}`: {}",
+                    sdef.name,
+                    missing.join(", ")
+                ),
+                e.span,
+            );
         }
         self.res.struct_lits.insert(e.id, sid);
         let st = self.resolve(&st);
         if st.contains_infer() {
             let n = sdef.name.clone();
-            self.err("T171", format!("cannot infer the type arguments of `{n}`: write `{n}<...> {{ ... }}`"), e.span);
+            self.err(
+                "T171",
+                format!("cannot infer the type arguments of `{n}`: write `{n}<...> {{ ... }}`"),
+                e.span,
+            );
             return Ty::Error;
         }
         st

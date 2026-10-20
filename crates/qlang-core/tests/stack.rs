@@ -25,6 +25,9 @@ fn default_depth_fits_in_a_normal_thread_stack() {
     if cfg!(debug_assertions) {
         assert!(run_on_stack(256 << 20, 990));
     } else {
-        assert!(run_on_stack(8 << 20, 990), "990 nested calls need more than 8 MiB of stack");
+        assert!(
+            run_on_stack(8 << 20, 990),
+            "990 nested calls need more than 8 MiB of stack"
+        );
     }
 }

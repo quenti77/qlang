@@ -164,3 +164,23 @@ fn a_git_dependency_must_be_installed_first() {
         "{err}"
     );
 }
+
+#[test]
+fn an_extern_a_package_needs_says_who_has_to_provide_it() {
+    let d = Dir::new("pkg-extern");
+    d.write(
+        "app/qlang.toml",
+        "[dependencies]\nmail = { path = \"../mail\" }\n",
+    );
+    d.write(
+        "mail/lib.q",
+        "extern fun smtp_send(to: string) -> bool\nfun send() -> bool\n  smtp_send(\"x\")\nend\nexport send\n",
+    );
+    d.write("app/main.q", "import \"@mail\" as m\nprint(m.send())\n");
+    let (_, err, ok) = d.qlang("app", &["run", "main.q"]);
+    assert!(!ok);
+    assert!(
+        err.contains("T263") && err.contains("the package @mail needs it"),
+        "{err}"
+    );
+}

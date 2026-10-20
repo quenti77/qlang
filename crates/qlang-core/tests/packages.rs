@@ -63,3 +63,15 @@ fn a_package_cannot_reach_outside_itself() {
     let out = exec("import \"@util/evil.q\" as e", h);
     assert!(out.starts_with("COMPILE: T100"), "{out}");
 }
+
+#[test]
+fn package_mains_tell_the_host_which_file_an_at_name_means() {
+    let mut h = host();
+    h.files.insert(
+        "@pkg/src/main.q".into(),
+        "fun hi() -> string\n  \"hi\"\nend\nexport hi".into(),
+    );
+    h.package_mains.insert("pkg".into(), "src/main.q".into());
+    let out = exec("import \"@pkg\" as p\nprint(p.hi())", h);
+    assert_eq!(out, "hi\n");
+}

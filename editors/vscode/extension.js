@@ -88,8 +88,10 @@ function rootFor(doc) {
   return folder ? folder.uri.fsPath : path.dirname(doc.uri.fsPath);
 }
 
-function readFileText(root, rel) {
-  const abs = path.join(root, rel);
+function readFileText(root, rel, packages = {}) {
+  const real = lib.realPath(root, rel, packages);
+  if (real === null) return null;
+  const abs = path.normalize(real);
   // an open, possibly unsaved editor wins over the disk
   const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === abs);
   if (open) return open.getText();
@@ -148,9 +150,12 @@ function runQlang(args, stdin, cwd) {
 async function analyse(doc, text) {
   const root = rootFor(doc);
   const entry = lib.relativePosix(root, doc.uri.fsPath);
-  const files = lib.collectFiles(entry, text === undefined ? doc.getText() : text, (rel) => readFileText(root, rel));
-  const response = await runQlang(['check', '--json'], lib.buildRequest(entry, files, true), root);
-  return response ? { response, entry, root, info: response.info || null } : null;
+  // the project's packages (`@name` imports): `qlang packages` only reads qlang.toml files
+  const found = await runQlang(['packages'], '', root);
+  const packages = found && !found.error ? found : {};
+  const files = lib.collectFiles(entry, text === undefined ? doc.getText() : text, (rel) => readFileText(root, rel, packages), 200, packages);
+  const response = await runQlang(['check', '--json'], lib.buildRequest(entry, files, true, packages), root);
+  return response ? { response, entry, root, packages, info: response.info || null } : null;
 }
 
 async function check(doc) {
@@ -158,7 +163,7 @@ async function check(doc) {
   const a = await analyse(doc);
   if (!a) return;
   if (a.info) analyses.set(doc.uri.toString(), { version, info: a.info, entry: a.entry, root: a.root });
-  publish(doc, a.root, a.entry, a.response);
+  publish(doc, a.root, a.entry, a.response, a.packages);
 }
 
 /** What the last check learned, re-checking first if the document changed since. */
@@ -255,10 +260,10 @@ const SEVERITY = {
   warning: vscode.DiagnosticSeverity.Warning,
 };
 
-function publish(doc, root, entry, response) {
+function publish(doc, root, entry, response, packages = {}) {
   const key = doc.uri.toString();
   const byFile = lib.toFileDiagnostics(response, entry);
-  const uriOf = (rel) => vscode.Uri.file(path.join(root, rel));
+  const uriOf = (rel) => vscode.Uri.file(path.normalize(lib.realPath(root, rel, packages) || path.join(root, rel)));
   const now = new Set();
   for (const [file, list] of Object.entries(byFile)) {
     const uri = uriOf(file);

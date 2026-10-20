@@ -18,7 +18,8 @@ function relativePosix(root, file) {
  * A path may go up and out of the project (`../shared/x.q`); the result then starts with
  * `..`. Absolute paths and empty paths are refused (null).
  */
-function resolveImport(importerRel, importPath) {
+function resolveImport(importerRel, importPath, packages = {}) {
+  if (importPath.startsWith('@')) return resolvePackageImport(importPath.slice(1), packages);
   // import paths use `/` everywhere and are never absolute (`/x.q`, `C:/x.q`, `lib\\x.q`)
   if (importPath === '' || importPath.includes('\\') || importPath.startsWith('/') || /^[A-Za-z]:/.test(importPath)) return null;
   const parts = [];
@@ -34,7 +35,47 @@ function resolveImport(importerRel, importPath) {
     }
   }
   if (parts.length === 0 || parts[parts.length - 1] === '..') return null;
+  // inside a package (`@name/...`) imports cannot leave it
+  if (importerRel.startsWith('@') && parts[0] !== importerRel.split('/')[0]) return null;
   return parts.join('/');
+}
+
+/**
+ * `name` or `name/dir/file.q` (written after the `@`) as the module name the compiler
+ * uses: `@name/dir/file.q`, or `@name/<main file>` for a bare `@name`. `packages` maps a
+ * name to `{ dir, main }` (see `qlang packages`).
+ */
+function resolvePackageImport(spec, packages) {
+  if (spec.includes('\\')) return null;
+  const slash = spec.indexOf('/');
+  const name = slash < 0 ? spec : spec.slice(0, slash);
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) return null;
+  const parts = [];
+  for (const part of (slash < 0 ? '' : spec.slice(slash + 1)).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  if (parts.length === 0) {
+    const pkg = packages[name];
+    if (!pkg) return '@' + name;
+    return resolvePackageImport(name + '/' + pkg.main, {});
+  }
+  return '@' + name + '/' + parts.join('/');
+}
+
+/** The file on disk behind a module name: `@name/rest` is inside the package's directory. */
+function realPath(root, rel, packages = {}) {
+  if (!rel.startsWith('@')) return root + '/' + rel;
+  const slash = rel.indexOf('/');
+  const name = rel.slice(1, slash < 0 ? undefined : slash);
+  const pkg = packages[name];
+  if (!pkg) return null;
+  return slash < 0 ? pkg.dir + '/' + pkg.main : pkg.dir + '/' + rel.slice(slash + 1);
 }
 
 /** Import paths written in a source text (`import a from "x.q"`, `import "x.q" as m`). */
@@ -50,13 +91,13 @@ function importPaths(text) {
  * The entry file and everything it imports, transitively.
  * `readText(relPath)` returns the text of a file, or null if it does not exist.
  */
-function collectFiles(entryRel, entryText, readText, limit = 200) {
+function collectFiles(entryRel, entryText, readText, limit = 200, packages = {}) {
   const files = { [entryRel]: entryText };
   const queue = [entryRel];
   while (queue.length && Object.keys(files).length < limit) {
     const current = queue.shift();
     for (const imp of importPaths(files[current])) {
-      const target = resolveImport(current, imp);
+      const target = resolveImport(current, imp, packages);
       if (target === null || target in files) continue;
       const text = readText(target);
       if (text === null || text === undefined) continue; // the compiler reports it
@@ -68,9 +109,12 @@ function collectFiles(entryRel, entryText, readText, limit = 200) {
 }
 
 /** The JSON request understood by `qlang check --json`. */
-function buildRequest(entry, files, info = false) {
+function buildRequest(entry, files, info = false, packages = {}) {
   // `input: []`, `now` and `seed` allow `read()`, `time` and `random`: the editor runs programs in a terminal
   const request = { entry, files, input: [], now: 0, seed: 0 };
+  // which file `import "@name"` means, for each package of the project
+  const mains = Object.fromEntries(Object.entries(packages).map(([name, p]) => [name, p.main.replace(/^\.\//, '')]));
+  if (Object.keys(mains).length) request.package_mains = mains;
   if (info) request.info = true; // types, variables and members, for tooltips and completion
   return JSON.stringify(request);
 }
@@ -125,6 +169,7 @@ module.exports = {
   toPosix,
   relativePosix,
   resolveImport,
+  realPath,
   importPaths,
   collectFiles,
   buildRequest,

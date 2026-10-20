@@ -232,6 +232,21 @@ impl Packages {
         Ok(())
     }
 
+    /// `{"name": {"dir": ..., "main": ...}}`.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::Value::Object(
+            self.by_name
+                .iter()
+                .map(|(name, p)| {
+                    (
+                        name.clone(),
+                        serde_json::json!({ "dir": p.dir.to_string_lossy(), "main": p.main }),
+                    )
+                })
+                .collect(),
+        )
+    }
+
     /// `@name` as `@name/<main file of the package>`; other module paths unchanged.
     pub fn with_main(&self, path: &str) -> String {
         match split_package_path(path) {

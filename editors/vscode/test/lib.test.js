@@ -104,3 +104,29 @@ test('toFileDiagnostics converts to 0-based ranges and groups by file', () => {
   // diagnostics without a location go to the entry file, at the top
   assert.deepStrictEqual([out['main.q'][1].startLine, out['main.q'][1].startCol], [0, 0]);
 });
+
+test('package imports resolve like the compiler does', () => {
+  const packages = { mail: { dir: '/p/mail', main: 'src/mail.q' } };
+  assert.strictEqual(lib.resolveImport('main.q', '@mail/send.q', packages), '@mail/send.q');
+  assert.strictEqual(lib.resolveImport('main.q', '@mail', packages), '@mail/src/mail.q');
+  assert.strictEqual(lib.resolveImport('main.q', '@mail/../x.q', packages), null);
+  assert.strictEqual(lib.resolveImport('main.q', '@bad name/x.q', packages), null);
+  // relative imports from inside a package stay inside it
+  assert.strictEqual(lib.resolveImport('@mail/src/mail.q', './helper.q', packages), '@mail/src/helper.q');
+  assert.strictEqual(lib.resolveImport('@mail/a.q', '../b.q', packages), null);
+  assert.strictEqual(lib.realPath('/proj', '@mail/send.q', packages), '/p/mail/send.q');
+  assert.strictEqual(lib.realPath('/proj', 'main.q', packages), '/proj/main.q');
+  assert.strictEqual(lib.realPath('/proj', '@other/x.q', packages), null);
+});
+
+test('collectFiles follows package imports and buildRequest names the main files', () => {
+  const packages = { mail: { dir: '/p/mail', main: './src/mail.q' } };
+  const disk = {
+    '@mail/src/mail.q': 'import h from "./helper.q"\nexport h',
+    '@mail/src/helper.q': 'fun h() -> int\n  1\nend\nexport h',
+  };
+  const files = lib.collectFiles('main.q', 'import "@mail" as m', (p) => disk[p] ?? null, 200, packages);
+  assert.deepStrictEqual(Object.keys(files).sort(), ['@mail/src/helper.q', '@mail/src/mail.q', 'main.q']);
+  const req = JSON.parse(lib.buildRequest('main.q', files, false, packages));
+  assert.deepStrictEqual(req.package_mains, { mail: 'src/mail.q' });
+});

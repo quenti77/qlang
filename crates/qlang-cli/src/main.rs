@@ -36,6 +36,7 @@ USAGE:
                         [--max-steps N] [--root DIR] [--seed N]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
+    qlang packages                       the packages of the project here, as JSON (for editors)
     qlang install                        fetch the git packages listed in qlang.toml into
                                          .qlang/packages, at the commits of qlang.lock
     qlang update [name...]               move them (all, or those named) to what their
@@ -79,6 +80,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
             }
         }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
+        Some("packages") => packages_json(),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -356,6 +358,26 @@ fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
                 .map(|v| (name.to_ascii_lowercase(), v.to_string()))
         })
         .collect()
+}
+
+/// `qlang packages`: the packages of the project in the current directory, as JSON
+/// (`{"mail": {"dir": "/abs/path", "main": "src/mail.q"}}`), for editors.
+fn packages_json() -> ExitCode {
+    let found = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| project_dir(&cwd))
+        .map(|dir| packages::Packages::load(&dir))
+        .unwrap_or_else(|| Ok(packages::Packages::default()));
+    match found {
+        Ok(p) => {
+            println!("{}", p.to_json());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            println!("{}", serde_json::json!({ "error": e }));
+            ExitCode::from(1)
+        }
+    }
 }
 
 /// `qlang install | update [name...] | add name --git URL ... | remove name`.

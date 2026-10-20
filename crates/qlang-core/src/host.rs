@@ -317,6 +317,8 @@ pub struct MemoryHost {
     /// Treat every `extern fun` as provided (only to check a program that is not going
     /// to run here, like an editor does: it must not report what the real host may have).
     pub assume_externs: bool,
+    /// For each package, the file `@name` stands for (see `Host::package_file`).
+    pub package_mains: std::collections::HashMap<String, String>,
 }
 
 /// An `extern fun` implemented in Rust, for [`MemoryHost`].
@@ -353,6 +355,16 @@ impl Host for MemoryHost {
             .get(path)
             .cloned()
             .ok_or_else(|| format!("module \"{path}\" not found"))
+    }
+
+    fn package_file(&mut self, path: &str) -> String {
+        match path
+            .strip_prefix('@')
+            .and_then(|n| self.package_mains.get(n))
+        {
+            Some(main) => format!("{path}/{main}"),
+            None => path.to_string(),
+        }
     }
 
     fn has_extern(&self, name: &str) -> bool {

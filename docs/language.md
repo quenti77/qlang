@@ -1240,6 +1240,13 @@ déclarent le même nom appellent donc la même fonction.
   `extern fun` qu'il ne fournit pas est une erreur de compilation (`T263`), comme
   `read()` sans clavier ; la déclarer sans l'appeler ne coûte rien. Une réponse qui ne
   correspond pas à la signature est une erreur d'exécution (`R083`).
+- **Les noms que la bibliothèque standard utilise** : `Db` (`sql_connect`, `sql_query`,
+  `sql_execute`, `sql_close`), `fs` (`fs_read(path) -> Result<string, Error>`,
+  `fs_write(path, content) -> Result<bool, Error>`), `env` (`env_get(name) -> string?`,
+  `env_args() -> array<string>`) et `http` (`http_send(req: Request) -> Result<Response,
+  Error>`) sont écrits en qlang dans le prélude, par-dessus ces `extern fun`. Un
+  environnement qui les implémente (un fournisseur, ou `Host::call`) remplace le disque, le
+  réseau ou la base de données de ces appels, sans que le langage change.
 - Une `extern fun` n'est autorisée qu'au niveau d'un fichier, pas dans un bloc, et ne
   peut pas être générique. Le programme `qlang` fournit celles de `Db` (SQLite et
   Postgres), et d'autres venant de programmes externes déclarés dans un `qlang.toml` ou

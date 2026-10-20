@@ -3,6 +3,7 @@
 
 mod db;
 mod json;
+mod providers;
 mod serve;
 
 use qlang_core::check::compile;
@@ -18,11 +19,13 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [-- ARGS...]
+    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [-- ARGS...]
                                          run a program (imports may live anywhere, or only
                                          under DIR with --root; the same --seed gives the
-                                         same random numbers; ARGS after -- are env.args())
-    qlang check <file.q>                 check a program without running it
+                                         same random numbers; ARGS after -- are env.args();
+                                         --extern CMD starts a provider of `extern fun`, as
+                                         do the [externs] of a qlang.toml near the program)
+    qlang check <file.q> [--extern CMD]  check a program without running it
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
     qlang serve [--port 8080] [--bind 127.0.0.1]
@@ -93,6 +96,8 @@ struct TerminalHost {
     /// The script's own arguments, for `env.args()` (everything after `--` on the command
     /// line), not including the file path or qlang's own options.
     script_args: Vec<String>,
+    /// Programs implementing `extern fun` (`qlang.toml`, `--extern`).
+    providers: providers::Providers,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -257,10 +262,13 @@ impl Host for TerminalHost {
     }
 
     fn has_extern(&self, name: &str) -> bool {
-        SQL_EXTERNS.contains(&name)
+        SQL_EXTERNS.contains(&name) || self.providers.has(name)
     }
 
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
+        if self.providers.has(name) {
+            return self.providers.call(name, args);
+        }
         sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
@@ -320,6 +328,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut seed: Option<u64> = None;
     let mut limits = Limits::default();
     let mut script_args: Vec<String> = Vec::new();
+    let mut externs: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -343,6 +352,16 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                     Some(n) => seed = Some(n),
                     None => {
                         eprintln!("--seed needs a number");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--extern" => {
+                i += 1;
+                match args.get(i) {
+                    Some(command) => externs.push(command.to_string()),
+                    None => {
+                        eprintln!("--extern needs a command");
                         return ExitCode::from(64);
                     }
                 }
@@ -382,11 +401,21 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         eprintln!("{file} is outside of --root {}", root.display());
         return ExitCode::from(64);
     }
+    let providers = match providers::specs_for(Path::new(file), &externs)
+        .and_then(|specs| providers::Providers::start(&specs, &SQL_EXTERNS))
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+    };
     let mut host = TerminalHost {
         root,
         rng: seed.unwrap_or_else(system_entropy),
         db: db::SqlConns::default(),
         script_args,
+        providers,
     };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,

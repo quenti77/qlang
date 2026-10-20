@@ -367,7 +367,16 @@ impl Interp<'_> {
                 self.check_size(entries.len(), span)?;
                 let mut m = MapObj::default();
                 for (k, val) in entries {
-                    let key = self.host_to_value(k, kt, depth + 1, work, span)?;
+                    // a JSON object only has text keys: `{"1": ...}` is a valid `map<int, V>`
+                    let key = match (&**kt, k) {
+                        (Ty::Int, HostValue::Str(s)) if s.parse::<i64>().is_ok() => {
+                            Value::Int(s.parse().unwrap())
+                        }
+                        (Ty::Bool, HostValue::Str(s)) if s == "true" || s == "false" => {
+                            Value::Bool(s == "true")
+                        }
+                        _ => self.host_to_value(k, kt, depth + 1, work, span)?,
+                    };
                     let val = self.host_to_value(val, vt, depth + 1, work, span)?;
                     if !m.insert(key, val) {
                         return bad("a valid map key");

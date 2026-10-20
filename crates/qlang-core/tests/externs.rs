@@ -196,3 +196,15 @@ fn extern_works_across_modules() {
     let out = exec("import twice from \"lib.q\"\nprint(twice(21))", host);
     assert_eq!(out, "42\n");
 }
+
+#[test]
+fn text_keys_from_a_json_host_fill_an_int_map() {
+    let host = host_with("table", |_| {
+        Ok(HostValue::Map(vec![(s("1"), s("one")), (s("2"), s("two"))]))
+    });
+    let out = exec(
+        "extern fun table() -> map<int, string>\nlet t = table()\nprint(t[2])",
+        host,
+    );
+    assert_eq!(out, "two\n");
+}

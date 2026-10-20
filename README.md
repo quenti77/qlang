@@ -109,6 +109,36 @@ Les `import` peuvent remonter dans les dossiers (`import f from "../lib/f.q"`, c
 qlang run app/main.q --root .      # les imports restent dans le dossier courant
 ```
 
+### Fournir des `extern fun`
+
+Une `extern fun` est implémentée par un **fournisseur** : n'importe quel programme qui
+parle JSON, une ligne par message, sur son entrée et sa sortie standard. Il est lancé une
+fois pour toute l'exécution. On le déclare dans un `qlang.toml` placé près du programme
+(ou dans un dossier parent), ou avec `--extern` :
+
+```toml
+[externs]
+mail = "python3 mail.py"     # lancé depuis le dossier du qlang.toml, sans shell
+```
+
+```sh
+qlang run app.q --extern "python3 mail.py"
+```
+
+Le fournisseur répond à deux messages :
+
+```
+→ {"op":"list"}                                    ← {"externs":["mail_send"]}
+→ {"op":"call","name":"mail_send","args":[…]}      ← {"ok":<valeur>}  ou  {"error":"message"}
+```
+
+Les valeurs sont du JSON : une structure ou une table est un objet (les clés `int` ou
+`bool` s'écrivent en texte), une énumération le nom de sa variante, un `Json` sa valeur.
+Un nom déjà fourni par `qlang` (`sql_*`) ou par un autre fournisseur est refusé. Lancer les
+commandes d'un `qlang.toml` revient à exécuter ce fichier : à ne faire que sur du code de
+confiance. Les modes `--json` (éditeurs, protocole) ne lisent pas de `qlang.toml` et ne
+lancent aucun fournisseur ; `qlang serve app.q` en lance un par worker.
+
 ## Architecture
 
 Le langage est séparé de toute interface : le cœur ne lit, n'écrit et ne touche

@@ -3,6 +3,8 @@
 //! Everything that reaches outside goes through the [`Host`]. Execution is
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
+mod externs;
+
 use crate::ast::*;
 use crate::check::Program;
 use crate::datetime;
@@ -962,6 +964,12 @@ impl<'a> Interp<'a> {
         name: &str,
         span: Span,
     ) -> R<Value> {
+        if decl.external {
+            self.frames.push((name.to_string(), span));
+            let r = self.call_extern(decl, args, span);
+            self.frames.pop();
+            return r;
+        }
         if self.depth >= self.limits.max_depth {
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }

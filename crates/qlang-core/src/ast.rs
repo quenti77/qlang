@@ -80,8 +80,10 @@ pub struct FunDecl {
     pub has_self: bool,
     pub params: Vec<Param>,
     pub ret: Option<TypeExpr>,
-    /// `None` for trait signatures.
+    /// `None` for trait signatures and for `extern fun`.
     pub body: Option<Block>,
+    /// `extern fun`: provided by the host environment, no body.
+    pub external: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

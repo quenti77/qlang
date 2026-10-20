@@ -920,7 +920,17 @@ fn compile_inner(
         return Err(finish_error(diags, sources, None));
     }
 
+    let missing_externs: HashSet<String> = modules
+        .iter()
+        .flat_map(|m| m.ast.items.iter())
+        .filter_map(|item| match item {
+            Item::Fun(f) if f.external => f.name.as_ref().map(|n| n.name.clone()),
+            _ => None,
+        })
+        .filter(|name| !host.has_extern(name))
+        .collect();
     let mut ck = Checker::new(sources, modules, caps);
+    ck.missing_externs = missing_externs;
     if options.info {
         ck.collect = Some(info::Collector::default());
     }
@@ -1256,6 +1266,8 @@ pub(crate) struct ModScope {
 
 pub(crate) struct Checker {
     pub caps: Capabilities,
+    /// Names of the `extern fun` this host does not provide.
+    pub missing_externs: HashSet<String>,
     pub sources: SourceMap,
     pub diags: Vec<Diagnostic>,
     pub defs: Defs,
@@ -1288,6 +1300,7 @@ impl Checker {
         let n = modules.len();
         Checker {
             caps,
+            missing_externs: HashSet::new(),
             sources,
             diags: Vec::new(),
             defs: Defs::new(),

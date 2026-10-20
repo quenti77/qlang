@@ -517,6 +517,19 @@ impl Checker {
         }
     }
 
+    /// Using an `extern fun` the host does not provide is a compile error.
+    pub(crate) fn check_extern_available(&mut self, fid: FnId, span: Span) {
+        let def = &self.defs.fns[fid];
+        if def.decl.as_ref().is_some_and(|d| d.external) && self.missing_externs.contains(&def.name)
+        {
+            let msg = format!(
+                "`{}` is not available in this environment (the host does not provide it)",
+                def.name
+            );
+            self.err("T263", msg, span);
+        }
+    }
+
     fn call_fn_item(
         &mut self,
         e: &Expr,
@@ -527,6 +540,7 @@ impl Checker {
         want: &Want,
     ) -> Ty {
         let def = self.defs.fns[fid].clone();
+        self.check_extern_available(fid, e.span);
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
         if let Some(c) = &mut self.collect {
             c.expr(

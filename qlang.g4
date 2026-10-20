@@ -279,6 +279,7 @@ bound: namedType;
 topLevelItem
     : importDeclaration
     | exportDeclaration
+    | externDeclaration
     | functionDeclaration
     | structDeclaration
     | implDeclaration
@@ -301,6 +302,9 @@ importName: Identifier (As Identifier)?;
 
 // export add, Point      (noms de déclarations du fichier)
 exportDeclaration: Export Identifier (Comma Identifier)*;
+
+// extern fun add(a: int, b: int) -> int      (fournie par l'environnement, sans corps)
+externDeclaration: Extern Fun Identifier LParen parameterList? RParen (Arrow type)?;
 
 // --------------------------------------------------------------------
 // Fonctions
@@ -437,6 +441,7 @@ Static: 'static';
 
 Import: 'import';
 Export: 'export';
+Extern: 'extern';
 From: 'from';
 As: 'as';
 

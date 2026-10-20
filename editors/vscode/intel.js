@@ -32,6 +32,7 @@ const KEYWORDS = {
   end: 'Closes a block.',
   import: '`import name from "file.q"` or `import "file.q" as module`.',
   export: 'Makes names usable from other files.',
+  extern: 'Declares a function the host environment provides: `extern fun name(params) -> type`.',
   from: 'Used by `import ... from "file.q"`.',
   as: 'Converts a value (`3 as float`) or names an import.',
   and: 'Logical and (both sides must be `bool`).',

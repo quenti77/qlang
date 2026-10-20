@@ -677,6 +677,7 @@ impl Checker {
     /// A function used as a value (not called).
     pub fn fn_value(&mut self, e: &Expr, fid: FnId, targs: &[TypeExpr]) -> Ty {
         let def = self.defs.fns[fid].clone();
+        self.check_extern_available(fid, e.span);
         self.res.paths.insert(e.id, PathRes::Fn(fid));
         let own: Vec<ParamId> = def
             .scope_params

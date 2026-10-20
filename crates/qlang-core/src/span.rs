@@ -139,6 +139,9 @@ fn split_root(path: &str) -> (&str, &str) {
 /// Nothing can go above the root of an absolute importer. The importer may be written with
 /// `\` (a Windows path); the result then uses `/`.
 pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> {
+    if let Some(package) = import_path.strip_prefix('@') {
+        return resolve_package_path(package);
+    }
     if import_path.is_empty() || import_path.contains('\\') || !split_root(import_path).0.is_empty()
     {
         return None;
@@ -168,12 +171,84 @@ pub fn resolve_module_path(importer: &str, import_path: &str) -> Option<String> 
     if parts.is_empty() || parts.last() == Some(&"..") {
         return None;
     }
+    // inside a package (`@name/...`) imports cannot leave it
+    if importer.starts_with('@') && parts.first() != importer.split('/').next().as_ref() {
+        return None;
+    }
     Some(format!("{root}{}", parts.join("/")))
+}
+
+/// Whether a module path names a file of a package (`@name/file.q`) or its main file (`@name`).
+pub fn is_package_path(path: &str) -> bool {
+    path.starts_with('@')
+}
+
+/// Splits `@name/rest.q` (as written after the `@`) into `("name", "rest.q")`.
+pub fn split_package_path(path: &str) -> Option<(&str, &str)> {
+    let path = path.strip_prefix('@')?;
+    Some(path.split_once('/').unwrap_or((path, "")))
+}
+
+/// A package name: letters, digits, `_` and `-`.
+pub fn valid_package_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// `name` or `name/dir/file.q` (after the `@`) as `@name` or `@name/dir/file.q`, normalised;
+/// `None` when the name is invalid or the path climbs out of the package.
+fn resolve_package_path(spec: &str) -> Option<String> {
+    if spec.contains('\\') {
+        return None;
+    }
+    let (name, rest) = spec.split_once('/').unwrap_or((spec, ""));
+    if !valid_package_name(name) {
+        return None;
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    for part in rest.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            p => parts.push(p),
+        }
+    }
+    if parts.is_empty() {
+        Some(format!("@{name}"))
+    } else {
+        Some(format!("@{name}/{}", parts.join("/")))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::resolve_module_path as r;
+
+    #[test]
+    fn package_imports_stay_inside_their_package() {
+        assert_eq!(r("main.q", "@mail").as_deref(), Some("@mail"));
+        assert_eq!(
+            r("lib/a.q", "@mail/send.q").as_deref(),
+            Some("@mail/send.q")
+        );
+        assert_eq!(
+            r("a.q", "@mail/./x/../send.q").as_deref(),
+            Some("@mail/send.q")
+        );
+        assert_eq!(r("a.q", "@mail/../other.q"), None);
+        assert_eq!(r("a.q", "@/x.q"), None);
+        assert_eq!(r("a.q", "@bad name/x.q"), None);
+        // relative imports from inside a package
+        assert_eq!(r("@mail/send.q", "util.q").as_deref(), Some("@mail/util.q"));
+        assert_eq!(r("@mail/lib/a.q", "../b.q").as_deref(), Some("@mail/b.q"));
+        assert_eq!(r("@mail/a.q", "../b.q"), None);
+        // and they can import another package
+        assert_eq!(r("@mail/a.q", "@json/x.q").as_deref(), Some("@json/x.q"));
+    }
 
     #[test]
     fn imports_are_relative_to_the_importing_file() {

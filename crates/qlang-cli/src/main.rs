@@ -3,6 +3,7 @@
 
 mod db;
 mod json;
+mod packages;
 mod providers;
 mod serve;
 
@@ -98,6 +99,8 @@ struct TerminalHost {
     script_args: Vec<String>,
     /// Programs implementing `extern fun` (`qlang.toml`, `--extern`).
     providers: providers::Providers,
+    /// The packages `import "@name/..."` can reach (`[dependencies]` of `qlang.toml`).
+    packages: packages::Packages,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -177,6 +180,17 @@ impl Host for TerminalHost {
     }
 
     fn load_module(&mut self, path: &str) -> Result<String, String> {
+        if qlang_core::span::is_package_path(path) {
+            // a package's files are the project's own choice (`[dependencies]`), so
+            // `--root` does not apply to them
+            let full = self.packages.resolve(path)?;
+            if full.extension().is_none_or(|e| e != "q") {
+                return Err(format!(
+                    "\"{path}\" is not a qlang file (only .q files can be imported)"
+                ));
+            }
+            return std::fs::read_to_string(&full).map_err(|e| e.to_string());
+        }
         // only qlang sources: importing any file would show its lines in error messages
         if !path.ends_with(".q") {
             return Err(format!(
@@ -197,7 +211,18 @@ impl Host for TerminalHost {
         std::fs::read_to_string(&full).map_err(|e| e.to_string())
     }
 
+    fn package_file(&mut self, path: &str) -> String {
+        self.packages.with_main(path)
+    }
+
     fn canonical_path(&mut self, path: &str) -> String {
+        if qlang_core::span::is_package_path(path) {
+            // the same file under two names is one module
+            return match self.packages.resolve(path) {
+                Ok(full) => full.to_string_lossy().into_owned(),
+                Err(_) => path.to_string(),
+            };
+        }
         // the same file reached through `..` or a symbolic link is the same module
         Path::new(path)
             .canonicalize()
@@ -322,6 +347,11 @@ fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The directory of the `qlang.toml` that governs `program`, if there is one.
+fn project_dir(program: &Path) -> Option<PathBuf> {
+    providers::find_config(program).and_then(|f| f.parent().map(Path::to_path_buf))
+}
+
 fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut file: Option<&str> = None;
     let mut root: Option<PathBuf> = None;
@@ -401,6 +431,16 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         eprintln!("{file} is outside of --root {}", root.display());
         return ExitCode::from(64);
     }
+    let packages = match project_dir(Path::new(file))
+        .map(|d| packages::Packages::load(&d))
+        .transpose()
+    {
+        Ok(p) => p.unwrap_or_default(),
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+    };
     let providers = match providers::specs_for(Path::new(file), &externs)
         .and_then(|specs| providers::Providers::start(&specs, &SQL_EXTERNS))
     {
@@ -416,6 +456,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         db: db::SqlConns::default(),
         script_args,
         providers,
+        packages,
     };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,

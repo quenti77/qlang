@@ -75,6 +75,86 @@ pub trait SqlBackend {
     fn sql_close(&mut self, conn: u64) -> Result<(), HostError>;
 }
 
+/// The `extern fun` of the prelude that the methods of [`Host`] above implement: `fs.read`
+/// and `fs.write` (`fs_read`, `fs_write`), `env.get` and `env.args` (`env_get`, `env_args`)
+/// and `http.send` (`http_send`). Whether a host has them follows its [`Capabilities`].
+pub fn std_has(caps: Capabilities, name: &str) -> bool {
+    match name {
+        "fs_read" | "fs_write" => caps.fs,
+        "env_get" | "env_args" => caps.env,
+        "http_send" => caps.http,
+        _ => false,
+    }
+}
+
+/// Runs one of the names of [`std_has`] on `host`; `None` if `name` is not one of them.
+pub fn std_call<H: Host + ?Sized>(
+    host: &mut H,
+    name: &str,
+    args: Vec<HostValue>,
+) -> Option<Result<HostValue, HostError>> {
+    let wrong =
+        |name: &str| HostError::Other(format!("`{name}` was called with the wrong arguments"));
+    Some(match (name, args.as_slice()) {
+        ("fs_read", [HostValue::Str(path)]) => host.read_file(path).map(HostValue::Str),
+        ("fs_write", [HostValue::Str(path), HostValue::Str(content)]) => host
+            .write_file(path, content)
+            .map(|()| HostValue::Bool(true)),
+        ("env_get", [HostValue::Str(name)]) => host
+            .env_var(name)
+            .map(|v| v.map_or(HostValue::Null, HostValue::Str)),
+        ("env_args", []) => host
+            .args()
+            .map(|xs| HostValue::Array(xs.into_iter().map(HostValue::Str).collect())),
+        ("http_send", [HostValue::Map(fields)]) => {
+            let text = |key: &str| {
+                fields.iter().find_map(|(k, v)| match (k, v) {
+                    (HostValue::Str(k), HostValue::Str(v)) if k == key => Some(v.clone()),
+                    _ => None,
+                })
+            };
+            let headers = fields
+                .iter()
+                .find_map(|(k, v)| match (k, v) {
+                    (HostValue::Str(k), HostValue::Map(h)) if k == "headers" => Some(h),
+                    _ => None,
+                })
+                .map(|h| {
+                    h.iter()
+                        .filter_map(|(k, v)| match (k, v) {
+                            (HostValue::Str(k), HostValue::Str(v)) => Some((k.clone(), v.clone())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let request = HttpRequest {
+                method: text("method").unwrap_or_default(),
+                url: text("url").unwrap_or_default(),
+                headers,
+                body: text("body"),
+            };
+            host.http_send(request).map(|r| {
+                HostValue::Map(vec![
+                    (HostValue::Str("status".into()), HostValue::Int(r.status)),
+                    (
+                        HostValue::Str("headers".into()),
+                        HostValue::Map(
+                            r.headers
+                                .into_iter()
+                                .map(|(k, v)| (HostValue::Str(k), HostValue::Str(v)))
+                                .collect(),
+                        ),
+                    ),
+                    (HostValue::Str("body".into()), HostValue::Str(r.body)),
+                ])
+            })
+        }
+        ("fs_read" | "fs_write" | "env_get" | "env_args" | "http_send", _) => Err(wrong(name)),
+        _ => return None,
+    })
+}
+
 /// The names of the `extern fun` the prelude's `Db` is built on.
 pub const SQL_EXTERNS: [&str; 4] = ["sql_connect", "sql_query", "sql_execute", "sql_close"];
 
@@ -233,14 +313,14 @@ pub trait Host {
 
     /// Whether this environment provides the `extern fun` called `name`. Asked at compile
     /// time, so that using a missing one is reported before running.
-    fn has_extern(&self, _name: &str) -> bool {
-        false
+    fn has_extern(&self, name: &str) -> bool {
+        std_has(self.capabilities(), name)
     }
 
     /// Run the `extern fun` called `name`. `Err` is turned into a `Result::err` when the
     /// function returns a `Result<T, Error>`, and stops the program otherwise.
-    fn call(&mut self, _name: &str, _args: Vec<HostValue>) -> Result<HostValue, HostError> {
-        Err(HostError::Unsupported("extern"))
+    fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
+        std_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -371,16 +451,17 @@ impl Host for MemoryHost {
         self.assume_externs
             || self.externs.contains_key(name)
             || (self.sql.is_some() && SQL_EXTERNS.contains(&name))
+            || std_has(self.capabilities(), name)
     }
 
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
         if let Some(f) = self.externs.get_mut(name) {
             return f(args);
         }
-        match sql_call(self, name, args) {
-            Some(r) => r,
-            None => Err(HostError::Unsupported("extern")),
+        if SQL_EXTERNS.contains(&name) {
+            return sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")));
         }
+        std_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
     fn capabilities(&self) -> Capabilities {

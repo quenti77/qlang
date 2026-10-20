@@ -517,13 +517,6 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
         "A random number from 0 (included) to 1 (excluded). Needs a source of randomness.",
     ),
     (
-        "http",
-        "function",
-        "send",
-        "send(req: Request) -> Result<Response, Error>",
-        "Sends an HTTP request and waits for the response. Needs network access. A connection failure is `err`, not a crash.",
-    ),
-    (
         "regex",
         "function",
         "matches",
@@ -571,34 +564,6 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
         "split",
         "split(text: string, pattern: string) -> array<string>",
         "`text` cut at every match of `pattern` (the matches themselves are dropped).",
-    ),
-    (
-        "fs",
-        "function",
-        "read",
-        "read(path: string) -> Result<string, Error>",
-        "Reads a file's whole content as text. Needs disk access. A missing file or a permission error is `err`, not a crash.",
-    ),
-    (
-        "fs",
-        "function",
-        "write",
-        "write(path: string, content: string) -> Result<bool, Error>",
-        "Writes `content` to a file, replacing it entirely (creating it if needed). Needs disk access.",
-    ),
-    (
-        "env",
-        "function",
-        "get",
-        "get(name: string) -> string?",
-        "The value of the environment variable `name`, or `none` if it is not set. Needs a process environment.",
-    ),
-    (
-        "env",
-        "function",
-        "args",
-        "args() -> array<string>",
-        "The program's own command-line arguments. Needs a process environment.",
     ),
 ];
 

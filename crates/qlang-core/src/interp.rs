@@ -9,7 +9,7 @@ use crate::ast::*;
 use crate::check::Program;
 use crate::datetime;
 use crate::diag::Diagnostic;
-use crate::host::{Host, HostError, HttpRequest, HttpResponse, Limits};
+use crate::host::{Host, HostError, Limits};
 use crate::ids;
 use crate::span::Span;
 use crate::types::*;
@@ -2006,27 +2006,6 @@ impl<'a> Interp<'a> {
                 let draw = self.random_bits(span)? % width;
                 Value::Int((*lo as i128 + draw as i128) as i64)
             }
-            ("http", "send") => return self.http_send_call(&args[0], span),
-            ("fs", "read") => match self.host.read_file(&text(&args[0])) {
-                Ok(s) => self.ok_result(Value::str(&s)),
-                Err(e) => self.host_err_result(e),
-            },
-            ("fs", "write") => match self.host.write_file(&text(&args[0]), &text(&args[1])) {
-                Ok(()) => self.ok_result(Value::Bool(true)),
-                Err(e) => self.host_err_result(e),
-            },
-            ("env", "get") => match self.host.env_var(&text(&args[0])) {
-                Ok(v) => v.map_or(Value::None, |s| Value::str(&s)),
-                Err(e) => {
-                    return self.fail("R065", format!("cannot read the environment: {e:?}"), span);
-                }
-            },
-            ("env", "args") => match self.host.args() {
-                Ok(xs) => Value::array(xs.iter().map(|s| Value::str(s)).collect()),
-                Err(e) => {
-                    return self.fail("R065", format!("cannot read the environment: {e:?}"), span);
-                }
-            },
             ("regex", "matches") => Value::Bool(
                 self.compile_regex(&text(&args[1]), span)?
                     .is_match(&text(&args[0])),
@@ -2144,61 +2123,6 @@ impl<'a> Interp<'a> {
             m.insert(Value::str(k), Value::str(v));
         }
         Value::Map(Rc::new(RefCell::new(m)))
-    }
-
-    fn http_ok(&self, resp: HttpResponse) -> Value {
-        let headers = Self::string_map(&resp.headers);
-        let response = self.new_struct(
-            self.prelude_struct("Response"),
-            &[
-                ("status", Value::Int(resp.status)),
-                ("headers", headers),
-                ("body", Value::str(&resp.body)),
-            ],
-        );
-        self.ok_result(response)
-    }
-
-    /// `http.send(req)`: never fails the program itself, even on a connection error — it
-    /// always returns a `Result<Response, Error>` value.
-    fn http_send_call(&mut self, req: &Value, span: Span) -> R<Value> {
-        let Value::Struct(o) = req else {
-            return self.fail("R005", "`http.send` expects a `Request`", span);
-        };
-        let fields = o.fields.borrow();
-        let text = |k: &str| match fields.get(k) {
-            Some(Value::Str(s)) => s.to_string(),
-            _ => String::new(),
-        };
-        let method = text("method");
-        let url = text("url");
-        let body = match fields.get("body") {
-            Some(Value::Str(s)) => Some(s.to_string()),
-            _ => None,
-        };
-        let headers: Vec<(String, String)> = match fields.get("headers") {
-            Some(Value::Map(m)) => m
-                .borrow()
-                .entries
-                .iter()
-                .filter_map(|(k, v)| match (k, v) {
-                    (Value::Str(k), Value::Str(v)) => Some((k.to_string(), v.to_string())),
-                    _ => None,
-                })
-                .collect(),
-            _ => vec![],
-        };
-        drop(fields);
-        let request = HttpRequest {
-            method,
-            url,
-            headers,
-            body,
-        };
-        match self.host.http_send(request) {
-            Ok(resp) => Ok(self.http_ok(resp)),
-            Err(e) => Ok(self.host_err_result(e)),
-        }
     }
 
     #[inline(never)]

@@ -137,7 +137,9 @@ Les valeurs sont du JSON : une structure ou une table est un objet (les clés `i
 Un nom déjà fourni par `qlang` (`sql_*`) ou par un autre fournisseur est refusé. Lancer les
 commandes d'un `qlang.toml` revient à exécuter ce fichier : à ne faire que sur du code de
 confiance. Les modes `--json` (éditeurs, protocole) ne lisent pas de `qlang.toml` et ne
-lancent aucun fournisseur ; `qlang serve app.q` en lance un par worker.
+lancent aucun fournisseur : une vérification seule (`check --json`, ou `"mode": "check"`)
+suppose donc toutes les `extern fun` fournies, comme elle suppose un clavier et une
+horloge, alors qu'un `run --json` les refuse (`T263`) ; `qlang serve app.q` en lance un par worker.
 
 ## Architecture
 

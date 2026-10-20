@@ -131,3 +131,35 @@ fn the_toml_is_found_in_a_parent_directory() {
     assert!(ok, "{err}");
     assert!(out.starts_with("HI!"), "{out}");
 }
+
+fn json_request(mode: &str, d: &Dir) -> String {
+    use std::io::Write;
+    let request = serde_json::json!({
+        "entry": "app.q",
+        "files": { "app.q": "extern fun shout(s: string) -> string\nprint(shout(\"hi\"))" },
+        "mode": mode,
+    });
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .args(["run", "--json"])
+        .current_dir(&d.0)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(request.to_string().as_bytes())
+        .unwrap();
+    String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+}
+
+#[test]
+fn a_json_check_assumes_externs_are_provided_but_a_json_run_does_not() {
+    let d = Dir::new("json");
+    let checked = json_request("check", &d);
+    assert!(checked.contains("\"ok\":true"), "{checked}");
+    let run = json_request("run", &d);
+    assert!(run.contains("T263"), "{run}");
+}

@@ -108,6 +108,8 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
         allow_read: req.input.is_some(),
         clock: req.now,
         seed: req.seed,
+        // a check cannot know what the real host provides: it does not report it
+        assume_externs: check_only,
         ..MemoryHost::default()
     };
     if let Some(lines) = req.input {

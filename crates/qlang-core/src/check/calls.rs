@@ -539,10 +539,17 @@ impl Checker {
             && def.decl.as_ref().is_some_and(|d| d.external)
             && self.missing_externs.contains(&def.name)
         {
-            let msg = format!(
+            let mut msg = format!(
                 "`{}` is not available in this environment (the host does not provide it)",
                 def.name
             );
+            // declared by a package: the project has to provide it
+            let module = self.modules[def.module].path.clone();
+            if let Some((package, _)) = module.split_once('/').filter(|_| module.starts_with('@')) {
+                msg.push_str(&format!(
+                    "; the package {package} needs it: provide it with `--extern` or in the `[externs]` of this project's qlang.toml"
+                ));
+            }
             self.err("T263", msg, span);
         }
     }

@@ -146,8 +146,12 @@ fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<
         remove_dir(dest).map_err(|e| format!("cannot replace {}: {e}", dest.display()))?;
     }
     if let Some(c) = locked {
-        // already there at that commit: nothing to do
-        if same_origin && git(Some(dest), &["rev-parse", "HEAD"]).ok().as_deref() == Some(c) {
+        // already there at that commit, and untouched: nothing to do (files edited by hand
+        // in the checkout are put back by the `checkout --force` below)
+        if same_origin
+            && git(Some(dest), &["rev-parse", "HEAD"]).ok().as_deref() == Some(c)
+            && git(Some(dest), &["status", "--porcelain"]).is_ok_and(|s| s.is_empty())
+        {
             return Ok(c.to_string());
         }
     }

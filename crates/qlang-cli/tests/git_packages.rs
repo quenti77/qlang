@@ -255,3 +255,22 @@ fn only_safe_transports_are_allowed() {
     assert!(!ok);
     assert!(!Path::new("/tmp/qlang-pwned").exists());
 }
+
+#[test]
+fn install_puts_back_files_edited_by_hand() {
+    if !have_git() {
+        return;
+    }
+    let d = Dir::new("tamper");
+    let url = d.repo("mail", &[("lib.q", &lib("v1"))], "v1");
+    d.write(
+        "app/qlang.toml",
+        &format!("[dependencies]\nmail = {{ git = \"{url}\", tag = \"v1\" }}\n"),
+    );
+    d.write("app/main.q", APP);
+    assert!(d.qlang(&["install"]).2);
+    d.write("app/.qlang/packages/mail/lib.q", &lib("hacked"));
+    assert_eq!(d.qlang(&["run", "main.q"]).0, "hacked\n");
+    assert!(d.qlang(&["install"]).2);
+    assert_eq!(d.qlang(&["run", "main.q"]).0, "v1\n");
+}

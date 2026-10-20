@@ -1197,8 +1197,9 @@ déclarent le même nom appellent donc la même fonction.
   `read()` sans clavier ; la déclarer sans l'appeler ne coûte rien. Une réponse qui ne
   correspond pas à la signature est une erreur d'exécution (`R083`).
 - Une `extern fun` n'est autorisée qu'au niveau d'un fichier, pas dans un bloc, et ne
-  peut pas être générique. Le programme `qlang` seul n'en fournit encore aucune : elles
-  servent aux programmes qui embarquent le langage (`Host::call`, voir `host.rs`).
+  peut pas être générique. Le programme `qlang` fournit celles de `Db` (SQLite et
+  Postgres) ; un programme qui embarque le langage en fournit d'autres avec
+  `Host::call` et `Host::has_extern` (voir `host.rs`).
 
 ---
 
@@ -1974,7 +1975,11 @@ end
 
 - Une erreur de connexion ou de requête (SQL invalide, table absente...) donne un
   `Result::err`, jamais un arrêt du programme, comme `http.send`.
-- Besoin d'un accès base de données côté hôte, comme pour `http`.
+- Besoin d'un accès base de données côté hôte, comme pour `http`. `Db` est écrit en
+  qlang au-dessus de quatre [`extern fun`](#fonctions-fournies-par-lenvironnement-extern)
+  (`sql_connect`, `sql_query`, `sql_execute`, `sql_close`) que l'hôte fournit :
+  `qlang` les fournit pour SQLite et Postgres, et un autre environnement peut brancher
+  sa propre base sous les mêmes noms.
 - **Limites actuelles** : côté Postgres, seuls les types scalaires courants (`bool`,
   entiers, flottants, texte) sont bien convertis, les autres (date, uuid, json,
   tableau...) retombent en texte si possible, sinon `none` ; pas de BLOB SQLite (devient

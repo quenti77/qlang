@@ -517,10 +517,27 @@ impl Checker {
         }
     }
 
+    /// `Db` calls need the host's database; the prelude's `extern fun` cannot say it
+    /// themselves (they are always declared), so the call on `Db` does.
+    fn require_database(&mut self, ext: &str, what: &str, span: Span) {
+        if self.missing_externs.contains(ext) {
+            self.err(
+                "T250",
+                format!(
+                    "`{what}` is not available in this environment (there is no database access)"
+                ),
+                span,
+            );
+        }
+    }
+
     /// Using an `extern fun` the host does not provide is a compile error.
     pub(crate) fn check_extern_available(&mut self, fid: FnId, span: Span) {
         let def = &self.defs.fns[fid];
-        if def.decl.as_ref().is_some_and(|d| d.external) && self.missing_externs.contains(&def.name)
+        // the prelude's own externs are reported where they are used (`Db` calls)
+        if self.cur_mod != PRELUDE_MOD
+            && def.decl.as_ref().is_some_and(|d| d.external)
+            && self.missing_externs.contains(&def.name)
         {
             let msg = format!(
                 "`{}` is not available in this environment (the host does not provide it)",
@@ -792,56 +809,18 @@ impl Checker {
             }
             _ => {}
         }
-        // `Db` declares no method in qlang: `query`, `execute` and `close` are native
+        // `Db` is written in qlang over `extern fun`: say so up front when the host has no database
         if let Ty::Struct(sid, _) = &rt
             && *sid == self.prelude_struct("Db")
         {
-            let error = || Ty::Struct(self.prelude_struct("Error"), vec![]);
-            let result = |data: Ty| Ty::Struct(self.prelude_struct("Result"), vec![data, error()]);
-            let json_array = Ty::Array(Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])));
-            let sig = match name.name.as_str() {
-                "query" => Some(CallSig {
-                    name: "Db.query".to_string(),
-                    tparams: vec![],
-                    params: vec![Ty::Str, json_array.clone()],
-                    ret: result(Ty::Array(Box::new(Ty::Map(
-                        Box::new(Ty::Str),
-                        Box::new(Ty::Struct(self.prelude_struct("Json"), vec![])),
-                    )))),
-                    param_names: None,
-                }),
-                "execute" => Some(CallSig {
-                    name: "Db.execute".to_string(),
-                    tparams: vec![],
-                    params: vec![Ty::Str, json_array],
-                    ret: result(Ty::Int),
-                    param_names: None,
-                }),
-                "close" | "begin" | "commit" | "rollback" => Some(CallSig {
-                    name: format!("Db.{}", name.name),
-                    tparams: vec![],
-                    params: vec![],
-                    ret: result(Ty::Bool),
-                    param_names: None,
-                }),
+            let needs = match name.name.as_str() {
+                "query" => Some("sql_query"),
+                "execute" | "begin" | "commit" | "rollback" => Some("sql_execute"),
+                "close" => Some("sql_close"),
                 _ => None,
             };
-            if let Some(sig) = sig {
-                if !self.caps.sql {
-                    self.err("T250", format!("`Db.{}` is not available in this environment (there is no database access)", name.name), e.span);
-                }
-                self.res.db_calls.insert(
-                    e.id,
-                    match name.name.as_str() {
-                        "query" => "query",
-                        "execute" => "execute",
-                        "begin" => "begin",
-                        "commit" => "commit",
-                        "rollback" => "rollback",
-                        _ => "close",
-                    },
-                );
-                return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            if let Some(ext) = needs {
+                self.require_database(ext, &format!("Db.{}", name.name), e.span);
             }
         }
         // built-in methods first for built-in types
@@ -1055,23 +1034,7 @@ impl Checker {
             && *sid == self.prelude_struct("Db")
             && name.name == "connect"
         {
-            self.res
-                .paths
-                .insert(callee.id, PathRes::BuiltinStatic("db", "connect"));
-            if !self.caps.sql {
-                self.err("T250", "`Db.connect` is not available in this environment (there is no database access)".to_string(), e.span);
-            }
-            let db = Ty::Struct(*sid, vec![]);
-            let error = Ty::Struct(self.prelude_struct("Error"), vec![]);
-            let result = Ty::Struct(self.prelude_struct("Result"), vec![db, error]);
-            let sig = CallSig {
-                name: "Db.connect".to_string(),
-                tparams: vec![],
-                params: vec![Ty::Str],
-                ret: result,
-                param_names: None,
-            };
-            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            self.require_database("sql_connect", "Db.connect", e.span);
         }
         if let TypeRef::Builtin(b) = tref {
             if let Some((fname, params, ret, needs)) = static_fn(b, &name.name, args.len()) {

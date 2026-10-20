@@ -452,12 +452,6 @@ impl Checker {
                 public: true,
             });
         }
-        if let Ty::Struct(sid, _) = ty
-            && self.defs.structs[*sid].module == super::PRELUDE_MOD
-            && self.defs.structs[*sid].name == "Db"
-        {
-            out.extend(db_members());
-        }
         dedup(out)
     }
 
@@ -570,18 +564,6 @@ impl Checker {
                     self.impl_methods(&Ty::Struct(asid, params), false, &mut out);
                 }
                 out.push(class_member());
-                if self.defs.structs[*sid].module == super::PRELUDE_MOD
-                    && self.defs.structs[*sid].name == "Db"
-                {
-                    out.push(Member {
-                        name: "connect".to_string(),
-                        kind: "function",
-                        detail: "connect(url: string) -> Result<Db, Error>".to_string(),
-                        loc: None,
-                        doc: Some("Opens a database connection (`sqlite://path`, `postgres://...`). Needs database access.".to_string()),
-                        public: true,
-                    });
-                }
             }
         }
         dedup(out)
@@ -851,61 +833,6 @@ fn class_member() -> Member {
         doc: Some("The name of the type, as a string.".to_string()),
         public: true,
     }
-}
-
-/// `Db` declares no method in qlang (`query`, `execute`, `close` are native): offered here
-/// so hovers and completion still show them.
-fn db_members() -> Vec<Member> {
-    vec![
-        Member {
-            name: "query".to_string(),
-            kind: "method",
-            detail: "query(sql: string, params: array<Json>) -> Result<array<map<string, Json>>, Error>".to_string(),
-            loc: None,
-            doc: Some("Runs a statement that returns rows (`SELECT`). `?` placeholders are bound from `params`, in order.".to_string()),
-            public: true,
-        },
-        Member {
-            name: "execute".to_string(),
-            kind: "method",
-            detail: "execute(sql: string, params: array<Json>) -> Result<int, Error>".to_string(),
-            loc: None,
-            doc: Some("Runs a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL), returning the number of rows affected.".to_string()),
-            public: true,
-        },
-        Member {
-            name: "close".to_string(),
-            kind: "method",
-            detail: "close() -> Result<bool, Error>".to_string(),
-            loc: None,
-            doc: Some("Closes the connection.".to_string()),
-            public: true,
-        },
-        Member {
-            name: "begin".to_string(),
-            kind: "method",
-            detail: "begin() -> Result<bool, Error>".to_string(),
-            loc: None,
-            doc: Some("Starts a transaction: statements run after this are not visible to other connections until `commit()`, and are undone by `rollback()`.".to_string()),
-            public: true,
-        },
-        Member {
-            name: "commit".to_string(),
-            kind: "method",
-            detail: "commit() -> Result<bool, Error>".to_string(),
-            loc: None,
-            doc: Some("Makes every statement since `begin()` permanent.".to_string()),
-            public: true,
-        },
-        Member {
-            name: "rollback".to_string(),
-            kind: "method",
-            detail: "rollback() -> Result<bool, Error>".to_string(),
-            loc: None,
-            doc: Some("Undoes every statement since `begin()`.".to_string()),
-            public: true,
-        },
-    ]
 }
 
 fn dedup(items: Vec<Member>) -> Vec<Member> {

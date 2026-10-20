@@ -9,7 +9,7 @@ use crate::ast::*;
 use crate::check::Program;
 use crate::datetime;
 use crate::diag::Diagnostic;
-use crate::host::{Host, HostError, HttpRequest, HttpResponse, Limits, SqlValue};
+use crate::host::{Host, HostError, HttpRequest, HttpResponse, Limits};
 use crate::ids;
 use crate::span::Span;
 use crate::types::*;
@@ -1006,9 +1006,6 @@ impl<'a> Interp<'a> {
         }
         if self.prog.res.class_calls.contains(&self.cur_call) {
             return Ok(Value::str(self.class_name_of(&recv)));
-        }
-        if let Some(op) = self.prog.res.db_calls.get(&self.cur_call).copied() {
-            return self.db_call(op, recv, args, span);
         }
         // A call made through a trait (a generic bound or a trait-typed value) goes to the
         // user's impl; a call on a concrete built-in type goes to the built-in method.
@@ -2030,7 +2027,6 @@ impl<'a> Interp<'a> {
                     return self.fail("R065", format!("cannot read the environment: {e:?}"), span);
                 }
             },
-            ("db", "connect") => return self.db_connect_call(&text(&args[0]), span),
             ("regex", "matches") => Value::Bool(
                 self.compile_regex(&text(&args[1]), span)?
                     .is_match(&text(&args[0])),
@@ -2202,140 +2198,6 @@ impl<'a> Interp<'a> {
         match self.host.http_send(request) {
             Ok(resp) => Ok(self.http_ok(resp)),
             Err(e) => Ok(self.host_err_result(e)),
-        }
-    }
-
-    /// A `Json` value's `kind`/`str`/`num`/`bool_` fields, read directly (duck-typed: it
-    /// does not matter whether the value really is the prelude's `Json`, only that it has
-    /// the same shape), turned into the matching [`SqlValue`] bind parameter.
-    fn json_to_sql(&self, v: &Value) -> SqlValue {
-        let Value::Struct(o) = v else {
-            return SqlValue::Null;
-        };
-        let fields = o.fields.borrow();
-        match fields.get("kind") {
-            Some(Value::Str(k)) => match k.as_ref() {
-                "string" => match fields.get("str") {
-                    Some(Value::Str(s)) => SqlValue::Text(s.to_string()),
-                    _ => SqlValue::Null,
-                },
-                "number" => match fields.get("num") {
-                    Some(Value::Float(n)) => SqlValue::Float(*n),
-                    _ => SqlValue::Null,
-                },
-                "bool" => match fields.get("bool_") {
-                    Some(Value::Bool(b)) => SqlValue::Bool(*b),
-                    _ => SqlValue::Null,
-                },
-                // "null", "array", "object": none of these are valid bind parameters
-                _ => SqlValue::Null,
-            },
-            _ => SqlValue::Null,
-        }
-    }
-
-    /// The reverse of [`Self::json_to_sql`]: a column value read back as a `Json` value.
-    fn sql_to_json(&self, v: &SqlValue) -> Value {
-        let (kind, str_v, num_v, bool_v) = match v {
-            SqlValue::Null => ("null", Value::None, Value::None, Value::None),
-            SqlValue::Text(s) => ("string", Value::str(s), Value::None, Value::None),
-            SqlValue::Int(i) => ("number", Value::None, Value::Float(*i as f64), Value::None),
-            SqlValue::Float(f) => ("number", Value::None, Value::Float(*f), Value::None),
-            SqlValue::Bool(b) => ("bool", Value::None, Value::None, Value::Bool(*b)),
-        };
-        self.new_struct(
-            self.prelude_struct("Json"),
-            &[
-                ("kind", Value::str(kind)),
-                ("str", str_v),
-                ("num", num_v),
-                ("bool_", bool_v),
-                ("arr", Value::None),
-                ("obj", Value::None),
-            ],
-        )
-    }
-
-    /// `Db.connect(url)`.
-    fn db_connect_call(&mut self, url: &str, span: Span) -> R<Value> {
-        let _ = span;
-        match self.host.sql_connect(url) {
-            Ok(id) => Ok(self.ok_result(self.new_struct(
-                self.prelude_struct("Db"),
-                &[("conn", Value::Int(id as i64))],
-            ))),
-            Err(e) => Ok(self.host_err_result(e)),
-        }
-    }
-
-    /// `params: array<Json>`, the second argument of `query`/`execute`, converted to the
-    /// `SqlValue`s the host binds in order for each `?` placeholder.
-    fn bind_params(&self, args: &[Value]) -> Vec<SqlValue> {
-        match args.get(1) {
-            Some(Value::Array(a)) => a.borrow().iter().map(|v| self.json_to_sql(v)).collect(),
-            _ => vec![],
-        }
-    }
-
-    /// A call on a `Db` value (`query`, `execute`, `close`, `begin`, `commit`,
-    /// `rollback`): `op` is what the checker recorded in `Resolutions::db_calls` for
-    /// this call expression.
-    fn db_call(&mut self, op: &'static str, recv: Value, args: Vec<Value>, span: Span) -> R<Value> {
-        let Value::Struct(o) = &recv else {
-            return self.fail("R005", "`Db` methods need a `Db` value", span);
-        };
-        let conn = match o.fields.borrow().get("conn") {
-            Some(Value::Int(i)) => *i as u64,
-            _ => 0,
-        };
-        let text = |v: &Value| match v {
-            Value::Str(s) => s.to_string(),
-            _ => String::new(),
-        };
-        match op {
-            "query" => {
-                let sql = text(&args[0]);
-                let params = self.bind_params(&args);
-                match self.host.sql_query(conn, &sql, params) {
-                    Ok(rows) => {
-                        let out: Vec<Value> = rows
-                            .iter()
-                            .map(|row| {
-                                let mut map = MapObj::default();
-                                for (name, v) in &row.columns {
-                                    map.insert(Value::str(name), self.sql_to_json(v));
-                                }
-                                Value::Map(Rc::new(RefCell::new(map)))
-                            })
-                            .collect();
-                        Ok(self.ok_result(Value::array(out)))
-                    }
-                    Err(e) => Ok(self.host_err_result(e)),
-                }
-            }
-            "execute" => {
-                let sql = text(&args[0]);
-                let params = self.bind_params(&args);
-                match self.host.sql_execute(conn, &sql, params) {
-                    Ok(n) => Ok(self.ok_result(Value::Int(n as i64))),
-                    Err(e) => Ok(self.host_err_result(e)),
-                }
-            }
-            "begin" | "commit" | "rollback" => {
-                let sql = match op {
-                    "begin" => "BEGIN",
-                    "commit" => "COMMIT",
-                    _ => "ROLLBACK",
-                };
-                match self.host.sql_execute(conn, sql, vec![]) {
-                    Ok(_) => Ok(self.ok_result(Value::Bool(true))),
-                    Err(e) => Ok(self.host_err_result(e)),
-                }
-            }
-            _ => match self.host.sql_close(conn) {
-                Ok(()) => Ok(self.ok_result(Value::Bool(true))),
-                Err(e) => Ok(self.host_err_result(e)),
-            },
         }
     }
 

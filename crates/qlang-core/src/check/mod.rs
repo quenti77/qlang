@@ -883,10 +883,66 @@ impl Router
     end
 end
 
---" A SQL database connection, opened with `Db.connect(url)`. `query`, `execute` and
-`close` are native: this struct declares no method in qlang. --"
+-- The host provides the database: these are the `extern fun` it implements.
+extern fun sql_connect(url: string) -> Result<int, Error>
+extern fun sql_query(conn: int, sql: string, params: array<Json>) -> Result<array<map<string, Json>>, Error>
+extern fun sql_execute(conn: int, sql: string, params: array<Json>) -> Result<int, Error>
+extern fun sql_close(conn: int) -> Result<bool, Error>
+
+--" Statement outcome as a `bool`: ok(true), or the same error. --"
+fun sql_done(r: Result<int, Error>) -> Result<bool, Error>
+    if r.is_ok() then
+        Result.ok(true)
+    else
+        Result.err(r.unwrap_err())
+    end
+end
+
+--" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int
+end
+
+impl Db
+    --" Opens a database connection (`sqlite://path`, `postgres://...`). Needs database access. --"
+    public fun connect(url: string) -> Result<Db, Error>
+        let r = sql_connect(url)
+        if r.is_ok() then
+            Result.ok(Db { conn: r.unwrap() })
+        else
+            Result.err(r.unwrap_err())
+        end
+    end
+
+    --" Runs a statement that returns rows (`SELECT`). `?` placeholders are bound from `params`, in order. --"
+    public fun query(self, sql: string, params: array<Json>) -> Result<array<map<string, Json>>, Error>
+        sql_query(self.conn, sql, params)
+    end
+
+    --" Runs a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL), returning the number of rows affected. --"
+    public fun execute(self, sql: string, params: array<Json>) -> Result<int, Error>
+        sql_execute(self.conn, sql, params)
+    end
+
+    --" Closes the connection. --"
+    public fun close(self) -> Result<bool, Error>
+        sql_close(self.conn)
+    end
+
+    --" Starts a transaction. --"
+    public fun begin(self) -> Result<bool, Error>
+        sql_done(sql_execute(self.conn, "BEGIN", []))
+    end
+
+    --" Commits the transaction started by `begin()`. --"
+    public fun commit(self) -> Result<bool, Error>
+        sql_done(sql_execute(self.conn, "COMMIT", []))
+    end
+
+    --" Cancels everything done since `begin()`. --"
+    public fun rollback(self) -> Result<bool, Error>
+        sql_done(sql_execute(self.conn, "ROLLBACK", []))
+    end
 end
 "#;
 

@@ -22,8 +22,6 @@ pub struct Capabilities {
     pub random: bool,
     /// `http.send(...)` is available (the host can reach the network).
     pub http: bool,
-    /// `Db.connect(...)` is available (the host can reach a database).
-    pub sql: bool,
     /// `fs.read(...)`/`fs.write(...)` are available (the host can touch the disk).
     pub fs: bool,
     /// `env.get(...)`/`env.args()` are available (the host has a process environment).
@@ -45,6 +43,104 @@ pub enum SqlValue {
 #[derive(Clone, Debug)]
 pub struct SqlRow {
     pub columns: Vec<(String, SqlValue)>,
+}
+
+/// The database side of a host. `Db` is written in qlang on top of four `extern fun`
+/// (`sql_connect`, `sql_query`, `sql_execute`, `sql_close`, see [`SQL_EXTERNS`]); a host
+/// that has a database implements this trait and forwards those names to [`sql_call`]
+/// from [`Host::call`], so it does not have to convert the values itself.
+pub trait SqlBackend {
+    /// Open a connection (`sqlite://path`, `postgres://...`...), returning a handle for
+    /// the other methods. What the handle means is entirely up to the host.
+    fn sql_connect(&mut self, url: &str) -> Result<u64, HostError>;
+
+    /// Run a statement that returns rows (`SELECT`), with positional `?` parameters.
+    fn sql_query(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<Vec<SqlRow>, HostError>;
+
+    /// Run a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL),
+    /// returning the number of rows affected.
+    fn sql_execute(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<u64, HostError>;
+
+    /// Close a connection opened by `sql_connect`.
+    fn sql_close(&mut self, conn: u64) -> Result<(), HostError>;
+}
+
+/// The names of the `extern fun` the prelude's `Db` is built on.
+pub const SQL_EXTERNS: [&str; 4] = ["sql_connect", "sql_query", "sql_execute", "sql_close"];
+
+/// Runs one of the [`SQL_EXTERNS`] on a [`SqlBackend`]; `None` if `name` is not one of
+/// them. Values follow the signatures declared in the prelude: `Json` parameters become
+/// [`SqlValue`]s (arrays and objects, which a column cannot hold, bind as `NULL`), and
+/// columns come back as `Json` (numbers are floats).
+pub fn sql_call(
+    db: &mut dyn SqlBackend,
+    name: &str,
+    args: Vec<HostValue>,
+) -> Option<Result<HostValue, HostError>> {
+    fn bad(name: &str) -> HostError {
+        HostError::Other(format!("`{name}` was called with the wrong arguments"))
+    }
+    fn to_sql(v: &HostValue) -> SqlValue {
+        match v {
+            HostValue::Str(s) => SqlValue::Text(s.clone()),
+            HostValue::Float(f) => SqlValue::Float(*f),
+            HostValue::Int(i) => SqlValue::Int(*i),
+            HostValue::Bool(b) => SqlValue::Bool(*b),
+            _ => SqlValue::Null,
+        }
+    }
+    fn from_sql(v: &SqlValue) -> HostValue {
+        match v {
+            SqlValue::Null => HostValue::Null,
+            SqlValue::Int(i) => HostValue::Float(*i as f64),
+            SqlValue::Float(f) => HostValue::Float(*f),
+            SqlValue::Text(s) => HostValue::Str(s.clone()),
+            SqlValue::Bool(b) => HostValue::Bool(*b),
+        }
+    }
+    let params = |v: &HostValue| match v {
+        HostValue::Array(items) => items.iter().map(to_sql).collect(),
+        _ => Vec::new(),
+    };
+    Some(match (name, args.as_slice()) {
+        ("sql_connect", [HostValue::Str(url)]) => {
+            db.sql_connect(url).map(|id| HostValue::Int(id as i64))
+        }
+        ("sql_query", [HostValue::Int(c), HostValue::Str(sql), p]) => {
+            db.sql_query(*c as u64, sql, params(p)).map(|rows| {
+                HostValue::Array(
+                    rows.iter()
+                        .map(|row| {
+                            HostValue::Map(
+                                row.columns
+                                    .iter()
+                                    .map(|(n, v)| (HostValue::Str(n.clone()), from_sql(v)))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+        }
+        ("sql_execute", [HostValue::Int(c), HostValue::Str(sql), p]) => db
+            .sql_execute(*c as u64, sql, params(p))
+            .map(|n| HostValue::Int(n as i64)),
+        ("sql_close", [HostValue::Int(c)]) => {
+            db.sql_close(*c as u64).map(|()| HostValue::Bool(true))
+        }
+        (n, _) if SQL_EXTERNS.contains(&n) => Err(bad(n)),
+        _ => return None,
+    })
 }
 
 /// A request given to [`Host::http_send`]: the fields of the prelude's `Request` struct,
@@ -112,38 +208,6 @@ pub trait Host {
     /// all; the caller turns both into a qlang `Result::err`, never a crash.
     fn http_send(&mut self, _req: HttpRequest) -> Result<HttpResponse, HostError> {
         Err(HostError::Unsupported("http"))
-    }
-
-    /// Open a connection (`sqlite://path`, `postgres://...`...), returning a handle for
-    /// the other `sql_*` methods. What the handle means is entirely up to the host.
-    fn sql_connect(&mut self, _url: &str) -> Result<u64, HostError> {
-        Err(HostError::Unsupported("sql"))
-    }
-
-    /// Run a statement that returns rows (`SELECT`), with positional `?` parameters.
-    fn sql_query(
-        &mut self,
-        _conn: u64,
-        _sql: &str,
-        _params: Vec<SqlValue>,
-    ) -> Result<Vec<SqlRow>, HostError> {
-        Err(HostError::Unsupported("sql"))
-    }
-
-    /// Run a statement that does not return rows (`INSERT`/`UPDATE`/`DELETE`/DDL),
-    /// returning the number of rows affected.
-    fn sql_execute(
-        &mut self,
-        _conn: u64,
-        _sql: &str,
-        _params: Vec<SqlValue>,
-    ) -> Result<u64, HostError> {
-        Err(HostError::Unsupported("sql"))
-    }
-
-    /// Close a connection opened by `sql_connect`.
-    fn sql_close(&mut self, _conn: u64) -> Result<(), HostError> {
-        Err(HostError::Unsupported("sql"))
     }
 
     /// Read a file's whole content as text. A missing file, a permission error, or content
@@ -282,12 +346,15 @@ impl Host for MemoryHost {
     }
 
     fn has_extern(&self, name: &str) -> bool {
-        self.externs.contains_key(name)
+        self.externs.contains_key(name) || (self.sql.is_some() && SQL_EXTERNS.contains(&name))
     }
 
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
-        match self.externs.get_mut(name) {
-            Some(f) => f(args),
+        if let Some(f) = self.externs.get_mut(name) {
+            return f(args);
+        }
+        match sql_call(self, name, args) {
+            Some(r) => r,
             None => Err(HostError::Unsupported("extern")),
         }
     }
@@ -298,7 +365,6 @@ impl Host for MemoryHost {
             time: self.clock.is_some(),
             random: self.seed.is_some(),
             http: self.http.is_some(),
-            sql: self.sql.is_some(),
             fs: self.fs.is_some(),
             env: self.env.is_some(),
         }
@@ -315,6 +381,54 @@ impl Host for MemoryHost {
         }
     }
 
+    fn read_file(&mut self, path: &str) -> Result<String, HostError> {
+        let table = self.fs.as_ref().ok_or(HostError::Unsupported("fs"))?;
+        table
+            .get(path)
+            .cloned()
+            .ok_or_else(|| HostError::Other(format!("\"{path}\" not found")))
+    }
+
+    fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
+        let table = self.fs.as_mut().ok_or(HostError::Unsupported("fs"))?;
+        table.insert(path.to_string(), content.to_string());
+        Ok(())
+    }
+
+    fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
+        let table = self.env.as_ref().ok_or(HostError::Unsupported("env"))?;
+        Ok(table.get(name).cloned())
+    }
+
+    fn args(&mut self) -> Result<Vec<String>, HostError> {
+        if self.env.is_none() {
+            return Err(HostError::Unsupported("env"));
+        }
+        Ok(self.cli_args.clone())
+    }
+
+    fn now_ms(&mut self) -> Result<i64, HostError> {
+        self.clock.ok_or(HostError::Unsupported("time"))
+    }
+
+    fn random_u64(&mut self) -> Result<u64, HostError> {
+        match &mut self.seed {
+            Some(state) => Ok(splitmix64(state)),
+            None => Err(HostError::Unsupported("random")),
+        }
+    }
+}
+
+/// A small deterministic generator (SplitMix64), for hosts that replay a seed.
+pub fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+impl SqlBackend for MemoryHost {
     fn sql_connect(&mut self, _url: &str) -> Result<u64, HostError> {
         if self.sql.is_some() {
             self.sql_closed = false;
@@ -369,50 +483,4 @@ impl Host for MemoryHost {
         self.sql_closed = true;
         Ok(())
     }
-
-    fn read_file(&mut self, path: &str) -> Result<String, HostError> {
-        let table = self.fs.as_ref().ok_or(HostError::Unsupported("fs"))?;
-        table
-            .get(path)
-            .cloned()
-            .ok_or_else(|| HostError::Other(format!("\"{path}\" not found")))
-    }
-
-    fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
-        let table = self.fs.as_mut().ok_or(HostError::Unsupported("fs"))?;
-        table.insert(path.to_string(), content.to_string());
-        Ok(())
-    }
-
-    fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
-        let table = self.env.as_ref().ok_or(HostError::Unsupported("env"))?;
-        Ok(table.get(name).cloned())
-    }
-
-    fn args(&mut self) -> Result<Vec<String>, HostError> {
-        if self.env.is_none() {
-            return Err(HostError::Unsupported("env"));
-        }
-        Ok(self.cli_args.clone())
-    }
-
-    fn now_ms(&mut self) -> Result<i64, HostError> {
-        self.clock.ok_or(HostError::Unsupported("time"))
-    }
-
-    fn random_u64(&mut self) -> Result<u64, HostError> {
-        match &mut self.seed {
-            Some(state) => Ok(splitmix64(state)),
-            None => Err(HostError::Unsupported("random")),
-        }
-    }
-}
-
-/// A small deterministic generator (SplitMix64), for hosts that replay a seed.
-pub fn splitmix64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
 }

@@ -7,7 +7,8 @@ mod serve;
 
 use qlang_core::check::compile;
 use qlang_core::host::{
-    Capabilities, Host, HostError, HttpRequest, HttpResponse, Limits, SqlRow, SqlValue,
+    Capabilities, Host, HostError, HostValue, HttpRequest, HttpResponse, Limits, SQL_EXTERNS,
+    SqlBackend, SqlRow, SqlValue, sql_call,
 };
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -126,6 +127,34 @@ impl TerminalHost {
     }
 }
 
+impl SqlBackend for TerminalHost {
+    fn sql_connect(&mut self, url: &str) -> Result<u64, HostError> {
+        self.db.connect(url)
+    }
+
+    fn sql_query(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<Vec<SqlRow>, HostError> {
+        self.db.query(conn, sql, params)
+    }
+
+    fn sql_execute(
+        &mut self,
+        conn: u64,
+        sql: &str,
+        params: Vec<SqlValue>,
+    ) -> Result<u64, HostError> {
+        self.db.execute(conn, sql, params)
+    }
+
+    fn sql_close(&mut self, conn: u64) -> Result<(), HostError> {
+        self.db.close(conn)
+    }
+}
+
 impl Host for TerminalHost {
     fn print(&mut self, text: &str) {
         let mut out = std::io::stdout().lock();
@@ -188,7 +217,6 @@ impl Host for TerminalHost {
             time: true,
             random: true,
             http: true,
-            sql: true,
             fs: true,
             env: true,
         }
@@ -228,30 +256,12 @@ impl Host for TerminalHost {
         Ok(self.script_args.clone())
     }
 
-    fn sql_connect(&mut self, url: &str) -> Result<u64, HostError> {
-        self.db.connect(url)
+    fn has_extern(&self, name: &str) -> bool {
+        SQL_EXTERNS.contains(&name)
     }
 
-    fn sql_query(
-        &mut self,
-        conn: u64,
-        sql: &str,
-        params: Vec<SqlValue>,
-    ) -> Result<Vec<SqlRow>, HostError> {
-        self.db.query(conn, sql, params)
-    }
-
-    fn sql_execute(
-        &mut self,
-        conn: u64,
-        sql: &str,
-        params: Vec<SqlValue>,
-    ) -> Result<u64, HostError> {
-        self.db.execute(conn, sql, params)
-    }
-
-    fn sql_close(&mut self, conn: u64) -> Result<(), HostError> {
-        self.db.close(conn)
+    fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
+        sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {

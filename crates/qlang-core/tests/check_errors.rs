@@ -163,3 +163,26 @@ fn parse_errors_are_reported() {
     expect("let x = 1 @ 2", "unexpected character");
     expect("print(\"abc", "unterminated string");
 }
+
+#[test]
+fn a_variable_assigned_by_a_function_is_not_narrowed() {
+    // `f()` can set `x` back to `none` between the test and the use
+    expect(
+        "let x: int? = 5\nlet f = fun() -> int\n  x = none\n  0\nend\nif x != none then\n  f()\n  print(x + 1)\nend",
+        "T005",
+    );
+    // same through a named function
+    expect(
+        "let x: int? = 5\nfun reset()\n  x = none\nend\nif x != none then\n  reset()\n  print(x + 1)\nend",
+        "T005",
+    );
+}
+
+#[test]
+fn narrowing_still_works_when_no_function_assigns_the_variable() {
+    ok("let x: int? = 5\nif x != none then\n  print(x + 1)\nend");
+    // a function's own variable of the same kind is its own business
+    ok(
+        "fun f() -> int\n  let y: int? = 1\n  y = 2\n  if y != none then\n    y + 1\n  else\n    0\n  end\nend\nprint(f())",
+    );
+}

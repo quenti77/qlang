@@ -258,6 +258,11 @@ variables de fichier) avec `==`/`!=` contre `none`, combinés par `and`, `or` et
 champs (`obj.champ`) ni aux résultats d'appels : copier d'abord la valeur dans
 une variable, puis tester la variable. Comparer à `none` est toujours permis.
 
+Une variable qu'une **fonction ou une fonction anonyme affecte** (`x = ...` dans son
+corps, sans l'y avoir déclarée) n'est jamais rétrécie : un appel entre le test et
+l'usage pourrait la remettre à `none`. Il faut alors copier sa valeur dans une variable
+locale avant de la tester.
+
 Appeler une méthode ou lire un champ sur une valeur qui peut être `none` est une
 erreur de compilation.
 

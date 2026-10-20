@@ -55,6 +55,7 @@ impl Checker {
     /// before any module's imports are resolved.
     pub(crate) fn declare_items(&mut self, m: ModId) {
         let ast = self.modules[m].ast.clone();
+        self.mscopes[m].assigned_in_closures = super::captured::assigned_from_closures(&ast);
 
         for (idx, item) in ast.items.iter().enumerate() {
             match item {

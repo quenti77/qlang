@@ -45,6 +45,16 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            "--extern" => {
+                i += 1;
+                match args.get(i) {
+                    Some(command) => app.extern_commands.push(command.to_string()),
+                    None => {
+                        eprintln!("--extern needs a command");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
             "--seed" => {
                 i += 1;
                 match args.get(i).and_then(|s| s.parse().ok()) {
@@ -117,7 +127,14 @@ pub fn serve(args: &[&str]) -> ExitCode {
         }
         i += 1;
     }
-    if app.file.is_some() {
+    if let Some(file) = &app.file {
+        match crate::providers::specs_for(Path::new(file), &app.extern_commands) {
+            Ok(specs) => app.providers = specs,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(1);
+            }
+        }
         return serve_app(&bind, port, app);
     }
     if app.max_steps.is_some()
@@ -126,6 +143,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         || app.static_dir.is_some()
         || app.workers != 1
         || !app.script_args.is_empty()
+        || !app.extern_commands.is_empty()
     {
         eprintln!(
             "--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`"
@@ -370,6 +388,9 @@ struct AppOptions {
     /// Interpreters answering requests, each with its own copy of the program.
     workers: usize,
     script_args: Vec<String>,
+    /// `--extern` commands, and the providers they and `qlang.toml` declare.
+    extern_commands: Vec<String>,
+    providers: Vec<crate::providers::Spec>,
 }
 
 /// A request waiting for an interpreter, and where to send the answer.
@@ -526,11 +547,20 @@ fn worker(
         .seed
         .map(|s| s.wrapping_add(index as u64))
         .unwrap_or_else(crate::system_entropy);
+    let providers =
+        match crate::providers::Providers::start(&opts.providers, &qlang_core::host::SQL_EXTERNS) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                return Err(ExitCode::from(1));
+            }
+        };
     let mut host = crate::TerminalHost {
         root: opts.root.clone(),
         rng: seed,
         db: Default::default(),
         script_args: opts.script_args.clone(),
+        providers,
     };
     let program = match compile(file, source, &mut host) {
         Ok(p) => p,

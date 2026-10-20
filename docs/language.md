@@ -1198,8 +1198,10 @@ déclarent le même nom appellent donc la même fonction.
   correspond pas à la signature est une erreur d'exécution (`R083`).
 - Une `extern fun` n'est autorisée qu'au niveau d'un fichier, pas dans un bloc, et ne
   peut pas être générique. Le programme `qlang` fournit celles de `Db` (SQLite et
-  Postgres) ; un programme qui embarque le langage en fournit d'autres avec
-  `Host::call` et `Host::has_extern` (voir `host.rs`).
+  Postgres), et d'autres venant de programmes externes déclarés dans un `qlang.toml` ou
+  avec `--extern` (voir le [README](../README.md#fournir-des-extern-fun)) ; un programme
+  qui embarque le langage en fournit avec `Host::call` et `Host::has_extern` (voir
+  `host.rs`).
 
 ---
 

@@ -810,7 +810,7 @@ impl<'a> Parser<'a> {
 
     // ----------------------------------------------------------- expressions
 
-    pub fn parse_expr(&mut self) -> PResult<Expr> {
+    fn parse_expr(&mut self) -> PResult<Expr> {
         self.enter()?;
         let r = self.parse_assignment();
         self.leave();

@@ -4,6 +4,9 @@ use super::unify::LangImpl;
 use super::*;
 use crate::ast::*;
 
+/// Variables narrowed to non-`none` by a condition: `(name, type)` pairs.
+type Facts = Vec<(String, Ty)>;
+
 /// What the context needs from an expression.
 #[derive(Clone)]
 pub(crate) enum Want {
@@ -111,7 +114,7 @@ impl Checker {
 
     /// Facts learned from a condition: variables that are not `none` when it
     /// is true, and when it is false.
-    fn cond_facts(&mut self, c: &Expr) -> (Vec<(String, Ty)>, Vec<(String, Ty)>) {
+    fn cond_facts(&mut self, c: &Expr) -> (Facts, Facts) {
         match &c.kind {
             ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), l, r) => {
                 let name = match (&l.kind, &r.kind) {

@@ -520,6 +520,7 @@ impl Checker {
         ret
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn call_method(&mut self, e: &Expr, callee: &Expr, rt: &Ty, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
         let rt = self.resolve(rt);
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
@@ -666,6 +667,7 @@ impl Checker {
             .unwrap_or_else(|| panic!("prelude struct `{name}` not found"))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn call_static(&mut self, e: &Expr, callee: &Expr, ty: &Ty, tref: &TypeRef, name: &Ident, targs: &[TypeExpr], args: &[CallArg], want: &Want) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         if let TypeRef::Builtin("http") = tref

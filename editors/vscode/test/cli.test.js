@@ -78,3 +78,33 @@ test('the editor and the terminal agree on imports that go up a folder', { skip:
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('packages of the project are followed through `qlang packages`', { skip: !binary && 'build qlang first (cargo build)' }, () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'qlang-ext-pkg-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'app'));
+    fs.mkdirSync(path.join(dir, 'mail/src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'app/qlang.toml'), '[dependencies]\nmail = { path = "../mail" }\n');
+    fs.writeFileSync(path.join(dir, 'mail/qlang.toml'), '[package]\nmain = "src/mail.q"\n');
+    fs.writeFileSync(path.join(dir, 'mail/src/mail.q'), 'import h from "./helper.q"\nexport h\n');
+    fs.writeFileSync(path.join(dir, 'mail/src/helper.q'), 'fun h() -> int\n  1\nend\nexport h\n');
+    const app = path.join(dir, 'app');
+    const found = cp.spawnSync(binary, ['packages'], { cwd: app, encoding: 'utf8' });
+    const packages = JSON.parse(found.stdout);
+    assert.strictEqual(packages.mail.main, 'src/mail.q');
+    const read = (rel) => {
+      const real = lib.realPath(app, rel, packages);
+      try { return real && fs.readFileSync(real, 'utf8'); } catch (_) { return null; }
+    };
+    const main = 'import "@mail" as m\nprint(m.h())\nlet x: int = "no"';
+    const files = lib.collectFiles('main.q', main, read, 200, packages);
+    assert.ok('@mail/src/helper.q' in files, Object.keys(files).join());
+    const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest('main.q', files, false, packages), encoding: 'utf8' });
+    const res = JSON.parse(r.stdout);
+    const byFile = lib.toFileDiagnostics(res, 'main.q');
+    assert.deepStrictEqual(Object.keys(byFile), ['main.q']);
+    assert.match(byFile['main.q'][0].message, /expected `int`, found `string`/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

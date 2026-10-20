@@ -352,7 +352,10 @@ curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
 (le programme `qlang` et l'extension ; ou, depuis les sources : `cargo install --path crates/qlang-cli`,
 puis `cd editors/vscode && npm install && npm run package` et `code --install-extension qlang-*.vsix`).
 
-Pour les éditeurs, `qlang check --json` lit la même requête JSON que `run --json` mais ne fait que
+Pour les éditeurs, `qlang packages` affiche en JSON les paquets du projet courant (nom,
+dossier, fichier principal) ; une requête JSON peut ensuite contenir leurs fichiers sous
+les noms `@nom/fichier.q` et dire quel fichier `@nom` désigne avec
+`"package_mains": {"nom": "src/lib.q"}`. `qlang check --json` lit la même requête JSON que `run --json` mais ne fait que
 vérifier le programme (réponse avec `"phase": "check"`) ; `"mode": "check"` dans la requête fait la
 même chose avec `run --json`.
 

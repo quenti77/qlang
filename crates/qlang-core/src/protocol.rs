@@ -25,6 +25,10 @@ struct Request {
     mode: Option<String>,
     /// Also answer what an editor needs: types, local variables, members.
     info: Option<bool>,
+    /// For each package of the project, the file `@name` stands for (`"mail": "src/mail.q"`):
+    /// `files` then holds it as `@mail/src/mail.q`.
+    #[serde(default)]
+    package_mains: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -110,6 +114,7 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
         seed: req.seed,
         // a check cannot know what the real host provides: it does not report it
         assume_externs: check_only,
+        package_mains: req.package_mains,
         ..MemoryHost::default()
     };
     if let Some(lines) = req.input {

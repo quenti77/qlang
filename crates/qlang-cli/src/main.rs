@@ -2,6 +2,7 @@
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
 mod db;
+mod install;
 mod json;
 mod packages;
 mod providers;
@@ -35,6 +36,13 @@ USAGE:
                         [--max-steps N] [--root DIR] [--seed N]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
+    qlang install                        fetch the git packages listed in qlang.toml into
+                                         .qlang/packages, at the commits of qlang.lock
+    qlang update [name...]               move them (all, or those named) to what their
+                                         tag/branch points to now, and rewrite qlang.lock
+    qlang add <name> --git URL [--tag T | --rev R | --branch B]
+    qlang add <name> --path DIR          add a dependency to qlang.toml and install it
+    qlang remove <name>                  remove a dependency
     qlang --help | --version
 ";
 
@@ -71,6 +79,9 @@ fn real_main(args: Vec<String>) -> ExitCode {
             }
         }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
+        Some(cmd @ ("install" | "update" | "add" | "remove")) => {
+            package_command(cmd, &it.collect::<Vec<_>>())
+        }
         Some("--version") | Some("-V") => {
             println!("qlang {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -345,6 +356,64 @@ fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
                 .map(|v| (name.to_ascii_lowercase(), v.to_string()))
         })
         .collect()
+}
+
+/// `qlang install | update [name...] | add name --git URL ... | remove name`.
+fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
+    let fail = |e: String| {
+        eprintln!("{e}");
+        ExitCode::from(1)
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        return fail("cannot read the current directory".to_string());
+    };
+    let project = match cmd {
+        "add" => {
+            let Some((name, rest)) = args.split_first() else {
+                return fail("usage: qlang add <name> --git URL [--tag T | --rev R | --branch B]\n       qlang add <name> --path DIR".to_string());
+            };
+            let mut options: Vec<(&str, &str)> = Vec::new();
+            let mut it = rest.iter();
+            while let Some(flag) = it.next() {
+                match (flag.strip_prefix("--"), it.next()) {
+                    (Some(key), Some(value)) => options.push((key, value)),
+                    _ => {
+                        return fail(format!(
+                            "`{flag}` needs a value (--git URL, --tag T, --path DIR...)"
+                        ));
+                    }
+                }
+            }
+            match install::add(&cwd, name, &options) {
+                Ok(p) => p,
+                Err(e) => return fail(e),
+            }
+        }
+        "remove" => match args {
+            [name] => match install::remove(&cwd, name) {
+                Ok(p) => p,
+                Err(e) => return fail(e),
+            },
+            _ => return fail("usage: qlang remove <name>".to_string()),
+        },
+        _ => match project_dir(&cwd) {
+            Some(p) => p,
+            None => return fail("no qlang.toml here or in a parent directory".to_string()),
+        },
+    };
+    let refresh = if cmd == "update" {
+        if args.is_empty() {
+            install::Refresh::All
+        } else {
+            install::Refresh::Some(args.iter().map(|s| s.to_string()).collect())
+        }
+    } else {
+        install::Refresh::Nothing
+    };
+    match install::install(&project, &refresh) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
 }
 
 /// The directory of the `qlang.toml` that governs `program`, if there is one.

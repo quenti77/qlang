@@ -1177,9 +1177,17 @@ Les paquets d'un projet se déclarent dans son `qlang.toml`, section `[dependenc
 
 ```toml
 [dependencies]
-mail = { path = "../mail" }           -- un dossier (utilisé sur place)
+mail  = { path = "../mail" }                                      -- un dossier (utilisé sur place)
+text  = { git = "https://github.com/x/text", tag = "v1.2.0" }     -- un dépôt git
 ```
 
+Un dépôt git se désigne par `tag`, `rev` (un commit) ou `branch` (sans rien : la branche par
+défaut). `qlang install` le récupère dans `.qlang/packages/<nom>` (à mettre dans le
+`.gitignore`) au commit noté dans `qlang.lock`, qu'il écrit s'il n'existe pas et qu'on
+versionne : tout le monde obtient les mêmes fichiers. `qlang update [nom…]` avance les
+paquets à ce que leur tag ou branche désigne maintenant ; `qlang add nom --git URL --tag T`
+(ou `--path DIR`) et `qlang remove nom` modifient `qlang.toml` puis installent. Un paquet
+récupéré par git ne peut dépendre que d'autres paquets git, pas d'un dossier local.
 - Le nom d'un paquet est fait de lettres, chiffres, `_` et `-`. Un paquet a son propre
   `qlang.toml` : `[package] main = "src/mail.q"` désigne le fichier que `import "@mail"`
   charge (par défaut `lib.q`), et ses propres `[dependencies]` sont installées avec le

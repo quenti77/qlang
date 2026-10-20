@@ -65,6 +65,15 @@ fn write_lock(project: &Path, lock: &BTreeMap<String, Locked>) -> Result<(), Str
     std::fs::write(&file, text).map_err(|e| format!("cannot write {}: {e}", file.display()))
 }
 
+/// A path without the `\\?\` prefix Windows' `canonicalize` adds (other paths unchanged).
+fn plain(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => path.to_path_buf(),
+    }
+}
+
 /// Removes a directory tree, including the read-only files git leaves on Windows.
 fn remove_dir(dir: &Path) -> std::io::Result<()> {
     fn writable(dir: &Path) {
@@ -193,6 +202,8 @@ pub enum Refresh {
 /// Installs every git package the project at `project` depends on, directly or through
 /// other packages, and rewrites the lock file.
 pub fn install(project: &Path, refresh: &Refresh) -> Result<(), String> {
+    // git does not understand Windows' `\\?\C:\...` paths, which `canonicalize` returns
+    let project = &plain(project);
     let manifest = manifest_of(project)?;
     let lock = read_lock(project)?;
     let mut new_lock: BTreeMap<String, Locked> = BTreeMap::new();

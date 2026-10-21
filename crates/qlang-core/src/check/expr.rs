@@ -325,6 +325,41 @@ impl Checker {
                 );
                 Ty::Unit
             }
+            StmtKind::Seq { stmts, arity } => {
+                for (i, st) in stmts.iter().enumerate() {
+                    self.check_stmt(st, &Want::Unused);
+                    // the first statement holds the value: it must be a tuple of the right size
+                    if i == 0
+                        && let (Some((n, span)), StmtKind::Let { name, .. }) = (arity, &st.kind)
+                        && let Some((hidden, _)) = self.lookup_var(&name.name)
+                    {
+                        match self.resolve(&hidden.ty) {
+                            Ty::Tuple(ts) if ts.len() != *n => {
+                                self.err(
+                                    "T288",
+                                    format!(
+                                        "the assignment takes {n} values, but the tuple has {}",
+                                        ts.len()
+                                    ),
+                                    *span,
+                                );
+                                break; // the elements would only add noise
+                            }
+                            Ty::Tuple(_) | Ty::Error => {}
+                            other => {
+                                let shown = self.show(&other);
+                                self.err(
+                                    "T289",
+                                    format!("`{shown}` cannot be taken apart: only a tuple can"),
+                                    *span,
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+                Ty::Unit
+            }
             StmtKind::LetTuple {
                 is_const,
                 pattern,

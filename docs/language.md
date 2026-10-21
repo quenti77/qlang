@@ -317,6 +317,20 @@ for i, (nom, _) in gens do                -- l'indice, puis l'élément déstruc
 end
 ```
 
+**Affecter.** À gauche d'un `=`, un tuple de cibles reçoit les éléments d'un tuple ; la valeur est
+calculée en entier avant que la première cible ne change, donc `(a, b) = (b, a)` échange :
+
+```
+(a, b) = (b, a)                      -- échange sans variable temporaire
+(xs[0], xs[2]) = (xs[2], xs[0])      -- aussi avec des éléments de tableau
+(p.x, p.y) = (p.y, p.x + p.y)        -- et des champs
+(cur, next) = (next, cur + next)     -- suite de Fibonacci en une ligne
+((q, _), r) = ((5, 6), 7)            -- motifs imbriqués, `_` ignore un élément
+```
+
+Chaque cible doit pouvoir être affectée (une constante est refusée, `T210`) ; `+=` et les
+autres opérateurs ne s'appliquent pas à un tuple.
+
 Le motif doit avoir autant de noms que le tuple a d'éléments (`T288`) et ne s'applique qu'à un
 tuple (`T289`). Les variables obtenues sont des variables ordinaires (`const` les fige), au
 niveau d'un fichier elles s'exportent comme les autres.

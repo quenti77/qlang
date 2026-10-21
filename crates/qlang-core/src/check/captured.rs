@@ -68,6 +68,7 @@ impl Scope {
                 self.declared.extend(names.iter().map(|n| n.name.clone()));
                 self.expr(init, out);
             }
+            StmtKind::Seq { stmts, .. } => stmts.iter().for_each(|s| self.stmt(s, out)),
             StmtKind::Return(e) => {
                 if let Some(e) = e {
                     self.expr(e, out);

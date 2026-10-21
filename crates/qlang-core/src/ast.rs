@@ -239,6 +239,13 @@ pub enum StmtKind {
         ty: Option<TypeExpr>,
         init: Expr,
     },
+    /// Statements run one after the other in the enclosing scope. The parser produces it for
+    /// `(a, b) = (b, a)`: a hidden variable takes the value, then each target is assigned its
+    /// element. `arity` is the number of targets of that tuple assignment, to be checked.
+    Seq {
+        stmts: Vec<Stmt>,
+        arity: Option<(usize, Span)>,
+    },
     Return(Option<Expr>),
     While {
         cond: Expr,

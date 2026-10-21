@@ -1,5 +1,9 @@
 # Journal des changements
 
+## À publier
+
+- Affectation par déstructuration : `(a, b) = (b, a)`, `(xs[i], xs[j]) = (xs[j], xs[i])`.
+
 Les versions sont numérotées à la publication (tag `vX.Y.Z`) : un numéro qui n'a pas été
 publié n'existe pas comme release, ses changements sont dans la suivante.
 

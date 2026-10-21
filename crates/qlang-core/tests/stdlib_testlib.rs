@@ -121,3 +121,33 @@ fn unwrap_on_an_error_points_at_the_call() {
     assert!(out.contains("main.q:7:1"), "{out}");
     assert!(!out.contains("<prelude>"), "{out}");
 }
+
+#[test]
+fn comparisons_lengths_and_text_assertions() {
+    let out = exec(
+        "assert_lt(1, 2)\nassert_le(2, 2)\nassert_gt(\"b\", \"a\")\nassert_ge(2, 2)\nassert_lt(0.5, 1.5)\nassert_len([1, 2, 3], 3)\nassert_empty([])\nassert_not_contains([1, 2], 3)\nassert_starts_with(\"hello\", \"he\")\nassert_ends_with(\"hello\", \"llo\")\nprint(\"ok\")",
+    );
+    assert_eq!(out, "ok\n");
+    for (src, needle) in [
+        ("assert_lt(3, 2)", "assert_lt failed: 3 is not less than 2"),
+        ("assert_le(3, 2)", "assert_le failed"),
+        (
+            "assert_gt(1, 2)",
+            "assert_gt failed: 1 is not greater than 2",
+        ),
+        ("assert_ge(1, 2)", "assert_ge failed"),
+        (
+            "assert_len([1], 2)",
+            "assert_len failed: [1] has 1 element(s), expected 2",
+        ),
+        ("assert_empty([1])", "assert_empty failed: got [1]"),
+        ("assert_not_contains([1], 1)", "assert_not_contains failed"),
+        ("assert_starts_with(\"abc\", \"b\")", "does not start with"),
+        ("assert_ends_with(\"abc\", \"b\")", "does not end with"),
+    ] {
+        let out = exec(src);
+        assert!(out.contains(needle), "{src}: {out}");
+        // the failure points at the test, not at the prelude
+        assert!(out.contains("main.q"), "{src}: {out}");
+    }
+}

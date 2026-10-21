@@ -1421,6 +1421,10 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `panic(message)`         | arrête le programme avec une erreur                                   |
 | `assert(cond, message?)` | arrête le programme si `cond` est faux                                |
 | `assert_eq(a, b)`        | arrête le programme si `a != b`, en montrant les deux valeurs (`assert_ne` : si `a == b`) |
+| `assert_lt(a, b)`, `assert_le`, `assert_gt`, `assert_ge` | pour un test : `a < b` (`<=`, `>`, `>=`), pour tout type qui s'ordonne (nombres, chaînes, tuples…) ; montre les deux valeurs sinon |
+| `assert_len(tableau, n)`, `assert_empty(tableau)` | pour un test : le tableau a `n` éléments / aucun |
+| `assert_not_contains(tableau, v)` | pour un test : `v` n'est pas dans le tableau |
+| `assert_starts_with(texte, début)`, `assert_ends_with(texte, fin)` | pour un test : le texte commence / finit par... |
 | `assert_ok(r)`, `assert_err(r)` | pour un test : la valeur d'un `Ok` / l'erreur d'un `Err`, ou arrête le programme en montrant ce que contenait le résultat |
 | `assert_some(x)`, `assert_none(x)` | pour un test : la valeur d'un nullable qui ne doit pas être `none` / vérifie qu'il l'est |
 | `assert_contains(tableau, v)`, `assert_contains_text(texte, morceau)` | pour un test : `v` est dans le tableau / `morceau` est dans le texte |

@@ -166,6 +166,8 @@ end
 ```
 
 Les autres assertions : `assert_err`, `assert_some`, `assert_none`, `assert_contains_text`,
+`assert_lt` / `assert_le` / `assert_gt` / `assert_ge`, `assert_len`, `assert_empty`,
+`assert_not_contains`, `assert_starts_with`, `assert_ends_with`,
 `assert_within` (tolérance donnée). Un échec est montré à la ligne de votre test, pas dans
 la bibliothèque.
 

@@ -1,6 +1,6 @@
 # Journal des changements
 
-## À publier
+## 0.34.0
 
 - Docs : `README.md` présente `qlang-std`, section « Points encore ouverts » mise à jour.
 - `examples/syntax.q` passe `qlang check` (ajout de `examples/math.q`).

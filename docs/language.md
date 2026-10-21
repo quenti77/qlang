@@ -291,7 +291,10 @@ print(nested.1.0)    -- 2.5
 ```
 
 - Un tuple **ne change pas** : `t.0 = 5` est refusé ; on en construit un nouveau.
-- `==` et `!=` comparent les éléments un à un ; l'affichage est `(1, "a")`.
+- `==` et `!=` comparent les éléments un à un ; l'affichage est `(1, "a")`. `<`, `<=`, `>`,
+  `>=`, `sort`, `min` et `max` les comparent aussi, élément par élément en commençant par le
+  premier (`(1, 9) < (2, 0)`), tant que chaque élément peut être ordonné (pas `bool`, ni les
+  nullables) : `[(2, "b"), (1, "z")].sort()` donne `[(1, "z"), (2, "b")]`.
 - Un tuple peut servir de clé de dictionnaire et de valeur d'ensemble quand ses éléments le
   peuvent : `{ (0, 0): "origine" }`, `Set.of([(0, 0), (1, 2)])`.
 - Un type de tuple accepte un élément plus large : `let t: (int?, string) = (5, "a")`.
@@ -483,7 +486,7 @@ De la plus faible à la plus forte :
   implémenter le trait `Eq`.
 - `<`, `<=`, `>`, `>=` fonctionnent sur les nombres et les chaînes (ordre
   alphabétique des caractères Unicode). Pour une structure, il faut
-  implémenter `Ord`.
+  implémenter `Ord` ; les tuples se comparent élément par élément.
 - Une condition (`if`, `elseif`, `while`, garde de `match`) doit être de type
   `bool`. Il n'y a ni « vrai » ni « faux » implicite : `if 1 then` et
   `if name then` sont des erreurs.
@@ -1354,14 +1357,14 @@ l'environnement sous le nom où elle est déclarée (`sqlite_open` ici) ; deux m
 déclarent le même nom appellent donc la même fonction.
 
 - **Types admis** dans la signature (arguments et retour) : `int`, `float`, `bool`,
-  `string`, les énumérations, `T?`, `array<T>`, `map<K, V>`, `Json`, et les structures
+  `string`, les énumérations, `T?`, les tuples, `array<T>`, `map<K, V>`, `Json`, et les structures
   non génériques, sans parent et non récursives dont tous les champs sont admis. Rien
   d'autre (fonctions, traits, `uuid`, `ulid`, `datetime`, génériques) : `T260`, `T261`
   ou `T262`.
 - **Les valeurs sont copiées** : l'environnement ne reçoit jamais une référence vers un
   tableau ou une structure du programme, et ce qu'il renvoie est reconstruit d'après la
-  signature. Une structure devient une table de ses champs, une énumération le nom de sa
-  variante, `Json` une valeur JSON.
+  signature. Une structure devient une table de ses champs, un tuple un tableau de ses
+  éléments (dans l'ordre), une énumération le nom de sa variante, `Json` une valeur JSON.
 - **Erreurs** : si la signature renvoie `Result<T, Error>`, un échec de l'environnement
   devient un `Result::err` (comme `http.send` ou `Db.connect`). Sinon il arrête le
   programme (`R081`).
@@ -2432,6 +2435,5 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Traits qui en exigent d'autres** (un trait qui suppose qu'un autre est
   aussi implémenté) : non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Tuples :** pas d'ordre (donc pas de tri) ni de passage à travers une `extern fun`.
 - **Format des commentaires de documentation** : le texte reste libre (`qlang doc` le recopie
   tel quel). À prévoir, selon l'usage : un format léger du type `@param` / `@return`.

@@ -376,9 +376,19 @@ impl Checker {
                 if Self::numeric_pair(&ty, &arg).is_some()
                     || (matches!(ty, Ty::Str | Ty::Uuid | Ty::Ulid | Ty::DateTime) && ty == arg)
                 {
-                    Some(Ty::Bool)
-                } else {
-                    None
+                    return Some(Ty::Bool);
+                }
+                // tuples compare element by element, as long as their elements can be ordered
+                match (&ty, &arg) {
+                    (Ty::Tuple(ts), Ty::Tuple(us)) if ts.len() == us.len() => ts
+                        .iter()
+                        .zip(us)
+                        .all(|(t, u)| {
+                            self.find_lang_impl(t, Lang::Ord, std::slice::from_ref(u))
+                                .is_some()
+                        })
+                        .then_some(Ty::Bool),
+                    _ => None,
                 }
             }
             Lang::Index => {

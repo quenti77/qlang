@@ -885,6 +885,8 @@ impl Checker {
                 )
             }),
             Ty::Nullable(t) | Ty::Array(t) => self.boundary_problem(t, path),
+            // a tuple crosses as an array of its elements
+            Ty::Tuple(ts) => ts.iter().find_map(|t| self.boundary_problem(t, path)),
             Ty::Map(k, v) => self
                 .boundary_problem(k, path)
                 .or_else(|| self.boundary_problem(v, path)),
@@ -918,7 +920,7 @@ impl Checker {
                 r
             }
             other => Some(format!(
-                "`{}` cannot cross to the host (only int, float, bool, string, enums, arrays, maps, `Json` and plain structs can)",
+                "`{}` cannot cross to the host (only int, float, bool, string, enums, tuples, arrays, maps, `Json` and plain structs can)",
                 self.show(other)
             )),
         }

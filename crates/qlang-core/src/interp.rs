@@ -1615,6 +1615,7 @@ impl<'a> Interp<'a> {
                         Some(a.cmp(b))
                     }
                     (Value::DateTime(a), Value::DateTime(b)) => Some(a.cmp(b)),
+                    (Value::Tuple(_), Value::Tuple(_)) => Some(self.order(&l, &r, span)?),
                     _ => match self.find_method(
                         &l,
                         Lang::Ord.method_name(),
@@ -2155,6 +2156,15 @@ impl<'a> Interp<'a> {
             (Value::Str(x), Value::Str(y)) => Ok(x.as_ref().cmp(y.as_ref())),
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => Ok(x.cmp(y)),
             (Value::DateTime(x), Value::DateTime(y)) => Ok(x.cmp(y)),
+            (Value::Tuple(xs), Value::Tuple(ys)) => {
+                for (x, y) in xs.iter().zip(ys.iter()) {
+                    let o = self.order(x, y, span)?;
+                    if o != Ordering::Equal {
+                        return Ok(o);
+                    }
+                }
+                Ok(xs.len().cmp(&ys.len()))
+            }
             _ => {
                 if let (Some(x), Some(y)) = (num(a), num(b)) {
                     return Ok(x.total_cmp(&y));

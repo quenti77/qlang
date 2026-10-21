@@ -90,6 +90,8 @@ postfixExpression
       | '[' Newline* expression Newline* ']'
       // a[] n'est valide que comme cible d'une affectation : a[] = valeur
       | '[' Newline* ']'
+      // x? : la valeur d'un Result ou d'un nullable, ou sortir de la fonction avec l'erreur / none
+      | Question
       )*
     ;
 

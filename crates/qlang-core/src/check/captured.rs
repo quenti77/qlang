@@ -122,7 +122,10 @@ impl Scope {
                 }
                 lit.fields.iter().for_each(|f| self.expr(&f.value, out));
             }
-            ExprKind::Unary(_, x) | ExprKind::Cast(x, _) | ExprKind::Append(x) => self.expr(x, out),
+            ExprKind::Unary(_, x)
+            | ExprKind::Cast(x, _)
+            | ExprKind::Append(x)
+            | ExprKind::Try(x) => self.expr(x, out),
             ExprKind::Field(x, ..) => self.expr(x, out),
             ExprKind::Binary(_, a, b) | ExprKind::Index(a, b) => {
                 self.expr(a, out);

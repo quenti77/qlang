@@ -1723,12 +1723,35 @@ end
   `Result<int, Error>.Err(erreur)`.
 - `match` prend un résultat en morceaux, et le compilateur vérifie que `Ok` et `Err` sont
   tous deux traités : la valeur n'est lisible que dans le cas `Ok`.
+- `résultat?` (voir plus bas) donne la valeur, ou quitte la fonction avec l'erreur.
 - `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
 - `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
   programme (`panic`) si on se trompe de cas.
 - `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou une
   énumération `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
   prélude, exactement comme une variable locale masque une variable de portée plus large.
+
+#### Propager une erreur avec `?`
+
+Dans une fonction qui renvoie elle-même un `Result`, `expr?` donne la valeur d'un `Ok`, et
+**quitte la fonction avec l'erreur** si c'est un `Err` :
+
+```
+fun load(path: string) -> Result<Json, Error>
+  let text = fs.read(path)?          -- l'erreur de fs.read sort de load
+  let json = Json.parse(text)?
+  Ok(json)
+end
+```
+
+- Le type d'erreur doit être le même des deux côtés (`Error` ici) : sinon, erreur de
+  compilation (`T282`) ; il n'y a pas de conversion automatique.
+- `?` marche aussi sur une valeur **nullable** : `x?` donne la valeur, ou quitte la fonction
+  avec `none`, ce qui demande une fonction qui renvoie un `T?`.
+  `fun port(s: string) -> int? ... let rest = s.strip_prefix("port=")?` ...
+- Il s'écrit derrière n'importe quelle expression (`a()? + b()?`, `f()?.g()`), mais pas en
+  dehors d'une fonction (`T280`), et il ne s'applique qu'à un `Result` ou un nullable
+  (`T281`). Dans une fonction anonyme, c'est elle seule qui est quittée.
 
 ### Prélude : JSON
 

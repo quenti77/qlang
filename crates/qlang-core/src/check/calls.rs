@@ -160,10 +160,26 @@ impl Checker {
                 Head::Type(Ty::Struct(id, args), TypeRef::Struct(id))
             }
             ItemRef::Enum(id) => {
+                let n = self.defs.enums[id].tparams.len();
+                let args: Vec<Ty> = if targs.is_empty() {
+                    (0..n).map(|_| self.fresh()).collect()
+                } else if targs.len() == n {
+                    targs.iter().map(|t| self.resolve_type(t)).collect()
+                } else {
+                    self.err(
+                        "T121",
+                        format!(
+                            "`{}` expects {n} type argument(s)",
+                            self.defs.enums[id].name
+                        ),
+                        e.span,
+                    );
+                    return Head::Error;
+                };
                 self.res
                     .paths
                     .insert(e.id, PathRes::Type(TypeRef::Enum(id)));
-                Head::Type(Ty::Enum(id), TypeRef::Enum(id))
+                Head::Type(Ty::Enum(id, args), TypeRef::Enum(id))
             }
             _ => Head::Error,
         }
@@ -237,13 +253,23 @@ impl Checker {
     ) -> Ty {
         match tref {
             TypeRef::Enum(eid) => {
-                if let Some(vi) = self.defs.enums[*eid]
-                    .variants
-                    .iter()
-                    .position(|v| *v == name.name)
-                {
+                if let Some(vi) = self.defs.enums[*eid].variant_index(&name.name) {
                     self.res.paths.insert(e.id, PathRes::EnumVariant(*eid, vi));
-                    return Ty::Enum(*eid);
+                    if !self.defs.enums[*eid].variants[vi].fields.is_empty() {
+                        self.err(
+                            "T164",
+                            format!(
+                                "`{}.{}` carries data: write `{}.{}(...)` with its values",
+                                self.defs.enums[*eid].name,
+                                name.name,
+                                self.defs.enums[*eid].name,
+                                name.name
+                            ),
+                            e.span,
+                        );
+                        return Ty::Error;
+                    }
+                    return ty.clone();
                 }
             }
             TypeRef::Struct(sid) => {
@@ -833,7 +859,7 @@ impl Checker {
         // built-in methods first for built-in types
         if !matches!(
             rt,
-            Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)
+            Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
         ) && let Some((params, ret)) = self.builtin_method(&rt, &name.name)
         {
             self.check_builtin_constraint(e, &rt, &name.name, callee.span);
@@ -936,7 +962,7 @@ impl Checker {
         if name.name == "class"
             && matches!(
                 rt,
-                Ty::Struct(..) | Ty::Enum(_) | Ty::Param(_) | Ty::Trait(..)
+                Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
             )
         {
             self.res.class_calls.insert(e.id);
@@ -981,6 +1007,42 @@ impl Checker {
         want: &Want,
     ) -> Ty {
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
+        // `Shape.Circle(2.0)`: building a value of a variant that carries data
+        if let (TypeRef::Enum(eid), Ty::Enum(_, targs_of_type)) = (tref, ty)
+            && let Some(vi) = self.defs.enums[*eid].variant_index(&name.name)
+        {
+            let def = self.defs.enums[*eid].clone();
+            let variant = &def.variants[vi];
+            self.res
+                .paths
+                .insert(callee.id, PathRes::EnumVariant(*eid, vi));
+            if variant.fields.is_empty() {
+                self.err(
+                    "T164",
+                    format!(
+                        "`{0}.{1}` carries no data: write `{0}.{1}` without ()",
+                        def.name, variant.name
+                    ),
+                    e.span,
+                );
+                self.check_args_loose(args);
+                return Ty::Error;
+            }
+            let map: HashMap<ParamId, Ty> = def
+                .tparams
+                .iter()
+                .copied()
+                .zip(targs_of_type.iter().cloned())
+                .collect();
+            let sig = CallSig {
+                name: format!("{}.{}", def.name, variant.name),
+                tparams: vec![],
+                params: variant.fields.iter().map(|(_, t)| t.subst(&map)).collect(),
+                ret: ty.clone(),
+                param_names: Some(variant.fields.iter().map(|(n, _)| n.clone()).collect()),
+            };
+            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+        }
         // what the host has to provide for the prelude's `fs`, `env`, `http` and `Db`
         if let TypeRef::Struct(sid) = tref {
             let owner = &self.defs.structs[*sid];

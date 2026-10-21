@@ -186,9 +186,9 @@ impl Docs {
                         d.put(key(e.name.span), &e.doc);
                         d.variants.insert(
                             key(e.name.span),
-                            e.variant_docs
+                            e.variants
                                 .iter()
-                                .map(|x| x.as_ref().map(|t| t.to_string()))
+                                .map(|v| v.doc.as_ref().map(|t| t.to_string()))
                                 .collect(),
                         );
                     }
@@ -435,7 +435,7 @@ impl Checker {
                     self.impl_methods(&Ty::Struct(asid, aargs), true, &mut out);
                 }
             }
-            Ty::Enum(_) => self.impl_methods(ty, true, &mut out),
+            Ty::Enum(..) => self.impl_methods(ty, true, &mut out),
             Ty::Trait(tid, _) => self.trait_methods(*tid, &mut out),
             Ty::Param(p) => {
                 let bounds = self.defs.params[*p].bounds.clone();
@@ -447,7 +447,7 @@ impl Checker {
         }
         if matches!(
             ty,
-            Ty::Struct(..) | Ty::Enum(_) | Ty::Trait(..) | Ty::Param(_)
+            Ty::Struct(..) | Ty::Enum(..) | Ty::Trait(..) | Ty::Param(_)
         ) {
             out.push(Member {
                 name: "class".to_string(),
@@ -506,7 +506,17 @@ impl Checker {
                             }
                         })
                         .collect(),
-                    (Ty::Enum(a), Ty::Enum(b)) if a == b => HashMap::new(),
+                    (Ty::Enum(a, targs), Ty::Enum(b, args)) if a == b => targs
+                        .iter()
+                        .zip(args.iter())
+                        .filter_map(|(t, v)| {
+                            if let Ty::Param(p) = t {
+                                Some((*p, v.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                     _ => continue,
                 };
                 for (_, fid) in &imp.methods {
@@ -542,15 +552,16 @@ impl Checker {
                 let docs = self.docs.variants.get(&(def.span.file, def.span.start));
                 for (i, v) in def.variants.iter().enumerate() {
                     out.push(Member {
-                        name: v.clone(),
+                        name: v.name.clone(),
                         kind: "variant",
-                        detail: format!("{}.{v}", def.name),
+                        detail: variant_label(&def, i, self),
                         loc: None,
                         doc: docs.and_then(|d| d.get(i)).cloned().flatten(),
                         public: true,
                     });
                 }
-                self.impl_methods(&Ty::Enum(*eid), false, &mut out);
+                let args: Vec<Ty> = def.tparams.iter().map(|p| Ty::Param(*p)).collect();
+                self.impl_methods(&Ty::Enum(*eid, args), false, &mut out);
                 out.push(class_member());
             }
             StaticKey::Type(TypeRef::Struct(sid)) => {
@@ -649,18 +660,20 @@ impl Checker {
                             None,
                             exported(&e.name.name),
                         );
-                        for (i, v) in e.variants.iter().enumerate() {
-                            let doc = e
-                                .variant_docs
-                                .get(i)
-                                .cloned()
-                                .flatten()
-                                .map(|d| d.to_string());
+                        for v in e.variants.iter() {
+                            let doc = v.doc.as_ref().map(|d| d.to_string());
+                            let label = id
+                                .and_then(|eid| {
+                                    let def = &self.defs.enums[eid];
+                                    def.variant_index(&v.name.name)
+                                        .map(|i| variant_label(def, i, self))
+                                })
+                                .unwrap_or_else(|| format!("{}.{}", e.name.name, v.name.name));
                             push(
-                                v.span,
-                                &v.name,
+                                v.name.span,
+                                &v.name.name,
                                 "variant",
-                                format!("{}.{}", e.name.name, v.name),
+                                label,
                                 doc,
                                 Some(e.name.name.clone()),
                                 true,
@@ -844,7 +857,7 @@ impl Checker {
             PathRes::Module(m) => Some(format!("module \"{}\"", self.modules[*m].path)),
             PathRes::EnumVariant(e, i) => {
                 let def = &self.defs.enums[*e];
-                Some(format!("{}.{}", def.name, def.variants[*i]))
+                Some(variant_label(def, *i, self))
             }
             PathRes::Local | PathRes::Global(..) => {
                 r.name.as_ref().map(|n| format!("{n}: {shown}"))
@@ -852,6 +865,20 @@ impl Checker {
             _ => None,
         }
     }
+}
+
+/// `Shape.Circle(radius: float)`, or `Color.Red` for a variant without data.
+fn variant_label(def: &EnumDef, index: usize, ck: &Checker) -> String {
+    let v = &def.variants[index];
+    if v.fields.is_empty() {
+        return format!("{}.{}", def.name, v.name);
+    }
+    let fields: Vec<String> = v
+        .fields
+        .iter()
+        .map(|(n, t)| format!("{n}: {}", ck.show(t)))
+        .collect();
+    format!("{}.{}({})", def.name, v.name, fields.join(", "))
 }
 
 /// `Point.class`: the static counterpart of `.class()`, offered on every struct and enum.

@@ -160,14 +160,15 @@ matchExpression
 
 matchCase: Case pattern (If expression)? Then block;
 
-// motifs : littéral, variante d'enum (Color.Red), intervalle, liaison (x)
+// motifs : littéral, variante d'enum (Color.Red, Circle(r), Shape.Rect(w, _)), intervalle,
+// liaison (x)
 pattern
     : Minus? (IntLiteral | FloatLiteral) ((DotDot | DotDotEq) Minus? (IntLiteral | FloatLiteral))?
     | StringLiteral
     | True
     | False
     | None
-    | Identifier (Dot Identifier)*
+    | Identifier (Dot Identifier)* ('(' Identifier (Comma Identifier)* ')')?
     ;
 
 // fun(x: int) -> int ... end
@@ -388,12 +389,20 @@ methodSignature
 //   Green
 //   Blue
 // end
-// Variantes simples (constantes nommées, sans données). Accès : Color.Red
+// Variantes simples (constantes nommées) ou qui portent des données, énumération
+// générique possible :
+//   enum Shape
+//     Circle(radius: float)
+//     Empty
+//   end
+// Accès : Color.Red, Shape.Circle(2.0) ; motif : case Circle(r) then
 enumDeclaration
-    : Enum Identifier Newline
-      (Identifier Newline+)*
+    : Enum Identifier typeParameters? Newline
+      (variant Newline+)*
       End
     ;
+
+variant: Identifier ('(' parameterList? ')')?;
 
 // ====================================================================
 // LEXER

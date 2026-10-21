@@ -82,7 +82,9 @@ impl Interp<'_> {
             (Value::Float(f), _) => HostValue::Float(*f),
             (Value::Bool(b), _) => HostValue::Bool(*b),
             (Value::Str(s), _) => HostValue::Str(s.to_string()),
-            (Value::Enum(e, i), _) => HostValue::Str(self.prog.defs.enums[*e].variants[*i].clone()),
+            (Value::Enum(e, i, _), _) => {
+                HostValue::Str(self.prog.defs.enums[*e].variants[*i].name.clone())
+            }
             (Value::Array(items), _) => {
                 let elem = match ty {
                     Ty::Nullable(t) => match &**t {
@@ -338,13 +340,9 @@ impl Interp<'_> {
                 self.check_size(s.len(), span)?;
                 Ok(Value::str(s))
             }
-            (Ty::Enum(e), HostValue::Str(name)) => {
-                match self.prog.defs.enums[*e]
-                    .variants
-                    .iter()
-                    .position(|v| v == name)
-                {
-                    Some(i) => Ok(Value::Enum(*e, i)),
+            (Ty::Enum(e, _), HostValue::Str(name)) => {
+                match self.prog.defs.enums[*e].variant_index(name) {
+                    Some(i) => Ok(Value::Enum(*e, i, None)),
                     None => self.fail(
                         "R083",
                         format!(
@@ -437,7 +435,7 @@ fn ty_word(t: &Ty) -> &'static str {
         Ty::Str => "string",
         Ty::Array(_) => "array",
         Ty::Map(..) => "map",
-        Ty::Enum(_) => "enum",
+        Ty::Enum(..) => "enum",
         Ty::Struct(..) => "struct",
         _ => "another type",
     }

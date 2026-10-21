@@ -513,9 +513,16 @@ Motifs possibles dans un `case` :
 | ---------------------- | ------------------------------------------------ |
 | Valeur littérale       | `case 42 then`, `case "a" then`, `case true then` |
 | `none`                 | `case none then` (pour une valeur nullable)      |
-| Variante d'énumération | `case Color.Red then`                            |
+| Variante d'énumération | `case Color.Red then`, `case Red then`            |
+| Variante avec données  | `case Circle(r) then`, `case Shape.Rect(w, _) then` |
 | Intervalle             | `case 1..=9 then`, `case 0.5..1.5 then`          |
 | Liaison + garde        | `case x if x > 100 then` (`x` désigne la valeur testée) |
+
+Une variante peut s'écrire avec ou sans le nom de l'énumération quand celle-ci est connue
+par la valeur testée (`case Red`, `case Circle(r)`) ; un nom qui est une variante de ce
+type est la variante, sinon c'est une liaison. Pour une variante qui porte des données,
+on nomme chaque valeur entre parenthèses (`_` pour l'ignorer) : le nombre de noms doit
+être celui des valeurs.
 
 Les `case` sont essayés dans l'ordre. Un nom seul (`case x then`) accepte toute
 valeur et la nomme ; `_` accepte toute valeur sans la nommer. Après un
@@ -1026,7 +1033,8 @@ Les tableaux implémentent déjà ces trois traits : `xs[] = v` ajoute `v` à la
 
 ## 11. Énumérations
 
-Une énumération est une liste de constantes nommées.
+Une énumération est une liste de variantes. Une variante est un nom, seul ou avec des
+valeurs qu'elle porte (des champs nommés, comme les paramètres d'une fonction) :
 
 ```
 enum Color
@@ -1035,12 +1043,19 @@ enum Color
   Blue
 end
 
-let c = Color.Red
+enum Shape
+  Circle(radius: float)
+  Rect(w: float, h: float)
+  Empty
+end
 
-let label = match c
-  case Color.Red then "rouge"
-  case Color.Green then "vert"
-  else "autre"
+let c = Color.Green
+let s = Shape.Circle(2.0)             -- ou Shape.Circle(radius: 2.0)
+
+let area = match s
+  case Circle(r) then 3.14 * r * r    -- r est la valeur portée
+  case Shape.Rect(w, h) then w * h
+  case Empty then 0.0
 end
 
 impl Color
@@ -1050,8 +1065,21 @@ impl Color
 end
 ```
 
-Les variantes ne portent pas de données. Elles se comparent avec `==` et
-s'affichent `Color.Red`. Une énumération peut avoir des méthodes (`impl`).
+- Une variante sans données s'écrit `Color.Red` (pas de parenthèses) ; une variante avec
+  données se **construit** par un appel : `Shape.Circle(2.0)`, par position ou par nom
+  comme n'importe quel appel. Écrire `Shape.Circle` seul, ou `Color.Red()`, est une erreur.
+- Dans un `match`, le compilateur vérifie que toutes les variantes sont traitées (voir
+  `match`). Les valeurs portées se lient par position ; les motifs ne s'imbriquent pas
+  (`case Circle(0.0)` n'existe pas : utiliser une garde, `case Circle(r) if r == 0.0`).
+- Une énumération peut être **générique** : `enum Maybe<T> Just(value: T) Nothing end`
+  (voir les génériques) ; `impl<T> Maybe<T> ... end` lui ajoute des méthodes, et un trait
+  s'implémente comme pour une structure.
+- Les valeurs s'affichent `Shape.Circle(2.0)`, `Color.Red`. `==` compare la variante puis
+  les valeurs portées, une à une.
+- Les variantes portent leurs valeurs sans les changer : une valeur d'énumération ne se
+  modifie pas (un tableau qu'elle contient reste, lui, un tableau partagé).
+- Seules les énumérations **sans aucune donnée** peuvent servir de clé de dictionnaire ou
+  traverser une `extern fun` (sous le nom de leur variante).
 
 ---
 

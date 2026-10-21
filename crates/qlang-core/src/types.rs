@@ -41,7 +41,8 @@ pub enum Ty {
     Map(Box<Ty>, Box<Ty>),
     Fn(Vec<Ty>, Box<Ty>),
     Struct(StructId, Vec<Ty>),
-    Enum(EnumId),
+    /// An enumeration, with the type arguments of a generic one (`Result<int, Error>`).
+    Enum(EnumId, Vec<Ty>),
     /// A trait used as a type: any value whose type implements it.
     Trait(TraitId, Vec<Ty>),
     /// A generic parameter.
@@ -83,6 +84,7 @@ impl Ty {
                 Box::new(r.subst(map)),
             ),
             Ty::Struct(id, args) => Ty::Struct(*id, args.iter().map(|a| a.subst(map)).collect()),
+            Ty::Enum(id, args) => Ty::Enum(*id, args.iter().map(|a| a.subst(map)).collect()),
             Ty::Trait(id, args) => Ty::Trait(*id, args.iter().map(|a| a.subst(map)).collect()),
             other => other.clone(),
         }
@@ -94,7 +96,7 @@ impl Ty {
             Ty::Nullable(t) | Ty::Array(t) => t.contains_infer(),
             Ty::Map(k, v) => k.contains_infer() || v.contains_infer(),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_infer) || r.contains_infer(),
-            Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_infer),
+            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_infer),
             _ => false,
         }
     }
@@ -105,7 +107,7 @@ impl Ty {
             Ty::Nullable(t) | Ty::Array(t) => t.contains_param(),
             Ty::Map(k, v) => k.contains_param() || v.contains_param(),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_param) || r.contains_param(),
-            Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_param),
+            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_param),
             _ => false,
         }
     }
@@ -139,7 +141,7 @@ impl Ty {
                 }
             }
             Ty::Struct(id, args) => named(&defs.structs[*id].name, args, defs),
-            Ty::Enum(id) => defs.enums[*id].name.clone(),
+            Ty::Enum(id, args) => named(&defs.enums[*id].name, args, defs),
             Ty::Trait(id, args) => named(&defs.traits[*id].name, args, defs),
             Ty::Param(p) => defs.params[*p].name.clone(),
             Ty::Infer(_) => "_".into(),
@@ -189,7 +191,27 @@ pub struct EnumDef {
     pub name: String,
     pub module: ModId,
     pub span: Span,
-    pub variants: Vec<String>,
+    pub tparams: Vec<ParamId>,
+    pub variants: Vec<VariantDef>,
+}
+
+/// A variant and the data it carries (`Circle(radius: float)`); none for `Empty`.
+#[derive(Clone, Debug)]
+pub struct VariantDef {
+    pub name: String,
+    pub span: Span,
+    pub fields: Vec<(String, Ty)>,
+}
+
+impl EnumDef {
+    pub fn variant_index(&self, name: &str) -> Option<usize> {
+        self.variants.iter().position(|v| v.name == name)
+    }
+
+    /// No variant carries data: the values are plain names (usable as map keys).
+    pub fn is_plain(&self) -> bool {
+        self.variants.iter().all(|v| v.fields.is_empty())
+    }
 }
 
 #[derive(Clone, Debug)]

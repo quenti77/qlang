@@ -144,9 +144,17 @@ pub struct EnumDecl {
     pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
-    pub variants: Vec<Ident>,
-    /// The documentation comment of each variant (same order as `variants`).
-    pub variant_docs: Vec<Option<Rc<str>>>,
+    pub tparams: Vec<TypeParam>,
+    pub variants: Vec<VariantDecl>,
+}
+
+/// `Circle(radius: float)` or `Empty`.
+#[derive(Debug)]
+pub struct VariantDecl {
+    pub name: Ident,
+    /// The documentation comment right above it.
+    pub doc: Option<Rc<str>>,
+    pub fields: Vec<Param>,
 }
 
 #[derive(Clone, Debug)]
@@ -308,6 +316,12 @@ pub enum Pattern {
     Path(Vec<Ident>),
     /// `x`: matches anything and binds the value.
     Bind(Ident),
+    /// `Circle(r)`, `Shape.Circle(r, _)`: a variant that carries data; each field is bound
+    /// to a name, or ignored (`None`, written `_`).
+    Variant {
+        path: Vec<Ident>,
+        fields: Vec<Option<Ident>>,
+    },
 }
 
 #[derive(Debug)]

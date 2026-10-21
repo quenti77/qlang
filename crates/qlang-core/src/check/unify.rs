@@ -52,6 +52,7 @@ impl Checker {
                 Box::new(self.resolve(r)),
             ),
             Ty::Struct(id, a) => Ty::Struct(*id, a.iter().map(|x| self.resolve(x)).collect()),
+            Ty::Enum(id, a) => Ty::Enum(*id, a.iter().map(|x| self.resolve(x)).collect()),
             Ty::Trait(id, a) => Ty::Trait(*id, a.iter().map(|x| self.resolve(x)).collect()),
             other => other.clone(),
         }
@@ -63,7 +64,9 @@ impl Checker {
             Ty::Nullable(x) | Ty::Array(x) => self.occurs(n, &x),
             Ty::Map(k, v) => self.occurs(n, &k) || self.occurs(n, &v),
             Ty::Fn(ps, r) => ps.iter().any(|p| self.occurs(n, p)) || self.occurs(n, &r),
-            Ty::Struct(_, a) | Ty::Trait(_, a) => a.iter().any(|x| self.occurs(n, x)),
+            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => {
+                a.iter().any(|x| self.occurs(n, x))
+            }
             _ => false,
         }
     }
@@ -124,7 +127,11 @@ impl Checker {
             }
             (_, Ty::Trait(tid, targs)) => self.implements(&f, *tid, targs),
             (Ty::Param(a), Ty::Param(b)) => a == b,
-            (Ty::Enum(a), Ty::Enum(b)) => a == b,
+            (Ty::Enum(a, aa), Ty::Enum(b, ba)) => {
+                a == b
+                    && aa.len() == ba.len()
+                    && aa.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y))
+            }
             (a, b) => a == b && !matches!(a, Ty::Param(_)),
         }
     }
@@ -147,7 +154,9 @@ impl Checker {
                     && pa.iter().zip(pb.iter()).all(|(x, y)| self.same(x, y))
                     && self.same(ra, rb)
             }
-            (Ty::Struct(x, xa), Ty::Struct(y, ya)) | (Ty::Trait(x, xa), Ty::Trait(y, ya)) => {
+            (Ty::Struct(x, xa), Ty::Struct(y, ya))
+            | (Ty::Enum(x, xa), Ty::Enum(y, ya))
+            | (Ty::Trait(x, xa), Ty::Trait(y, ya)) => {
                 x == y
                     && xa.len() == ya.len()
                     && xa.iter().zip(ya.iter()).all(|(p, q)| self.same(p, q))
@@ -411,7 +420,12 @@ impl Checker {
             | (Ty::Uuid, Ty::Uuid)
             | (Ty::Ulid, Ty::Ulid)
             | (Ty::DateTime, Ty::DateTime) => true,
-            (Ty::Enum(x), Ty::Enum(y)) => x == y,
+            (Ty::Enum(x, xa), Ty::Enum(y, ya)) => {
+                // variants with data are compared field by field, so those must be comparable
+                x == y
+                    && xa.len() == ya.len()
+                    && xa.iter().zip(ya.iter()).all(|(p, q)| self.same(p, q))
+            }
             (Ty::Array(x), Ty::Array(y)) => self.eq_ok(x, y),
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => self.same(k1, k2) && self.eq_ok(v1, v2),
             (Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..), _) => self

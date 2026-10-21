@@ -959,6 +959,69 @@ fun assert_ne<T: Eq>(actual: T, unexpected: T)
     end
 end
 
+--" Stops the program (a failed test) unless `actual < limit`, showing both values. --"
+fun assert_lt<T: Ord>(actual: T, limit: T)
+    if not (actual < limit) then
+        panic("assert_lt failed: {actual} is not less than {limit}")
+    end
+end
+
+--" Stops the program (a failed test) unless `actual <= limit`, showing both values. --"
+fun assert_le<T: Ord>(actual: T, limit: T)
+    if not (actual <= limit) then
+        panic("assert_le failed: {actual} is not less than or equal to {limit}")
+    end
+end
+
+--" Stops the program (a failed test) unless `actual > limit`, showing both values. --"
+fun assert_gt<T: Ord>(actual: T, limit: T)
+    if not (actual > limit) then
+        panic("assert_gt failed: {actual} is not greater than {limit}")
+    end
+end
+
+--" Stops the program (a failed test) unless `actual >= limit`, showing both values. --"
+fun assert_ge<T: Ord>(actual: T, limit: T)
+    if not (actual >= limit) then
+        panic("assert_ge failed: {actual} is not greater than or equal to {limit}")
+    end
+end
+
+--" Stops the program (a failed test) unless `items` has `expected` elements. --"
+fun assert_len<T>(items: array<T>, expected: int)
+    if items.len() != expected then
+        panic("assert_len failed: {items} has {items.len()} element(s), expected {expected}")
+    end
+end
+
+--" Stops the program (a failed test) unless `items` has no element. --"
+fun assert_empty<T>(items: array<T>)
+    if items.len() != 0 then
+        panic("assert_empty failed: got {items}")
+    end
+end
+
+--" Stops the program (a failed test) if `item` is in `items`. --"
+fun assert_not_contains<T: Eq>(items: array<T>, item: T)
+    if items.contains(item) then
+        panic("assert_not_contains failed: {items} contains {item}")
+    end
+end
+
+--" Stops the program (a failed test) unless `text` starts with `prefix`. --"
+fun assert_starts_with(text: string, prefix: string)
+    if not text.starts_with(prefix) then
+        panic("assert_starts_with failed: \"{text}\" does not start with \"{prefix}\"")
+    end
+end
+
+--" Stops the program (a failed test) unless `text` ends with `suffix`. --"
+fun assert_ends_with(text: string, suffix: string)
+    if not text.ends_with(suffix) then
+        panic("assert_ends_with failed: \"{text}\" does not end with \"{suffix}\"")
+    end
+end
+
 --" A set: values without duplicates, kept in the order they were added. The values follow
 the rules of map keys (`int`, `float`, `string`, `bool`, `uuid`, `ulid`, `datetime`, an enum
 whose variants carry no data). Make one with `Set<int>.new()` or `Set.of([1, 2, 2, 3])`,

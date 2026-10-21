@@ -2,6 +2,7 @@
 
 ## À publier
 
+- Tests : `assert_lt`, `assert_le`, `assert_gt`, `assert_ge`, `assert_len`, `assert_empty`, `assert_not_contains`, `assert_starts_with`, `assert_ends_with`.
 - Motifs imbriqués : une variante dans un motif de tuple (`case (Red, n)`), un motif dans une variante (`case Ok((a, b))`, `case Ok(0)`). La vérification d'exhaustivité suit l'imbrication. `T224` n'existe plus.
 
 ## 0.34.0

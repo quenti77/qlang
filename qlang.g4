@@ -177,6 +177,7 @@ pattern
     | True
     | False
     | None
+    | '(' pattern (Comma pattern)+ Comma? ')'
     | Identifier (Dot Identifier)* ('(' Identifier (Comma Identifier)* ')')?
     ;
 

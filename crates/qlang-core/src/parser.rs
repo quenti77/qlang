@@ -1832,6 +1832,30 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Ok(Pattern::None)
             }
+            Tok::LParen => {
+                let start = self.bump().span;
+                self.nl.push(false);
+                let mut items = Vec::new();
+                let r: PResult<Span> = (|| {
+                    while !self.at(&Tok::RParen) {
+                        items.push(self.parse_pattern()?);
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Tok::RParen)
+                })();
+                self.nl.pop();
+                let end = r?;
+                if items.len() < 2 {
+                    return self.error_at(
+                        "P062",
+                        "a tuple pattern needs at least two patterns: `(0, y)`",
+                        start.to(end),
+                    );
+                }
+                Ok(Pattern::Tuple(items))
+            }
             Tok::Ident(_) => {
                 let mut path = vec![self.expect_ident()?];
                 while self.at(&Tok::Dot) {

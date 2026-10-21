@@ -2109,6 +2109,17 @@ impl<'a> Interp<'a> {
                 };
                 x >= l && if *inclusive { x <= h } else { x < h }
             }
+            Pattern::Tuple(items) => match v {
+                Value::Tuple(vs) if vs.len() == items.len() => {
+                    for (p, x) in items.iter().zip(vs.iter()) {
+                        if !self.match_pattern(p, x, mid, idx, scope)? {
+                            return Ok(false);
+                        }
+                    }
+                    true
+                }
+                _ => false,
+            },
             Pattern::Path(_) => match (self.prog.res.patterns.get(&(mid, idx)), v) {
                 (Some((eid, vi)), Value::Enum(e, x, _)) => eid == e && vi == x,
                 _ => false,

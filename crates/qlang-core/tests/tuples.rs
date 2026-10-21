@@ -165,3 +165,62 @@ fn exports_and_imports_see_destructured_names() {
     assert!(r.error.is_none());
     assert_eq!(host.output, "12\n");
 }
+
+#[test]
+fn match_takes_tuples_in_and_tests_their_elements() {
+    let out = exec(
+        "fun where_is(p: (int, int)) -> string\n  match p\n    case (0, 0) then \"origin\"\n    case (0, y) then \"y axis at {y}\"\n    case (x, 0) then \"x axis at {x}\"\n    case (x, y) if x == y then \"diagonal\"\n    case (x, y) then \"somewhere\"\n  end\nend\nprint(where_is((0, 0)))\nprint(where_is((0, 5)))\nprint(where_is((3, 0)))\nprint(where_is((2, 2)))\nprint(where_is((1, 2)))",
+    );
+    assert_eq!(
+        out,
+        "origin\ny axis at 5\nx axis at 3\ndiagonal\nsomewhere\n"
+    );
+}
+
+#[test]
+fn tuple_patterns_hold_strings_ranges_none_and_nested_tuples() {
+    let out = exec(
+        "let a = match (\"get\", 404)\n  case (\"get\", 200) then \"ok\"\n  case (\"get\", 400..=499) then \"client error\"\n  case (_, _) then \"other\"\nend\nprint(a)\nlet b = match (none, 1)\n  case (none, x) then x + 10\n  case (_, _) then 0\nend\nprint(b)\nlet c = match (1, (2, true))\n  case (1, (n, true)) then n\n  case (_, _) then -1\nend\nprint(c)",
+    );
+    assert_eq!(out, "client error\n11\n2\n");
+}
+
+#[test]
+fn a_tuple_pattern_of_names_covers_every_tuple() {
+    let out = exec("let n = match (1, 2)\n  case (a, b) then a + b\nend\nprint(n)");
+    assert_eq!(out, "3\n");
+    // with tests on values it needs an `else` or a catch-all, like numbers do
+    let open =
+        exec("let n = match (1, 2)\n  case (1, b) then b\n  case (a, 2) then a\nend\nprint(n)");
+    assert!(open.starts_with("COMPILE:"), "{open}");
+    assert_eq!(
+        exec("let n = match (3, 4)\n  case (1, b) then b\n  else 0\nend\nprint(n)"),
+        "0\n"
+    );
+}
+
+#[test]
+fn a_match_pattern_must_fit_the_value() {
+    let wrong = exec("match (1, 2)\n  case (a, b, c) then print(a)\n  else print(0)\nend");
+    assert!(
+        wrong.contains("T220") && wrong.contains("3 elements"),
+        "{wrong}"
+    );
+    let not_a_tuple = exec("match 5\n  case (a, b) then print(a)\n  else print(0)\nend");
+    assert!(not_a_tuple.contains("T220"), "{not_a_tuple}");
+    let types = exec("match (1, \"a\")\n  case (\"x\", b) then print(b)\n  else print(0)\nend");
+    assert!(types.contains("T220"), "{types}");
+    assert!(exec("match (1, 2)\n  case (a) then print(a)\n  else print(0)\nend").contains("P062"));
+    let variant = exec(
+        "enum C\n  Red\n  Blue\nend\nmatch (C.Red, 1)\n  case (C.Red, n) then print(n)\n  else print(0)\nend",
+    );
+    assert!(variant.contains("T224"), "{variant}");
+}
+
+#[test]
+fn names_of_a_tuple_pattern_are_visible_in_the_guard_and_the_body() {
+    let out = exec(
+        "match (3, 4)\n  case (a, b) if a < b then print(\"{a} < {b}\")\n  else print(\"no\")\nend",
+    );
+    assert_eq!(out, "3 < 4\n");
+}

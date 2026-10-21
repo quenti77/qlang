@@ -179,16 +179,9 @@ impl Scope {
             } => {
                 self.expr(scrutinee, out);
                 for c in cases {
-                    match &c.pattern {
-                        Pattern::Bind(name) => {
-                            self.declared.insert(name.name.clone());
-                        }
-                        Pattern::Variant { fields, .. } => {
-                            self.declared
-                                .extend(fields.iter().flatten().map(|n| n.name.clone()));
-                        }
-                        _ => {}
-                    }
+                    let mut names = Vec::new();
+                    c.pattern.bound_names(&mut names);
+                    self.declared.extend(names.iter().map(|n| n.name.clone()));
                     if let Some(g) = &c.guard {
                         self.expr(g, out);
                     }

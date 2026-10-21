@@ -1423,7 +1423,17 @@ Nombres :
 | `f.floor()`, `f.ceil()`, `f.round()` | arrondis d'un `float`, qui renvoient un `int`                         |
 | `n.to_hex()`, `n.to_oct()`, `n.to_bin()` | (`int`) texte en base 16 / 8 / 2 (`255.to_hex()` vaut `"ff"`)      |
 | `f.to_fixed(décimales)`              | (`float`) texte avec exactement `décimales` chiffres après la virgule (0 à 17) |
+| `x.sin()`, `x.cos()`, `x.tan()`      | trigonométrie, `x` en radians (`int` ou `float`), un `float`          |
+| `x.asin()`, `x.acos()`, `x.atan()`   | fonctions réciproques, en radians ; `asin`/`acos` hors de −1 à 1 : erreur |
+| `y.atan2(x)`                         | l'angle du point (`x`, `y`), en radians                               |
+| `x.exp()`, `x.ln()`, `x.log10()`, `x.log2()`, `x.log(base)` | exponentielle et logarithmes ; un nombre qui n'est pas strictement positif : erreur (`R016`) |
+| `x.to_radians()`, `x.to_degrees()`   | conversion entre degrés et radians                                    |
+| `x.signum()`                         | −1, 0 ou 1 selon le signe (`int` ou `float`)                          |
+| `x.clamp(min, max)`                  | ramène `x` dans l'intervalle (même type ; `min` > `max` : erreur)     |
+| `f.trunc()`                          | partie entière d'un `float` (vers zéro), un `int`                     |
+| `f.is_nan()`, `f.is_infinite()`      | `bool`                                                                |
 | `float.PI`, `float.E`                | constantes mathématiques                                              |
+| `float.INFINITY`, `float.NAN`        | l'infini, et « pas un nombre » (`float.NAN == float.NAN` est faux : utiliser `is_nan()`) |
 | `int.MAX`, `int.MIN`                 | plus grand / plus petit `int`                                         |
 
 ```
@@ -1683,6 +1693,28 @@ Une syntaxe d'expression régulière invalide est une erreur `R070` : c'est une
 erreur de programmation (comme une date qui n'existe pas), pas une
 condition à récupérer avec `Result`.
 
+### Encodages et hachages
+
+Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; le texte est le seul type,
+il n'y a pas de tableau d'octets, donc un décodage renvoie `none` si le résultat n'est pas du
+texte UTF-8 valide :
+
+| Fonction | Rôle |
+| --- | --- |
+| `Base64.encode(s)`, `Base64.encode_url(s)` | texte en base64 (avec `=`), ou en base64 « URL » (`-` `_`, sans `=`) |
+| `Base64.decode(s)` | le texte d'une chaîne base64 (les deux alphabets), ou `none` |
+| `Hex.encode(s)`, `Hex.decode(s)` | hexadécimal en minuscules ; `none` si ce n'est pas de l'hexadécimal |
+| `Url.encode(s)`, `Url.decode(s)` | encodage en pourcentage d'un morceau d'URL (`a b&c` donne `a%20b%26c`) ; `+` se décode en espace ; `none` si un `%` est mal formé |
+| `Hash.sha256(s)`, `Hash.sha1(s)`, `Hash.md5(s)` | l'empreinte en hexadécimal (`sha1` et `md5` ne servent pas à la sécurité) |
+| `Hash.hmac_sha256(clé, message)` | le HMAC-SHA-256 en hexadécimal |
+
+```
+print(Hash.sha256("abc"))        -- ba7816bf...
+print(Base64.decode("TWFu"))     -- Man
+```
+
+Ces noms commencent par une majuscule pour ne pas être masqués par une variable `url` ou `hash`.
+
 ## 16. Prélude : `Result`, `Error` et JSON
 
 ### Prélude : `Result` et `Error`
@@ -1694,8 +1726,9 @@ struct Error
   public message: string
 end
 
-struct Result<T, E>
-  -- data et err sont privés : on y accède avec les méthodes ci-dessous
+enum Result<T, E>
+  Ok(value: T)
+  Err(error: E)
 end
 ```
 

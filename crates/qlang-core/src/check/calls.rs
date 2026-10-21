@@ -99,6 +99,10 @@ impl Checker {
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
                             "regex" => (Ty::Unit, "regex"),
+                            "Base64" => (Ty::Unit, "Base64"),
+                            "Hex" => (Ty::Unit, "Hex"),
+                            "Url" => (Ty::Unit, "Url"),
+                            "Hash" => (Ty::Unit, "Hash"),
                             "array" => {
                                 let f = self.fresh();
                                 (Ty::Array(Box::new(f)), "array")
@@ -306,6 +310,8 @@ impl Checker {
                 let found = match (*b, name.name.as_str()) {
                     ("float", "PI") => Some(("float", "PI", Ty::Float)),
                     ("float", "E") => Some(("float", "E", Ty::Float)),
+                    ("float", "INFINITY") => Some(("float", "INFINITY", Ty::Float)),
+                    ("float", "NAN") => Some(("float", "NAN", Ty::Float)),
                     ("int", "MAX") => Some(("int", "MAX", Ty::Int)),
                     ("int", "MIN") => Some(("int", "MIN", Ty::Int)),
                     ("uuid", "NIL") => Some(("uuid", "NIL", Ty::Uuid)),
@@ -1526,6 +1532,19 @@ impl Checker {
             (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
             (Ty::Float, "floor" | "ceil" | "round") => (vec![], Ty::Int),
             (Ty::Float, "to_fixed") => (vec![Ty::Int], Ty::Str),
+            (
+                Ty::Int | Ty::Float,
+                "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "exp" | "ln" | "log10" | "log2"
+                | "to_radians" | "to_degrees",
+            ) => (vec![], Ty::Float),
+            (Ty::Int, "log" | "atan2") => (vec![Ty::Int], Ty::Float),
+            (Ty::Float, "log" | "atan2") => (vec![Ty::Float], Ty::Float),
+            (Ty::Int, "signum") => (vec![], Ty::Int),
+            (Ty::Float, "signum") => (vec![], Ty::Float),
+            (Ty::Int, "clamp") => (vec![Ty::Int, Ty::Int], Ty::Int),
+            (Ty::Float, "clamp") => (vec![Ty::Float, Ty::Float], Ty::Float),
+            (Ty::Float, "trunc") => (vec![], Ty::Int),
+            (Ty::Float, "is_nan" | "is_infinite") => (vec![], Ty::Bool),
             _ => return None,
         })
     }
@@ -1620,6 +1639,37 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
             "split",
             vec![Ty::Str, Ty::Str],
             Ty::Array(Box::new(Ty::Str)),
+            Needs::Nothing,
+        ),
+        ("Base64", "encode") => ("encode", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Base64", "encode_url") => ("encode_url", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Base64", "decode") => (
+            "decode",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Str),
+            Needs::Nothing,
+        ),
+        ("Hex", "encode") => ("encode", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Hex", "decode") => (
+            "decode",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Str),
+            Needs::Nothing,
+        ),
+        ("Url", "encode") => ("encode", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Url", "decode") => (
+            "decode",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Str),
+            Needs::Nothing,
+        ),
+        ("Hash", "sha256") => ("sha256", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Hash", "sha1") => ("sha1", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Hash", "md5") => ("md5", vec![Ty::Str], Ty::Str, Needs::Nothing),
+        ("Hash", "hmac_sha256") => (
+            "hmac_sha256",
+            vec![Ty::Str, Ty::Str],
+            Ty::Str,
             Needs::Nothing,
         ),
         _ => return None,

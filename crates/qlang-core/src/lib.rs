@@ -5,6 +5,7 @@
 
 pub mod ast;
 pub mod check;
+pub mod codec;
 pub mod datetime;
 pub mod diag;
 pub mod fx;

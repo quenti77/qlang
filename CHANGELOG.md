@@ -1,6 +1,6 @@
 # Journal des changements
 
-## À publier
+## 0.35.0
 
 - Performance : cache de recherche des variables, valeurs de 24 octets au lieu de 48, calcul direct des opérations entre `int` (boucles ×1,3, appels ×1,1 ; voir `docs/performance.md`).
 - Tests : `assert_lt`, `assert_le`, `assert_gt`, `assert_ge`, `assert_len`, `assert_empty`, `assert_not_contains`, `assert_starts_with`, `assert_ends_with`.

@@ -2,6 +2,7 @@
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
 mod db;
+mod init;
 mod install;
 mod json;
 mod packages;
@@ -21,7 +22,8 @@ const USAGE: &str = "\
 qlang - a small, readable language
 
 USAGE:
-    qlang run <file.q> [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
+    qlang init [dir]                     start a project: qlang.toml, main.q, .gitignore
+    qlang run [file.q] [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
                     [-- ARGS...]
                                          run a program (imports may live anywhere, or only
                                          under DIR with --root; the same --seed gives the
@@ -29,7 +31,8 @@ USAGE:
                                          --extern CMD starts a provider of `extern fun`, as
                                          do the [externs] of a qlang.toml near the program,
                                          once you agreed to them: --trust-externs says yes)
-    qlang check <file.q> [--extern CMD]  check a program without running it
+    qlang check [file.q] [--extern CMD]  check a program without running it (no file: the `entry`
+                                         of qlang.toml's [package], for run too)
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
     qlang serve [--port 8080] [--bind 127.0.0.1]
@@ -83,6 +86,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
         Some("packages") => packages_json(),
+        Some("init") => init::init(&it.collect::<Vec<_>>()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -368,6 +372,41 @@ fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The program `qlang run` / `qlang check` use when no file is given: the `entry` of the
+/// `[package]` table of the nearest `qlang.toml`, as a path from the current directory.
+fn project_entry() -> Result<Option<String>, String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let Some(config) = providers::find_config(&cwd) else {
+        return Ok(None);
+    };
+    let dir = config.parent().expect("a file has a parent").to_path_buf();
+    let Some(table) = packages::manifest_of(&dir)? else {
+        return Ok(None);
+    };
+    let Some(entry) = table
+        .get("package")
+        .and_then(|p| p.get("entry"))
+        .and_then(|e| e.as_str())
+    else {
+        return Ok(None);
+    };
+    let full = dir.join(entry);
+    if !full.is_file() {
+        return Err(format!(
+            "{}: the entry \"{entry}\" does not exist",
+            config.display()
+        ));
+    }
+    // shown relative to where the user is, when it is below
+    let canonical_cwd = cwd.canonicalize().unwrap_or(cwd);
+    let shown = full
+        .canonicalize()
+        .ok()
+        .and_then(|f| f.strip_prefix(&canonical_cwd).ok().map(Path::to_path_buf))
+        .unwrap_or(full);
+    Ok(Some(shown.to_string_lossy().into_owned()))
+}
+
 /// `qlang packages`: the packages of the project in the current directory, as JSON
 /// (`{"mail": {"dir": "/abs/path", "main": "src/mail.q"}}`), for editors.
 fn packages_json() -> ExitCode {
@@ -515,9 +554,23 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         }
         i += 1;
     }
-    let Some(file) = file else {
-        eprintln!("missing file\n\n{USAGE}");
-        return ExitCode::from(64);
+    let entry;
+    let file = match file {
+        Some(f) => f,
+        None => match project_entry() {
+            Ok(Some(f)) => {
+                entry = f;
+                entry.as_str()
+            }
+            Ok(None) => {
+                eprintln!("missing file (and no `entry` in a qlang.toml here)\n\n{USAGE}");
+                return ExitCode::from(64);
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(1);
+            }
+        },
     };
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,

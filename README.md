@@ -109,6 +109,20 @@ Les `import` peuvent remonter dans les dossiers (`import f from "../lib/f.q"`, c
 qlang run app/main.q --root .      # les imports restent dans le dossier courant
 ```
 
+### Démarrer un projet
+
+```sh
+qlang init mon-app      # qlang.toml, main.q et .gitignore (sans rien écraser)
+cd mon-app
+qlang run               # lance l'`entry` du qlang.toml
+qlang check             # vérifie sans lancer
+```
+
+`entry` se trouve dans la table `[package]` du `qlang.toml` ; `qlang run` et `qlang check`
+sans fichier le cherchent depuis le dossier courant, vers le haut. (`main`, dans la même
+table, est autre chose : le fichier qu'`import "@mon-app"` charge quand le projet est
+utilisé comme paquet.)
+
 ### Paquets
 
 Un projet liste ses dépendances dans son `qlang.toml` et les importe avec `@nom` :

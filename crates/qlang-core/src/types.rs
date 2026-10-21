@@ -1,8 +1,9 @@
 //! Types and definitions shared by the checker and the interpreter.
 
 use crate::ast::{Expr, FunDecl, NodeId, Visibility};
+use crate::fx::{FxHashMap, FxHashSet, NodeMap};
 use crate::span::Span;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub type StructId = usize;
@@ -520,26 +521,26 @@ pub enum PathRes {
 
 #[derive(Default)]
 pub struct Resolutions {
-    pub paths: HashMap<NodeId, PathRes>,
+    pub paths: NodeMap<PathRes>,
     /// Target type of each `as` cast.
-    pub casts: HashMap<NodeId, Ty>,
-    pub struct_lits: HashMap<NodeId, StructId>,
+    pub casts: FxHashMap<NodeId, Ty>,
+    pub struct_lits: FxHashMap<NodeId, StructId>,
     /// `super.method` calls: the parent method being called.
-    pub super_calls: HashMap<NodeId, FnId>,
+    pub super_calls: FxHashMap<NodeId, FnId>,
     /// Enum variant patterns: (match expression, case index) to variant.
-    pub patterns: HashMap<(NodeId, usize), (EnumId, usize)>,
+    pub patterns: FxHashMap<(NodeId, usize), (EnumId, usize)>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
-    pub float_sums: HashSet<NodeId>,
+    pub float_sums: FxHashSet<NodeId>,
     /// Method calls made through a trait (a generic bound or a trait-typed value): at
     /// run time they go to the user's impl, not to a built-in method of the same name.
-    pub trait_calls: HashSet<NodeId>,
+    pub trait_calls: FxHashSet<NodeId>,
     /// `value.class()`: the concrete struct or enum name of the value at run time
     /// (works even when `value`'s static type is a trait or a generic parameter).
-    pub class_calls: HashSet<NodeId>,
+    pub class_calls: FxHashSet<NodeId>,
     /// `expr?` that applies to a `Result` (the others apply to a nullable value).
-    pub result_tries: HashSet<NodeId>,
+    pub result_tries: FxHashSet<NodeId>,
     /// Calls with at least one named argument (`f(a: 1)`): for each argument, in the
     /// order written, which parameter slot it fills. Absent means purely positional
     /// (the common case), so the interpreter binds arguments in writing order as-is.
-    pub arg_order: HashMap<NodeId, Vec<usize>>,
+    pub arg_order: FxHashMap<NodeId, Vec<usize>>,
 }

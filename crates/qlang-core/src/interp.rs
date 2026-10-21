@@ -11,6 +11,7 @@ use crate::datetime;
 use crate::diag::Diagnostic;
 use crate::host::{Host, HostError, Limits};
 use crate::ids;
+use crate::smallmap::{Name, SmallMap};
 use crate::span::Span;
 use crate::types::*;
 use crate::value::*;
@@ -318,7 +319,7 @@ struct Interp<'a> {
     out_bytes: usize,
     envs: Vec<Env>,
     statics: HashMap<(StructId, String), Value>,
-    frames: Vec<(String, Span)>,
+    frames: Vec<(Name, Span)>,
     /// The call expression being evaluated (for `sum()` on empty float arrays).
     cur_call: NodeId,
     /// Nesting and size of the value being converted to text (cycles, huge values).
@@ -355,11 +356,11 @@ impl<'a> Interp<'a> {
     fn error(&self, code: &str, msg: impl Into<String>, span: Span) -> Ctrl {
         let mut d = Diagnostic::error(code, msg, span);
         // innermost call first; identical consecutive calls (recursion) are merged
-        let mut groups: Vec<(&String, Span, usize)> = Vec::new();
+        let mut groups: Vec<(&str, Span, usize)> = Vec::new();
         for (name, call_span) in self.frames.iter().rev() {
             match groups.last_mut() {
-                Some((n, s, count)) if *n == name && *s == *call_span => *count += 1,
-                _ => groups.push((name, *call_span, 1)),
+                Some((n, s, count)) if *n == name.as_str() && *s == *call_span => *count += 1,
+                _ => groups.push((name.as_str(), *call_span, 1)),
             }
         }
         for (name, call_span, count) in groups.into_iter().take(8) {
@@ -487,6 +488,15 @@ impl<'a> Interp<'a> {
     }
 
     fn exec_block(&mut self, b: &Block, env: &Env) -> R<Value> {
+        // a block that declares nothing has no variables of its own: run it in the
+        // enclosing scope instead of making a new one for every pass through a loop
+        if !b
+            .stmts
+            .iter()
+            .any(|s| matches!(s.kind, StmtKind::Let { .. }))
+        {
+            return self.exec_stmts(&b.stmts, env);
+        }
         let scope = Scope::new(Some(env.clone()));
         self.exec_stmts(&b.stmts, &scope)
     }
@@ -842,12 +852,12 @@ impl<'a> Interp<'a> {
     fn eval_struct_lit(&mut self, e: &Expr, lit: &StructLit, env: &Env) -> R<Value> {
         let prog = self.prog;
         let sid = prog.res.struct_lits[&e.id];
-        let mut fields: HashMap<String, Value> = HashMap::new();
+        let mut fields = SmallMap::default();
         if let Some(b) = &lit.base {
             match self.eval(b, env)? {
                 Value::Struct(o) => {
                     for (k, v) in o.fields.borrow().iter() {
-                        fields.insert(k.clone(), v.clone());
+                        fields.insert(k, v.clone());
                     }
                 }
                 _ => return self.fail("R001", "`..base` must be a struct value", b.span),
@@ -855,7 +865,7 @@ impl<'a> Interp<'a> {
         }
         for item in &lit.fields {
             let v = self.eval(&item.value, env)?;
-            fields.insert(item.name.name.clone(), v);
+            fields.insert(&item.name.name, v);
         }
         for (asid, _) in prog.defs.ancestry(sid, &[]) {
             let sd = &prog.defs.structs[asid];
@@ -866,7 +876,7 @@ impl<'a> Interp<'a> {
                 if let Some(d) = &f.default {
                     let scope = Scope::new(Some(self.envs[sd.module].clone()));
                     let v = self.eval(d, &scope)?;
-                    fields.insert(f.name.clone(), v);
+                    fields.insert(&f.name, v);
                 }
             }
         }
@@ -1044,7 +1054,7 @@ impl<'a> Interp<'a> {
         span: Span,
     ) -> R<Value> {
         if decl.external {
-            self.frames.push((name.to_string(), span));
+            self.frames.push((Name::new(name), span));
             let r = self.call_extern(decl, args, span);
             self.frames.pop();
             return r;
@@ -1053,7 +1063,7 @@ impl<'a> Interp<'a> {
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }
         self.depth += 1;
-        self.frames.push((name.to_string(), span));
+        self.frames.push((Name::new(name), span));
         let scope = Scope::new(Some(parent.clone()));
         if let Some(s) = this {
             scope.define("self", s);
@@ -1759,7 +1769,7 @@ impl<'a> Interp<'a> {
                 }
             }
             Place::Field(o, n) => {
-                o.fields.borrow_mut().insert(n.clone(), v);
+                o.fields.borrow_mut().insert(n, v);
             }
             Place::Static(sid, n) => {
                 self.statics.insert((*sid, n.clone()), v);
@@ -1834,6 +1844,28 @@ impl<'a> Interp<'a> {
         value: &Expr,
         env: &Env,
     ) -> R<Value> {
+        // the common case, a variable, without building a `Place` (which owns its name)
+        if let ExprKind::Ident(name, _) = &target.kind {
+            let prog = self.prog;
+            let (scope, key): (Env, &str) = match prog.res.paths.get(&target.id) {
+                Some(PathRes::Global(m, n)) => (self.envs[*m].clone(), n.as_str()),
+                _ => (env.clone(), name.as_str()),
+            };
+            let v = match op {
+                None => self.eval(value, env)?,
+                Some(bop) => {
+                    let Some(cur) = scope.get(key) else {
+                        return self.fail("R002", format!("`{key}` has no value yet"), target.span);
+                    };
+                    let rhs = self.eval(value, env)?;
+                    self.binary(bop, cur, rhs, e.span)?
+                }
+            };
+            if !scope.assign(key, v.clone()) {
+                return self.fail("R002", format!("`{key}` has no value yet"), target.span);
+            }
+            return Ok(v);
+        }
         let place = self.eval_place(target, env)?;
         let v = match op {
             None => self.eval(value, env)?,
@@ -2197,10 +2229,10 @@ impl<'a> Interp<'a> {
     }
 
     fn new_struct(&self, sid: StructId, fields: &[(&str, Value)]) -> Value {
-        let map: HashMap<String, Value> = fields
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+        let mut map = SmallMap::default();
+        for (k, v) in fields {
+            map.insert(k, v.clone());
+        }
         Value::Struct(Rc::new(StructObj {
             def: sid,
             fields: RefCell::new(map),

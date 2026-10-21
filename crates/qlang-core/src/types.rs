@@ -40,6 +40,8 @@ pub enum Ty {
     Array(Box<Ty>),
     /// `map<K, V>`: keys are int, string, bool or enum values.
     Map(Box<Ty>, Box<Ty>),
+    /// `(int, string)`: two or more types, a fixed number of values of different types.
+    Tuple(Vec<Ty>),
     Fn(Vec<Ty>, Box<Ty>),
     Struct(StructId, Vec<Ty>),
     /// An enumeration, with the type arguments of a generic one (`Result<int, Error>`).
@@ -80,6 +82,7 @@ impl Ty {
             Ty::Nullable(t) => Ty::nullable(t.subst(map)),
             Ty::Array(t) => Ty::Array(Box::new(t.subst(map))),
             Ty::Map(k, v) => Ty::Map(Box::new(k.subst(map)), Box::new(v.subst(map))),
+            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| t.subst(map)).collect()),
             Ty::Fn(ps, r) => Ty::Fn(
                 ps.iter().map(|p| p.subst(map)).collect(),
                 Box::new(r.subst(map)),
@@ -96,6 +99,7 @@ impl Ty {
             Ty::Infer(_) => true,
             Ty::Nullable(t) | Ty::Array(t) => t.contains_infer(),
             Ty::Map(k, v) => k.contains_infer() || v.contains_infer(),
+            Ty::Tuple(ts) => ts.iter().any(Ty::contains_infer),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_infer) || r.contains_infer(),
             Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_infer),
             _ => false,
@@ -107,6 +111,7 @@ impl Ty {
             Ty::Param(_) => true,
             Ty::Nullable(t) | Ty::Array(t) => t.contains_param(),
             Ty::Map(k, v) => k.contains_param() || v.contains_param(),
+            Ty::Tuple(ts) => ts.iter().any(Ty::contains_param),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_param) || r.contains_param(),
             Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => a.iter().any(Ty::contains_param),
             _ => false,
@@ -133,6 +138,10 @@ impl Ty {
             },
             Ty::Array(t) => format!("array<{}>", t.show(defs)),
             Ty::Map(k, v) => format!("map<{}, {}>", k.show(defs), v.show(defs)),
+            Ty::Tuple(ts) => {
+                let ts: Vec<String> = ts.iter().map(|t| t.show(defs)).collect();
+                format!("({})", ts.join(", "))
+            }
             Ty::Fn(ps, r) => {
                 let ps: Vec<String> = ps.iter().map(|p| p.show(defs)).collect();
                 if **r == Ty::Unit {

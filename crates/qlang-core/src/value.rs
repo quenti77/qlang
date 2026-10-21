@@ -25,6 +25,8 @@ pub enum Value {
     /// Keys keep their insertion order.
     Map(Rc<RefCell<MapObj>>),
     Struct(Rc<StructObj>),
+    /// A tuple: a fixed number of values, never changed.
+    Tuple(Rc<[Value]>),
     /// An enum value: its type, the index of its variant and the data it carries (values
     /// are never changed, so a copy is just another handle).
     Enum(EnumId, usize, Option<Rc<[Value]>>),
@@ -46,6 +48,7 @@ pub enum KeyVal {
     Ulid(u128),
     DateTime(i64),
     Enum(EnumId, usize),
+    Tuple(Vec<KeyVal>),
 }
 
 impl KeyVal {
@@ -59,6 +62,9 @@ impl KeyVal {
             Value::Ulid(u) => KeyVal::Ulid(*u),
             Value::DateTime(t) => KeyVal::DateTime(*t),
             Value::Enum(e, i, None) => KeyVal::Enum(*e, *i),
+            Value::Tuple(items) => {
+                KeyVal::Tuple(items.iter().map(KeyVal::of).collect::<Option<Vec<_>>>()?)
+            }
             _ => return None,
         })
     }

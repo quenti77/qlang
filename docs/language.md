@@ -271,6 +271,36 @@ locale avant de la tester.
 Appeler une méthode ou lire un champ sur une valeur qui peut être `none` est une
 erreur de compilation.
 
+### Tuples
+
+Un **tuple** regroupe un nombre fixe de valeurs, de types différents, sans déclarer de
+structure. Son type s'écrit `(int, string)`, sa valeur `(1, "a")` : au moins deux éléments.
+On lit un élément par sa **position**, à partir de 0 :
+
+```
+fun bornes(xs: array<int>) -> (int, int)
+  (xs[0], xs[xs.len() - 1])
+end
+
+let b = bornes([3, 1, 2])
+print(b)             -- (3, 2)
+print(b.0)           -- 3
+print(b.1)           -- 2
+let nested = (1, (2.5, true))
+print(nested.1.0)    -- 2.5
+```
+
+- Un tuple **ne change pas** : `t.0 = 5` est refusé ; on en construit un nouveau.
+- `==` et `!=` comparent les éléments un à un ; l'affichage est `(1, "a")`.
+- Un tuple peut servir de clé de dictionnaire et de valeur d'ensemble quand ses éléments le
+  peuvent : `{ (0, 0): "origine" }`, `Set.of([(0, 0), (1, 2)])`.
+- Un type de tuple accepte un élément plus large : `let t: (int?, string) = (5, "a")`.
+- Une position qui n'existe pas (`(1, 2).2`) est une erreur de compilation (`T286`), comme
+  `.0` sur autre chose qu'un tuple (`T287`). Un seul élément n'est pas un tuple : `(1)` est
+  juste `1` et `(1,)` est refusé.
+
+Les tuples se déstructurent aussi (`let (a, b) = t`) : voir plus bas.
+
 ### Conversions
 
 Il n'y a pas de conversion implicite entre `int` et `float` pour l'affectation

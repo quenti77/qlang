@@ -87,6 +87,7 @@ postfixExpression
     : primaryExpression
       ( typeArguments? '(' Newline* argumentList? Newline* ')'
       | typeArguments? Dot Identifier
+      | Dot IntLiteral
       | '[' Newline* expression Newline* ']'
       // a[] n'est valide que comme cible d'une affectation : a[] = valeur
       | '[' Newline* ']'
@@ -103,6 +104,7 @@ primaryExpression
     | Self
     | Super
     | '(' Newline* expression Newline* ')'
+    | tupleLiteral
     | arrayLiteral
     | mapLiteral
     | structLiteral
@@ -118,6 +120,11 @@ literal
     | True
     | False
     | None
+    ;
+
+// (1, "a") : deux valeurs ou plus ; t.0, t.1 : un élément d'un tuple
+tupleLiteral
+    : '(' Newline* expression (Comma Newline* expression)+ Comma? Newline* ')'
     ;
 
 arrayLiteral
@@ -253,7 +260,11 @@ nullableType: baseType Question?;
 baseType
     : namedType
     | '(' type ')'
+    | tupleType
     ;
+
+// (int, string) : deux types ou plus
+tupleType: '(' type (Comma type)+ Comma? ')';
 
 // math.Point : type exporté par un module importé sous alias
 namedType: Identifier (Dot Identifier)* typeArguments?;

@@ -566,6 +566,62 @@ impl Checker {
                 Ty::Range
             }
             ExprKind::Try(inner) => self.check_try(e, inner),
+            ExprKind::Tuple(items) => {
+                let expected: Option<Vec<Ty>> = match want.expected().map(|t| self.resolve(t)) {
+                    Some(Ty::Tuple(ts)) if ts.len() == items.len() => Some(ts),
+                    _ => None,
+                };
+                let mut types = Vec::with_capacity(items.len());
+                for (i, item) in items.iter().enumerate() {
+                    let w = match &expected {
+                        Some(ts) => Want::Exp(ts[i].clone()),
+                        None => Want::Any,
+                    };
+                    let t = self.expr(item, &w);
+                    types.push(self.require_value(t, item.span));
+                }
+                Ty::Tuple(types)
+            }
+            ExprKind::TupleField(inner, index) => {
+                let t = self.expr(inner, &Want::Any);
+                let t = self.require_value(t, inner.span);
+                match self.resolve(&t) {
+                    Ty::Tuple(ts) => match ts.get(*index) {
+                        Some(el) => el.clone(),
+                        None => {
+                            let shown = self.show(&Ty::Tuple(ts.clone()));
+                            self.err(
+                                "T286",
+                                format!(
+                                    "`{shown}` has {} elements, so `.{index}` does not exist (they are numbered from 0)",
+                                    ts.len()
+                                ),
+                                e.span,
+                            );
+                            Ty::Error
+                        }
+                    },
+                    Ty::Error => Ty::Error,
+                    Ty::Nullable(_) | Ty::NoneT => {
+                        let shown = self.show(&t);
+                        self.err(
+                            "T162",
+                            format!("this value may be `none` (`{shown}`): check `!= none` before using `.{index}`"),
+                            e.span,
+                        );
+                        Ty::Error
+                    }
+                    other => {
+                        let shown = self.show(&other);
+                        self.err(
+                            "T287",
+                            format!("`.{index}` needs a tuple, found `{shown}`"),
+                            e.span,
+                        );
+                        Ty::Error
+                    }
+                }
+            }
             ExprKind::Cast(inner, te) => {
                 let from = self.expr(inner, &Want::Any);
                 let from = self.require_value(from, inner.span);
@@ -1043,6 +1099,14 @@ impl Checker {
                     );
                 }
                 return vt;
+            }
+            ExprKind::TupleField(..) => {
+                self.err(
+                    "T213",
+                    "a tuple cannot be changed: build a new one (`t = (t.0, new_value)`)",
+                    target.span,
+                );
+                Ty::Error
             }
             _ => {
                 self.err(

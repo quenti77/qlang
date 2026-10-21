@@ -53,6 +53,7 @@ impl Checker {
             ),
             Ty::Struct(id, a) => Ty::Struct(*id, a.iter().map(|x| self.resolve(x)).collect()),
             Ty::Enum(id, a) => Ty::Enum(*id, a.iter().map(|x| self.resolve(x)).collect()),
+            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|x| self.resolve(x)).collect()),
             Ty::Trait(id, a) => Ty::Trait(*id, a.iter().map(|x| self.resolve(x)).collect()),
             other => other.clone(),
         }
@@ -64,7 +65,7 @@ impl Checker {
             Ty::Nullable(x) | Ty::Array(x) => self.occurs(n, &x),
             Ty::Map(k, v) => self.occurs(n, &k) || self.occurs(n, &v),
             Ty::Fn(ps, r) => ps.iter().any(|p| self.occurs(n, p)) || self.occurs(n, &r),
-            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => {
+            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) | Ty::Tuple(a) => {
                 a.iter().any(|x| self.occurs(n, x))
             }
             _ => false,
@@ -108,6 +109,10 @@ impl Checker {
             (_, Ty::Nullable(b)) => self.assignable(&f, b),
             (Ty::Array(a), Ty::Array(b)) => self.same(a, b),
             (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
+            // tuples never change, so each element may be used where a wider one is expected
+            (Ty::Tuple(a), Ty::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| self.assignable(x, y))
+            }
             (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
                 pa.len() == pb.len()
                     && pa.iter().zip(pb.iter()).all(|(a, b)| self.assignable(b, a))
@@ -149,6 +154,9 @@ impl Checker {
             (Ty::Nullable(x), Ty::Nullable(y)) => self.same(x, y),
             (Ty::Array(x), Ty::Array(y)) => self.same(x, y),
             (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
+            (Ty::Tuple(x), Ty::Tuple(y)) => {
+                x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| self.same(p, q))
+            }
             (Ty::Fn(pa, ra), Ty::Fn(pb, rb)) => {
                 pa.len() == pb.len()
                     && pa.iter().zip(pb.iter()).all(|(x, y)| self.same(x, y))
@@ -427,6 +435,9 @@ impl Checker {
                     && xa.iter().zip(ya.iter()).all(|(p, q)| self.same(p, q))
             }
             (Ty::Array(x), Ty::Array(y)) => self.eq_ok(x, y),
+            (Ty::Tuple(x), Ty::Tuple(y)) => {
+                x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| self.eq_ok(p, q))
+            }
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => self.same(k1, k2) && self.eq_ok(v1, v2),
             (Ty::Struct(..) | Ty::Param(_) | Ty::Trait(..), _) => self
                 .find_lang_impl(&a, Lang::Eq, std::slice::from_ref(&b))

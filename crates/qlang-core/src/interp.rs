@@ -789,6 +789,21 @@ impl<'a> Interp<'a> {
                 inclusive,
             } => self.eval_range(e, start, end, *inclusive, env),
             ExprKind::Try(inner) => self.eval_try(e, inner, env),
+            ExprKind::Tuple(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for it in items {
+                    out.push(self.eval(it, env)?);
+                }
+                Ok(Value::Tuple(out.into()))
+            }
+            ExprKind::TupleField(inner, index) => match self.eval(inner, env)? {
+                Value::Tuple(items) if *index < items.len() => Ok(items[*index].clone()),
+                _ => self.fail(
+                    "R001",
+                    "this value is not a tuple with that element",
+                    e.span,
+                ),
+            },
             ExprKind::Cast(inner, _) => self.eval_cast(e, inner, env),
             ExprKind::Call { callee, args } => self.eval_call(e, callee, args, env),
             ExprKind::Index(base, idx) => self.eval_index(e, base, idx, env),
@@ -1453,6 +1468,14 @@ impl<'a> Interp<'a> {
                 }
                 format!("[{}]", parts.join(", "))
             }
+            Value::Tuple(items) => {
+                let items = items.clone();
+                let mut parts = Vec::with_capacity(items.len());
+                for it in items.iter() {
+                    parts.push(self.repr(it, span)?);
+                }
+                format!("({})", parts.join(", "))
+            }
             Value::Map(m) => {
                 let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
                 let mut parts = Vec::with_capacity(entries.len());
@@ -1685,6 +1708,18 @@ impl<'a> Interp<'a> {
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => x == y,
             (Value::DateTime(x), Value::DateTime(y)) => x == y,
+            (Value::Tuple(xs), Value::Tuple(ys)) => {
+                if xs.len() != ys.len() {
+                    return Ok(false);
+                }
+                let (xs, ys) = (xs.clone(), ys.clone());
+                for (x, y) in xs.iter().zip(ys.iter()) {
+                    if !self.values_equal(x, y, span)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
             (Value::Enum(e1, v1, d1), Value::Enum(e2, v2, d2)) => {
                 if e1 != e2 || v1 != v2 {
                     return Ok(false);

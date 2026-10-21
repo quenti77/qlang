@@ -373,6 +373,26 @@ pub fn lex_with_docs(
                     }
                 }
             },
+            // `t.0`, `t.1.0`: after a dot, digits are the position of a tuple element, not a
+            // number (so `1.0` is not read as a float there)
+            b'0'..=b'9'
+                if i > 0
+                    && b[i - 1] == b'.'
+                    && matches!(toks.last(), Some(Token { tok: Tok::Dot, .. })) =>
+            {
+                let start = i;
+                while i < b.len() && b[i].is_ascii_digit() {
+                    i += 1;
+                }
+                match src[start..i].parse::<i64>() {
+                    Ok(n) => push!(Tok::Int(n), start, i),
+                    Err(_) => diags.push(Diagnostic::error(
+                        "L003",
+                        "this tuple position is too large",
+                        span(start, i),
+                    )),
+                }
+            }
             b'0'..=b'9' => i = lex_number(src, i, file, base, &mut toks, diags),
             b'"' => {
                 let start = i;

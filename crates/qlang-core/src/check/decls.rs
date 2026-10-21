@@ -336,6 +336,14 @@ impl Checker {
                 }
                 Ty::nullable(t)
             }
+            TypeExprKind::Tuple(items) => {
+                let ts: Vec<Ty> = items.iter().map(|t| self.resolve_type(t)).collect();
+                if ts.contains(&Ty::Unit) {
+                    self.err("T120", "a type without value cannot be in a tuple", te.span);
+                    return Ty::Error;
+                }
+                Ty::Tuple(ts)
+            }
             TypeExprKind::Fun { params, ret } => {
                 let ps = params.iter().map(|p| self.resolve_type(p)).collect();
                 let r = ret
@@ -415,6 +423,13 @@ impl Checker {
     /// Map keys must be compared by value: int, float, string, bool or enum.
     pub(crate) fn check_key_type(&mut self, k: &Ty, span: Span) {
         let k = self.resolve(k);
+        // a tuple is a key when each of its elements can be one
+        if let Ty::Tuple(items) = &k {
+            for t in items {
+                self.check_key_type(t, span);
+            }
+            return;
+        }
         // an enum whose variants carry data is not compared by name alone
         if let Ty::Enum(id, _) = &k {
             if !self.defs.enums[*id].is_plain() {

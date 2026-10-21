@@ -983,9 +983,33 @@ impl<'a> Parser<'a> {
             Tok::LParen => {
                 self.bump();
                 self.nl.push(false);
-                let r = self
-                    .parse_type()
-                    .and_then(|t| self.expect(&Tok::RParen).map(|_| t));
+                // `(T)` is just T; `(A, B)` is a tuple type
+                let r: PResult<TypeExpr> = (|| {
+                    let first = self.parse_type()?;
+                    if !self.at(&Tok::Comma) {
+                        self.expect(&Tok::RParen)?;
+                        return Ok(first);
+                    }
+                    let mut items = vec![first];
+                    while self.eat(&Tok::Comma) {
+                        if self.at(&Tok::RParen) {
+                            break;
+                        }
+                        items.push(self.parse_type()?);
+                    }
+                    let end = self.expect(&Tok::RParen)?;
+                    if items.len() < 2 {
+                        return self.error_at(
+                            "P060",
+                            "a tuple type needs at least two types: `(int, string)`",
+                            start.to(end),
+                        );
+                    }
+                    Ok(TypeExpr {
+                        span: start.to(end),
+                        kind: TypeExprKind::Tuple(items),
+                    })
+                })();
                 self.nl.pop();
                 r?
             }
@@ -1271,6 +1295,16 @@ impl<'a> Parser<'a> {
                         },
                     );
                 }
+                Tok::Dot if matches!(self.toks[self.pos + 1].tok, Tok::Int(_)) => {
+                    // `t.0`: an element of a tuple
+                    self.bump();
+                    let Tok::Int(n) = self.peek() else {
+                        unreachable!()
+                    };
+                    let end = self.bump().span;
+                    let span = e.span.to(end);
+                    e = self.mk(span, ExprKind::TupleField(Box::new(e), n as usize));
+                }
                 Tok::Dot => {
                     self.bump();
                     let name = self.expect_ident()?;
@@ -1466,9 +1500,30 @@ impl<'a> Parser<'a> {
             Tok::LParen => {
                 self.bump();
                 self.nl.push(false);
-                let r = self
-                    .parse_expr()
-                    .and_then(|e| self.expect(&Tok::RParen).map(|_| e));
+                // `(e)` groups; `(a, b)` is a tuple
+                let r: PResult<Expr> = (|| {
+                    let first = self.parse_expr()?;
+                    if !self.at(&Tok::Comma) {
+                        self.expect(&Tok::RParen)?;
+                        return Ok(first);
+                    }
+                    let mut items = vec![first];
+                    while self.eat(&Tok::Comma) {
+                        if self.at(&Tok::RParen) {
+                            break;
+                        }
+                        items.push(self.parse_expr()?);
+                    }
+                    let end = self.expect(&Tok::RParen)?;
+                    if items.len() < 2 {
+                        return self.error_at(
+                            "P060",
+                            "a tuple needs at least two values: `(1, \"a\")`",
+                            span.to(end),
+                        );
+                    }
+                    Ok(self.mk(span.to(end), ExprKind::Tuple(items)))
+                })();
                 self.nl.pop();
                 r
             }

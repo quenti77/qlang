@@ -171,6 +171,8 @@ pub enum TypeExprKind {
         args: Vec<TypeExpr>,
     },
     Nullable(Box<TypeExpr>),
+    /// `(int, string)`: two or more types.
+    Tuple(Vec<TypeExpr>),
     Fun {
         params: Vec<TypeExpr>,
         ret: Option<Box<TypeExpr>>,
@@ -363,6 +365,10 @@ pub enum ExprKind {
     Cast(Box<Expr>, TypeExpr),
     /// `expr?`: the value of a `Result` or nullable, or leave the function with the error / `none`.
     Try(Box<Expr>),
+    /// `(a, b)`: two or more values.
+    Tuple(Vec<Expr>),
+    /// `t.0`: the element of a tuple at this position.
+    TupleField(Box<Expr>, usize),
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,

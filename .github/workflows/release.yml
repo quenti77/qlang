@@ -75,7 +75,7 @@ jobs:
       - name: Package
         shell: bash
         run: scripts/package-release.sh ${{ matrix.target }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-${{ matrix.target }}
           path: dist/*
@@ -99,7 +99,7 @@ jobs:
           mkdir -p dist
           cp target/wasm32-unknown-unknown/wasm/qlang_wasm.wasm dist/qlang.wasm
           cp crates/qlang-wasm/js/qlang.mjs dist/qlang.mjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-wasm
           path: dist/*
@@ -122,7 +122,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           npx vsce package --allow-missing-repository -o "$GITHUB_WORKSPACE/dist/qlang.vsix"
         working-directory: editors/vscode
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-vsix
           path: dist/qlang.vsix

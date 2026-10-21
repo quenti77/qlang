@@ -131,6 +131,27 @@ impl<V> SmallMap<V> {
         self.position(key).is_some()
     }
 
+    /// Adds an entry whose name is known not to be in the map yet (a call's parameters, which
+    /// the checker made distinct): no search for an existing one.
+    #[inline]
+    pub fn push_new(&mut self, key: &str, value: V) {
+        debug_assert!(self.position(key).is_none());
+        let name = Name::new(key);
+        if let Some(ix) = &mut self.index {
+            ix.insert(name.clone(), self.entries.len());
+        }
+        self.entries.push((name, value));
+        if self.index.is_none() && self.entries.len() > INDEX_FROM {
+            self.index = Some(
+                self.entries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (k, _))| (k.clone(), i))
+                    .collect(),
+            );
+        }
+    }
+
     /// Insert or replace.
     pub fn insert(&mut self, key: &str, value: V) {
         if let Some(i) = self.position(key) {

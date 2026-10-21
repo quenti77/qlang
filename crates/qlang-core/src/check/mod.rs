@@ -958,6 +958,68 @@ fun assert_ne<T: Eq>(actual: T, unexpected: T)
     end
 end
 
+--" The value of an ok `Result`; stops the program (a failed test) showing the error otherwise. --"
+fun assert_ok<T, E>(result: Result<T, E>) -> T
+    match result
+        case Ok(v) then v
+        case Err(e) then panic("assert_ok failed: got the error {e}")
+    end
+end
+
+--" The error of an error `Result`; stops the program (a failed test) showing the value if it is ok. --"
+fun assert_err<T, E>(result: Result<T, E>) -> E
+    match result
+        case Ok(v) then panic("assert_err failed: got the ok value {v}")
+        case Err(e) then e
+    end
+end
+
+--" The value, which must not be `none`; stops the program (a failed test) otherwise. --"
+fun assert_some<T>(value: T?) -> T
+    let v = value
+    if v != none then
+        v
+    else
+        panic("assert_some failed: the value is none")
+    end
+end
+
+--" Stops the program (a failed test) unless the value is `none`. --"
+fun assert_none<T>(value: T?)
+    if value != none then
+        panic("assert_none failed: got {value}")
+    end
+end
+
+--" Stops the program (a failed test) unless `item` is in `items`. --"
+fun assert_contains<T: Eq>(items: array<T>, item: T)
+    if not items.contains(item) then
+        panic("assert_contains failed: {items} does not contain {item}")
+    end
+end
+
+--" Stops the program (a failed test) unless `text` contains `part`. --"
+fun assert_contains_text(text: string, part: string)
+    if not text.contains(part) then
+        panic("assert_contains_text failed: \"{text}\" does not contain \"{part}\"")
+    end
+end
+
+--" Stops the program (a failed test) unless `actual` is within `tolerance` of `expected`
+(relative to `expected` once it is larger than 1): for numbers that went through float
+arithmetic. --"
+fun assert_within(actual: float, expected: float, tolerance: float)
+    let scale = expected.abs().max(1.0)
+    if (actual - expected).abs() > tolerance * scale then
+        panic("assert_within failed: {actual} is not within {tolerance} of {expected}")
+    end
+end
+
+--" Like `assert_within` with a tolerance of one billionth. --"
+fun assert_close(actual: float, expected: float)
+    assert_within(actual, expected, 0.000000001)
+end
+
 --" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int

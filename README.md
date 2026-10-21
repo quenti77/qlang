@@ -157,7 +157,17 @@ fun test_negatives()
   assert(double(-1) < 0, "doit rester négatif")
   assert_ne(double(1), 3)
 end
+
+fun test_load()
+  let json = assert_ok(Json.parse("{\"n\": 1}"))   -- la valeur du Ok, ou l'échec en montrant l'erreur
+  assert_close(0.1 + 0.2, 0.3)                      -- flottants : à un milliardième près
+  assert_contains([1, 2, 3], 2)
+end
 ```
+
+Les autres assertions : `assert_err`, `assert_some`, `assert_none`, `assert_contains_text`,
+`assert_within` (tolérance donnée). Un échec est montré à la ligne de votre test, pas dans
+la bibliothèque.
 
 Code de sortie : `0` si tout passe (ou s'il n'y a aucun test), `1` sinon. `--seed N` fixe les
 nombres aléatoires, `--max-steps N` limite chaque test.

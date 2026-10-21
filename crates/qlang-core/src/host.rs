@@ -371,6 +371,23 @@ impl Default for Limits {
     }
 }
 
+/// How much memory the process uses, and the most a run may use. The core cannot count
+/// memory itself (values are shared and freed all over), so the program that embeds it says
+/// how, once: the terminal program counts its allocations. Without it, only the other limits
+/// apply (they bound a run to a few gigabytes, which is too much for a server).
+static MEMORY: std::sync::OnceLock<(fn() -> usize, usize)> = std::sync::OnceLock::new();
+
+/// Stops runs (`R904`) when `probe()`, the bytes in use, goes over `max_bytes`. Call it once,
+/// at start-up; a second call is ignored.
+pub fn set_memory_limit(probe: fn() -> usize, max_bytes: usize) {
+    let _ = MEMORY.set((probe, max_bytes));
+}
+
+/// Whether the memory in use is over the limit given to [`set_memory_limit`].
+pub fn memory_exceeded() -> bool {
+    MEMORY.get().is_some_and(|(probe, max)| probe() > *max)
+}
+
 /// A host that keeps everything in memory. Used by tests and by web servers.
 #[derive(Default)]
 pub struct MemoryHost {

@@ -153,6 +153,20 @@ impl<V> SmallMap<V> {
         }
     }
 
+    /// The values, in order (the names stay, the map is not usable as before).
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.entries.iter().map(|(_, v)| v)
+    }
+
+    /// Takes all the values out, leaving the map empty.
+    pub fn take_values(&mut self) -> Vec<V> {
+        self.index = None;
+        std::mem::take(&mut self.entries)
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
         self.entries.iter().map(|(k, v)| (k.as_str(), v))
     }

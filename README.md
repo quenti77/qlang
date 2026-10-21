@@ -415,12 +415,18 @@ y compris le travail des méthodes prédéfinies), la récursion, la sortie, la 
 des tableaux et chaînes, et le nombre d'erreurs renvoyées (100 au plus). Un bug
 interne du compilateur ou de l'interpréteur est renvoyé comme une erreur `X999`
 au lieu d'arrêter le processus ; dans le serveur HTTP, le worker concerné répond
-500 et son emplacement de connexion est libéré. Il ne limite pas la
-mémoire totale d'un processus ni le temps réel : pour du code d'inconnus, lancez
-`qlang` dans un conteneur ou avec les limites du système (`ulimit`, cgroups) et un
-délai d'attente. Le serveur HTTP (`qlang serve`) est minimal : pas de TLS, pas de
-connexions persistantes, 16 connexions simultanées au plus. Placez-le derrière un
-proxy inverse et ne l'exposez pas directement à Internet.
+500 et son emplacement de connexion est libéré. Le programme `qlang` arrête un
+programme qui tient plus d'un gigaoctet de mémoire (`R904` ; `--max-memory MB` ou
+`QLANG_MAX_MEMORY` pour le changer, `0` pour le retirer) : la mémoire du processus entier
+est comptée, donc un programme hostile peut gêner les autres requêtes d'un serveur tant
+qu'il tourne, mais pas l'épuiser. Les valeurs imbriquées sur des millions de niveaux (une
+liste chaînée géante) sont libérées sans récursion et leur comparaison s'arrête sur une
+erreur (`R092`). Il ne limite pas le temps réel (les étapes le bornent, pas l'horloge) :
+pour du code d'inconnus, lancez `qlang` dans un conteneur ou avec les limites du système
+(`ulimit`, cgroups) et un délai d'attente. Le serveur HTTP (`qlang serve`) est minimal :
+pas de TLS, pas de connexions persistantes, 16 connexions simultanées au plus, une requête
+doit arriver en 20 secondes, les fichiers cachés (`.env`, `.git`) ne sont jamais servis par
+`--static`. Placez-le derrière un proxy inverse et ne l'exposez pas directement à Internet.
 
 ## Navigateur : WebAssembly
 

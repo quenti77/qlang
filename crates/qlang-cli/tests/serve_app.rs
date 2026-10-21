@@ -272,6 +272,9 @@ fn static_files_are_served_before_the_program_and_cannot_escape() {
     std::fs::write(public.join("index.html"), "<h1>home</h1>").unwrap();
     std::fs::write(public.join("sub/style.css"), "body{}").unwrap();
     std::fs::write(root.join("secret.txt"), "TOP SECRET").unwrap();
+    std::fs::write(public.join(".env"), "TOKEN=hidden").unwrap();
+    std::fs::create_dir_all(public.join(".git")).unwrap();
+    std::fs::write(public.join(".git/config"), "HIDDEN CONFIG").unwrap();
     let server = start("static", ECHO_APP, &["--static", public.to_str().unwrap()]);
 
     let r = exchange(&server, "GET /hello.txt HTTP/1.1\r\nHost: t\r\n\r\n");
@@ -300,6 +303,17 @@ fn static_files_are_served_before_the_program_and_cannot_escape() {
         "POST /hello.txt HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n",
     );
     assert!(r.contains("path=/hello.txt"), "{r}");
+    // hidden files and folders are not files for the web
+    for target in ["/.env", "/.git/config", "/%2eenv"] {
+        let r = exchange(
+            &server,
+            &format!("GET {target} HTTP/1.1\r\nHost: t\r\n\r\n"),
+        );
+        assert!(
+            !r.contains("hidden") && !r.contains("HIDDEN"),
+            "{target}: {r}"
+        );
+    }
     // nothing outside the folder, whatever the spelling
     for target in [
         "/../secret.txt",
@@ -457,4 +471,44 @@ fn the_api_example_routes_requests() {
         r.starts_with("HTTP/1.1 405") && r.contains("Allow: GET, POST"),
         "{r}"
     );
+}
+
+#[test]
+fn a_status_a_client_cannot_understand_is_a_500() {
+    let server = start(
+        "badstatus",
+        "fun handle(req: Request) -> Response\n  Response { status: 99999, body: \"x\" }\nend\n",
+        &[],
+    );
+    let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.starts_with("HTTP/1.1 500 "), "{r}");
+}
+
+#[test]
+fn a_client_sending_too_slowly_is_cut_off() {
+    use std::io::Write;
+    let server = start("slow", ECHO_APP, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(40)))
+        .unwrap();
+    // the head never ends: one byte every second must not keep the connection for ever
+    let started = std::time::Instant::now();
+    let mut closed = false;
+    for _ in 0..40 {
+        if s.write_all(b"X").is_err() {
+            closed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // the server answers 408 and closes: the next write fails, or the read says so
+        s.set_nonblocking(true).unwrap();
+        let mut b = [0u8; 64];
+        if matches!(std::io::Read::read(&mut s, &mut b), Ok(n) if n > 0) {
+            closed = true;
+            break;
+        }
+        s.set_nonblocking(false).unwrap();
+    }
+    assert!(closed, "the connection was still open after 40 s");
+    assert!(started.elapsed() < std::time::Duration::from_secs(35));
 }

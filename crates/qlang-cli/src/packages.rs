@@ -131,6 +131,17 @@ pub fn parse_dependencies(
                 .into_iter()
                 .flatten()
                 .collect();
+                // these go to `git` as revisions: a leading `-` would be taken for an option
+                for r in &refs {
+                    let (GitRef::Tag(t) | GitRef::Rev(t) | GitRef::Branch(t)) = r else {
+                        continue;
+                    };
+                    if t.is_empty() || t.starts_with('-') || t.contains(char::is_whitespace) {
+                        return Err(format!(
+                            "{owner}: dependency `{name}`: `{t}` is not a valid tag, branch or revision"
+                        ));
+                    }
+                }
                 if refs.len() > 1 {
                     return Err(format!(
                         "{owner}: dependency `{name}`: choose one of `tag`, `rev` and `branch`"

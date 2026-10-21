@@ -2409,12 +2409,17 @@ environnement, l'exécution est bornée :
 | appels imbriqués                                                        | 1 000       | `R901` (récursion infinie ?) |
 | sortie affichée                                                         | 10 Mo       | `R902`                       |
 | taille d'un tableau ou dictionnaire (éléments) ou d'une chaîne (octets) | 10 000 000  | `R903`                       |
+| mémoire du processus (programme `qlang`, `--max-memory`)                | 1 Go        | `R904`                       |
 
 Le temps passé dans les opérations prédéfinies compte aussi : chercher dans un
 tableau (`contains`, `index_of`), le trier, l'assembler (`join`), copier une
 chaîne (`+`, `replace`, `split`…) coûte environ une étape pour 4 éléments (ou 32
 octets). Une boucle qui fouille un très grand tableau à chaque tour atteint donc
 la limite d'étapes, comme n'importe quelle boucle trop longue.
+
+Comparer deux valeurs (`==`, `<`) descend au plus de 1 000 niveaux dans les énumérations, tableaux et
+tuples imbriqués : au-delà, `R092` (un programme peut construire des listes chaînées de millions de
+maillons ; leur libération, elle, n'a pas de limite).
 
 Afficher une valeur (`print`, interpolation, `as string`) descend au plus de 64
 niveaux dans les tableaux et structures : en dessous, elle affiche `...`. Cela

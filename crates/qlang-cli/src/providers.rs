@@ -26,6 +26,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+/// The longest answer (one line) a provider may give.
+const MAX_ANSWER: u64 = 64 << 20;
+
 /// One provider to start.
 #[derive(Clone, Debug)]
 pub struct Spec {
@@ -97,8 +100,13 @@ impl Provider {
             .and_then(|()| self.stdin.flush())
             .map_err(|_| "the provider stopped".to_string())?;
         let mut answer = String::new();
-        match self.stdout.read_line(&mut answer) {
+        // a provider that never ends its line must not fill the memory
+        match std::io::Read::take(&mut self.stdout, MAX_ANSWER).read_line(&mut answer) {
             Ok(0) | Err(_) => Err("the provider stopped".to_string()),
+            Ok(_) if !answer.ends_with('\n') && answer.len() as u64 >= MAX_ANSWER => Err(format!(
+                "the provider's answer is longer than {} MB",
+                MAX_ANSWER >> 20
+            )),
             Ok(_) => serde_json::from_str(&answer)
                 .map_err(|e| format!("the provider answered something that is not JSON ({e})")),
         }

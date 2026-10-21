@@ -85,6 +85,18 @@ impl KeyVal {
         })
     }
 
+    /// Like [`KeyVal::of`], but `None` for a key nested deeper than `MAX_KEY_DEPTH` tuples (a
+    /// program could build one a million levels deep, which no code here should recurse into).
+    pub fn of_checked(v: &Value) -> Option<KeyVal> {
+        fn depth(v: &Value, d: usize) -> bool {
+            match v {
+                Value::Tuple(items) => d < MAX_KEY_DEPTH && items.iter().all(|i| depth(i, d + 1)),
+                _ => true,
+            }
+        }
+        if depth(v, 0) { KeyVal::of(v) } else { None }
+    }
+
     fn float_bits(f: f64) -> u64 {
         if f.is_nan() {
             f64::NAN.to_bits()
@@ -96,6 +108,9 @@ impl KeyVal {
     }
 }
 
+/// Tuples nested deeper than this cannot be map keys or set values.
+const MAX_KEY_DEPTH: usize = 64;
+
 /// An insertion-ordered map.
 #[derive(Default)]
 pub struct MapObj {
@@ -104,6 +119,15 @@ pub struct MapObj {
 }
 
 impl MapObj {
+    /// Takes keys and values out (for dropping a map without deep recursion).
+    pub fn take_values(&mut self) -> Vec<Value> {
+        self.index.clear();
+        std::mem::take(&mut self.entries)
+            .into_iter()
+            .flat_map(|(k, v)| [k, v])
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -113,13 +137,13 @@ impl MapObj {
     }
 
     pub fn get(&self, k: &Value) -> Option<&Value> {
-        let i = *self.index.get(&KeyVal::of(k)?)?;
+        let i = *self.index.get(&KeyVal::of_checked(k)?)?;
         Some(&self.entries[i].1)
     }
 
     /// Insert or replace; false if `k` cannot be a key.
     pub fn insert(&mut self, k: Value, v: Value) -> bool {
-        let Some(key) = KeyVal::of(&k) else {
+        let Some(key) = KeyVal::of_checked(&k) else {
             return false;
         };
         match self.index.get(&key) {
@@ -133,7 +157,7 @@ impl MapObj {
     }
 
     pub fn remove(&mut self, k: &Value) -> Option<Value> {
-        let i = self.index.remove(&KeyVal::of(k)?)?;
+        let i = self.index.remove(&KeyVal::of_checked(k)?)?;
         let (_, v) = self.entries.remove(i);
         for slot in self.index.values_mut() {
             if *slot > i {
@@ -318,5 +342,137 @@ impl Scope {
                 None => return false,
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------- dropping deep values
+//
+// A linked list of a million nodes is a value nested a million levels deep, and the plain
+// drop of it recurses a million times: the stack of the thread overflows and the process
+// dies (in a server, for everybody). So the last owner of a container takes its contents
+// out and drops them with a counter: deeper than `MAX_DROP_DEPTH` levels, the contents wait
+// in a list, and the outermost drop empties the list one batch at a time.
+
+const MAX_DROP_DEPTH: u32 = 48;
+
+thread_local! {
+    static DROP_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static DEFERRED: RefCell<Vec<Vec<Value>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn release(values: Vec<Value>) {
+    if values.is_empty() {
+        return;
+    }
+    // while the thread's storage is being torn down, drop plainly
+    let Ok(depth) = DROP_DEPTH.try_with(|d| d.get()) else {
+        return;
+    };
+    if depth >= MAX_DROP_DEPTH {
+        let _ = DEFERRED.try_with(|q| {
+            if let Ok(mut q) = q.try_borrow_mut() {
+                q.push(values);
+            }
+        });
+        return;
+    }
+    let _ = DROP_DEPTH.try_with(|d| d.set(depth + 1));
+    drop(values);
+    let _ = DROP_DEPTH.try_with(|d| d.set(depth));
+    if depth == 0 {
+        // the outermost drop: empty the waiting list (dropping a batch may add to it)
+        loop {
+            let next = DEFERRED
+                .try_with(|q| q.try_borrow_mut().ok().and_then(|mut q| q.pop()))
+                .ok()
+                .flatten();
+            let Some(batch) = next else { break };
+            let _ = DROP_DEPTH.try_with(|d| d.set(1));
+            drop(batch);
+            let _ = DROP_DEPTH.try_with(|d| d.set(0));
+        }
+    }
+}
+
+impl Drop for Value {
+    #[inline(always)]
+    fn drop(&mut self) {
+        // numbers, text and the like (nearly every drop) have nothing to take out
+        if self.is_last_owner_of_container() {
+            self.drop_container();
+        }
+    }
+}
+
+impl Value {
+    #[inline(never)]
+    fn drop_container(&mut self) {
+        let children: Vec<Value> = match self {
+            Value::Array(a) if Rc::strong_count(a) == 1 => match a.try_borrow_mut() {
+                Ok(mut v) => std::mem::take(&mut *v),
+                Err(_) => return,
+            },
+            Value::Map(m) if Rc::strong_count(m) == 1 => match m.try_borrow_mut() {
+                Ok(mut m) => m.take_values(),
+                Err(_) => return,
+            },
+            Value::Struct(o) if Rc::strong_count(o) == 1 => match o.fields.try_borrow_mut() {
+                Ok(mut f) => f.take_values(),
+                Err(_) => return,
+            },
+            Value::Tuple(t) => match Rc::get_mut(t) {
+                Some(items) if items.iter().any(Value::is_container) => items
+                    .iter_mut()
+                    .map(|v| std::mem::replace(v, Value::Unit))
+                    .collect(),
+                _ => return,
+            },
+            Value::Enum(_, _, Some(d)) => match Rc::get_mut(d) {
+                Some(items) => std::mem::take(items),
+                None => return,
+            },
+            _ => return,
+        };
+        release(children);
+    }
+}
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        // a scope usually holds numbers and strings: only one that holds something nested
+        // (an array, a structure, a function with its own scope...) goes through `release`
+        let vars = self.vars.get_mut();
+        if vars.values().any(Value::is_last_owner_of_container) {
+            release(vars.take_values());
+        }
+    }
+}
+
+impl Value {
+    /// Whether this value is the only owner of a container, so that dropping it drops more.
+    #[inline(always)]
+    fn is_last_owner_of_container(&self) -> bool {
+        match self {
+            Value::Array(a) => Rc::strong_count(a) == 1,
+            Value::Map(m) => Rc::strong_count(m) == 1,
+            Value::Struct(o) => Rc::strong_count(o) == 1,
+            Value::Tuple(t) => Rc::strong_count(t) == 1,
+            Value::Enum(_, _, Some(d)) => Rc::strong_count(d) == 1,
+            Value::Func(f) => Rc::strong_count(f) == 1,
+            _ => false,
+        }
+    }
+
+    /// Whether dropping this value can drop more values.
+    pub fn is_container(&self) -> bool {
+        matches!(
+            self,
+            Value::Array(_)
+                | Value::Map(_)
+                | Value::Struct(_)
+                | Value::Tuple(_)
+                | Value::Enum(_, _, Some(_))
+                | Value::Func(_)
+        )
     }
 }

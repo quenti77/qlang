@@ -1270,7 +1270,12 @@ print(math.add(1, 2))
 - Un même fichier atteint par deux chemins (`a.q`, `../d/a.q`, un lien symbolique)
   est un seul module.
 - Un module est exécuté une seule fois, avant le fichier qui l'importe, quel que
-  soit le nombre d'imports. Les imports circulaires sont refusés.
+  soit le nombre d'imports.
+- Deux modules peuvent s'importer mutuellement (un cycle) tant qu'**un seul** des modules
+  du cycle exécute du code au niveau du fichier (`print`, `let`, appels…) : ceux qui ne
+  font que déclarer des fonctions, structures, traits ou énumérations ne dépendent pas de
+  l'ordre d'exécution. Si plusieurs modules du cycle exécutent du code, il n'y a pas
+  d'ordre valable et le programme est refusé (`T101`).
 - On ne peut pas modifier depuis un autre fichier une variable exportée.
 
 ### Paquets

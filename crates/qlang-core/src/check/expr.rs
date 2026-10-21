@@ -815,7 +815,7 @@ impl Checker {
                 scrutinee,
                 cases,
                 else_block,
-            } => self.check_match(e, scrutinee, cases, else_block.as_ref(), want),
+            } => self.check_match(scrutinee, cases, else_block.as_ref(), want),
             ExprKind::Lambda(f) => self.check_lambda(f),
         }
     }
@@ -1390,7 +1390,6 @@ impl Checker {
 
     fn check_match(
         &mut self,
-        e: &Expr,
         scrutinee: &Expr,
         cases: &[MatchCase],
         else_block: Option<&Block>,
@@ -1401,42 +1400,17 @@ impl Checker {
         let st = self.require_value(st, scrutinee.span);
         let mut result: Option<Ty> = None;
         let mut failed = false;
-        let mut exhaustive = else_block.is_some();
         let mut none_seen = false;
-        let mut variants_seen: HashSet<usize> = HashSet::new();
-        let mut enum_id: Option<EnumId> = None;
-        let mut bools_seen = (false, false);
-        for (i, case) in cases.iter().enumerate() {
+        let mut covering: Vec<&Pattern> = Vec::new();
+        for case in cases {
             self.push_scope();
-            self.check_pattern(e.id, i, &case.pattern, case.pattern_span, &st, none_seen);
+            self.check_pattern(&case.pattern, case.pattern_span, &st, none_seen);
             if let Some(g) = &case.guard {
                 self.check_cond(g);
             }
-            let unguarded = case.guard.is_none();
-            if unguarded
-                && matches!(&case.pattern, Pattern::Tuple(_))
-                && case.pattern.is_irrefutable()
-                && !matches!(st, Ty::Nullable(_))
-            {
-                // `case (a, b)`: every tuple of the right shape
-                exhaustive = true;
-            } else if unguarded && let Some(&(eid, v)) = self.res.patterns.get(&(e.id, i)) {
-                // a variant, written with or without its type, with or without data
-                enum_id = Some(eid);
-                variants_seen.insert(v);
-            } else if unguarded {
-                match &case.pattern {
-                    Pattern::Bind(_) => exhaustive = true,
-                    Pattern::None => none_seen = true,
-                    Pattern::Bool(b) => {
-                        if *b {
-                            bools_seen.0 = true;
-                        } else {
-                            bools_seen.1 = true;
-                        }
-                    }
-                    _ => {}
-                }
+            if case.guard.is_none() {
+                covering.push(&case.pattern);
+                none_seen |= matches!(case.pattern, Pattern::None);
             }
             let bt = self.check_block(&case.body, want);
             self.pop_scope();
@@ -1483,29 +1457,14 @@ impl Checker {
                 });
             }
         }
-        if let Some(eid) = enum_id
-            && variants_seen.len() == self.defs.enums[eid].variants.len()
-        {
-            exhaustive = true;
-        }
-        if bools_seen.0 && bools_seen.1 {
-            exhaustive = true;
-        }
+        let exhaustive = else_block.is_some() || self.patterns_exhaustive(&st, &covering);
         if !exhaustive || !used {
             return Ty::Unit;
         }
         result.unwrap_or(Ty::Unit)
     }
 
-    fn check_pattern(
-        &mut self,
-        mid: NodeId,
-        idx: usize,
-        p: &Pattern,
-        span: Span,
-        st: &Ty,
-        none_seen: bool,
-    ) {
+    fn check_pattern(&mut self, p: &Pattern, span: Span, st: &Ty, none_seen: bool) {
         let st_r = self.resolve(st);
         let inner = st_r.non_null();
         let expect = |this: &mut Checker, got: Ty| {
@@ -1519,7 +1478,7 @@ impl Checker {
             }
         };
         match p {
-            Pattern::Tuple(items) => self.check_tuple_pattern(mid, idx, items, span, &inner),
+            Pattern::Tuple(items) => self.check_tuple_pattern(items, span, &inner),
             Pattern::Int(_) => expect(self, Ty::Int),
             Pattern::Float(_) => expect(self, Ty::Float),
             Pattern::Str(_) => expect(self, Ty::Str),
@@ -1539,10 +1498,10 @@ impl Checker {
                     expect(self, t);
                 }
             }
-            Pattern::Path(path) => {
+            Pattern::Path { path, id } => {
                 if let Some((eid, vi, args)) = self.pattern_variant(path, &inner, span) {
                     let expected = Ty::Enum(eid, args);
-                    self.res.patterns.insert((mid, idx), (eid, vi));
+                    self.res.patterns.insert(*id, (eid, vi));
                     if !self.defs.enums[eid].variants[vi].fields.is_empty() {
                         let v = &self.defs.enums[eid].variants[vi];
                         let msg = format!(
@@ -1556,11 +1515,11 @@ impl Checker {
                     expect(self, expected);
                 }
             }
-            Pattern::Variant { path, fields } => {
+            Pattern::Variant { path, fields, id } => {
                 let Some((eid, vi, args)) = self.pattern_variant(path, &inner, span) else {
                     return;
                 };
-                self.res.patterns.insert((mid, idx), (eid, vi));
+                self.res.patterns.insert(*id, (eid, vi));
                 expect(self, Ty::Enum(eid, args.clone()));
                 let def = self.defs.enums[eid].clone();
                 let v = &def.variants[vi];
@@ -1575,6 +1534,10 @@ impl Checker {
                         ),
                         span,
                     );
+                    // one mistake, one error: still declare the names
+                    for p in fields {
+                        self.check_pattern(p, span, &Ty::Error, false);
+                    }
                     return;
                 }
                 let map: HashMap<ParamId, Ty> = def
@@ -1583,27 +1546,17 @@ impl Checker {
                     .copied()
                     .zip(args.iter().cloned())
                     .collect();
-                for ((_, fty), bind) in v.fields.iter().zip(fields) {
-                    if let Some(name) = bind {
-                        let ty = self.resolve(&fty.subst(&map));
-                        self.declare(
-                            name,
-                            Local {
-                                ty,
-                                kind: LocalKind::Var,
-                                orig: None,
-                                span: name.span,
-                            },
-                        );
-                    }
+                for ((_, fty), p) in v.fields.iter().zip(fields) {
+                    let ty = self.resolve(&fty.subst(&map));
+                    self.check_pattern(p, span, &ty, false);
                 }
             }
-            Pattern::Bind(name) => {
+            Pattern::Bind { name, id } => {
                 // a name that is a variant of the type being matched is that variant
                 if let Ty::Enum(eid, args) = &inner
                     && let Some(vi) = self.defs.enums[*eid].variant_index(&name.name)
                 {
-                    self.res.patterns.insert((mid, idx), (*eid, vi));
+                    self.res.patterns.insert(*id, (*eid, vi));
                     if !self.defs.enums[*eid].variants[vi].fields.is_empty() {
                         let msg =
                             format!("`{0}` carries data: write `{0}(...)` to take it", name.name);
@@ -1633,18 +1586,11 @@ impl Checker {
     }
 
     /// `(0, y)` against a value of type `ty`: one sub-pattern for each element.
-    fn check_tuple_pattern(
-        &mut self,
-        mid: NodeId,
-        idx: usize,
-        items: &[Pattern],
-        span: Span,
-        ty: &Ty,
-    ) {
+    fn check_tuple_pattern(&mut self, items: &[Pattern], span: Span, ty: &Ty) {
         match self.resolve(ty) {
             Ty::Tuple(ts) if ts.len() == items.len() => {
                 for (p, t) in items.iter().zip(ts.iter()) {
-                    self.check_sub_pattern(mid, idx, p, span, t);
+                    self.check_pattern(p, span, t, false);
                 }
             }
             found => {
@@ -1671,36 +1617,9 @@ impl Checker {
                 }
                 // declare the names anyway: one mistake, one error
                 for p in items {
-                    self.check_sub_pattern(mid, idx, p, span, &Ty::Error);
+                    self.check_pattern(p, span, &Ty::Error, false);
                 }
             }
-        }
-    }
-
-    /// A pattern inside a tuple pattern: a value, a range, `none`, a name, `_` or a tuple.
-    fn check_sub_pattern(&mut self, mid: NodeId, idx: usize, p: &Pattern, span: Span, ty: &Ty) {
-        match p {
-            Pattern::Bind(name) => {
-                if name.name != "_" {
-                    let ty = self.resolve(ty);
-                    self.declare(
-                        name,
-                        Local {
-                            ty,
-                            kind: LocalKind::Var,
-                            orig: None,
-                            span: name.span,
-                        },
-                    );
-                }
-            }
-            Pattern::Tuple(items) => self.check_tuple_pattern(mid, idx, items, span, ty),
-            Pattern::Path(_) | Pattern::Variant { .. } => self.err(
-                "T224",
-                "a variant cannot be matched inside a tuple pattern yet: name the element, then `match` it",
-                span,
-            ),
-            other => self.check_pattern(mid, idx, other, span, ty, false),
         }
     }
 

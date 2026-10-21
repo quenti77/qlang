@@ -1839,8 +1839,7 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         let r: PResult<()> = (|| {
             while !self.at(&Tok::RParen) {
-                let name = self.expect_ident()?;
-                fields.push(if name.name == "_" { None } else { Some(name) });
+                fields.push(self.parse_pattern()?);
                 if !self.eat(&Tok::Comma) {
                     break;
                 }
@@ -1850,7 +1849,8 @@ impl<'a> Parser<'a> {
         })();
         self.nl.pop();
         r?;
-        Ok(Pattern::Variant { path, fields })
+        let id = self.fresh_id();
+        Ok(Pattern::Variant { path, fields, id })
     }
 
     fn parse_pattern(&mut self) -> PResult<Pattern> {
@@ -1933,10 +1933,14 @@ impl<'a> Parser<'a> {
                 if self.at(&Tok::LParen) {
                     return self.parse_variant_pattern(path);
                 }
+                let id = self.fresh_id();
                 if path.len() == 1 {
-                    Ok(Pattern::Bind(path.pop().unwrap()))
+                    Ok(Pattern::Bind {
+                        name: path.pop().unwrap(),
+                        id,
+                    })
                 } else {
-                    Ok(Pattern::Path(path))
+                    Ok(Pattern::Path { path, id })
                 }
             }
             _ => self.unexpected("a pattern (a value, a range, `Enum.Variant` or a name)"),

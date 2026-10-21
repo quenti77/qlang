@@ -170,7 +170,7 @@ matchExpression
 matchCase: Case pattern (If expression)? Then block;
 
 // motifs : littéral, variante d'enum (Color.Red, Circle(r), Shape.Rect(w, _)), intervalle,
-// liaison (x)
+// tuple, liaison (x) ; ils s'imbriquent : Ok((a, b)), (Circle(r), Red)
 pattern
     : Minus? (IntLiteral | FloatLiteral) ((DotDot | DotDotEq) Minus? (IntLiteral | FloatLiteral))?
     | StringLiteral
@@ -178,7 +178,7 @@ pattern
     | False
     | None
     | '(' pattern (Comma pattern)+ Comma? ')'
-    | Identifier (Dot Identifier)* ('(' Identifier (Comma Identifier)* ')')?
+    | Identifier (Dot Identifier)* ('(' pattern (Comma pattern)* Comma? ')')?
     ;
 
 // fun(x: int) -> int ... end

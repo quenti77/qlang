@@ -868,7 +868,7 @@ impl<'a> Interp<'a> {
                 scrutinee,
                 cases,
                 else_block,
-            } => self.eval_match(e, scrutinee, cases, else_block, env),
+            } => self.eval_match(scrutinee, cases, else_block, env),
             ExprKind::Lambda(f) => Ok(Value::Func(Rc::new(FuncVal {
                 decl: f.clone(),
                 env: env.clone(),
@@ -998,16 +998,15 @@ impl<'a> Interp<'a> {
     #[inline(never)]
     fn eval_match(
         &mut self,
-        e: &Expr,
         scrutinee: &Expr,
         cases: &[MatchCase],
         else_block: &Option<Block>,
         env: &Env,
     ) -> R<Value> {
         let v = self.eval(scrutinee, env)?;
-        for (i, case) in cases.iter().enumerate() {
+        for case in cases {
             let scope = Scope::new(Some(env.clone()));
-            if !self.match_pattern(&case.pattern, &v, e.id, i, &scope)? {
+            if !self.match_pattern(&case.pattern, &v, &scope)? {
                 continue;
             }
             if let Some(g) = &case.guard
@@ -2086,14 +2085,7 @@ impl<'a> Interp<'a> {
 
     // --------------------------------------------------------------- patterns
 
-    fn match_pattern(
-        &mut self,
-        p: &Pattern,
-        v: &Value,
-        mid: NodeId,
-        idx: usize,
-        scope: &Env,
-    ) -> R<bool> {
+    fn match_pattern(&mut self, p: &Pattern, v: &Value, scope: &Env) -> R<bool> {
         Ok(match p {
             Pattern::Int(n) => {
                 matches!(v, Value::Int(x) if x == n)
@@ -2117,7 +2109,7 @@ impl<'a> Interp<'a> {
             Pattern::Tuple(items) => match v {
                 Value::Tuple(vs) if vs.len() == items.len() => {
                     for (p, x) in items.iter().zip(vs.iter()) {
-                        if !self.match_pattern(p, x, mid, idx, scope)? {
+                        if !self.match_pattern(p, x, scope)? {
                             return Ok(false);
                         }
                     }
@@ -2125,24 +2117,24 @@ impl<'a> Interp<'a> {
                 }
                 _ => false,
             },
-            Pattern::Path(_) => match (self.prog.res.patterns.get(&(mid, idx)), v) {
+            Pattern::Path { id, .. } => match (self.prog.res.patterns.get(id), v) {
                 (Some((eid, vi)), Value::Enum(e, x, _)) => eid == e && vi == x,
                 _ => false,
             },
-            Pattern::Variant { fields, .. } => match (self.prog.res.patterns.get(&(mid, idx)), v) {
+            Pattern::Variant { fields, id, .. } => match (self.prog.res.patterns.get(id), v) {
                 (Some((eid, vi)), Value::Enum(e, x, Some(data))) if eid == e && vi == x => {
-                    for (bind, value) in fields.iter().zip(data.iter()) {
-                        if let Some(name) = bind {
-                            scope.define(&name.name, value.clone());
+                    for (p, value) in fields.iter().zip(data.iter()) {
+                        if !self.match_pattern(p, value, scope)? {
+                            return Ok(false);
                         }
                     }
                     true
                 }
                 _ => false,
             },
-            Pattern::Bind(name) => {
+            Pattern::Bind { name, id } => {
                 // a name that is a variant of the type matched (decided by the checker)
-                if let Some((eid, vi)) = self.prog.res.patterns.get(&(mid, idx)) {
+                if let Some((eid, vi)) = self.prog.res.patterns.get(id) {
                     return Ok(matches!(v, Value::Enum(e, x, _) if e == eid && x == vi));
                 }
                 if name.name != "_" {

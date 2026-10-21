@@ -211,10 +211,6 @@ fn a_match_pattern_must_fit_the_value() {
     let types = exec("match (1, \"a\")\n  case (\"x\", b) then print(b)\n  else print(0)\nend");
     assert!(types.contains("T220"), "{types}");
     assert!(exec("match (1, 2)\n  case (a) then print(a)\n  else print(0)\nend").contains("P062"));
-    let variant = exec(
-        "enum C\n  Red\n  Blue\nend\nmatch (C.Red, 1)\n  case (C.Red, n) then print(n)\n  else print(0)\nend",
-    );
-    assert!(variant.contains("T224"), "{variant}");
 }
 
 #[test]

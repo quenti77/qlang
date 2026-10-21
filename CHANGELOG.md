@@ -1,5 +1,9 @@
 # Journal des changements
 
+## À publier
+
+- Motifs imbriqués : une variante dans un motif de tuple (`case (Red, n)`), un motif dans une variante (`case Ok((a, b))`, `case Ok(0)`). La vérification d'exhaustivité suit l'imbrication. `T224` n'existe plus.
+
 ## 0.34.0
 
 - Docs : `README.md` présente `qlang-std`, section « Points encore ouverts » mise à jour.

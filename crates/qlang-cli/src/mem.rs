@@ -24,8 +24,15 @@ fn count(delta: isize) {
                 IN_USE.fetch_add(v as usize, Relaxed);
             } else {
                 // memory freed here that another thread allocated: never below zero
-                let _ = IN_USE
-                    .fetch_update(Relaxed, Relaxed, |u| Some(u.saturating_sub((-v) as usize)));
+                let mut cur = IN_USE.load(Relaxed);
+                while let Err(seen) = IN_USE.compare_exchange_weak(
+                    cur,
+                    cur.saturating_sub((-v) as usize),
+                    Relaxed,
+                    Relaxed,
+                ) {
+                    cur = seen;
+                }
             }
             c.set(0);
         } else {

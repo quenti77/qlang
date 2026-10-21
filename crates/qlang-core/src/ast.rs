@@ -362,35 +362,34 @@ pub enum Pattern {
         hi: Box<Pattern>,
         inclusive: bool,
     },
-    /// `Color.Red`, `m.Color.Red`
-    Path(Vec<Ident>),
-    /// `x`: matches anything and binds the value.
-    Bind(Ident),
+    /// `Color.Red`, `m.Color.Red`; `id` keys what the checker resolved it to.
+    Path {
+        path: Vec<Ident>,
+        id: NodeId,
+    },
+    /// `x`: matches anything and binds the value (or, when `x` is a variant of the type
+    /// matched, that variant: the checker decides, by `id`).
+    Bind {
+        name: Ident,
+        id: NodeId,
+    },
     /// `(0, y)`, `(a, b)`: a tuple whose elements match the patterns, in order.
     Tuple(Vec<Pattern>),
-    /// `Circle(r)`, `Shape.Circle(r, _)`: a variant that carries data; each field is bound
-    /// to a name, or ignored (`None`, written `_`).
+    /// `Circle(r)`, `Shape.Circle(r, _)`, `Ok((a, b))`: a variant that carries data; each
+    /// field is matched by a pattern (a name, `_`, a value, a tuple, another variant…).
     Variant {
         path: Vec<Ident>,
-        fields: Vec<Option<Ident>>,
+        fields: Vec<Pattern>,
+        id: NodeId,
     },
 }
 
 impl Pattern {
-    /// Whether the pattern matches every value of its type (a name, or tuples of such).
-    pub fn is_irrefutable(&self) -> bool {
-        match self {
-            Pattern::Bind(_) => true,
-            Pattern::Tuple(items) => items.iter().all(Pattern::is_irrefutable),
-            _ => false,
-        }
-    }
-
     /// The variables the pattern declares.
     pub fn bound_names<'a>(&'a self, out: &mut Vec<&'a Ident>) {
         match self {
-            Pattern::Bind(n) => out.push(n),
-            Pattern::Variant { fields, .. } => out.extend(fields.iter().flatten()),
+            Pattern::Bind { name, .. } => out.push(name),
+            Pattern::Variant { fields, .. } => fields.iter().for_each(|p| p.bound_names(out)),
             Pattern::Tuple(items) => items.iter().for_each(|p| p.bound_names(out)),
             _ => {}
         }

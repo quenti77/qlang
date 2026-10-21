@@ -586,14 +586,34 @@ Motifs possibles dans un `case` :
 Une variante peut s'écrire avec ou sans le nom de l'énumération quand celle-ci est connue
 par la valeur testée (`case Red`, `case Circle(r)`) ; un nom qui est une variante de ce
 type est la variante, sinon c'est une liaison. Pour une variante qui porte des données,
-on nomme chaque valeur entre parenthèses (`_` pour l'ignorer) : le nombre de noms doit
+on écrit un motif par valeur entre parenthèses (`_` pour l'ignorer) : le nombre de motifs doit
 être celui des valeurs.
 
-Un motif de tuple a un sous-motif par élément (valeur, intervalle, `none`, nom, `_`, ou un
-autre tuple) ; les noms sont liés dans la garde et dans le corps. Un variant d'énumération ne
-peut pas s'écrire dans un motif de tuple : nommer l'élément, puis le `match`er à part. Un
-motif de tuple fait de noms seulement (`case (a, b)`) accepte tout tuple, donc rend le `match`
-exhaustif ; dès qu'il teste une valeur, il faut un `else` ou un `case` qui accepte tout.
+Les motifs **s'imbriquent** : un motif de tuple a un sous-motif par élément, une variante
+avec données un sous-motif par valeur portée, et chaque sous-motif est lui-même un motif
+(valeur, intervalle, `none`, nom, `_`, tuple, variante). Les noms sont liés dans la garde et
+dans le corps.
+
+```
+match (shape, color)
+  case (Circle(r), Red) then print("cercle rouge de rayon {r}")
+  case (Rect(w, _), _) then print("rectangle de largeur {w}")
+  else print("autre")
+end
+
+match result
+  case Ok((n, name)) then print("{n} {name}")
+  case Ok(0) then print("zéro")      -- un littéral dans une variante
+  case Err(e) then print(e.message)
+end
+```
+
+Le compilateur vérifie que les `case` **couvrent** toutes les valeurs, en comptant les
+variantes, `true`/`false` et `none` jusque dans les motifs imbriqués : `(Red, Red)`,
+`(Red, Green)` et `(Green, _)` suffisent pour deux couleurs. Les valeurs littérales et les
+intervalles ne couvrent jamais un type (il faut alors un `else` ou un nom), et un `case` avec
+garde n'est pas compté. Dans un tuple, un nom ne retire pas le `none` d'un élément nullable
+(seul un `case none` au premier niveau le fait).
 
 Les `case` sont essayés dans l'ordre. Un nom seul (`case x then`) accepte toute
 valeur et la nomme ; `_` accepte toute valeur sans la nommer. Après un
@@ -1140,8 +1160,8 @@ end
   données se **construit** par un appel : `Shape.Circle(2.0)`, par position ou par nom
   comme n'importe quel appel. Écrire `Shape.Circle` seul, ou `Color.Red()`, est une erreur.
 - Dans un `match`, le compilateur vérifie que toutes les variantes sont traitées (voir
-  `match`). Les valeurs portées se lient par position ; les motifs ne s'imbriquent pas
-  (`case Circle(0.0)` n'existe pas : utiliser une garde, `case Circle(r) if r == 0.0`).
+  `match`). Les valeurs portées se lient par position, et chacune est un motif à part
+  entière : `case Circle(0.0)`, `case Ok((n, s))`, `case Ok(Some(x))`… (voir `match`).
 - Une énumération peut être **générique** : `enum Maybe<T> Just(value: T) Nothing end`
   (voir les génériques) ; `impl<T> Maybe<T> ... end` lui ajoute des méthodes, et un trait
   s'implémente comme pour une structure.
@@ -2412,8 +2432,6 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Traits qui en exigent d'autres** (un trait qui suppose qu'un autre est
   aussi implémenté) : non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Motifs :** une variante d'énumération dans un motif de tuple, et un motif imbriqué
-  dans une variante, ne sont pas encore acceptés.
 - **Tuples :** pas d'ordre (donc pas de tri) ni de passage à travers une `extern fun`.
 - **Format des commentaires de documentation** : le texte reste libre (`qlang doc` le recopie
   tel quel). À prévoir, selon l'usage : un format léger du type `@param` / `@return`.

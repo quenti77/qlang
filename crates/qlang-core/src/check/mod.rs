@@ -6,6 +6,7 @@ mod calls;
 mod captured;
 mod catalog;
 mod decls;
+mod exhaust;
 mod expr;
 mod info;
 mod unify;

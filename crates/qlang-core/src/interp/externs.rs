@@ -450,10 +450,10 @@ fn k_text(k: &Value) -> String {
 
 /// The `T` of a `Result<T, Error>` return type.
 fn prog_result_payload<'a>(prog: &crate::check::Program, ret: &'a Ty) -> Option<&'a Ty> {
-    let Ty::Struct(sid, args) = ret else {
+    let Ty::Enum(eid, args) = ret else {
         return None;
     };
-    let s = &prog.defs.structs[*sid];
+    let s = &prog.defs.enums[*eid];
     (s.module == crate::check::PRELUDE_MOD && s.name == "Result" && args.len() == 2)
         .then(|| &args[0])
 }

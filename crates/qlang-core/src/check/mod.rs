@@ -117,63 +117,58 @@ struct Error
     public message: string
 end
 
-struct Result<T, E>
-    data: T?
-    err: E?
+--" The outcome of something that can fail: `Ok(value)` or `Err(error)`. Take it apart
+with `match` (`case Ok(v) then ... case Err(e) then ...`), or with `is_ok()`, `unwrap()`...
+Write `Ok(1)` / `Err(error)`, or `Result.Ok(1)` / `Result.Err(error)`. --"
+enum Result<T, E>
+    Ok(value: T)
+    Err(error: E)
 end
 
 impl<T, E> Result<T, E>
-    --" An ok result holding `data`. --"
-    public fun ok(data: T) -> Result<T, E>
-        Result { data, err: none }
-    end
-
-    --" An error result holding `error`. --"
-    public fun err(error: E) -> Result<T, E>
-        Result { data: none, err: error }
-    end
-
     --" Whether this is an ok result. --"
     public fun is_ok(self) -> bool
-        self.data != none
+        match self
+            case Ok(_) then true
+            case Err(_) then false
+        end
     end
 
     --" Whether this is an error result. --"
     public fun is_err(self) -> bool
-        self.err != none
+        match self
+            case Ok(_) then false
+            case Err(_) then true
+        end
     end
 
     --" The ok value, or stops the program if this is an error result. --"
     public fun unwrap(self) -> T
-        let d = self.data
-        if d != none then
-            d
-        else
-            panic("called unwrap() on an error Result")
+        match self
+            case Ok(v) then v
+            case Err(_) then panic("called unwrap() on an error Result")
         end
     end
 
     --" The error value, or stops the program if this is an ok result. --"
     public fun unwrap_err(self) -> E
-        let e = self.err
-        if e != none then
-            e
-        else
-            panic("called unwrap_err() on an ok Result")
+        match self
+            case Ok(_) then panic("called unwrap_err() on an ok Result")
+            case Err(e) then e
         end
     end
 end
 
 --" An ok `Result`, usually inferred from context (`return Ok(1)` inside a function
 returning `Result<int, Error>`, `let r: Result<int, Error> = Ok(1)`...). When the
-compiler cannot infer `E` from anywhere, write `Result<int, Error>.ok(1)` directly. --"
+compiler cannot infer `E` from anywhere, write `Result<int, Error>.Ok(1)` directly. --"
 fun Ok<T, E>(value: T) -> Result<T, E>
-    Result<T, E>.ok(value)
+    Result<T, E>.Ok(value)
 end
 
 --" An error `Result`: see `Ok`. --"
 fun Err<T, E>(error: E) -> Result<T, E>
-    Result<T, E>.err(error)
+    Result<T, E>.Err(error)
 end
 
 -- ===== encode =====
@@ -478,7 +473,7 @@ impl JsonParser
     end
 
     public fun fail(self, message: string) -> Result<Json, Error>
-        Result<Json, Error>.err(Error { message: "JSON parse error at offset {self.pos}: {message}" })
+        Result<Json, Error>.Err(Error { message: "JSON parse error at offset {self.pos}: {message}" })
     end
 
     public fun trailing_error(self) -> Error?
@@ -501,13 +496,13 @@ impl JsonParser
             self.parse_array()
         elseif self.looking_at("true") then
             self.pos = self.pos + 4
-            Result<Json, Error>.ok(Json.boolean(true))
+            Result<Json, Error>.Ok(Json.boolean(true))
         elseif self.looking_at("false") then
             self.pos = self.pos + 5
-            Result<Json, Error>.ok(Json.boolean(false))
+            Result<Json, Error>.Ok(Json.boolean(false))
         elseif self.looking_at("null") then
             self.pos = self.pos + 4
-            Result<Json, Error>.ok(Json.null())
+            Result<Json, Error>.Ok(Json.null())
         elseif c == "-" or c.is_digit() then
             self.parse_number()
         else
@@ -520,7 +515,7 @@ impl JsonParser
         let out = ""
         while self.peek() != "\"" do
             if self.peek() == "" then
-                return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: unterminated string" })
+                return Result<string, Error>.Err(Error { message: "JSON parse error at offset {self.pos}: unterminated string" })
             end
             if self.peek() == "\\" then
                 self.advance()
@@ -545,12 +540,12 @@ impl JsonParser
                     let hex = self.text.substring(self.pos + 1, self.pos + 5)
                     let code = parse_hex4(hex)
                     if code == none then
-                        return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: invalid \\u escape" })
+                        return Result<string, Error>.Err(Error { message: "JSON parse error at offset {self.pos}: invalid \\u escape" })
                     end
                     out += code.char()
                     self.pos = self.pos + 4
                 else
-                    return Result<string, Error>.err(Error { message: "JSON parse error at offset {self.pos}: invalid escape \\{e}" })
+                    return Result<string, Error>.Err(Error { message: "JSON parse error at offset {self.pos}: invalid escape \\{e}" })
                 end
                 self.advance()
             else
@@ -559,15 +554,15 @@ impl JsonParser
             end
         end
         self.advance()
-        Result<string, Error>.ok(out)
+        Result<string, Error>.Ok(out)
     end
 
     public fun parse_string_value(self) -> Result<Json, Error>
         let r = self.parse_raw_string()
         if r.is_err() then
-            return Result<Json, Error>.err(r.unwrap_err())
+            return Result<Json, Error>.Err(r.unwrap_err())
         end
-        Result<Json, Error>.ok(Json.string(r.unwrap()))
+        Result<Json, Error>.Ok(Json.string(r.unwrap()))
     end
 
     public fun parse_number(self) -> Result<Json, Error>
@@ -596,9 +591,9 @@ impl JsonParser
         let text = self.text.substring(start, self.pos)
         let n = text.to_float()
         if n == none then
-            return Result<Json, Error>.err(Error { message: "JSON parse error at offset {start}: invalid number" })
+            return Result<Json, Error>.Err(Error { message: "JSON parse error at offset {start}: invalid number" })
         end
-        Result<Json, Error>.ok(Json.number(n))
+        Result<Json, Error>.Ok(Json.number(n))
     end
 
     public fun parse_array(self) -> Result<Json, Error>
@@ -607,12 +602,12 @@ impl JsonParser
         self.skip_ws()
         if self.peek() == "]" then
             self.advance()
-            return Result<Json, Error>.ok(Json.array(items))
+            return Result<Json, Error>.Ok(Json.array(items))
         end
         while true do
             let r = self.parse_value()
             if r.is_err() then
-                return Result<Json, Error>.err(r.unwrap_err())
+                return Result<Json, Error>.Err(r.unwrap_err())
             end
             items[] = r.unwrap()
             self.skip_ws()
@@ -620,7 +615,7 @@ impl JsonParser
                 self.advance()
             elseif self.peek() == "]" then
                 self.advance()
-                return Result<Json, Error>.ok(Json.array(items))
+                return Result<Json, Error>.Ok(Json.array(items))
             else
                 return self.fail("expected ',' or ']'")
             end
@@ -634,7 +629,7 @@ impl JsonParser
         self.skip_ws()
         if self.peek() == "\}" then
             self.advance()
-            return Result<Json, Error>.ok(Json.object(fields))
+            return Result<Json, Error>.Ok(Json.object(fields))
         end
         while true do
             self.skip_ws()
@@ -643,7 +638,7 @@ impl JsonParser
             end
             let key_r = self.parse_raw_string()
             if key_r.is_err() then
-                return Result<Json, Error>.err(key_r.unwrap_err())
+                return Result<Json, Error>.Err(key_r.unwrap_err())
             end
             self.skip_ws()
             if self.peek() != ":" then
@@ -652,7 +647,7 @@ impl JsonParser
             self.advance()
             let value_r = self.parse_value()
             if value_r.is_err() then
-                return Result<Json, Error>.err(value_r.unwrap_err())
+                return Result<Json, Error>.Err(value_r.unwrap_err())
             end
             fields[key_r.unwrap()] = value_r.unwrap()
             self.skip_ws()
@@ -660,7 +655,7 @@ impl JsonParser
                 self.advance()
             elseif self.peek() == "\}" then
                 self.advance()
-                return Result<Json, Error>.ok(Json.object(fields))
+                return Result<Json, Error>.Ok(Json.object(fields))
             else
                 return self.fail("expected ',' or '\}'")
             end
@@ -679,7 +674,7 @@ impl Json
         end
         let trailing = p.trailing_error()
         if trailing != none then
-            return Result<Json, Error>.err(trailing)
+            return Result<Json, Error>.Err(trailing)
         end
         r
     end
@@ -893,9 +888,9 @@ extern fun sql_close(conn: int) -> Result<bool, Error>
 --" Statement outcome as a `bool`: ok(true), or the same error. --"
 fun sql_done(r: Result<int, Error>) -> Result<bool, Error>
     if r.is_ok() then
-        Result.ok(true)
+        Result.Ok(true)
     else
-        Result.err(r.unwrap_err())
+        Result.Err(r.unwrap_err())
     end
 end
 
@@ -973,9 +968,9 @@ impl Db
     public fun connect(url: string) -> Result<Db, Error>
         let r = sql_connect(url)
         if r.is_ok() then
-            Result.ok(Db { conn: r.unwrap() })
+            Result.Ok(Db { conn: r.unwrap() })
         else
-            Result.err(r.unwrap_err())
+            Result.Err(r.unwrap_err())
         end
     end
 

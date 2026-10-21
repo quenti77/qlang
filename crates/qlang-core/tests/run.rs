@@ -701,9 +701,9 @@ fn generic_struct_type_args_resolve_across_modules_in_a_trait_signature() {
 fn prelude_result_and_error_need_no_import() {
     let o = run("fun divide(a: int, b: int) -> Result<int, Error>\n\
          if b == 0 then\n\
-         return Result<int, Error>.err(Error { message: \"division by zero\" })\n\
+         return Result<int, Error>.Err(Error { message: \"division by zero\" })\n\
          end\n\
-         Result<int, Error>.ok(a div b)\n\
+         Result<int, Error>.Ok(a div b)\n\
          end\n\
          let r = divide(10, 2)\n\
          print(r.is_ok())\n\
@@ -725,7 +725,7 @@ fn prelude_names_can_be_shadowed_by_a_local_declaration() {
 #[test]
 fn prelude_unwrap_on_an_error_result_panics() {
     let o = run(
-        "fun fail() -> Result<int, Error>\nResult<int, Error>.err(Error { message: \"nope\" })\nend\nprint(fail().unwrap())\n",
+        "fun fail() -> Result<int, Error>\nResult<int, Error>.Err(Error { message: \"nope\" })\nend\nprint(fail().unwrap())\n",
     );
     assert!(
         o.error

@@ -2190,24 +2190,35 @@ impl<'a> Interp<'a> {
         }))
     }
 
-    /// Builds a `Result::ok(data)` value of the prelude's `Result` struct.
-    fn ok_result(&self, data: Value) -> Value {
-        self.new_struct(
-            self.prelude_struct("Result"),
-            &[("data", data), ("err", Value::None)],
-        )
+    fn prelude_enum(&self, name: &str) -> EnumId {
+        self.prog
+            .defs
+            .enums
+            .iter()
+            .position(|e| e.module == crate::check::PRELUDE_MOD && e.name == name)
+            .unwrap_or_else(|| panic!("prelude enum `{name}` not found"))
     }
 
-    /// Builds a `Result::err(Error { message })` value.
+    /// Builds `Ok(data)`, a value of the prelude's `Result`.
+    fn ok_result(&self, data: Value) -> Value {
+        let eid = self.prelude_enum("Result");
+        let vi = self.prog.defs.enums[eid]
+            .variant_index("Ok")
+            .expect("Result has Ok");
+        Value::Enum(eid, vi, Some(Rc::from(vec![data])))
+    }
+
+    /// Builds `Err(Error { message })`.
     fn err_result(&self, message: &str) -> Value {
         let error = self.new_struct(
             self.prelude_struct("Error"),
             &[("message", Value::str(message))],
         );
-        self.new_struct(
-            self.prelude_struct("Result"),
-            &[("data", Value::None), ("err", error)],
-        )
+        let eid = self.prelude_enum("Result");
+        let vi = self.prog.defs.enums[eid]
+            .variant_index("Err")
+            .expect("Result has Err");
+        Value::Enum(eid, vi, Some(Rc::from(vec![error])))
     }
 
     /// Turns a [`HostError`] into a `Result::err`: a host without the capability, or one

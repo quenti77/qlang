@@ -825,10 +825,10 @@ impl Checker {
 
     /// The `T` of a `Result<T, Error>`.
     pub(crate) fn result_payload<'a>(&self, ty: &'a Ty) -> Option<&'a Ty> {
-        let Ty::Struct(sid, args) = ty else {
+        let Ty::Enum(eid, args) = ty else {
             return None;
         };
-        let s = &self.defs.structs[*sid];
+        let s = &self.defs.enums[*eid];
         if s.module != PRELUDE_MOD || s.name != "Result" || args.len() != 2 {
             return None;
         }

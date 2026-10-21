@@ -152,6 +152,13 @@ impl Checker {
                     if let StmtKind::Let { name, .. } = &s.kind {
                         self.add_item(name, ItemRef::Var(m, name.name.clone()));
                     }
+                    if let StmtKind::LetTuple { pattern, .. } = &s.kind {
+                        let mut names = Vec::new();
+                        pattern.names(&mut names);
+                        for name in names {
+                            self.add_item(name, ItemRef::Var(m, name.name.clone()));
+                        }
+                    }
                 }
                 _ => {}
             }

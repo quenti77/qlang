@@ -11,6 +11,8 @@ pub struct Module {
 }
 
 #[derive(Debug)]
+// the tree is built once per program: the size of one variant does not matter
+#[allow(clippy::large_enum_variant)]
 pub enum Item {
     Import(Import),
     Export(Export),
@@ -191,6 +193,35 @@ pub struct Stmt {
     pub kind: StmtKind,
 }
 
+/// What `let (a, (b, _)) = t` and `for (a, b) in pairs` take a tuple apart with.
+#[derive(Debug)]
+pub enum TuplePattern {
+    /// A variable that receives the element.
+    Name(Ident),
+    /// `_`: the element is ignored.
+    Wild(Span),
+    /// `(a, b)`: the element is itself a tuple.
+    Tuple(Vec<TuplePattern>, Span),
+}
+
+impl TuplePattern {
+    /// The variables the pattern declares, in order.
+    pub fn names<'a>(&'a self, out: &mut Vec<&'a Ident>) {
+        match self {
+            TuplePattern::Name(n) => out.push(n),
+            TuplePattern::Wild(_) => {}
+            TuplePattern::Tuple(items, _) => items.iter().for_each(|i| i.names(out)),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            TuplePattern::Name(n) => n.span,
+            TuplePattern::Wild(s) | TuplePattern::Tuple(_, s) => *s,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum StmtKind {
     Let {
@@ -198,6 +229,13 @@ pub enum StmtKind {
         doc: Option<Rc<str>>,
         is_const: bool,
         name: Ident,
+        ty: Option<TypeExpr>,
+        init: Expr,
+    },
+    /// `let (a, b) = expr`
+    LetTuple {
+        is_const: bool,
+        pattern: TuplePattern,
         ty: Option<TypeExpr>,
         init: Expr,
     },
@@ -210,6 +248,9 @@ pub enum StmtKind {
         var: Ident,
         /// `for key, value in map` / `for index, item in array`
         var2: Option<Ident>,
+        /// `for (a, b) in pairs`: `var` is then empty and these take the value apart.
+        var_pattern: Option<TuplePattern>,
+        var2_pattern: Option<TuplePattern>,
         iter: Expr,
         step: Option<Expr>,
         body: Block,

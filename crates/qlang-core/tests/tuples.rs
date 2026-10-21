@@ -103,3 +103,65 @@ fn bad_uses_are_reported() {
     // a parenthesised type or expression is still just that
     assert_eq!(exec("let w: (int) = 5\nprint((w + 1) * 2)"), "12\n");
 }
+
+#[test]
+fn let_takes_a_tuple_apart() {
+    let out = exec(
+        "fun bounds(xs: array<int>) -> (int, int)\n  (xs[0], xs[xs.len() - 1])\nend\nlet (lo, hi) = bounds([3, 1, 2])\nprint(lo)\nprint(hi)\nlet (a, (b, _)) = (1, (\"x\", true))\nprint(\"{a} {b}\")\nconst (k, v): (string, int) = (\"age\", 42)\nprint(\"{k}={v}\")\nlet (i, _) = (7, 8)\nprint(i + 1)",
+    );
+    assert_eq!(out, "3\n2\n1 x\nage=42\n8\n");
+}
+
+#[test]
+fn for_takes_each_element_apart() {
+    let out = exec(
+        "let people: array<(string, int)> = [(\"ana\", 31), (\"bob\", 27)]\nfor (name, age) in people do\n  print(\"{name} {age}\")\nend\nfor i, (name, _) in people do\n  print(\"{i}: {name}\")\nend\nlet pairs = [((1, 2), \"a\"), ((3, 4), \"b\")]\nfor ((x, y), label) in pairs do\n  print(\"{label} {x + y}\")\nend",
+    );
+    assert_eq!(out, "ana 31\nbob 27\n0: ana\n1: bob\na 3\nb 7\n");
+}
+
+#[test]
+fn destructured_variables_work_like_the_others() {
+    // a variable of a function, a top-level one used in a function, a changed one
+    let out = exec(
+        "let (g, h) = (1, 2)\nfun f() -> int\n  let (p, q) = (10, 20)\n  p + q + g\nend\nprint(f())\nlet (m, n) = (5, 6)\nm = 9\nprint(m + n)\nconst (c, d) = (1, 2)\nprint(c + d)",
+    );
+    assert_eq!(out, "31\n15\n3\n");
+    assert!(exec("const (c, d) = (1, 2)\nc = 5").starts_with("COMPILE:"));
+}
+
+#[test]
+fn a_loop_body_with_only_a_destructuring_keeps_its_own_variables() {
+    let out = exec(
+        "let total = 0\nfor i in 0..3 do\n  let (a, b) = (i, i * 2)\n  total += a + b\nend\nprint(total)",
+    );
+    assert_eq!(out, "9\n");
+}
+
+#[test]
+fn the_pattern_must_fit_the_value() {
+    let big = exec("let (a, b) = (1, 2, 3)");
+    assert!(big.contains("T288"), "{big}");
+    let not_a_tuple = exec("let (a, b) = 5");
+    assert!(not_a_tuple.contains("T289"), "{not_a_tuple}");
+    let nested = exec("let (a, (b, c)) = (1, (2, 3, 4))");
+    assert!(nested.contains("T288"), "{nested}");
+    assert!(exec("let (a) = (1, 2)").contains("P061"));
+    // the names are still known, so one mistake is one error
+    let one = exec("let (a, b) = (1, 2, 3)\nprint(a + b)");
+    assert_eq!(one.matches("T0").count(), 0, "{one}");
+}
+
+#[test]
+fn exports_and_imports_see_destructured_names() {
+    let mut host = MemoryHost::default();
+    host.files.insert(
+        "lib.q".into(),
+        "let (width, height) = (3, 4)\nexport width, height\n".into(),
+    );
+    let src = "import width, height from \"lib.q\"\nprint(width * height)";
+    let prog = compile("main.q", src, &mut host).ok().unwrap();
+    let r = prog.run(&mut host, Limits::default());
+    assert!(r.error.is_none());
+    assert_eq!(host.output, "12\n");
+}

@@ -62,6 +62,12 @@ impl Scope {
                 self.declared.insert(name.name.clone());
                 self.expr(init, out);
             }
+            StmtKind::LetTuple { pattern, init, .. } => {
+                let mut names = Vec::new();
+                pattern.names(&mut names);
+                self.declared.extend(names.iter().map(|n| n.name.clone()));
+                self.expr(init, out);
+            }
             StmtKind::Return(e) => {
                 if let Some(e) = e {
                     self.expr(e, out);
@@ -74,6 +80,8 @@ impl Scope {
             StmtKind::For {
                 var,
                 var2,
+                var_pattern,
+                var2_pattern,
                 iter,
                 step,
                 body,
@@ -82,6 +90,11 @@ impl Scope {
                 if let Some(v) = var2 {
                     self.declared.insert(v.name.clone());
                 }
+                let mut names = Vec::new();
+                for p in [var_pattern, var2_pattern].into_iter().flatten() {
+                    p.names(&mut names);
+                }
+                self.declared.extend(names.iter().map(|n| n.name.clone()));
                 self.expr(iter, out);
                 if let Some(e) = step {
                     self.expr(e, out);

@@ -842,10 +842,31 @@ impl<'a> Parser<'a> {
                 StmtKind::While { cond, body }
             }
             Tok::For => {
-                self.bump();
-                let var = self.expect_ident()?;
+                let for_span = self.bump().span;
+                // each loop variable is a name or a tuple pattern: `for (a, b) in pairs`
+                let mut var_pattern = None;
+                let var = if self.at(&Tok::LParen) {
+                    var_pattern = Some(self.parse_tuple_pattern()?);
+                    Ident {
+                        name: String::new(),
+                        span: for_span,
+                    }
+                } else {
+                    self.expect_ident()?
+                };
+                let mut var2_pattern = None;
                 let var2 = if self.eat(&Tok::Comma) {
-                    Some(self.expect_ident()?)
+                    if self.at(&Tok::LParen) {
+                        let p = self.parse_tuple_pattern()?;
+                        let span = p.span();
+                        var2_pattern = Some(p);
+                        Some(Ident {
+                            name: String::new(),
+                            span,
+                        })
+                    } else {
+                        Some(self.expect_ident()?)
+                    }
                 } else {
                     None
                 };
@@ -862,6 +883,8 @@ impl<'a> Parser<'a> {
                 StmtKind::For {
                     var,
                     var2,
+                    var_pattern,
+                    var2_pattern,
                     iter,
                     step,
                     body,
@@ -907,10 +930,71 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `(a, _, (b, c))`: two or more names, `_` or nested patterns.
+    fn parse_tuple_pattern(&mut self) -> PResult<TuplePattern> {
+        let start = self.expect(&Tok::LParen)?;
+        self.nl.push(false);
+        let mut items = Vec::new();
+        let r: PResult<Span> = (|| {
+            while !self.at(&Tok::RParen) {
+                if self.at(&Tok::LParen) {
+                    items.push(self.parse_tuple_pattern()?);
+                } else {
+                    let name = self.expect_ident()?;
+                    items.push(if name.name == "_" {
+                        TuplePattern::Wild(name.span)
+                    } else {
+                        TuplePattern::Name(name)
+                    });
+                }
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::RParen)
+        })();
+        self.nl.pop();
+        let end = r?;
+        if items.len() < 2 {
+            return self.error_at(
+                "P061",
+                "a tuple pattern needs at least two names: `(a, b)`",
+                start.to(end),
+            );
+        }
+        Ok(TuplePattern::Tuple(items, start.to(end)))
+    }
+
     fn parse_let(&mut self) -> PResult<StmtKind> {
         let first = self.peek_span();
         let doc = self.take_doc(first);
         let is_const = self.bump().tok == Tok::Const;
+        if self.at(&Tok::LParen) {
+            // `let (a, b) = expr`
+            let pattern = self.parse_tuple_pattern()?;
+            let ty = if self.eat(&Tok::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            if !self.at(&Tok::Assign) {
+                let span = self.peek_span();
+                return self.error_at(
+                    "P060",
+                    "a tuple pattern needs a value: `let (a, b) = expr`",
+                    span,
+                );
+            }
+            self.bump();
+            self.skip_newlines();
+            let init = self.parse_expr()?;
+            return Ok(StmtKind::LetTuple {
+                is_const,
+                pattern,
+                ty,
+                init,
+            });
+        }
         let name = self.expect_ident()?;
         let ty = if self.eat(&Tok::Colon) {
             Some(self.parse_type()?)

@@ -299,7 +299,27 @@ print(nested.1.0)    -- 2.5
   `.0` sur autre chose qu'un tuple (`T287`). Un seul élément n'est pas un tuple : `(1)` est
   juste `1` et `(1,)` est refusé.
 
-Les tuples se déstructurent aussi (`let (a, b) = t`) : voir plus bas.
+**Déstructurer.** `let (a, b) = t` prend un tuple en morceaux, et `for (a, b) in …` fait de
+même pour chaque élément :
+
+```
+let (lo, hi) = bornes([3, 1, 2])          -- lo = 3, hi = 2
+let (nom, (x, y)) = ("p", (1, 2))         -- motifs imbriqués
+let (_, hi2) = bornes([1, 2])             -- _ ignore un élément
+const (k, v): (string, int) = ("a", 1)    -- const, et type facultatif
+
+let gens: array<(string, int)> = [("ana", 31), ("bob", 27)]
+for (nom, age) in gens do
+  print("{nom} a {age} ans")
+end
+for i, (nom, _) in gens do                -- l'indice, puis l'élément déstructuré
+  print("{i}: {nom}")
+end
+```
+
+Le motif doit avoir autant de noms que le tuple a d'éléments (`T288`) et ne s'applique qu'à un
+tuple (`T289`). Les variables obtenues sont des variables ordinaires (`const` les fige), au
+niveau d'un fichier elles s'exportent comme les autres.
 
 ### Conversions
 

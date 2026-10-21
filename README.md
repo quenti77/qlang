@@ -123,6 +123,34 @@ sans fichier le cherchent depuis le dossier courant, vers le haut. (`main`, dans
 table, est autre chose : le fichier qu'`import "@mon-app"` charge quand le projet est
 utilisé comme paquet.)
 
+### Tests
+
+```sh
+qlang test                       # tous les tests du projet
+qlang test math_test.q           # un fichier (ou un dossier)
+qlang test --filter double       # les tests dont le nom contient « double »
+```
+
+Les fichiers de test se nomment `*_test.q` ou `test_*.q` ; dans chacun, toute fonction
+`fun test_...()` sans paramètre est un test. Chaque test repart d'un état propre (le code
+du fichier est rejoué) et réussit s'il ne s'arrête pas sur une erreur :
+
+```
+import double from "math.q"
+
+fun test_double()
+  assert_eq(double(21), 42)       -- affiche les deux valeurs s'ils diffèrent
+end
+
+fun test_negatives()
+  assert(double(-1) < 0, "doit rester négatif")
+  assert_ne(double(1), 3)
+end
+```
+
+Code de sortie : `0` si tout passe (ou s'il n'y a aucun test), `1` sinon. `--seed N` fixe les
+nombres aléatoires, `--max-steps N` limite chaque test.
+
 ### Paquets
 
 Un projet liste ses dépendances dans son `qlang.toml` et les importe avec `@nom` :

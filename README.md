@@ -35,7 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
 
 Le programme `qlang` est installé dans `~/.local/bin`, et le script dit s'il faut l'ajouter au
 `PATH`. Chaque téléchargement est vérifié avec la somme de contrôle (`SHA256SUMS`) publiée avec
-la version.
+la version. Les fichiers publiés ont aussi une attestation de provenance signée (GitHub) qui
+prouve qu'ils sortent du workflow de ce dépôt : `gh attestation verify qlang-x86_64-unknown-linux-musl.tar.gz --repo quenti77/qlang`
+(les versions publiées avant 0.36 n'en ont pas).
 
 **Windows** : il n'y a pas de programme précompilé pour l'instant. Il faut le compiler :
 installer Rust ([rustup.rs](https://rustup.rs), version 1.88 ou plus récente), puis

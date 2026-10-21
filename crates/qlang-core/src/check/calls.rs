@@ -1249,7 +1249,9 @@ impl Checker {
             "print" => "print",
             "write" => "write",
             "read" => "read",
+            "read_all" => "read_all",
             "panic" => "panic",
+            "exit" => "exit",
             _ => "assert",
         };
         self.res
@@ -1297,11 +1299,11 @@ impl Checker {
                 }
                 Ty::Unit
             }
-            "read" => {
+            "read" | "read_all" => {
                 if !self.caps.read {
                     self.err(
                         "T250",
-                        "`read` is not available in this environment (there is no input to read)",
+                        format!("`{name}` is not available in this environment (there is no input to read)"),
                         e.span,
                     );
                 }
@@ -1312,6 +1314,17 @@ impl Checker {
                 if arity(self, 1, 1) {
                     let t = self.expr(args[0], &Want::Any);
                     self.require_value(t, args[0].span);
+                }
+                Ty::Never
+            }
+            "exit" => {
+                if arity(self, 0, 1)
+                    && let Some(code) = args.first().copied()
+                {
+                    let t = self.expr(code, &Want::Exp(Ty::Int));
+                    if !self.assignable(&t, &Ty::Int) {
+                        self.mismatch(code.span, &Ty::Int, &t);
+                    }
                 }
                 Ty::Never
             }
@@ -1602,6 +1615,7 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
             Needs::Nothing,
         ),
         ("time", "now") => ("now", vec![], Ty::Int, Needs::Time),
+        ("time", "sleep") => ("sleep", vec![Ty::Int], Ty::Unit, Needs::Time),
         ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
         ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),
         ("regex", "matches") => ("matches", vec![Ty::Str, Ty::Str], Ty::Bool, Needs::Nothing),

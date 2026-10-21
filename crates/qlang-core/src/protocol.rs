@@ -47,6 +47,9 @@ struct Response {
     output: String,
     diagnostics: Vec<Diagnostic>,
     steps: u64,
+    /// The code the program gave to `exit(code)`, if it called it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     info: Option<Info>,
 }
@@ -58,6 +61,7 @@ fn failure(phase: &'static str, message: String) -> Response {
         output: String::new(),
         diagnostics: vec![Diagnostic::error("J001", message, Default::default())],
         steps: 0,
+        exit_code: None,
         info: None,
     }
 }
@@ -156,6 +160,7 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
                 output: String::new(),
                 diagnostics: e.diagnostics,
                 steps: 0,
+                exit_code: None,
                 info: e.info.map(|i| *i),
             };
         }
@@ -167,6 +172,7 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
             output: String::new(),
             diagnostics: program.warnings.clone(),
             steps: 0,
+            exit_code: None,
             info: program.info,
         };
     }
@@ -180,6 +186,7 @@ fn execute(req: Request, ceiling: &Ceiling, force_check: bool) -> Response {
         output: host.output,
         diagnostics,
         steps: result.steps,
+        exit_code: result.exit_code,
         info: None,
     }
 }

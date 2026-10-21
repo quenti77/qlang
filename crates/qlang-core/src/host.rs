@@ -273,6 +273,11 @@ pub trait Host {
         Err(HostError::Unsupported("time"))
     }
 
+    /// Wait `ms` milliseconds. A host with a virtual clock may move it forward instead.
+    fn sleep_ms(&mut self, _ms: u64) -> Result<(), HostError> {
+        Err(HostError::Unsupported("time"))
+    }
+
     /// 64 random bits. Hosts that offer a seed return the same sequence for the same seed.
     fn random_u64(&mut self) -> Result<u64, HostError> {
         Err(HostError::Unsupported("random"))
@@ -510,6 +515,13 @@ impl Host for MemoryHost {
             return Err(HostError::Unsupported("env"));
         }
         Ok(self.cli_args.clone())
+    }
+
+    fn sleep_ms(&mut self, ms: u64) -> Result<(), HostError> {
+        // the clock is virtual: waiting moves it forward, instantly
+        let now = self.clock.as_mut().ok_or(HostError::Unsupported("time"))?;
+        *now = now.saturating_add(ms as i64);
+        Ok(())
     }
 
     fn now_ms(&mut self) -> Result<i64, HostError> {

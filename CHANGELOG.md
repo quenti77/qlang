@@ -9,6 +9,7 @@ publié n'existe pas comme release, ses changements sont dans la suivante.
   `log10`, `log2`, `log`, `to_radians`, `to_degrees`, `signum`, `clamp`, `trunc`, `is_nan`,
   `is_infinite`, `float.INFINITY`, `float.NAN`.
 - Encodages et hachages : `Base64`, `Hex`, `Url`, `Hash` (`sha256`, `sha1`, `md5`, `hmac_sha256`).
+- Système : `exit(code)`, `read_all()`, `time.sleep(ms)`.
 - Interpréteur 1,3 à 1,9 fois plus rapide ; récursion jusqu'à 999 niveaux sous WebAssembly.
 
 ## 0.31.0

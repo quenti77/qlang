@@ -172,6 +172,13 @@ la bibliothèque.
 Code de sortie : `0` si tout passe (ou s'il n'y a aucun test), `1` sinon. `--seed N` fixe les
 nombres aléatoires, `--max-steps N` limite chaque test.
 
+### Lancer un programme
+
+`Process.run("git", ["status"])` démarre un programme de la machine (sans shell). C'est refusé par
+défaut : le programme doit être lancé avec `--allow-process`
+(`qlang run --allow-process app.q`, aussi pour `qlang test` et `qlang serve`). Voir
+« Prélude : lancer un programme » dans [docs/language.md](docs/language.md).
+
 ### Paquets
 
 Un projet liste ses dépendances dans son `qlang.toml` et les importe avec `@nom` :

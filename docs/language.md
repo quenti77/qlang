@@ -2300,6 +2300,31 @@ let p = Point {
 Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, même
 à l'intérieur de parenthèses : chaque instruction y tient sur sa ligne.
 
+### Prélude : lancer un programme
+
+`Process.run(commande, arguments)` lance un programme de la machine, attend sa fin et renvoie un
+`Result<ProcessOutput, Error>` ; `ProcessOutput` a trois champs publics : `status` (le code de
+sortie, −1 si un signal l'a arrêté), `stdout` et `stderr` (ce qu'il a écrit, en texte).
+`Process.run_with_input(commande, arguments, texte)` écrit en plus `texte` sur son entrée standard.
+
+```
+let r = Process.run("git", ["rev-parse", "HEAD"])
+match r
+  case Ok(o) then print(o.stdout.trim())
+  case Err(e) then print("pas de git : {e.message}")
+end
+```
+
+- **Aucun shell** : la commande et chaque argument sont donnés tels quels au système (pas
+  d'étoile, de pipe ni de variable). Un programme qui se termine avec un code non nul est quand
+  même un `Ok` : c'est à vous de lire `status`. Un programme introuvable est un `Err`.
+- **Il faut la permission** : sans elle, `Process.run` est une erreur de compilation (`T250`).
+  Dans le terminal, c'est `--allow-process` (sur `qlang run`, `qlang test` et `qlang serve`) ; le
+  protocole JSON, le navigateur et un `qlang.toml` ne peuvent pas l'accorder. `qlang check` n'en a
+  pas besoin.
+- Un programme lancé n'est **pas limité** par `--root` ni par les limites de qlang (pas, mémoire) ;
+  il est arrêté s'il tourne plus d'une minute, et on garde au plus 16 Mo de chaque flux.
+
 ---
 
 ## 19. Mots-clés réservés

@@ -7,6 +7,7 @@ mod init;
 mod install;
 mod json;
 mod packages;
+mod process;
 mod providers;
 mod serve;
 mod testrun;
@@ -31,13 +32,14 @@ USAGE:
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
     qlang run [file.q] [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
-                    [-- ARGS...]
+                    [--allow-process] [-- ARGS...]
                                          run a program (imports may live anywhere, or only
                                          under DIR with --root; the same --seed gives the
                                          same random numbers; ARGS after -- are env.args();
                                          --extern CMD starts a provider of `extern fun`, as
                                          do the [externs] of a qlang.toml near the program,
-                                         once you agreed to them: --trust-externs says yes)
+                                         once you agreed to them: --trust-externs says yes;
+                                         --allow-process lets the program start programs)
     qlang check [file.q] [--extern CMD]  check a program without running it (no file: the `entry`
                                          of qlang.toml's [package], for run too)
     qlang check --json                   same, with a JSON request on stdin (used by editors)
@@ -131,6 +133,8 @@ struct TerminalHost {
     packages: packages::Packages,
     /// Treat every `extern fun` as provided (to check or document code without running it).
     assume_externs: bool,
+    /// `Process.run` may start programs (`--allow-process`).
+    allow_process: bool,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -325,6 +329,7 @@ impl Host for TerminalHost {
     fn has_extern(&self, name: &str) -> bool {
         self.assume_externs
             || SQL_EXTERNS.contains(&name)
+            || (self.allow_process && name == "process_run")
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -332,6 +337,9 @@ impl Host for TerminalHost {
     fn call(&mut self, name: &str, args: Vec<HostValue>) -> Result<HostValue, HostError> {
         if self.providers.has(name) {
             return self.providers.call(name, args);
+        }
+        if name == "process_run" && self.allow_process {
+            return process::run(&args);
         }
         if SQL_EXTERNS.contains(&name) {
             return sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")));
@@ -551,6 +559,7 @@ fn new_host_with(
         providers,
         packages,
         assume_externs: !run,
+        allow_process: false,
     })
 }
 
@@ -562,6 +571,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut script_args: Vec<String> = Vec::new();
     let mut externs: Vec<String> = Vec::new();
     let mut trust = false;
+    let mut allow_process = false;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -590,6 +600,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                 }
             }
             "--trust-externs" => trust = true,
+            "--allow-process" => allow_process = true,
             "--extern" => {
                 i += 1;
                 match args.get(i) {
@@ -656,6 +667,8 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // checking only looks at the program: nothing is started, so no permission is needed
+    host.allow_process = allow_process || !execute;
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,
         Err(e) => {

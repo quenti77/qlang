@@ -1141,6 +1141,36 @@ fun assert_close(actual: float, expected: float)
     assert_within(actual, expected, 0.000000001)
 end
 
+-- Starting programs: only where the host allows it.
+extern fun process_run(command: string, args: array<string>, input: string?) -> Result<ProcessOutput, Error>
+
+--" What a program wrote on its two output streams, and the code it ended with (-1 when a
+signal ended it). --"
+struct ProcessOutput
+    public status: int
+    public stdout: string
+    public stderr: string
+end
+
+--" Starting programs: `Process.run("git", ["status"])`. No shell is involved, so the
+arguments are passed as they are. Needs permission (`--allow-process` in the terminal); a
+program is not confined by `--root`, and one that runs for more than a minute is stopped. --"
+struct Process
+end
+
+impl Process
+    --" Runs `command` with `args` and waits for it. `err` if it cannot be started; a program
+    that ends with a non-zero `status` is still an `ok` result. --"
+    public fun run(command: string, args: array<string>) -> Result<ProcessOutput, Error>
+        process_run(command, args, none)
+    end
+
+    --" Like `run`, with `input` written to the program's standard input. --"
+    public fun run_with_input(command: string, args: array<string>, input: string) -> Result<ProcessOutput, Error>
+        process_run(command, args, input)
+    end
+end
+
 --" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int

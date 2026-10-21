@@ -221,6 +221,11 @@ impl Scope {
         })
     }
 
+    /// [`Scope::define`] for a name that is not in this scope yet.
+    pub fn define_new(&self, name: &str, v: Value) {
+        self.vars.borrow_mut().push_new(name, v);
+    }
+
     pub fn define(&self, name: &str, v: Value) {
         self.vars.borrow_mut().insert(name, v);
     }

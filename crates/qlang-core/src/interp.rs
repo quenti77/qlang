@@ -1310,10 +1310,10 @@ impl<'a> Interp<'a> {
         self.frames.push((Name::new(name), span));
         let scope = Scope::with_capacity(Some(parent.clone()), decl.params.len() + 3);
         if let Some(s) = this {
-            scope.define("self", s);
+            scope.define_new("self", s);
         }
         for (p, a) in decl.params.iter().zip(args) {
-            scope.define(&p.name.name, a);
+            scope.define_new(&p.name.name, a);
         }
         let r = match &decl.body {
             Some(b) => self.exec_stmts(&b.stmts, &scope),

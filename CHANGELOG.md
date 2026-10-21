@@ -3,7 +3,7 @@
 Les versions sont numérotées à la publication (tag `vX.Y.Z`) : un numéro qui n'a pas été
 publié n'existe pas comme release, ses changements sont dans la suivante.
 
-## À publier
+## 0.32.0
 
 - Maths sur les nombres : `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `ln`,
   `log10`, `log2`, `log`, `to_radians`, `to_degrees`, `signum`, `clamp`, `trunc`, `is_nan`,

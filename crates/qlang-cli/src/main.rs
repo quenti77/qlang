@@ -186,6 +186,25 @@ impl TerminalHost {
 
 impl SqlBackend for TerminalHost {
     fn sql_connect(&mut self, url: &str) -> Result<u64, HostError> {
+        // `--root` confines the database file like it confines `fs.write` (not what the SQL
+        // itself does: `ATTACH DATABASE` reaches any file the user can)
+        if let Some(path) = url.strip_prefix("sqlite://")
+            && !path.is_empty()
+            && path != ":memory:"
+            && !path.starts_with("file::memory:")
+        {
+            let p = Path::new(path);
+            let target = if p.exists() {
+                p.canonicalize()
+            } else {
+                p.parent()
+                    .filter(|d| !d.as_os_str().is_empty())
+                    .unwrap_or_else(|| Path::new("."))
+                    .canonicalize()
+            }
+            .map_err(|e| HostError::Other(e.to_string()))?;
+            self.check_fs_root(&target)?;
+        }
         self.db.connect(url)
     }
 

@@ -2217,7 +2217,12 @@ l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`, ou
 pareil ici) : `postgres://user:pass@hôte/base?sslmode=require`. Le certificat
 du serveur est toujours vérifié contre les autorités publiques (Mozilla) ;
 un certificat auto-signé ou une autorité privée ne sont pas acceptés sans
-configuration côté hôte.
+configuration côté hôte. Un serveur qui n'est pas sur la machine (autre chose que
+`localhost`, `127.0.0.1`, `::1` ou un socket) **exige** un `sslmode` dans l'URL : sans lui, la
+connexion est refusée plutôt que d'envoyer le mot de passe en clair par accident
+(`?sslmode=disable` confirme qu'on le veut). Avec `--root`, le fichier d'une base `sqlite://`
+doit être dans le dossier ; le SQL lui-même n'est pas confiné (`ATTACH DATABASE` atteint
+n'importe quel fichier lisible).
 
 ```
 let c = Db.connect("sqlite://data.db")

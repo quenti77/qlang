@@ -174,10 +174,7 @@ impl Scope {
             if let Some(v) = cur.vars.borrow().get(name) {
                 return Some(v.clone());
             }
-            match &cur.parent {
-                Some(p) => cur = p,
-                None => return None,
-            }
+            cur = cur.parent.as_ref()?;
         }
     }
 

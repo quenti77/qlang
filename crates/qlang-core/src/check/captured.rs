@@ -162,8 +162,15 @@ impl Scope {
             } => {
                 self.expr(scrutinee, out);
                 for c in cases {
-                    if let Pattern::Bind(name) = &c.pattern {
-                        self.declared.insert(name.name.clone());
+                    match &c.pattern {
+                        Pattern::Bind(name) => {
+                            self.declared.insert(name.name.clone());
+                        }
+                        Pattern::Variant { fields, .. } => {
+                            self.declared
+                                .extend(fields.iter().flatten().map(|n| n.name.clone()));
+                        }
+                        _ => {}
                     }
                     if let Some(g) = &c.guard {
                         self.expr(g, out);

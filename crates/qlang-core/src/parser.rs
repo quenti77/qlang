@@ -700,8 +700,12 @@ impl<'a> Parser<'a> {
         let start = self.expect(&Tok::Enum)?;
         let doc = self.take_doc(start);
         let name = self.expect_ident()?;
+        let tparams = if self.at(&Tok::Lt) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
         let mut variants = Vec::new();
-        let mut variant_docs = Vec::new();
         loop {
             self.skip_newlines();
             if self.at(&Tok::End) || self.at(&Tok::Eof) {
@@ -710,10 +714,9 @@ impl<'a> Parser<'a> {
             let before = self.pos;
             let first = self.peek_span();
             let variant_doc = self.take_doc(first);
-            match self.expect_ident() {
+            match self.parse_variant(variant_doc) {
                 Ok(v) => {
                     variants.push(v);
-                    variant_docs.push(variant_doc);
                     if !self.end_of_stmt(&[Tok::End]) {
                         self.sync(&[Tok::End]);
                     }
@@ -729,9 +732,46 @@ impl<'a> Parser<'a> {
             doc,
             span: start.to(end),
             name,
+            tparams,
             variants,
-            variant_docs,
         })
+    }
+
+    /// `Name` or `Name(field: type, ...)`.
+    fn parse_variant(&mut self, doc: Option<Rc<str>>) -> PResult<VariantDecl> {
+        let name = self.expect_ident()?;
+        let mut fields = Vec::new();
+        if self.at(&Tok::LParen) {
+            self.bump();
+            self.nl.push(false);
+            let r: PResult<()> = (|| {
+                while !self.at(&Tok::RParen) {
+                    let fname = self.expect_ident()?;
+                    if !self.at(&Tok::Colon) {
+                        let span = fname.span;
+                        return self.error_at(
+                            "P042",
+                            format!(
+                                "field `{}` needs a type (`{}: type`)",
+                                fname.name, fname.name
+                            ),
+                            span,
+                        );
+                    }
+                    self.bump();
+                    let ty = self.parse_type()?;
+                    fields.push(Param { name: fname, ty });
+                    if !self.eat(&Tok::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RParen)?;
+                Ok(())
+            })();
+            self.nl.pop();
+            r?;
+        }
+        Ok(VariantDecl { name, doc, fields })
     }
 
     // ---------------------------------------------------------------- blocks
@@ -1580,6 +1620,27 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// `(a, _, c)` after the path of a variant that carries data.
+    fn parse_variant_pattern(&mut self, path: Vec<Ident>) -> PResult<Pattern> {
+        self.expect(&Tok::LParen)?;
+        self.nl.push(false);
+        let mut fields = Vec::new();
+        let r: PResult<()> = (|| {
+            while !self.at(&Tok::RParen) {
+                let name = self.expect_ident()?;
+                fields.push(if name.name == "_" { None } else { Some(name) });
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::RParen)?;
+            Ok(())
+        })();
+        self.nl.pop();
+        r?;
+        Ok(Pattern::Variant { path, fields })
+    }
+
     fn parse_pattern(&mut self) -> PResult<Pattern> {
         match self.peek() {
             Tok::Minus | Tok::Int(_) | Tok::Float(_) => {
@@ -1632,6 +1693,9 @@ impl<'a> Parser<'a> {
                 while self.at(&Tok::Dot) {
                     self.bump();
                     path.push(self.expect_ident()?);
+                }
+                if self.at(&Tok::LParen) {
+                    return self.parse_variant_pattern(path);
                 }
                 if path.len() == 1 {
                     Ok(Pattern::Bind(path.pop().unwrap()))

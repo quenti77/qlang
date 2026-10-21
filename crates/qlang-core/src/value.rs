@@ -24,7 +24,9 @@ pub enum Value {
     /// Keys keep their insertion order.
     Map(Rc<RefCell<MapObj>>),
     Struct(Rc<StructObj>),
-    Enum(EnumId, usize),
+    /// An enum value: its type, the index of its variant and the data it carries (values
+    /// are never changed, so a copy is just another handle).
+    Enum(EnumId, usize, Option<Rc<[Value]>>),
     /// `start..end` or `start..=end` (the flag is "inclusive").
     Range(i64, i64, bool),
     Func(Rc<FuncVal>),
@@ -55,7 +57,7 @@ impl KeyVal {
             Value::Uuid(u) => KeyVal::Uuid(*u),
             Value::Ulid(u) => KeyVal::Ulid(*u),
             Value::DateTime(t) => KeyVal::DateTime(*t),
-            Value::Enum(e, i) => KeyVal::Enum(*e, *i),
+            Value::Enum(e, i, None) => KeyVal::Enum(*e, *i),
             _ => return None,
         })
     }

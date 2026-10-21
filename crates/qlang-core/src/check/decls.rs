@@ -98,25 +98,34 @@ impl Checker {
                 }
                 Item::Enum(e) => {
                     let id = self.defs.enums.len();
-                    let mut variants: Vec<String> = Vec::new();
+                    let mut variants: Vec<VariantDef> = Vec::new();
                     for v in &e.variants {
-                        if variants.contains(&v.name) {
+                        if variants.iter().any(|x| x.name == v.name.name) {
                             self.err(
                                 "T112",
                                 format!(
                                     "variant `{}` is declared twice in enum `{}`",
-                                    v.name, e.name.name
+                                    v.name.name, e.name.name
                                 ),
-                                v.span,
+                                v.name.span,
                             );
                         } else {
-                            variants.push(v.name.clone());
+                            // the field types are resolved in `resolve_enums`, once every
+                            // type is known
+                            variants.push(VariantDef {
+                                name: v.name.name.clone(),
+                                span: v.name.span,
+                                fields: Vec::new(),
+                            });
                         }
                     }
                     self.defs.enums.push(EnumDef {
                         name: e.name.name.clone(),
                         module: m,
                         span: e.name.span,
+                        // the real `ParamId`s come with `resolve_enums`; the count is
+                        // needed before that
+                        tparams: vec![0; e.tparams.len()],
                         variants,
                     });
                     self.mscopes[m].decl_ids.insert(idx, id);
@@ -404,6 +413,18 @@ impl Checker {
     /// Map keys must be compared by value: int, float, string, bool or enum.
     pub(crate) fn check_key_type(&mut self, k: &Ty, span: Span) {
         let k = self.resolve(k);
+        // an enum whose variants carry data is not compared by name alone
+        if let Ty::Enum(id, _) = &k {
+            if !self.defs.enums[*id].is_plain() {
+                let shown = self.show(&k);
+                self.err(
+                    "T270",
+                    format!("`{shown}` cannot be a map key: some of its variants carry data"),
+                    span,
+                );
+            }
+            return;
+        }
         if !matches!(
             k,
             Ty::Int
@@ -413,7 +434,6 @@ impl Checker {
                 | Ty::Uuid
                 | Ty::Ulid
                 | Ty::DateTime
-                | Ty::Enum(_)
                 | Ty::Param(_)
                 | Ty::Never
                 | Ty::Error
@@ -450,10 +470,19 @@ impl Checker {
                 Ty::Struct(id, targs)
             }
             ItemRef::Enum(id) => {
-                if !targs.is_empty() {
-                    self.err("T121", format!("`{name}` takes no type arguments"), span);
+                let n = self.defs.enums[id].tparams.len();
+                if targs.len() != n {
+                    self.err(
+                        "T121",
+                        format!(
+                            "`{name}` expects {n} type argument(s), found {}",
+                            targs.len()
+                        ),
+                        span,
+                    );
+                    return Ty::Error;
                 }
-                Ty::Enum(id)
+                Ty::Enum(id, targs)
             }
             ItemRef::Trait(id) => {
                 let n = self.defs.traits[id].tparams.len();
@@ -694,6 +723,46 @@ impl Checker {
         }
     }
 
+    /// Resolves the type parameters of every enum of module `m` and the types of the data
+    /// its variants carry.
+    pub(crate) fn resolve_enums(&mut self, m: ModId) {
+        let ast = self.modules[m].ast.clone();
+        for (idx, item) in ast.items.iter().enumerate() {
+            let Item::Enum(e) = item else { continue };
+            let id = self.mscopes[m].decl_ids[&idx];
+            self.tparam_scope.clear();
+            let tps = self.make_tparams(&e.tparams);
+            self.defs.enums[id].tparams = tps.iter().map(|(_, p)| *p).collect();
+            for v in &e.variants {
+                let Some(vi) = self.defs.enums[id].variant_index(&v.name.name) else {
+                    continue;
+                };
+                // a variant declared twice was reported already: keep the first
+                if self.defs.enums[id].variants[vi].span != v.name.span {
+                    continue;
+                }
+                let mut fields: Vec<(String, Ty)> = Vec::new();
+                for f in &v.fields {
+                    if fields.iter().any(|(n, _)| *n == f.name.name) {
+                        self.err(
+                            "T126",
+                            format!(
+                                "field `{}` is declared twice in `{}`",
+                                f.name.name, v.name.name
+                            ),
+                            f.name.span,
+                        );
+                        continue;
+                    }
+                    let ty = self.resolve_type(&f.ty);
+                    fields.push((f.name.name.clone(), ty));
+                }
+                self.defs.enums[id].variants[vi].fields = fields;
+            }
+            self.tparam_scope.clear();
+        }
+    }
+
     pub(crate) fn resolve_functions(&mut self, m: ModId) {
         let ast = self.modules[m].ast.clone();
         for (idx, item) in ast.items.iter().enumerate() {
@@ -777,7 +846,14 @@ impl Checker {
     /// parent, not recursive) whose fields are all allowed.
     pub(crate) fn boundary_problem(&self, ty: &Ty, path: &mut Vec<StructId>) -> Option<String> {
         match ty {
-            Ty::Error | Ty::Int | Ty::Float | Ty::Bool | Ty::Str | Ty::Enum(_) => None,
+            Ty::Error | Ty::Int | Ty::Float | Ty::Bool | Ty::Str => None,
+            // an enumeration crosses as the name of its variant, if none carries data
+            Ty::Enum(id, _) => (!self.defs.enums[*id].is_plain()).then(|| {
+                format!(
+                    "enum `{}` has variants that carry data, which cannot cross to the host",
+                    self.defs.enums[*id].name
+                )
+            }),
             Ty::Nullable(t) | Ty::Array(t) => self.boundary_problem(t, path),
             Ty::Map(k, v) => self
                 .boundary_problem(k, path)
@@ -831,7 +907,7 @@ impl Checker {
                     continue;
                 }
                 Ty::Struct(..)
-                | Ty::Enum(_)
+                | Ty::Enum(..)
                 | Ty::Int
                 | Ty::Float
                 | Ty::Bool

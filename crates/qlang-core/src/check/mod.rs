@@ -1502,6 +1502,10 @@ impl Checker {
         }
         for m in 0..n {
             self.cur_mod = m;
+            self.resolve_enums(m);
+        }
+        for m in 0..n {
+            self.cur_mod = m;
             self.resolve_functions(m);
         }
         for m in 0..n {

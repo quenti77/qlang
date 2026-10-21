@@ -1202,7 +1202,11 @@ impl Checker {
                 self.check_cond(g);
             }
             let unguarded = case.guard.is_none();
-            if unguarded {
+            if unguarded && let Some(&(eid, v)) = self.res.patterns.get(&(e.id, i)) {
+                // a variant, written with or without its type, with or without data
+                enum_id = Some(eid);
+                variants_seen.insert(v);
+            } else if unguarded {
                 match &case.pattern {
                     Pattern::Bind(_) => exhaustive = true,
                     Pattern::None => none_seen = true,
@@ -1211,12 +1215,6 @@ impl Checker {
                             bools_seen.0 = true;
                         } else {
                             bools_seen.1 = true;
-                        }
-                    }
-                    Pattern::Path(_) => {
-                        if let Some(&(eid, v)) = self.res.patterns.get(&(e.id, i)) {
-                            enum_id = Some(eid);
-                            variants_seen.insert(v);
                         }
                     }
                     _ => {}
@@ -1323,33 +1321,78 @@ impl Checker {
                 }
             }
             Pattern::Path(path) => {
-                let (head, last) = path.split_at(path.len() - 1);
-                let Some(ItemRef::Enum(eid)) = self.lookup_path_item(head, "enum") else {
-                    if !self.diags.iter().any(|d| d.span == head[0].span) {
-                        self.err("T221", "expected `Enum.Variant`", span);
+                if let Some((eid, vi, args)) = self.pattern_variant(path, &inner, span) {
+                    let expected = Ty::Enum(eid, args);
+                    self.res.patterns.insert((mid, idx), (eid, vi));
+                    if !self.defs.enums[eid].variants[vi].fields.is_empty() {
+                        let v = &self.defs.enums[eid].variants[vi];
+                        let msg = format!(
+                            "`{}` carries data: write `{}({})` to take it",
+                            v.name,
+                            v.name,
+                            v.fields.iter().map(|_| "_").collect::<Vec<_>>().join(", ")
+                        );
+                        self.err("T222", msg, span);
                     }
+                    expect(self, expected);
+                }
+            }
+            Pattern::Variant { path, fields } => {
+                let Some((eid, vi, args)) = self.pattern_variant(path, &inner, span) else {
                     return;
                 };
-                match self.defs.enums[eid]
-                    .variants
+                self.res.patterns.insert((mid, idx), (eid, vi));
+                expect(self, Ty::Enum(eid, args.clone()));
+                let def = self.defs.enums[eid].clone();
+                let v = &def.variants[vi];
+                if v.fields.len() != fields.len() {
+                    self.err(
+                        "T222",
+                        format!(
+                            "`{}` carries {} value(s), but the pattern names {}",
+                            v.name,
+                            v.fields.len(),
+                            fields.len()
+                        ),
+                        span,
+                    );
+                    return;
+                }
+                let map: HashMap<ParamId, Ty> = def
+                    .tparams
                     .iter()
-                    .position(|v| *v == last[0].name)
-                {
-                    Some(vi) => {
-                        self.res.patterns.insert((mid, idx), (eid, vi));
-                        expect(self, Ty::Enum(eid));
-                    }
-                    None => {
-                        let en = self.defs.enums[eid].name.clone();
-                        self.err(
-                            "T221",
-                            format!("enum `{en}` has no variant `{}`", last[0].name),
-                            last[0].span,
+                    .copied()
+                    .zip(args.iter().cloned())
+                    .collect();
+                for ((_, fty), bind) in v.fields.iter().zip(fields) {
+                    if let Some(name) = bind {
+                        let ty = self.resolve(&fty.subst(&map));
+                        self.declare(
+                            name,
+                            Local {
+                                ty,
+                                kind: LocalKind::Var,
+                                orig: None,
+                                span: name.span,
+                            },
                         );
                     }
                 }
             }
             Pattern::Bind(name) => {
+                // a name that is a variant of the type being matched is that variant
+                if let Ty::Enum(eid, args) = &inner
+                    && let Some(vi) = self.defs.enums[*eid].variant_index(&name.name)
+                {
+                    self.res.patterns.insert((mid, idx), (*eid, vi));
+                    if !self.defs.enums[*eid].variants[vi].fields.is_empty() {
+                        let msg =
+                            format!("`{0}` carries data: write `{0}(...)` to take it", name.name);
+                        self.err("T222", msg, span);
+                    }
+                    let _ = args;
+                    return;
+                }
                 if name.name != "_" {
                     let ty = if none_seen {
                         inner.clone()
@@ -1368,6 +1411,59 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// The variant a pattern path names: `Circle` (the type being matched is known),
+    /// `Shape.Circle` or `m.Shape.Circle`; also the type arguments of its enum, those of
+    /// the matched value when it is an instance of the same enum.
+    fn pattern_variant(
+        &mut self,
+        path: &[Ident],
+        matched: &Ty,
+        span: Span,
+    ) -> Option<(EnumId, usize, Vec<Ty>)> {
+        let (eid, last) = if path.len() == 1 {
+            let Ty::Enum(eid, _) = matched else {
+                if !matches!(matched, Ty::Error) {
+                    let shown = self.show(matched);
+                    self.err(
+                        "T221",
+                        format!(
+                            "`{}` is not a variant: the value matched has type `{shown}`",
+                            path[0].name
+                        ),
+                        span,
+                    );
+                }
+                return None;
+            };
+            (*eid, &path[0])
+        } else {
+            let (head, last) = path.split_at(path.len() - 1);
+            let Some(ItemRef::Enum(eid)) = self.lookup_path_item(head, "enum") else {
+                if !self.diags.iter().any(|d| d.span == head[0].span) {
+                    self.err("T221", "expected `Enum.Variant`", span);
+                }
+                return None;
+            };
+            (eid, &last[0])
+        };
+        let Some(vi) = self.defs.enums[eid].variant_index(&last.name) else {
+            let en = self.defs.enums[eid].name.clone();
+            self.err(
+                "T221",
+                format!("enum `{en}` has no variant `{}`", last.name),
+                last.span,
+            );
+            return None;
+        };
+        let args = match matched {
+            Ty::Enum(m, args) if *m == eid => args.clone(),
+            _ => (0..self.defs.enums[eid].tparams.len())
+                .map(|_| self.fresh())
+                .collect(),
+        };
+        Some((eid, vi, args))
     }
 
     // ------------------------------------------------------------- lambdas

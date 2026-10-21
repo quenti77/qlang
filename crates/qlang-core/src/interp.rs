@@ -862,7 +862,7 @@ impl<'a> Interp<'a> {
     fn eval_field(&mut self, e: &Expr, obj: &Expr, name: &Ident, env: &Env) -> R<Value> {
         let prog = self.prog;
         match prog.res.paths.get(&e.id) {
-            Some(PathRes::EnumVariant(eid, vi)) => return Ok(Value::Enum(*eid, *vi)),
+            Some(PathRes::EnumVariant(eid, vi)) => return Ok(Value::Enum(*eid, *vi, None)),
             Some(PathRes::StaticField(sid, n)) => {
                 return match self.statics.get(&(*sid, n.clone())) {
                     Some(v) => Ok(v.clone()),
@@ -956,6 +956,11 @@ impl<'a> Interp<'a> {
                     Some(PathRes::BuiltinFn(name)) => {
                         let argv = self.eval_args(e.id, args, env)?;
                         return self.builtin_fn(name, argv, e.span);
+                    }
+                    // `Shape.Circle(2.0)`: a variant that carries data
+                    Some(PathRes::EnumVariant(eid, vi)) => {
+                        let argv = self.eval_args(e.id, args, env)?;
+                        return Ok(Value::Enum(*eid, *vi, Some(argv.into())));
                     }
                     Some(PathRes::BuiltinStatic(ty, name)) => {
                         let argv = self.eval_args(e.id, args, env)?;
@@ -1095,7 +1100,7 @@ impl<'a> Interp<'a> {
     fn class_name_of(&self, v: &Value) -> &str {
         match v {
             Value::Struct(o) => &self.prog.defs.structs[o.def].name,
-            Value::Enum(eid, _) => &self.prog.defs.enums[*eid].name,
+            Value::Enum(eid, ..) => &self.prog.defs.enums[*eid].name,
             _ => "?",
         }
     }
@@ -1129,7 +1134,7 @@ impl<'a> Interp<'a> {
                         && matches!(&imp.target, Ty::Struct(s, _) if classes.contains(s))
                 })
             }
-            (Value::Enum(e, _), Ty::Enum(x)) => e == x,
+            (Value::Enum(e, ..), Ty::Enum(x, _)) => e == x,
             (Value::Func(_), Ty::Fn(..)) => true,
             _ => false,
         }
@@ -1300,9 +1305,20 @@ impl<'a> Interp<'a> {
                 }
                 format!("{{{}}}", parts.join(", "))
             }
-            Value::Enum(e, vi) => {
+            Value::Enum(e, vi, data) => {
                 let d = &self.prog.defs.enums[*e];
-                format!("{}.{}", d.name, d.variants[*vi])
+                let name = format!("{}.{}", d.name, d.variants[*vi].name);
+                match data {
+                    None => name,
+                    Some(items) => {
+                        let items = items.clone();
+                        let mut parts = Vec::with_capacity(items.len());
+                        for it in items.iter() {
+                            parts.push(self.repr(it, span)?);
+                        }
+                        format!("{name}({})", parts.join(", "))
+                    }
+                }
             }
             Value::Range(a, b, incl) => format!("{a}{}{b}", if *incl { "..=" } else { ".." }),
             Value::Func(_) => "<function>".to_string(),
@@ -1513,7 +1529,24 @@ impl<'a> Interp<'a> {
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => x == y,
             (Value::DateTime(x), Value::DateTime(y)) => x == y,
-            (Value::Enum(e1, v1), Value::Enum(e2, v2)) => e1 == e2 && v1 == v2,
+            (Value::Enum(e1, v1, d1), Value::Enum(e2, v2, d2)) => {
+                if e1 != e2 || v1 != v2 {
+                    return Ok(false);
+                }
+                match (d1, d2) {
+                    (Some(xs), Some(ys)) if xs.len() == ys.len() => {
+                        let (xs, ys) = (xs.clone(), ys.clone());
+                        for (x, y) in xs.iter().zip(ys.iter()) {
+                            if !self.values_equal(x, y, span)? {
+                                return Ok(false);
+                            }
+                        }
+                        true
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
+            }
             (Value::Map(x), Value::Map(y)) => {
                 if Rc::ptr_eq(x, y) {
                     return Ok(true);
@@ -1828,10 +1861,25 @@ impl<'a> Interp<'a> {
                 x >= l && if *inclusive { x <= h } else { x < h }
             }
             Pattern::Path(_) => match (self.prog.res.patterns.get(&(mid, idx)), v) {
-                (Some((eid, vi)), Value::Enum(e, x)) => eid == e && vi == x,
+                (Some((eid, vi)), Value::Enum(e, x, _)) => eid == e && vi == x,
+                _ => false,
+            },
+            Pattern::Variant { fields, .. } => match (self.prog.res.patterns.get(&(mid, idx)), v) {
+                (Some((eid, vi)), Value::Enum(e, x, Some(data))) if eid == e && vi == x => {
+                    for (bind, value) in fields.iter().zip(data.iter()) {
+                        if let Some(name) = bind {
+                            scope.define(&name.name, value.clone());
+                        }
+                    }
+                    true
+                }
                 _ => false,
             },
             Pattern::Bind(name) => {
+                // a name that is a variant of the type matched (decided by the checker)
+                if let Some((eid, vi)) = self.prog.res.patterns.get(&(mid, idx)) {
+                    return Ok(matches!(v, Value::Enum(e, x, _) if e == eid && x == vi));
+                }
                 if name.name != "_" {
                     scope.define(&name.name, v.clone());
                 }

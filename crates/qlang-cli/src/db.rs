@@ -255,6 +255,19 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_server_needs_an_explicit_sslmode() {
+        use super::{has_sslmode, is_local};
+        assert!(is_local("postgres://localhost/db"));
+        assert!(is_local("postgres://u:p@127.0.0.1:5432/db"));
+        assert!(is_local("postgres://u:p@[::1]/db"));
+        assert!(is_local("postgres:///db"));
+        assert!(!is_local("postgres://db.example.com/db"));
+        assert!(!is_local("postgres://u:p@10.0.0.5/db?x=localhost"));
+        assert!(!has_sslmode("postgres://h/db"));
+        assert!(has_sslmode("postgres://h/db?user=x&sslmode=disable"));
+    }
+
+    #[test]
     fn rewrites_bare_question_marks_in_order() {
         assert_eq!(
             rewrite_placeholders("SELECT * FROM t WHERE a = ? AND b = ?"),
@@ -293,7 +306,36 @@ fn wants_tls(url: &str) -> bool {
     })
 }
 
+/// Whether the URL says anything about `sslmode`.
+fn has_sslmode(url: &str) -> bool {
+    url.split(['?', '&'])
+        .skip(1)
+        .any(|p| p.starts_with("sslmode="))
+}
+
+/// Whether the server is on this machine (a name, an address or a socket directory).
+fn is_local(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let authority = rest.split(['/', '?']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = host.split(':').next().unwrap_or("");
+    let host = host.trim_matches(['[', ']']);
+    // no host in the URL: a local socket
+    host.is_empty()
+        || host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host.starts_with('%')
+        || host.starts_with('/')
+}
+
 fn pg_connect(url: &str) -> Result<postgres::Client, HostError> {
+    // a password sent in the clear to another machine must be a choice, not an accident
+    if !has_sslmode(url) && !is_local(url) {
+        return Err(HostError::Other(
+            "this Postgres server is not on this machine: add ?sslmode=require to use TLS, or ?sslmode=disable to confirm that you want an unencrypted connection".to_string(),
+        ));
+    }
     if !wants_tls(url) {
         return postgres::Client::connect(url, postgres::NoTls)
             .map_err(|e| HostError::Other(e.to_string()));

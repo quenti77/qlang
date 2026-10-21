@@ -8,6 +8,7 @@ Sécurité (voir la section « Sécurité » du README) :
 - Les valeurs imbriquées très profondément (liste chaînée de millions de maillons) sont libérées sans récursion : leur libération faisait déborder la pile et tuait le processus. Les comparer (`==`, `<`) au-delà de 1 000 niveaux est une erreur `R092`.
 - `fs.write` ne suit plus un lien symbolique qui sort de `--root` ; `fs.read` refuse ce qui n'est pas un fichier ordinaire (`/dev/zero`) ou dépasse 64 Mo ; `http.send` a un délai de 60 s.
 - `qlang serve` : une requête doit arriver entière en 20 s (un client lent gardait une connexion pour toujours), `--static` ne sert plus les fichiers cachés (`.env`, `.git/...`), un statut hors de 100 à 599 donne 500.
+- `Db.connect` : un serveur Postgres distant sans `sslmode` dans l'URL est refusé (le mot de passe partait en clair) ; avec `--root`, le fichier d'une base `sqlite://` doit être dans le dossier.
 - Fournisseurs d'`extern` : une réponse de plus de 64 Mo est refusée. Dépendances git : un `tag`, `rev` ou `branch` ne peut pas commencer par `-`.
 
 ## 0.35.0

@@ -967,6 +967,8 @@ impl<'a> Interp<'a> {
                 return Ok(match (*ty, *name) {
                     ("float", "PI") => Value::Float(std::f64::consts::PI),
                     ("float", "E") => Value::Float(std::f64::consts::E),
+                    ("float", "INFINITY") => Value::Float(f64::INFINITY),
+                    ("float", "NAN") => Value::Float(f64::NAN),
                     ("int", "MAX") => Value::Int(i64::MAX),
                     ("int", "MIN") => Value::Int(i64::MIN),
                     ("uuid", "NIL") => Value::Uuid(0),
@@ -2126,6 +2128,47 @@ impl<'a> Interp<'a> {
         }
     }
 
+    /// `Base64.*`, `Hex.*`, `Url.*` and `Hash.*`: encodings and hashes of the UTF-8 bytes of
+    /// a string. Decoding gives `none` unless the bytes are valid text.
+    #[inline(never)]
+    fn codec_call(&mut self, ty: &str, name: &str, args: &[Value], span: Span) -> R<Value> {
+        use crate::codec;
+        let text = |v: &Value| match v {
+            Value::Str(s) => s.to_string(),
+            _ => String::new(),
+        };
+        let input = text(&args[0]);
+        // hashing and encoding read every byte: charged like other built-in work
+        self.charge(input.len(), span)?;
+        let out = match (ty, name) {
+            ("Base64", "encode") => codec::base64_encode(input.as_bytes(), false),
+            ("Base64", "encode_url") => codec::base64_encode(input.as_bytes(), true),
+            ("Hex", "encode") => codec::hex_encode(input.as_bytes()),
+            ("Url", "encode") => codec::url_encode(input.as_bytes()),
+            ("Hash", "sha256") => codec::hex_encode(&codec::sha256(input.as_bytes())),
+            ("Hash", "sha1") => codec::hex_encode(&codec::sha1(input.as_bytes())),
+            ("Hash", "md5") => codec::hex_encode(&codec::md5(input.as_bytes())),
+            ("Hash", "hmac_sha256") => {
+                let message = text(&args[1]);
+                self.charge(message.len(), span)?;
+                codec::hex_encode(&codec::hmac_sha256(input.as_bytes(), message.as_bytes()))
+            }
+            (_, "decode") => {
+                let bytes = match ty {
+                    "Base64" => codec::base64_decode(&input),
+                    "Hex" => codec::hex_decode(&input),
+                    _ => codec::url_decode(&input),
+                };
+                return Ok(bytes
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .map_or(Value::None, |s| Value::str(&s)));
+            }
+            _ => return self.fail("R001", format!("unknown function `{ty}.{name}`"), span),
+        };
+        self.guard_alloc(out.len(), span)?;
+        Ok(Value::str(&out))
+    }
+
     /// A function of a built-in type: `int.parse`, `uuid.v4`, `time.now`, `random.int`...
     /// Not inlined: it would make the frame of `eval_call` (used by every recursion) bigger.
     #[inline(never)]
@@ -2222,6 +2265,9 @@ impl<'a> Interp<'a> {
                 let width = (*hi as i128 - *lo as i128 + 1) as u128;
                 let draw = self.random_bits(span)? % width;
                 Value::Int((*lo as i128 + draw as i128) as i64)
+            }
+            ("Base64" | "Hex" | "Url" | "Hash", _) => {
+                return self.codec_call(ty, name, &args, span);
             }
             ("regex", "matches") => Value::Bool(
                 self.compile_regex(&text(&args[1]), span)?
@@ -3121,10 +3167,95 @@ impl<'a> Interp<'a> {
                 }
                 Value::Float(f.sqrt())
             }
-            (Value::Float(f), "floor" | "ceil" | "round") => {
+            (
+                Value::Int(_) | Value::Float(_),
+                "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "exp" | "ln" | "log10" | "log2"
+                | "to_radians" | "to_degrees",
+            ) => {
+                let x = num(recv).unwrap_or(f64::NAN);
+                let domain = match name {
+                    "asin" | "acos" => (-1.0..=1.0).contains(&x),
+                    "ln" | "log10" | "log2" => x > 0.0,
+                    _ => true,
+                };
+                if !domain {
+                    return self.fail(
+                        "R016",
+                        format!("{x} is outside the domain of `{name}`"),
+                        span,
+                    );
+                }
+                Value::Float(match name {
+                    "sin" => x.sin(),
+                    "cos" => x.cos(),
+                    "tan" => x.tan(),
+                    "asin" => x.asin(),
+                    "acos" => x.acos(),
+                    "atan" => x.atan(),
+                    "exp" => x.exp(),
+                    "ln" => x.ln(),
+                    "log10" => x.log10(),
+                    "log2" => x.log2(),
+                    "to_radians" => x.to_radians(),
+                    _ => x.to_degrees(),
+                })
+            }
+            (Value::Int(_) | Value::Float(_), "log") => {
+                let (x, base) = (
+                    num(recv).unwrap_or(f64::NAN),
+                    num(&args[0]).unwrap_or(f64::NAN),
+                );
+                if x <= 0.0 || base <= 0.0 || base == 1.0 {
+                    return self.fail(
+                        "R016",
+                        format!("`log` needs a positive number and a positive base other than 1 (found {x} and {base})"),
+                        span,
+                    );
+                }
+                Value::Float(x.ln() / base.ln())
+            }
+            (Value::Int(_) | Value::Float(_), "atan2") => Value::Float(
+                num(recv)
+                    .unwrap_or(f64::NAN)
+                    .atan2(num(&args[0]).unwrap_or(f64::NAN)),
+            ),
+            (Value::Int(x), "signum") => Value::Int(x.signum()),
+            (Value::Float(x), "signum") => Value::Float(if x.is_nan() {
+                *x
+            } else if *x == 0.0 {
+                0.0
+            } else {
+                x.signum()
+            }),
+            (Value::Int(x), "clamp") => {
+                let (lo, hi) = (int_arg(0).unwrap_or(0), int_arg(1).unwrap_or(0));
+                if lo > hi {
+                    return self.fail(
+                        "R016",
+                        format!("`clamp` needs min <= max (found {lo} and {hi})"),
+                        span,
+                    );
+                }
+                Value::Int((*x).clamp(lo, hi))
+            }
+            (Value::Float(x), "clamp") => {
+                let (lo, hi) = (num(&args[0]).unwrap_or(0.0), num(&args[1]).unwrap_or(0.0));
+                if lo.is_nan() || hi.is_nan() || lo > hi {
+                    return self.fail(
+                        "R016",
+                        format!("`clamp` needs min <= max (found {lo} and {hi})"),
+                        span,
+                    );
+                }
+                Value::Float(x.clamp(lo, hi))
+            }
+            (Value::Float(x), "is_nan") => Value::Bool(x.is_nan()),
+            (Value::Float(x), "is_infinite") => Value::Bool(x.is_infinite()),
+            (Value::Float(f), "floor" | "ceil" | "round" | "trunc") => {
                 let r = match name {
                     "floor" => f.floor(),
                     "ceil" => f.ceil(),
+                    "trunc" => f.trunc(),
                     _ => f.round(),
                 };
                 if !r.is_finite() || r.abs() >= 9.3e18 {

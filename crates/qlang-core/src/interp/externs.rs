@@ -387,7 +387,7 @@ impl Interp<'_> {
             }
             (Ty::Struct(sid, _), HostValue::Map(entries)) => {
                 let def = &self.prog.defs.structs[*sid];
-                let mut fields = HashMap::new();
+                let mut fields = crate::smallmap::SmallMap::default();
                 for f in def.fields.iter().filter(|f| !f.is_static) {
                     let found = entries
                         .iter()
@@ -403,7 +403,7 @@ impl Interp<'_> {
                             );
                         }
                     };
-                    fields.insert(f.name.clone(), v);
+                    fields.insert(&f.name, v);
                 }
                 Ok(Value::Struct(Rc::new(StructObj {
                     def: *sid,

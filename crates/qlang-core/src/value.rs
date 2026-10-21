@@ -1,6 +1,7 @@
 //! Runtime values and environments.
 
 use crate::ast::FunDecl;
+use crate::smallmap::SmallMap;
 use crate::types::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -128,7 +129,7 @@ impl MapObj {
 
 pub struct StructObj {
     pub def: StructId,
-    pub fields: RefCell<HashMap<String, Value>>,
+    pub fields: RefCell<SmallMap<Value>>,
 }
 
 pub struct FuncVal {
@@ -149,7 +150,7 @@ impl Value {
 
 /// A lexical scope. Closures keep their scope alive.
 pub struct Scope {
-    vars: RefCell<HashMap<String, Value>>,
+    vars: RefCell<SmallMap<Value>>,
     parent: Option<Env>,
 }
 
@@ -158,43 +159,40 @@ pub type Env = Rc<Scope>;
 impl Scope {
     pub fn new(parent: Option<Env>) -> Env {
         Rc::new(Scope {
-            vars: RefCell::new(HashMap::new()),
+            vars: RefCell::new(SmallMap::default()),
             parent,
         })
     }
 
     pub fn define(&self, name: &str, v: Value) {
-        self.vars.borrow_mut().insert(name.to_string(), v);
+        self.vars.borrow_mut().insert(name, v);
     }
 
     pub fn get(&self, name: &str) -> Option<Value> {
-        if let Some(v) = self.vars.borrow().get(name) {
-            return Some(v.clone());
-        }
-        let mut cur = self.parent.clone();
-        while let Some(s) = cur {
-            if let Some(v) = s.vars.borrow().get(name) {
+        let mut cur: &Scope = self;
+        loop {
+            if let Some(v) = cur.vars.borrow().get(name) {
                 return Some(v.clone());
             }
-            cur = s.parent.clone();
+            match &cur.parent {
+                Some(p) => cur = p,
+                None => return None,
+            }
         }
-        None
     }
 
     /// Assign to an existing variable, in the nearest scope that has it.
     pub fn assign(&self, name: &str, v: Value) -> bool {
-        if let Some(slot) = self.vars.borrow_mut().get_mut(name) {
-            *slot = v;
-            return true;
-        }
-        let mut cur = self.parent.clone();
-        while let Some(s) = cur {
-            if let Some(slot) = s.vars.borrow_mut().get_mut(name) {
+        let mut cur: &Scope = self;
+        loop {
+            if let Some(slot) = cur.vars.borrow_mut().get_mut(name) {
                 *slot = v;
                 return true;
             }
-            cur = s.parent.clone();
+            match &cur.parent {
+                Some(p) => cur = p,
+                None => return false,
+            }
         }
-        false
     }
 }

@@ -2,7 +2,7 @@
   "name": "qlang",
   "displayName": "qlang",
   "description": "Language support for qlang: syntax highlighting, errors as you type, tooltips, completion, snippets and a Run command.",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "publisher": "qlang",
   "license": "MIT",
   "engines": { "vscode": "^1.80.0" },

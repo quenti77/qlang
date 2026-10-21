@@ -379,10 +379,32 @@ impl<'a> Interp<'a> {
     // ------------------------------------------------------------------ errors
 
     fn error(&self, code: &str, msg: impl Into<String>, span: Span) -> Ctrl {
+        // An error raised inside the prelude (a failed `assert_eq`, an `unwrap` of an
+        // error) is shown at the call in the user's code, not at a line of the prelude.
+        let prelude_file = self.prog.modules[crate::check::PRELUDE_MOD].file;
+        let mut span = span;
+        let mut outer = self.frames.len();
+        let mut inside: Option<String> = None;
+        if span.file == prelude_file
+            && let Some(i) = self
+                .frames
+                .iter()
+                .rposition(|(_, call_span)| call_span.file != prelude_file)
+        {
+            span = self.frames[i].1;
+            inside = Some(self.frames[i].0.as_str().to_string());
+            outer = i;
+        }
         let mut d = Diagnostic::error(code, msg, span);
+        if let Some(name) = inside {
+            d = d.with_note(
+                format!("raised inside `{name}`, of the standard library"),
+                None,
+            );
+        }
         // innermost call first; identical consecutive calls (recursion) are merged
         let mut groups: Vec<(&str, Span, usize)> = Vec::new();
-        for (name, call_span) in self.frames.iter().rev() {
+        for (name, call_span) in self.frames[..outer].iter().rev() {
             match groups.last_mut() {
                 Some((n, s, count)) if *n == name.as_str() && *s == *call_span => *count += 1,
                 _ => groups.push((name.as_str(), *call_span, 1)),

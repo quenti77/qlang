@@ -1322,6 +1322,10 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `panic(message)`         | arrête le programme avec une erreur                                   |
 | `assert(cond, message?)` | arrête le programme si `cond` est faux                                |
 | `assert_eq(a, b)`        | arrête le programme si `a != b`, en montrant les deux valeurs (`assert_ne` : si `a == b`) |
+| `assert_ok(r)`, `assert_err(r)` | pour un test : la valeur d'un `Ok` / l'erreur d'un `Err`, ou arrête le programme en montrant ce que contenait le résultat |
+| `assert_some(x)`, `assert_none(x)` | pour un test : la valeur d'un nullable qui ne doit pas être `none` / vérifie qu'il l'est |
+| `assert_contains(tableau, v)`, `assert_contains_text(texte, morceau)` | pour un test : `v` est dans le tableau / `morceau` est dans le texte |
+| `assert_close(a, b)`, `assert_within(a, b, tolérance)` | pour un test : deux `float` égaux à la tolérance près (un milliardième par défaut ; relative dès que `b` dépasse 1) |
 | `int.parse(s)`           | renvoie un `int?` : `none` si `s` n'est pas un entier valide          |
 | `float.parse(s)`         | renvoie un `float?`                                                   |
 

@@ -553,6 +553,7 @@ impl Checker {
                 }
                 Ty::Range
             }
+            ExprKind::Try(inner) => self.check_try(e, inner),
             ExprKind::Cast(inner, te) => {
                 let from = self.expr(inner, &Want::Any);
                 let from = self.require_value(from, inner.span);
@@ -1464,6 +1465,66 @@ impl Checker {
                 .collect(),
         };
         Some((eid, vi, args))
+    }
+
+    /// `inner?`: the value of a `Result` or of a nullable, or leave the current function with
+    /// the error (the same `Result` error type) or with `none`.
+    fn check_try(&mut self, e: &Expr, inner: &Expr) -> Ty {
+        let t = self.expr(inner, &Want::Any);
+        let t = self.require_value(t, inner.span);
+        let t = self.resolve(&t);
+        let ret = self.ret_stack.last().cloned().map(|r| self.resolve(&r));
+        if ret.is_none() {
+            self.err(
+                "T280",
+                "`?` can only be used inside a function (it leaves the function when there is an error)",
+                e.span,
+            );
+        }
+        match &t {
+            Ty::Error => Ty::Error,
+            Ty::Enum(eid, args)
+                if args.len() == 2
+                    && self.defs.enums[*eid].module == PRELUDE_MOD
+                    && self.defs.enums[*eid].name == "Result" =>
+            {
+                self.res.result_tries.insert(e.id);
+                if let Some(ret) = ret {
+                    let needed = Ty::Enum(*eid, vec![self.fresh(), args[1].clone()]);
+                    if !matches!(ret, Ty::Error) && !self.assignable(&needed, &ret) {
+                        let (shown, er) = (self.show(&ret), self.show(&args[1]));
+                        self.err(
+                            "T282",
+                            format!("`?` on a `Result` leaves the function with its error, so the function must return a `Result<_, {er}>`, not `{shown}`"),
+                            e.span,
+                        );
+                    }
+                }
+                args[0].clone()
+            }
+            Ty::Nullable(value) => {
+                if let Some(ret) = ret
+                    && !matches!(ret, Ty::Nullable(_) | Ty::Error)
+                {
+                    let shown = self.show(&ret);
+                    self.err(
+                        "T282",
+                        format!("`?` on a nullable value leaves the function with `none`, so the function must return a nullable (`T?`), not `{shown}`"),
+                        e.span,
+                    );
+                }
+                (**value).clone()
+            }
+            other => {
+                let shown = self.show(other);
+                self.err(
+                    "T281",
+                    format!("`?` needs a `Result` or a nullable value, found `{shown}`"),
+                    e.span,
+                );
+                Ty::Error
+            }
+        }
     }
 
     // ------------------------------------------------------------- lambdas

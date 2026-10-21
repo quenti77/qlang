@@ -1277,6 +1277,11 @@ impl<'a> Parser<'a> {
                     let span = e.span.to(name.span);
                     e = self.mk(span, ExprKind::Field(Box::new(e), name, Vec::new()));
                 }
+                Tok::Question => {
+                    let end = self.bump().span;
+                    let span = e.span.to(end);
+                    e = self.mk(span, ExprKind::Try(Box::new(e)));
+                }
                 Tok::LBracket => {
                     self.bump();
                     self.nl.push(false);

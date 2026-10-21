@@ -536,6 +536,8 @@ pub struct Resolutions {
     /// `value.class()`: the concrete struct or enum name of the value at run time
     /// (works even when `value`'s static type is a trait or a generic parameter).
     pub class_calls: HashSet<NodeId>,
+    /// `expr?` that applies to a `Result` (the others apply to a nullable value).
+    pub result_tries: HashSet<NodeId>,
     /// Calls with at least one named argument (`f(a: 1)`): for each argument, in the
     /// order written, which parameter slot it fills. Absent means purely positional
     /// (the common case), so the interpreter binds arguments in writing order as-is.

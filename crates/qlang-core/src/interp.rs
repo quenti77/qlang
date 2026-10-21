@@ -755,6 +755,23 @@ impl<'a> Interp<'a> {
                     _ => self.fail("R001", "a range needs integer bounds", e.span),
                 }
             }
+            ExprKind::Try(inner) => {
+                let v = self.eval(inner, env)?;
+                if prog.res.result_tries.contains(&e.id) {
+                    // `Ok(x)` gives x; `Err(..)` leaves the function with that same error
+                    return match &v {
+                        Value::Enum(_, vi, Some(_)) if self.is_err_variant(&v, *vi) => {
+                            Err(Ctrl::Return(v.clone()))
+                        }
+                        Value::Enum(_, _, Some(data)) if data.len() == 1 => Ok(data[0].clone()),
+                        _ => self.fail("R001", "`?` expects a `Result`", e.span),
+                    };
+                }
+                match v {
+                    Value::None => Err(Ctrl::Return(Value::None)),
+                    other => Ok(other),
+                }
+            }
             ExprKind::Cast(inner, _) => {
                 let v = self.eval(inner, env)?;
                 let target = prog.res.casts.get(&e.id).cloned().unwrap_or(Ty::Error);
@@ -2188,6 +2205,14 @@ impl<'a> Interp<'a> {
             def: sid,
             fields: RefCell::new(map),
         }))
+    }
+
+    /// Whether `v`, a `Result`, is the `Err` variant (`vi` is its variant index).
+    fn is_err_variant(&self, v: &Value, vi: usize) -> bool {
+        let Value::Enum(eid, ..) = v else {
+            return false;
+        };
+        self.prog.defs.enums[*eid].variants[vi].name == "Err"
     }
 
     fn prelude_enum(&self, name: &str) -> EnumId {

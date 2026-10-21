@@ -361,6 +361,8 @@ pub enum ExprKind {
         inclusive: bool,
     },
     Cast(Box<Expr>, TypeExpr),
+    /// `expr?`: the value of a `Result` or nullable, or leave the function with the error / `none`.
+    Try(Box<Expr>),
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,

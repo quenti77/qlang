@@ -239,6 +239,7 @@ fn reason(status: u16) -> &'static str {
         413 => "Payload Too Large",
         422 => "Unprocessable Entity",
         429 => "Too Many Requests",
+        408 => "Request Timeout",
         500 => "Internal Server Error",
         501 => "Not Implemented",
         503 => "Service Unavailable",
@@ -296,13 +297,28 @@ struct Parsed {
     body: Vec<u8>,
 }
 
+/// How long a client has to send its whole request.
+const READ_DEADLINE: Duration = Duration::from_secs(20);
+
+/// Arms the read timeout with what is left before `deadline`; `false` when there is nothing left.
+fn wait_for_data(stream: &TcpStream, deadline: Instant) -> bool {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return false;
+    }
+    let _ = stream.set_read_timeout(Some(left.min(Duration::from_secs(10))));
+    true
+}
+
 /// Reads one request. On failure, the status and message to answer with (`None`: the client
 /// went away, nothing to answer).
 fn read_request(
     stream: &mut TcpStream,
     max_body: usize,
 ) -> Result<Parsed, Option<(u16, &'static str)>> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    // the whole request must arrive in time, not just every piece of it: a client sending a
+    // byte every few seconds would otherwise hold one of the few connections for ever
+    let deadline = Instant::now() + READ_DEADLINE;
     let mut buf: Vec<u8> = Vec::new();
     let mut chunk = [0u8; 8192];
     let header_end = loop {
@@ -311,6 +327,9 @@ fn read_request(
         }
         if buf.len() > 64 * 1024 {
             return Err(Some((400, "headers too large")));
+        }
+        if !wait_for_data(stream, deadline) {
+            return Err(Some((408, "request timeout")));
         }
         match stream.read(&mut chunk) {
             Ok(0) | Err(_) => return Err(None),
@@ -349,6 +368,9 @@ fn read_request(
     }
     let mut body: Vec<u8> = buf[header_end + 4..].to_vec();
     while body.len() < content_length {
+        if !wait_for_data(stream, deadline) {
+            return Err(Some((408, "request timeout")));
+        }
         match stream.read(&mut chunk) {
             Ok(0) | Err(_) => break,
             Ok(n) => body.extend_from_slice(&chunk[..n]),
@@ -701,6 +723,13 @@ fn static_file(dir: &Path, path: &str) -> Option<PathBuf> {
     if path.contains('\0') || path.split('/').any(|part| part == "..") {
         return None;
     }
+    // hidden files (`.env`, `.git/config`...) are never served, whatever the folder holds
+    if path
+        .split('/')
+        .any(|part| part.starts_with('.') && part != ".well-known")
+    {
+        return None;
+    }
     let mut full = dir.join(path.trim_start_matches('/'));
     if full.is_dir() {
         full = full.join("index.html");
@@ -786,14 +815,13 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
             {
                 headers.extend(text_plain);
             }
-            let _ = write_response(
-                stream,
-                r.status as u16,
-                &headers,
-                r.body.as_bytes(),
-                head_only,
-            );
-            r.status as u16
+            // a status a client could not understand is the program's mistake
+            let status = u16::try_from(r.status)
+                .ok()
+                .filter(|s| (100..=599).contains(s))
+                .unwrap_or(500);
+            let _ = write_response(stream, status, &headers, r.body.as_bytes(), head_only);
+            status
         }
         Ok(Err(diagnostic)) => {
             // the details stay in the server's log: they are not for the client

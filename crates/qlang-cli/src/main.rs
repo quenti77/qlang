@@ -6,6 +6,7 @@ mod docgen;
 mod init;
 mod install;
 mod json;
+mod mem;
 mod packages;
 mod process;
 mod providers;
@@ -59,10 +60,21 @@ USAGE:
     qlang add <name> --path DIR          add a dependency to qlang.toml and install it
     qlang remove <name>                  remove a dependency
     qlang --help | --version
+
+OPTIONS FOR EVERY COMMAND:
+    --max-memory MB                      stop a program that holds more than MB megabytes (R904;
+                                         default 1024, or $QLANG_MAX_MEMORY; 0: no limit)
 ";
 
+#[global_allocator]
+static ALLOCATOR: mem::Counting = mem::Counting;
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = mem::configure(&mut args) {
+        eprintln!("{e}");
+        return ExitCode::from(64);
+    }
     // run on a big stack: the interpreter recurses for nested calls
     let handle = std::thread::Builder::new()
         .stack_size(1 << 30)
@@ -115,6 +127,9 @@ fn real_main(args: Vec<String>) -> ExitCode {
         }
     }
 }
+
+/// The biggest file `fs.read` accepts.
+const MAX_FS_READ: u64 = 64 << 20;
 
 /// A host connected to the terminal and the disk. Imports can reach any `.q` file the
 /// user can read (like `require` in Node), unless `--root` confines them to a directory.
@@ -297,6 +312,20 @@ impl Host for TerminalHost {
             .canonicalize()
             .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
         self.check_fs_root(&full)?;
+        // a regular file of a sensible size: not a device (`/dev/zero` never ends) nor a
+        // file that would not fit in memory
+        let meta = std::fs::metadata(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        if !meta.is_file() {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is not a regular file"
+            )));
+        }
+        if meta.len() > MAX_FS_READ {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is too big to read ({} MB at most)",
+                MAX_FS_READ >> 20
+            )));
+        }
         std::fs::read_to_string(&full).map_err(|e| HostError::Other(e.to_string()))
     }
 
@@ -315,7 +344,16 @@ impl Host for TerminalHost {
                 "\"{path}\" is not a valid file name"
             )));
         };
-        std::fs::write(full_parent.join(name), content).map_err(|e| HostError::Other(e.to_string()))
+        let target = full_parent.join(name);
+        // the folder was checked, not the file: a link in it must not lead out of `--root`
+        if std::fs::symlink_metadata(&target).is_ok_and(|m| m.file_type().is_symlink()) {
+            let real = target
+                .canonicalize()
+                .map_err(|e| HostError::Other(e.to_string()))?;
+            self.check_fs_root(&real)?;
+            return std::fs::write(real, content).map_err(|e| HostError::Other(e.to_string()));
+        }
+        std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
     }
 
     fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
@@ -349,7 +387,8 @@ impl Host for TerminalHost {
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
-        let mut r = ureq::request(&req.method, &req.url);
+        let mut r =
+            ureq::request(&req.method, &req.url).timeout(std::time::Duration::from_secs(60));
         for (name, value) in &req.headers {
             r = r.set(name, value);
         }

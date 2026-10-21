@@ -354,7 +354,12 @@ struct Interp<'a> {
     last_ulid: u128,
     /// Where each variable use found its variable last time, by node (see `Scope::get_cached`).
     slots: Vec<u32>,
+    /// Nesting of the comparison in progress (`values_equal`, `order`).
+    cmp_depth: usize,
 }
+
+/// Values nested deeper than this cannot be compared (`R005`).
+const MAX_CMP_DEPTH: usize = 1000;
 
 /// Deeper values print as `...` (this also stops cyclic structures).
 const MAX_FMT_DEPTH: usize = 64;
@@ -376,6 +381,7 @@ impl<'a> Interp<'a> {
             fmt_nodes: 0,
             last_ulid: 0,
             slots: Vec::new(),
+            cmp_depth: 0,
         }
     }
 
@@ -438,8 +444,24 @@ impl<'a> Interp<'a> {
         &mut self.slots[i]
     }
 
+    /// `R904` when the process is over the memory limit (see `host::set_memory_limit`).
+    #[inline(never)]
+    fn check_memory(&self, span: Span) -> R<()> {
+        if crate::host::memory_exceeded() {
+            return self.fail(
+                "R904",
+                "the program uses too much memory (memory limit reached)",
+                span,
+            );
+        }
+        Ok(())
+    }
+
     fn tick(&mut self, span: Span) -> R<()> {
         self.steps += 1;
+        if self.steps & 0x3FFF == 0 {
+            self.check_memory(span)?;
+        }
         if self.steps > self.limits.max_steps {
             return self.fail(
                 "R900",
@@ -453,6 +475,9 @@ impl<'a> Interp<'a> {
     /// Charge the work of a built-in operation to the step budget: about one step
     /// per 4 elements visited. Without it, `xs.contains(v)` on a big array would be free.
     fn charge(&mut self, elements: usize, span: Span) -> R<()> {
+        if elements >= 1 << 16 {
+            self.check_memory(span)?;
+        }
         self.steps = self.steps.saturating_add((elements / 4) as u64);
         if self.steps > self.limits.max_steps {
             return self.fail(
@@ -471,6 +496,9 @@ impl<'a> Interp<'a> {
 
     /// Refuse arrays and strings that grow beyond the configured size.
     fn guard_alloc(&self, len: usize, span: Span) -> R<()> {
+        if len >= 1 << 16 {
+            self.check_memory(span)?;
+        }
         if len > self.limits.max_alloc {
             return self.fail(
                 "R903",
@@ -679,7 +707,7 @@ impl<'a> Interp<'a> {
                     };
                 }
             }
-            Value::Array(a) => {
+            Value::Array(ref a) => {
                 let mut i = 0;
                 loop {
                     let item = a.borrow().get(i).cloned();
@@ -696,7 +724,7 @@ impl<'a> Interp<'a> {
                     i += 1;
                 }
             }
-            Value::Str(st) => {
+            Value::Str(ref st) => {
                 for (i, ch) in st.chars().enumerate() {
                     let c = Value::str(&ch.to_string());
                     let ok = if var2.is_some() {
@@ -711,10 +739,10 @@ impl<'a> Interp<'a> {
                 }
             }
             // a `Set` of the prelude: its values, as they were when the loop began
-            Value::Struct(o) if o.def == self.prelude_struct("Set") => {
+            Value::Struct(ref o) if o.def == self.prelude_struct("Set") => {
                 let items = o.fields.borrow().get("items").cloned();
                 let keys: Vec<Value> = match items {
-                    Some(Value::Map(m)) => {
+                    Some(Value::Map(ref m)) => {
                         self.charge(m.borrow().len(), s.span)?;
                         m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()
                     }
@@ -727,7 +755,7 @@ impl<'a> Interp<'a> {
                     self.tick(s.span)?;
                 }
             }
-            Value::Map(m) => {
+            Value::Map(ref m) => {
                 // a snapshot: the map may be changed by the loop body
                 self.charge(m.borrow().len(), s.span)?;
                 let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
@@ -867,7 +895,7 @@ impl<'a> Interp<'a> {
                 Ok(Value::Tuple(out.into()))
             }
             ExprKind::TupleField(inner, index) => match self.eval(inner, env)? {
-                Value::Tuple(items) if *index < items.len() => Ok(items[*index].clone()),
+                Value::Tuple(ref items) if *index < items.len() => Ok(items[*index].clone()),
                 _ => self.fail(
                     "R001",
                     "this value is not a tuple with that element",
@@ -1067,7 +1095,7 @@ impl<'a> Interp<'a> {
         let mut fields = SmallMap::default();
         if let Some(b) = &lit.base {
             match self.eval(b, env)? {
-                Value::Struct(o) => {
+                Value::Struct(ref o) => {
                     for (k, v) in o.fields.borrow().iter() {
                         fields.insert(k, v.clone());
                     }
@@ -1141,7 +1169,7 @@ impl<'a> Interp<'a> {
             _ => {}
         }
         match self.eval(obj, env)? {
-            Value::Struct(o) => {
+            Value::Struct(ref o) => {
                 let v = o.fields.borrow().get(&name.name).cloned();
                 match v {
                     Some(v) => Ok(v),
@@ -1576,7 +1604,7 @@ impl<'a> Interp<'a> {
             Value::Func(_) => "<function>".to_string(),
             Value::Struct(o) => match self.find_cast_impl(v, &Ty::Str) {
                 Some(fid) => match self.call_fid(fid, Some(v.clone()), vec![], span)? {
-                    Value::Str(s) => s.to_string(),
+                    Value::Str(ref s) => s.to_string(),
                     _ => return self.fail("R001", "`convert` must return a string", span),
                 },
                 None => {
@@ -1773,6 +1801,26 @@ impl<'a> Interp<'a> {
     }
 
     fn values_equal(&mut self, a: &Value, b: &Value, span: Span) -> R<bool> {
+        self.nested_cmp(span, |this| this.values_equal_inner(a, b, span))
+    }
+
+    /// Runs a comparison one level deeper: values nested a million levels (a program can build
+    /// them) must end in an error, not in a stack overflow that takes the process down.
+    fn nested_cmp<T>(&mut self, span: Span, f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        if self.cmp_depth >= MAX_CMP_DEPTH {
+            return self.fail(
+                "R092",
+                "these values are nested too deeply to be compared",
+                span,
+            );
+        }
+        self.cmp_depth += 1;
+        let r = f(self);
+        self.cmp_depth -= 1;
+        r
+    }
+
+    fn values_equal_inner(&mut self, a: &Value, b: &Value, span: Span) -> R<bool> {
         let prog = self.prog;
         Ok(match (a, b) {
             (Value::None, Value::None) => true,
@@ -1928,7 +1976,7 @@ impl<'a> Interp<'a> {
                     return Ok(Place::Static(*sid, n.clone()));
                 }
                 match self.eval(obj, env)? {
-                    Value::Struct(o) => Ok(Place::Field(o, name.name.clone())),
+                    Value::Struct(ref o) => Ok(Place::Field(o.clone(), name.name.clone())),
                     Value::None => self.fail(
                         "R006",
                         format!("cannot set `.{}`: the value is `none`", name.name),
@@ -2204,15 +2252,15 @@ impl<'a> Interp<'a> {
             (Value::Str(x), Value::Str(y)) => Ok(x.as_ref().cmp(y.as_ref())),
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => Ok(x.cmp(y)),
             (Value::DateTime(x), Value::DateTime(y)) => Ok(x.cmp(y)),
-            (Value::Tuple(xs), Value::Tuple(ys)) => {
+            (Value::Tuple(xs), Value::Tuple(ys)) => self.nested_cmp(span, |this| {
                 for (x, y) in xs.iter().zip(ys.iter()) {
-                    let o = self.order(x, y, span)?;
+                    let o = this.order(x, y, span)?;
                     if o != Ordering::Equal {
                         return Ok(o);
                     }
                 }
                 Ok(xs.len().cmp(&ys.len()))
-            }
+            }),
             _ => {
                 if let (Some(x), Some(y)) = (num(a), num(b)) {
                     return Ok(x.total_cmp(&y));
@@ -3367,7 +3415,7 @@ impl<'a> Interp<'a> {
                 let mut out = Vec::new();
                 for it in items {
                     match it {
-                        Value::Array(inner) => out.extend(inner.borrow().iter().cloned()),
+                        Value::Array(ref inner) => out.extend(inner.borrow().iter().cloned()),
                         other => out.push(other),
                     }
                 }

@@ -99,3 +99,30 @@ fn a_test_may_exit_with_zero_but_not_with_another_code() {
         "{out}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn fs_write_through_a_link_cannot_leave_root() {
+    let d = Dir::new("fs-link");
+    let outside = std::env::temp_dir().join(format!("qlang-outside-{}.txt", std::process::id()));
+    fs::write(&outside, "original").unwrap();
+    fs::create_dir_all(d.0.join("jail")).unwrap();
+    std::os::unix::fs::symlink(&outside, d.0.join("jail/link.txt")).unwrap();
+    d.write(
+        "jail/a.q",
+        "let r = fs.write(\"link.txt\", \"pwned\")\nprint(r.is_err())\n",
+    );
+    let (out, err, _) = d.qlang(&["run", "--root", "jail", "jail/a.q"], "");
+    assert_eq!(out, "true\n", "{err}");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "original");
+    let _ = fs::remove_file(&outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn fs_read_refuses_what_is_not_a_regular_file() {
+    let d = Dir::new("fs-dev");
+    d.write("a.q", "let r = fs.read(\"/dev/zero\")\nprint(r.is_err())\n");
+    let (out, err, _) = d.qlang(&["run", "a.q"], "");
+    assert_eq!(out, "true\n", "{err}");
+}

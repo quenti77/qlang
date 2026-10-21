@@ -61,6 +61,12 @@ pub struct ItemInfo {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+    /// The type a field, method or variant belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Part of the file's public face: an exported name (every name when the file has no
+    /// `export`), or a `public` field or method.
+    pub public: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -572,17 +578,26 @@ impl Checker {
     /// Items defined by the source files, by position.
     fn definition_sites(&self) -> Vec<ItemInfo> {
         let mut out = Vec::new();
-        let mut push =
-            |span: Span, name: &str, kind: &'static str, label: String, doc: Option<String>| {
-                out.push(ItemInfo {
-                    loc: self.loc(span),
-                    name: name.to_string(),
-                    kind,
-                    label,
-                    doc,
-                });
-            };
+        let mut push = |span: Span,
+                        name: &str,
+                        kind: &'static str,
+                        label: String,
+                        doc: Option<String>,
+                        owner: Option<String>,
+                        public: bool| {
+            out.push(ItemInfo {
+                loc: self.loc(span),
+                name: name.to_string(),
+                kind,
+                label,
+                doc,
+                owner,
+                public,
+            });
+        };
         for (m, module) in self.modules.iter().enumerate() {
+            let exports = &self.mscopes[m].exports;
+            let exported = |name: &str| exports.is_empty() || exports.contains(name);
             for (idx, item) in module.ast.items.iter().enumerate() {
                 let id = self.mscopes[m].decl_ids.get(&idx).copied();
                 match item {
@@ -594,6 +609,8 @@ impl Checker {
                                 "function",
                                 format!("fun {}", self.fn_signature(fid, &HashMap::new())),
                                 self.docs.of(n.span),
+                                None,
+                                exported(&n.name),
                             );
                         }
                     }
@@ -604,6 +621,8 @@ impl Checker {
                             "struct",
                             format!("struct {}", s.name.name),
                             self.docs.of(s.name.span),
+                            None,
+                            exported(&s.name.name),
                         );
                         if let Some(sid) = id {
                             for f in &self.defs.structs[sid].fields {
@@ -614,6 +633,8 @@ impl Checker {
                                     kind,
                                     format!("{}: {}", f.name, self.show(&f.ty)),
                                     self.docs.of(f.span),
+                                    Some(s.name.name.clone()),
+                                    f.vis == Visibility::Public,
                                 );
                             }
                         }
@@ -625,6 +646,8 @@ impl Checker {
                             "enum",
                             format!("enum {}", e.name.name),
                             self.docs.of(e.name.span),
+                            None,
+                            exported(&e.name.name),
                         );
                         for (i, v) in e.variants.iter().enumerate() {
                             let doc = e
@@ -639,6 +662,8 @@ impl Checker {
                                 "variant",
                                 format!("{}.{}", e.name.name, v.name),
                                 doc,
+                                Some(e.name.name.clone()),
+                                true,
                             );
                         }
                     }
@@ -648,6 +673,8 @@ impl Checker {
                         "trait",
                         format!("trait {}", t.name.name),
                         self.docs.of(t.name.span),
+                        None,
+                        exported(&t.name.name),
                     ),
                     Item::Impl(_) => {
                         if let Some(iid) = id {
@@ -660,6 +687,8 @@ impl Checker {
                                         "method",
                                         format!("fun {}", self.fn_signature(*fid, &HashMap::new())),
                                         self.docs.of(n.span),
+                                        Some(self.show(&self.defs.impls[iid].target)),
+                                        f.vis == Visibility::Public,
                                     );
                                 }
                             }
@@ -681,6 +710,8 @@ impl Checker {
                                 kind,
                                 format!("{}: {}", name.name, self.show(&local.ty)),
                                 self.docs.of(name.span),
+                                None,
+                                exported(&name.name),
                             );
                         }
                     }

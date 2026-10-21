@@ -577,6 +577,7 @@ fn worker(
         script_args: opts.script_args.clone(),
         providers,
         packages: opts.packages.clone(),
+        assume_externs: false,
     };
     let program = match compile(file, source, &mut host) {
         Ok(p) => p,

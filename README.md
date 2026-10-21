@@ -123,6 +123,17 @@ sans fichier le cherchent depuis le dossier courant, vers le haut. (`main`, dans
 table, est autre chose : le fichier qu'`import "@mon-app"` charge quand le projet est
 utilisé comme paquet.)
 
+### Documentation
+
+```sh
+qlang doc                  # Markdown de tout le projet, sur la sortie standard
+qlang doc lib.q -o API.md  # un fichier, écrit dans API.md
+```
+
+Elle est tirée des commentaires `--" … --"` placés juste au-dessus des déclarations : les
+noms exportés d'un fichier (tous, s'il n'a pas de `export`) avec leur signature, et les
+champs, méthodes et variantes `public` de leurs types. Les fichiers de test sont ignorés.
+
 ### Tests
 
 ```sh

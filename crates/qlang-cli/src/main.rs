@@ -2,6 +2,7 @@
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
 mod db;
+mod docgen;
 mod init;
 mod install;
 mod json;
@@ -24,6 +25,8 @@ qlang - a small, readable language
 
 USAGE:
     qlang init [dir]                     start a project: qlang.toml, main.q, .gitignore
+    qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
+                                         project's files (or of the paths given)
     qlang test [path...] [--filter TEXT] [--seed N] [--max-steps N] [--trust-externs]
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
@@ -92,6 +95,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("packages") => packages_json(),
         Some("init") => init::init(&it.collect::<Vec<_>>()),
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
+        Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -125,6 +129,8 @@ struct TerminalHost {
     providers: providers::Providers,
     /// The packages `import "@name/..."` can reach (`[dependencies]` of `qlang.toml`).
     packages: packages::Packages,
+    /// Treat every `extern fun` as provided (to check or document code without running it).
+    assume_externs: bool,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -311,7 +317,8 @@ impl Host for TerminalHost {
     }
 
     fn has_extern(&self, name: &str) -> bool {
-        SQL_EXTERNS.contains(&name)
+        self.assume_externs
+            || SQL_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -505,13 +512,31 @@ fn new_host(
     externs: &[String],
     trust: bool,
 ) -> Result<TerminalHost, String> {
+    new_host_with(file, root, seed, script_args, externs, trust, true)
+}
+
+/// Like [`new_host`]; without `run`, the providers are not started and every `extern fun` is
+/// assumed to exist (the program is only going to be looked at, not run).
+fn new_host_with(
+    file: &Path,
+    root: Option<PathBuf>,
+    seed: Option<u64>,
+    script_args: Vec<String>,
+    externs: &[String],
+    trust: bool,
+    run: bool,
+) -> Result<TerminalHost, String> {
     let packages = match project_dir(file) {
         Some(d) => packages::Packages::load(&d)?,
         None => packages::Packages::default(),
     };
-    let specs = providers::specs_for(file, externs)?;
-    providers::ensure_trusted(&specs, trust)?;
-    let providers = providers::Providers::start(&specs, &SQL_EXTERNS)?;
+    let providers = if run {
+        let specs = providers::specs_for(file, externs)?;
+        providers::ensure_trusted(&specs, trust)?;
+        providers::Providers::start(&specs, &SQL_EXTERNS)?
+    } else {
+        providers::Providers::default()
+    };
     Ok(TerminalHost {
         root,
         rng: seed.unwrap_or_else(system_entropy),
@@ -519,6 +544,7 @@ fn new_host(
         script_args,
         providers,
         packages,
+        assume_externs: !run,
     })
 }
 

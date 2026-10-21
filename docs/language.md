@@ -158,6 +158,11 @@ suit ; avec une ligne vide entre les deux, il ne documente rien. Le texte est li
 début et à la fin sont retirés. `qlang check --json` avec `"info": true` renvoie ces
 textes (champ `doc`).
 
+`qlang doc` en fait une page Markdown : pour chaque fichier, ses noms exportés (tous s'il
+n'a pas de `export`) avec leur signature et leur commentaire, puis les champs, méthodes et
+variantes `public` de leurs types. `qlang doc` seul documente le projet (sans les fichiers
+de test) ; `qlang doc lib.q` un fichier ; `-o API.md` écrit dans un fichier.
+
 ---
 
 ## 3. Valeurs et types

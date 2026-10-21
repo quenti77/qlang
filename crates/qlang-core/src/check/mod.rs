@@ -958,6 +958,127 @@ fun assert_ne<T: Eq>(actual: T, unexpected: T)
     end
 end
 
+--" A set: values without duplicates, kept in the order they were added. The values follow
+the rules of map keys (`int`, `float`, `string`, `bool`, `uuid`, `ulid`, `datetime`, an enum
+whose variants carry no data). Make one with `Set<int>.new()` or `Set.of([1, 2, 2, 3])`,
+go through it with `for x in s`. --"
+struct Set<T>
+    items: map<T, bool>
+end
+
+impl<T> Set<T>
+    --" An empty set: `Set<int>.new()`. --"
+    public fun new() -> Set<T>
+        let m: map<T, bool> = {}
+        Set { items: m }
+    end
+
+    --" A set with the values of `values`, without the duplicates. --"
+    public fun of(values: array<T>) -> Set<T>
+        let s = Set<T>.new()
+        for v in values do
+            s.add(v)
+        end
+        s
+    end
+
+    --" Adds `value`; whether it was new. --"
+    public fun add(self, value: T) -> bool
+        if self.items.has(value) then
+            return false
+        end
+        self.items[value] = true
+        true
+    end
+
+    --" Whether `value` is in the set. --"
+    public fun contains(self, value: T) -> bool
+        self.items.has(value)
+    end
+
+    --" Removes `value`; whether it was there. --"
+    public fun remove(self, value: T) -> bool
+        self.items.remove(value) != none
+    end
+
+    --" The number of values. --"
+    public fun len(self) -> int
+        self.items.len()
+    end
+
+    --" Whether the set has no value. --"
+    public fun is_empty(self) -> bool
+        self.items.len() == 0
+    end
+
+    --" Removes every value. --"
+    public fun clear(self)
+        self.items.clear()
+    end
+
+    --" The values, in the order they were added. --"
+    public fun to_array(self) -> array<T>
+        self.items.keys()
+    end
+
+    --" A new set with the values of both sets. --"
+    public fun union(self, other: Set<T>) -> Set<T>
+        let out = Set<T>.of(self.to_array())
+        for v in other do
+            out.add(v)
+        end
+        out
+    end
+
+    --" A new set with the values that are in both sets. --"
+    public fun intersect(self, other: Set<T>) -> Set<T>
+        let out = Set<T>.new()
+        for v in self do
+            if other.contains(v) then
+                out.add(v)
+            end
+        end
+        out
+    end
+
+    --" A new set with the values of this set that are not in `other`. --"
+    public fun difference(self, other: Set<T>) -> Set<T>
+        let out = Set<T>.new()
+        for v in self do
+            if not other.contains(v) then
+                out.add(v)
+            end
+        end
+        out
+    end
+
+    --" Whether every value of this set is in `other`. --"
+    public fun is_subset(self, other: Set<T>) -> bool
+        for v in self do
+            if not other.contains(v) then
+                return false
+            end
+        end
+        true
+    end
+
+    --" Whether both sets have the same values (whatever their order). --"
+    public fun equals(self, other: Set<T>) -> bool
+        self.len() == other.len() and self.is_subset(other)
+    end
+end
+
+impl<T> As<string> for Set<T>
+    public fun convert(self) -> string
+        let parts: array<string> = []
+        for v in self do
+            parts[] = "{v}"
+        end
+        let body = parts.join(", ")
+        "Set({body})"
+    end
+end
+
 --" The value of an ok `Result`; stops the program (a failed test) showing the error otherwise. --"
 fun assert_ok<T, E>(result: Result<T, E>) -> T
     match result

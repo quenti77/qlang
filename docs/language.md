@@ -1536,6 +1536,42 @@ print(a.filter(fun(k: string, v: int) -> bool v > 1 end)) -- {"y": 2}
 Un indice hors limites (`xs[5]` pour 3 éléments, indice négatif) est une erreur
 d'exécution.
 
+### Ensembles
+
+Un `Set<T>` est un ensemble de valeurs **sans doublon**, qui garde l'ordre d'ajout. C'est un
+type du prélude (sans `import`) :
+
+```
+let a = Set.of([1, 2, 2, 3])         -- Set(1, 2, 3)
+let seen = Set<string>.new()         -- un ensemble vide
+seen.add("x")                        -- true : la valeur était nouvelle
+seen.add("x")                        -- false
+print(seen.contains("x"))            -- true
+
+let b = Set.of([2, 3, 4])
+print(a.union(b))                    -- Set(1, 2, 3, 4)
+print(a.intersect(b))                -- Set(2, 3)
+print(a.difference(b))               -- Set(1)
+
+for v in a do                        -- dans l'ordre d'ajout
+  print(v)
+end
+```
+
+| Méthode | Rôle |
+| --- | --- |
+| `Set.of(tableau)`, `Set<T>.new()` | crée un ensemble |
+| `add(v)`, `remove(v)` | ajoute / retire ; `true` si l'ensemble a changé |
+| `contains(v)`, `len()`, `is_empty()`, `clear()` | |
+| `to_array()` | les valeurs, dans l'ordre d'ajout |
+| `union(autre)`, `intersect(autre)`, `difference(autre)` | un **nouvel** ensemble |
+| `is_subset(autre)`, `equals(autre)` | `bool` (`equals` ignore l'ordre) |
+
+Les valeurs suivent la règle des clés de dictionnaire (`int`, `float`, `string`, `bool`, `uuid`,
+`ulid`, `datetime`, énumération sans données) : un `Set<array<int>>` est refusé (`T270`).
+Parcourir un ensemble en le modifiant est permis (la boucle voit l'ensemble tel qu'il était au
+départ). Il s'affiche `Set(1, 2, 3)`.
+
 ---
 
 ## 15. Temps, identifiants et expressions régulières

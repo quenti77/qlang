@@ -258,3 +258,23 @@ fn a_tuple_assignment_is_checked() {
     // `+=` and friends are not for tuples
     assert!(exec("let a = 1\nlet b = 2\n(a, b) += (1, 1)").starts_with("COMPILE:"));
 }
+
+#[test]
+fn tuples_are_ordered_element_by_element() {
+    assert_eq!(
+        exec(
+            "print((1, 2) < (1, 3))\nprint((2, 0) > (1, 9))\nprint((1, \"a\") <= (1, \"a\"))\nprint((1, (2, 3)) < (1, (2, 2)))"
+        ),
+        "true\ntrue\ntrue\nfalse\n"
+    );
+    assert_eq!(
+        exec(
+            "let xs = [(2, \"b\"), (1, \"z\"), (2, \"a\")]\nxs.sort()\nprint(xs)\nprint(xs.min())\nprint(xs.max())"
+        ),
+        "[(1, \"z\"), (2, \"a\"), (2, \"b\")]\n(1, \"z\")\n(2, \"b\")\n"
+    );
+    // tuples of different shapes, or with elements that cannot be ordered, are refused
+    assert!(exec("print((1, 2) < (1, 2, 3))").contains("T005"));
+    let bools = exec("let xs = [(true, 1)]\nxs.sort()");
+    assert!(bools.contains("T260"), "{bools}");
+}

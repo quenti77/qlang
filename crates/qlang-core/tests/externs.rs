@@ -208,3 +208,32 @@ fn text_keys_from_a_json_host_fill_an_int_map() {
     );
     assert_eq!(out, "two\n");
 }
+
+#[test]
+fn tuples_cross_as_arrays() {
+    let host = host_with("swap", |args| match args.as_slice() {
+        [HostValue::Array(p)] => Ok(HostValue::Array(vec![p[1].clone(), p[0].clone()])),
+        other => Err(HostError::Other(format!("bad args {other:?}"))),
+    });
+    let out = exec(
+        "extern fun swap(p: (int, string)) -> (string, int)\nlet (a, b) = swap((1, \"x\"))\nprint(\"{a} {b}\")",
+        host,
+    );
+    assert_eq!(out, "x 1\n");
+    // a wrong shape from the host is an error, not a crash
+    let host = host_with("bad", |_| Ok(HostValue::Array(vec![HostValue::Int(1)])));
+    let out = exec("extern fun bad() -> (int, int)\nprint(bad())", host);
+    assert!(out.starts_with("R083"), "{out}");
+    // inside a Result and an array
+    let host = host_with("pairs", |_| {
+        Ok(HostValue::Array(vec![
+            HostValue::Array(vec![HostValue::Int(1), HostValue::Str("a".into())]),
+            HostValue::Array(vec![HostValue::Int(2), HostValue::Str("b".into())]),
+        ]))
+    });
+    let out = exec(
+        "extern fun pairs() -> Result<array<(int, string)>, Error>\nprint(pairs().unwrap())",
+        host,
+    );
+    assert_eq!(out, "[(1, \"a\"), (2, \"b\")]\n");
+}

@@ -1,7 +1,7 @@
 //! `extern fun`: calls into the host, with plain data copied in both directions.
 //!
 //! What may cross is decided by the checker (`boundary_problem`): `int`, `float`,
-//! `bool`, `string`, enums, `T?`, arrays, maps, `Json` and plain structs. A struct is a
+//! `bool`, `string`, enums, `T?`, tuples (an array), arrays, maps, `Json` and plain structs. A struct is a
 //! `HostValue::Map` keyed by field names, an enum is the name of its variant.
 
 use super::*;
@@ -97,6 +97,22 @@ impl Interp<'_> {
                 let mut out = Vec::new();
                 for item in items.borrow().iter() {
                     out.push(self.value_to_host(item, elem, depth + 1, work, span)?);
+                }
+                HostValue::Array(out)
+            }
+            (Value::Tuple(items), _) => {
+                let tys: &[Ty] = match ty {
+                    Ty::Tuple(ts) => ts,
+                    Ty::Nullable(t) => match &**t {
+                        Ty::Tuple(ts) => ts,
+                        _ => &[],
+                    },
+                    _ => &[],
+                };
+                let mut out = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    let t = tys.get(i).unwrap_or(&Ty::Error);
+                    out.push(self.value_to_host(item, t, depth + 1, work, span)?);
                 }
                 HostValue::Array(out)
             }
@@ -360,6 +376,13 @@ impl Interp<'_> {
                     out.push(self.host_to_value(item, t, depth + 1, work, span)?);
                 }
                 Ok(Value::Array(Rc::new(RefCell::new(out))))
+            }
+            (Ty::Tuple(ts), HostValue::Array(items)) if ts.len() == items.len() => {
+                let mut out = Vec::new();
+                for (item, t) in items.iter().zip(ts) {
+                    out.push(self.host_to_value(item, t, depth + 1, work, span)?);
+                }
+                Ok(Value::Tuple(Rc::from(out)))
             }
             (Ty::Map(kt, vt), HostValue::Map(entries)) => {
                 self.check_size(entries.len(), span)?;

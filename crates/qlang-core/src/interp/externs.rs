@@ -82,9 +82,11 @@ impl Interp<'_> {
             (Value::Float(f), _) => HostValue::Float(*f),
             (Value::Bool(b), _) => HostValue::Bool(*b),
             (Value::Str(s), _) => HostValue::Str(s.to_string()),
-            (Value::Enum(e, i, _), _) => {
-                HostValue::Str(self.prog.defs.enums[*e].variants[*i].name.clone())
-            }
+            (Value::Enum(e, i, _), _) => HostValue::Str(
+                self.prog.defs.enums[*e as usize].variants[*i as usize]
+                    .name
+                    .clone(),
+            ),
             (Value::Array(items), _) => {
                 let elem = match ty {
                     Ty::Nullable(t) => match &**t {
@@ -358,7 +360,7 @@ impl Interp<'_> {
             }
             (Ty::Enum(e, _), HostValue::Str(name)) => {
                 match self.prog.defs.enums[*e].variant_index(name) {
-                    Some(i) => Ok(Value::Enum(*e, i, None)),
+                    Some(i) => Ok(Value::Enum(*e as u32, i as u32, None)),
                     None => self.fail(
                         "R083",
                         format!(

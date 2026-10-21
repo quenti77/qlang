@@ -125,7 +125,7 @@ fn unwrap_on_an_error_points_at_the_call() {
 #[test]
 fn comparisons_lengths_and_text_assertions() {
     let out = exec(
-        "assert_lt(1, 2)\nassert_le(2, 2)\nassert_gt(\"b\", \"a\")\nassert_ge(2, 2)\nassert_lt(0.5, 1.5)\nassert_len([1, 2, 3], 3)\nassert_empty([])\nassert_not_contains([1, 2], 3)\nassert_starts_with(\"hello\", \"he\")\nassert_ends_with(\"hello\", \"llo\")\nprint(\"ok\")",
+        "assert_lt(1, 2)\nassert_le(2, 2)\nassert_gt(\"b\", \"a\")\nassert_ge(2, 2)\nassert_ge((1, 2), (1, 2))\nassert_lt((1, 2), (1, 3))\nassert_lt(0.5, 1.5)\nassert_len([1, 2, 3], 3)\nassert_empty([])\nassert_not_contains([1, 2], 3)\nassert_starts_with(\"hello\", \"he\")\nassert_ends_with(\"hello\", \"llo\")\nprint(\"ok\")",
     );
     assert_eq!(out, "ok\n");
     for (src, needle) in [

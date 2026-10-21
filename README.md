@@ -204,6 +204,19 @@ import send from "@mail/send.q"      -- un de ses fichiers
 Mettez `.qlang/` dans le `.gitignore` et versionnez `qlang.lock`. Voir « Paquets » dans
 [docs/language.md](docs/language.md) pour le détail.
 
+#### Bibliothèque `qlang-std`
+
+[`qlang-std`](https://github.com/quenti77/qlang-std) est une bibliothèque en qlang pur : CSV,
+gabarits de texte et TOML.
+
+```sh
+qlang add std --git https://github.com/quenti77/qlang-std --tag v0.1.0
+```
+
+```
+import "@std/csv.q" as csv
+```
+
 ### Fournir des `extern fun`
 
 Une `extern fun` est implémentée par un **fournisseur** : n'importe quel programme qui

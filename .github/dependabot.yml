@@ -1,15 +1,25 @@
-# Keeps the pinned GitHub Actions and the dependencies up to date (a pull request each).
+# Keeps the pinned GitHub Actions and the dependencies up to date: one pull request per
+# ecosystem and week (the updates are grouped), so that there are few to read.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    groups:
+      crates:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /editors/vscode
     schedule:
       interval: weekly
+    groups:
+      extension:
+        patterns: ["*"]

@@ -624,6 +624,13 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
         "The current time: milliseconds since 1970-01-01 00:00:00 UTC. Needs a clock.",
     ),
     (
+        "time",
+        "function",
+        "sleep",
+        "sleep(ms: int)",
+        "Waits `ms` milliseconds (0 to 3600000). Needs a clock; with a virtual clock (tests, the JSON protocol) it only moves the clock forward.",
+    ),
+    (
         "random",
         "function",
         "int",
@@ -777,6 +784,16 @@ pub const FUNCTIONS: &[(&str, &str, &str)] = &[
         "read",
         "read() -> string",
         "Reads a line and returns it without the new line. Not available everywhere (a web server has no keyboard).",
+    ),
+    (
+        "read_all",
+        "read_all() -> string",
+        "Reads every remaining line, joined by new lines (none after the last). Not available everywhere.",
+    ),
+    (
+        "exit",
+        "exit(code?: int)",
+        "Ends the program now, with this exit code (0 by default). Nothing after it runs.",
     ),
     (
         "panic",

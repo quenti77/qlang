@@ -267,6 +267,12 @@ impl Host for TerminalHost {
             .map_err(|e| HostError::Other(e.to_string()))
     }
 
+    fn sleep_ms(&mut self, ms: u64) -> Result<(), HostError> {
+        let _ = std::io::stdout().flush();
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+        Ok(())
+    }
+
     fn random_u64(&mut self) -> Result<u64, HostError> {
         Ok(qlang_core::host::splitmix64(&mut self.rng))
     }
@@ -669,7 +675,10 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let result = program.run(&mut host, limits);
     let _ = std::io::stdout().flush();
     match result.error {
-        None => ExitCode::SUCCESS,
+        None => match result.exit_code {
+            Some(code) if code != 0 => ExitCode::from(code as u8),
+            _ => ExitCode::SUCCESS,
+        },
         Some(d) => {
             eprint!("{}", d.render(&program.sources));
             ExitCode::from(2)

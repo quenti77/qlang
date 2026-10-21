@@ -332,6 +332,7 @@ Réponse :
 
 - `phase` : `"request"` (requête invalide), `"compile"` (erreurs avant exécution)
   ou `"run"` (le programme a été exécuté ; `ok` dit s'il a réussi).
+- `exit_code` : présent seulement si le programme a appelé `exit(code)`.
 - `diagnostics` : liste d'erreurs (et avertissements) :
 
 ```json

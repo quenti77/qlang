@@ -1317,6 +1317,8 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `print(x)`               | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
 | `write(x)`               | affiche `x` sans retour à la ligne                                    |
 | `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
+| `read_all()`             | lit toutes les lignes restantes, reliées par des retours à la ligne (aucun après la dernière) |
+| `exit(code?)`            | termine le programme tout de suite avec ce code de sortie (0 par défaut) ; rien ne s'exécute après |
 | `panic(message)`         | arrête le programme avec une erreur                                   |
 | `assert(cond, message?)` | arrête le programme si `cond` est faux                                |
 | `assert_eq(a, b)`        | arrête le programme si `a != b`, en montrant les deux valeurs (`assert_ne` : si `a == b`) |
@@ -1543,6 +1545,7 @@ refusé **avant** d'être exécuté (erreur `T250`).
 | Appel                  | Résultat                                                                 |
 | ---------------------- | ------------------------------------------------------------------------ |
 | `time.now()`           | l'heure courante, un `int` : millisecondes depuis le 1er janvier 1970 UTC |
+| `time.sleep(ms)`       | attend `ms` millisecondes (0 à 3 600 000) ; avec une horloge virtuelle (tests, protocole JSON), avance seulement l'horloge |
 | `random.int(min, max)` | un `int` au hasard entre `min` et `max`, **les deux inclus**             |
 | `random.float()`       | un `float` au hasard dans `[0, 1[`                                       |
 

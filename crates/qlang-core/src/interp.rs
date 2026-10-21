@@ -23,6 +23,8 @@ use std::rc::Rc;
 pub struct RunResult {
     /// The runtime error that stopped the program, if any.
     pub error: Option<Diagnostic>,
+    /// The code the program gave to `exit(code)`, if it called it.
+    pub exit_code: Option<i32>,
     /// Evaluation steps used.
     pub steps: u64,
 }
@@ -38,17 +40,23 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
     let mut it = Interp::new(prog, host, limits);
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
+    let mut exit_code = None;
     let error = match outcome {
         Ok(Ok(())) => None,
         Ok(Err(Ctrl::Error(mut d))) => {
             d.resolve(&prog.sources);
             Some(*d)
         }
+        Ok(Err(Ctrl::Exit(code))) => {
+            exit_code = Some(code);
+            None
+        }
         Ok(Err(_)) => None,
         Err(payload) => Some(crate::check::internal_error(&payload)),
     };
     RunResult {
         error,
+        exit_code,
         steps: it.steps,
     }
 }
@@ -128,6 +136,11 @@ impl Program {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
         match outcome {
             Ok(Ok(())) => Ok(App { it, handler }),
+            Ok(Err(Ctrl::Exit(_))) => Err(Box::new(Diagnostic::error(
+                "R090",
+                "`exit` cannot be used in a program that serves requests (it would stop the server)",
+                Default::default(),
+            ))),
             Ok(Err(Ctrl::Error(mut d))) => {
                 d.resolve(&self.sources);
                 Err(d)
@@ -167,6 +180,11 @@ impl App<'_> {
                     Default::default(),
                 )),
             }),
+            Ok(Err(Ctrl::Exit(_))) => Err(Box::new(Diagnostic::error(
+                "R090",
+                "`exit` cannot be used in a program that serves requests (it would stop the server)",
+                Default::default(),
+            ))),
             Ok(Err(Ctrl::Error(mut d))) => {
                 d.resolve(&prog.sources);
                 Err(d)
@@ -227,7 +245,12 @@ impl Program {
             it.call_fid(fid, None, vec![], span).map(|_| ())
         }));
         match outcome {
-            Ok(Ok(())) | Ok(Err(Ctrl::Return(_))) => Ok(()),
+            Ok(Ok(())) | Ok(Err(Ctrl::Return(_))) | Ok(Err(Ctrl::Exit(0))) => Ok(()),
+            Ok(Err(Ctrl::Exit(code))) => Err(Box::new(Diagnostic::error(
+                "R091",
+                format!("the test called `exit({code})`"),
+                span,
+            ))),
             Ok(Err(Ctrl::Error(mut d))) => {
                 d.resolve(&self.sources);
                 Err(d)
@@ -293,6 +316,8 @@ enum Ctrl {
     Break,
     Continue,
     Return(Value),
+    /// `exit(code)`: the whole program ends here, with this exit code.
+    Exit(i32),
     Error(Box<Diagnostic>),
 }
 
@@ -2088,6 +2113,7 @@ impl<'a> Interp<'a> {
         Ok(out)
     }
 
+    #[inline(never)]
     fn builtin_fn(&mut self, name: &str, args: Vec<Value>, span: Span) -> R<Value> {
         match name {
             "print" | "write" => {
@@ -2111,6 +2137,40 @@ impl<'a> Interp<'a> {
                     self.fail("R041", format!("cannot read input: {m}"), span)
                 }
             },
+            "read_all" => {
+                // every remaining line, joined by new lines (no new line after the last)
+                let mut lines: Vec<String> = Vec::new();
+                loop {
+                    match self.host.read_line() {
+                        Ok(Some(line)) => {
+                            self.charge_bytes(line.len(), span)?;
+                            lines.push(line);
+                            self.guard_alloc(lines.len(), span)?;
+                        }
+                        Ok(None) => break,
+                        Err(HostError::Unsupported(_)) => {
+                            return self.fail(
+                                "R041",
+                                "`read_all` is not available in this environment",
+                                span,
+                            );
+                        }
+                        Err(HostError::Other(m)) => {
+                            return self.fail("R041", format!("cannot read input: {m}"), span);
+                        }
+                    }
+                }
+                let text = lines.join("\n");
+                self.guard_alloc(text.len(), span)?;
+                Ok(Value::str(&text))
+            }
+            "exit" => {
+                let code = match args.first() {
+                    Some(Value::Int(n)) => (*n).clamp(0, 255) as i32,
+                    _ => 0,
+                };
+                Err(Ctrl::Exit(code))
+            }
             "panic" => {
                 let msg = self.stringify(&args[0], span)?;
                 self.fail("R050", format!("panic: {msg}"), span)
@@ -2182,6 +2242,32 @@ impl<'a> Interp<'a> {
             ("uuid", "parse") => ids::parse_uuid(&text(&args[0])).map_or(Value::None, Value::Uuid),
             ("ulid", "parse") => ids::parse_ulid(&text(&args[0])).map_or(Value::None, Value::Ulid),
             ("time", "now") => Value::Int(self.now(span)?),
+            ("time", "sleep") => {
+                let ms = match args.first() {
+                    Some(Value::Int(n)) => *n,
+                    _ => 0,
+                };
+                if !(0..=3_600_000).contains(&ms) {
+                    return self.fail(
+                        "R017",
+                        format!("`time.sleep` waits from 0 to 3600000 milliseconds (found {ms})"),
+                        span,
+                    );
+                }
+                match self.host.sleep_ms(ms as u64) {
+                    Ok(()) => Value::Unit,
+                    Err(HostError::Unsupported(_)) => {
+                        return self.fail(
+                            "R060",
+                            "waiting is not available in this environment",
+                            span,
+                        );
+                    }
+                    Err(HostError::Other(m)) => {
+                        return self.fail("R060", format!("cannot wait: {m}"), span);
+                    }
+                }
+            }
             ("datetime", "now") => {
                 Value::DateTime(self.now(span)?.clamp(datetime::MIN_MS, datetime::MAX_MS))
             }

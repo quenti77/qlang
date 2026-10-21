@@ -469,6 +469,12 @@ impl Checker {
                     );
                     return Ty::Error;
                 }
+                // the values of a set are compared by value, like map keys
+                if self.is_prelude_set(id)
+                    && let (Some(arg), Some(te)) = (targs.first(), args.first())
+                {
+                    self.check_key_type(arg, te.span);
+                }
                 Ty::Struct(id, targs)
             }
             ItemRef::Enum(id) => {

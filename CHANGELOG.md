@@ -9,6 +9,7 @@ publié n'existe pas comme release, ses changements sont dans la suivante.
   `log10`, `log2`, `log`, `to_radians`, `to_degrees`, `signum`, `clamp`, `trunc`, `is_nan`,
   `is_infinite`, `float.INFINITY`, `float.NAN`.
 - Encodages et hachages : `Base64`, `Hex`, `Url`, `Hash` (`sha256`, `sha1`, `md5`, `hmac_sha256`).
+- Ensembles : `Set<T>` (`Set.of`, `Set<T>.new`, `add`, `contains`, `union`, `intersect`...).
 - Test : `assert_ok`, `assert_err`, `assert_some`, `assert_none`, `assert_contains`,
   `assert_contains_text`, `assert_close`, `assert_within` ; une erreur levée dans la bibliothèque
   est montrée à l'appel dans votre code.

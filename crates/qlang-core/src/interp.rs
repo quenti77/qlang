@@ -684,6 +684,23 @@ impl<'a> Interp<'a> {
                     self.tick(s.span)?;
                 }
             }
+            // a `Set` of the prelude: its values, as they were when the loop began
+            Value::Struct(o) if o.def == self.prelude_struct("Set") => {
+                let items = o.fields.borrow().get("items").cloned();
+                let keys: Vec<Value> = match items {
+                    Some(Value::Map(m)) => {
+                        self.charge(m.borrow().len(), s.span)?;
+                        m.borrow().entries.iter().map(|(k, _)| k.clone()).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                for k in keys {
+                    if !run_body(self, k, None)? {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                }
+            }
             Value::Map(m) => {
                 // a snapshot: the map may be changed by the loop body
                 self.charge(m.borrow().len(), s.span)?;

@@ -383,6 +383,12 @@ impl Checker {
                     (Ty::Array(t), true) => (Ty::Int, (**t).clone()),
                     (Ty::Str, true) => (Ty::Int, Ty::Str),
                     (Ty::Map(k, v), true) => ((**k).clone(), (**v).clone()),
+                    // a `Set<T>` of the prelude gives its values
+                    (Ty::Struct(sid, args), false)
+                        if self.is_prelude_set(*sid) && args.len() == 1 =>
+                    {
+                        (args[0].clone(), Ty::Error)
+                    }
                     (Ty::Error, _) => (Ty::Error, Ty::Error),
                     (other, two) => {
                         let shown = other.show(&self.defs);
@@ -455,6 +461,12 @@ impl Checker {
                 Ty::Never
             }
         }
+    }
+
+    /// The prelude's `Set` struct.
+    pub(crate) fn is_prelude_set(&self, sid: StructId) -> bool {
+        let s = &self.defs.structs[sid];
+        s.module == PRELUDE_MOD && s.name == "Set"
     }
 
     fn check_cond(&mut self, c: &Expr) {

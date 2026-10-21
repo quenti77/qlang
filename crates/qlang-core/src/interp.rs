@@ -180,6 +180,63 @@ impl App<'_> {
     }
 }
 
+impl Program {
+    /// The tests of the entry file: its top-level functions `fun test_...()` without
+    /// parameters, in the order written.
+    pub fn test_names(&self) -> Vec<String> {
+        let entry = self.modules.len().saturating_sub(1);
+        self.defs
+            .fns
+            .iter()
+            .filter(|f| {
+                f.module == entry
+                    && f.impl_id.is_none()
+                    && !f.has_self
+                    && f.params.is_empty()
+                    && f.name.starts_with("test_")
+                    && f.decl.as_ref().is_some_and(|d| !d.external)
+            })
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Runs one test on its own: the program's top-level code runs again from a clean
+    /// state, then the test function, each with a fresh budget. A failed `assert`, a
+    /// `panic` or any run-time error is the `Err`.
+    pub fn run_test(
+        &self,
+        name: &str,
+        host: &mut dyn Host,
+        limits: Limits,
+    ) -> Result<(), Box<Diagnostic>> {
+        let entry = self.modules.len().saturating_sub(1);
+        let Some(fid) = self.defs.fns.iter().position(|f| {
+            f.name == name && f.module == entry && f.impl_id.is_none() && f.decl.is_some()
+        }) else {
+            return Err(Box::new(Diagnostic::error(
+                "R070",
+                format!("there is no test `{name}`"),
+                Default::default(),
+            )));
+        };
+        let span = self.defs.fns[fid].span;
+        let mut it = Interp::new(self, host, limits);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            it.run_all()?;
+            it.call_fid(fid, None, vec![], span).map(|_| ())
+        }));
+        match outcome {
+            Ok(Ok(())) | Ok(Err(Ctrl::Return(_))) => Ok(()),
+            Ok(Err(Ctrl::Error(mut d))) => {
+                d.resolve(&self.sources);
+                Err(d)
+            }
+            Ok(Err(_)) => Ok(()),
+            Err(payload) => Err(Box::new(crate::check::internal_error(&payload))),
+        }
+    }
+}
+
 impl Interp<'_> {
     fn request_value(&self, req: &AppRequest) -> Value {
         let body = req.body.as_deref().map_or(Value::None, Value::str);

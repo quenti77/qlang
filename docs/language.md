@@ -1286,6 +1286,7 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
 | `panic(message)`         | arrête le programme avec une erreur                                   |
 | `assert(cond, message?)` | arrête le programme si `cond` est faux                                |
+| `assert_eq(a, b)`        | arrête le programme si `a != b`, en montrant les deux valeurs (`assert_ne` : si `a == b`) |
 | `int.parse(s)`           | renvoie un `int?` : `none` si `s` n'est pas un entier valide          |
 | `float.parse(s)`         | renvoie un `float?`                                                   |
 

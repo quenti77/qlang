@@ -949,6 +949,20 @@ impl http
     end
 end
 
+--" Stops the program (a failed test) unless `actual == expected`, showing both values. --"
+fun assert_eq<T: Eq>(actual: T, expected: T)
+    if actual != expected then
+        panic("assert_eq failed\n  actual:   {actual}\n  expected: {expected}")
+    end
+end
+
+--" Stops the program (a failed test) if `actual == unexpected`, showing the value. --"
+fun assert_ne<T: Eq>(actual: T, unexpected: T)
+    if actual == unexpected then
+        panic("assert_ne failed: both sides are {actual}")
+    end
+end
+
 --" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int

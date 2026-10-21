@@ -8,6 +8,7 @@ mod json;
 mod packages;
 mod providers;
 mod serve;
+mod testrun;
 
 use qlang_core::check::compile;
 use qlang_core::host::{
@@ -23,6 +24,9 @@ qlang - a small, readable language
 
 USAGE:
     qlang init [dir]                     start a project: qlang.toml, main.q, .gitignore
+    qlang test [path...] [--filter TEXT] [--seed N] [--max-steps N] [--trust-externs]
+                                         run the `fun test_...()` of the *_test.q / test_*.q
+                                         files of the project (or of the paths given)
     qlang run [file.q] [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
                     [-- ARGS...]
                                          run a program (imports may live anywhere, or only
@@ -87,6 +91,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
         Some("packages") => packages_json(),
         Some("init") => init::init(&it.collect::<Vec<_>>()),
+        Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -490,6 +495,33 @@ fn project_dir(program: &Path) -> Option<PathBuf> {
     providers::find_config(program).and_then(|f| f.parent().map(Path::to_path_buf))
 }
 
+/// The terminal host for the program `file`: its packages and providers come from the
+/// `qlang.toml` near it (and `externs`, the `--extern` commands).
+fn new_host(
+    file: &Path,
+    root: Option<PathBuf>,
+    seed: Option<u64>,
+    script_args: Vec<String>,
+    externs: &[String],
+    trust: bool,
+) -> Result<TerminalHost, String> {
+    let packages = match project_dir(file) {
+        Some(d) => packages::Packages::load(&d)?,
+        None => packages::Packages::default(),
+    };
+    let specs = providers::specs_for(file, externs)?;
+    providers::ensure_trusted(&specs, trust)?;
+    let providers = providers::Providers::start(&specs, &SQL_EXTERNS)?;
+    Ok(TerminalHost {
+        root,
+        rng: seed.unwrap_or_else(system_entropy),
+        db: db::SqlConns::default(),
+        script_args,
+        providers,
+        packages,
+    })
+}
+
 fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut file: Option<&str> = None;
     let mut root: Option<PathBuf> = None;
@@ -585,33 +617,12 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         eprintln!("{file} is outside of --root {}", root.display());
         return ExitCode::from(64);
     }
-    let packages = match project_dir(Path::new(file))
-        .map(|d| packages::Packages::load(&d))
-        .transpose()
-    {
-        Ok(p) => p.unwrap_or_default(),
+    let mut host = match new_host(Path::new(file), root, seed, script_args, &externs, trust) {
+        Ok(h) => h,
         Err(e) => {
             eprintln!("{e}");
             return ExitCode::from(1);
         }
-    };
-    let providers = match providers::specs_for(Path::new(file), &externs)
-        .and_then(|specs| providers::ensure_trusted(&specs, trust).map(|()| specs))
-        .and_then(|specs| providers::Providers::start(&specs, &SQL_EXTERNS))
-    {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(1);
-        }
-    };
-    let mut host = TerminalHost {
-        root,
-        rng: seed.unwrap_or_else(system_entropy),
-        db: db::SqlConns::default(),
-        script_args,
-        providers,
-        packages,
     };
     let program = match compile(file, &source, &mut host) {
         Ok(p) => p,

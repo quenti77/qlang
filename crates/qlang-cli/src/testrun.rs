@@ -47,6 +47,7 @@ pub fn run(args: &[&str]) -> ExitCode {
     let mut seed: Option<u64> = None;
     let mut limits = Limits::default();
     let mut trust = false;
+    let mut allow_process = false;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -72,6 +73,7 @@ pub fn run(args: &[&str]) -> ExitCode {
                 }
             }
             "--trust-externs" => trust = true,
+            "--allow-process" => allow_process = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
@@ -126,6 +128,7 @@ pub fn run(args: &[&str]) -> ExitCode {
                 continue;
             }
         };
+        host.allow_process = allow_process;
         let program = match compile(&shown, &source, &mut host) {
             Ok(p) => p,
             Err(e) => {

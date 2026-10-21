@@ -1060,6 +1060,10 @@ impl Checker {
                     ("env", "get") => Some(("env_get", "there is no process environment")),
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),
+                    ("Process", "run" | "run_with_input") => Some((
+                        "process_run",
+                        "starting programs is not allowed here; the terminal needs `--allow-process`",
+                    )),
                     _ => None,
                 };
                 if let Some((ext, why)) = need {

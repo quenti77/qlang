@@ -2,6 +2,7 @@
 
 ## À publier
 
+- `Process.run` / `Process.run_with_input` : lancer un programme, avec la permission `--allow-process`.
 - Affectation par déstructuration : `(a, b) = (b, a)`, `(xs[i], xs[j]) = (xs[j], xs[i])`.
 
 Les versions sont numérotées à la publication (tag `vX.Y.Z`) : un numéro qui n'a pas été

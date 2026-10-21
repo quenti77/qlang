@@ -46,6 +46,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                 }
             }
             "--trust-externs" => app.trust_externs = true,
+            "--allow-process" => app.allow_process = true,
             "--extern" => {
                 i += 1;
                 match args.get(i) {
@@ -157,6 +158,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         || !app.script_args.is_empty()
         || !app.extern_commands.is_empty()
         || app.trust_externs
+        || app.allow_process
     {
         eprintln!(
             "--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`"
@@ -404,6 +406,7 @@ struct AppOptions {
     /// `--extern` commands, and the providers they and `qlang.toml` declare.
     extern_commands: Vec<String>,
     trust_externs: bool,
+    allow_process: bool,
     providers: Vec<crate::providers::Spec>,
     packages: crate::packages::Packages,
 }
@@ -578,6 +581,7 @@ fn worker(
         providers,
         packages: opts.packages.clone(),
         assume_externs: false,
+        allow_process: opts.allow_process,
     };
     let program = match compile(file, source, &mut host) {
         Ok(p) => p,

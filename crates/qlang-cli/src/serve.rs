@@ -173,6 +173,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         }
     };
     eprintln!("qlang serving on http://{bind}:{port} (POST /run)");
+    let loopback = is_loopback(&bind);
     let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
         if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
@@ -187,7 +188,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                 let _slot = slot;
                 let reply = stream.try_clone();
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    handle_connection(stream)
+                    handle_connection(stream, loopback)
                 }));
                 if outcome.is_err()
                     && let Ok(s) = reply
@@ -385,7 +386,48 @@ fn read_request(
     })
 }
 
-fn handle_connection(mut stream: TcpStream) {
+/// Whether the server listens on this machine only.
+fn is_loopback(bind: &str) -> bool {
+    bind == "localhost"
+        || bind
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Whether a `Host` header names this machine (`localhost`, `127.0.0.1`, `[::1]`, with a port).
+fn is_local_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(h, _)| h),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// A web page is not a client of this server: a request that comes from a browser page
+/// (`Origin` is always sent by browsers on a cross-site POST) is refused, and so is one
+/// addressed to another name than this machine's when the server is only on this machine
+/// (a page of another site whose name was made to point here: DNS rebinding).
+fn refuse_browser(request: &Parsed, loopback: bool) -> Option<&'static str> {
+    let header = |name: &str| {
+        request
+            .headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    };
+    if header("origin").is_some() || header("sec-fetch-site").is_some_and(|v| v != "none") {
+        return Some("requests from a web page are refused");
+    }
+    if loopback && header("host").is_some_and(|h| !is_local_host(h)) {
+        return Some("this server only answers to localhost");
+    }
+    None
+}
+
+fn handle_connection(mut stream: TcpStream, loopback: bool) {
     let request = match read_request(&mut stream, MAX_BODY) {
         Ok(r) => r,
         Err(Some((status, message))) => {
@@ -394,6 +436,10 @@ fn handle_connection(mut stream: TcpStream) {
         }
         Err(None) => return,
     };
+    if let Some(why) = refuse_browser(&request, loopback) {
+        let _ = respond(stream, 403, &format!("{{\"error\":\"{why}\"}}"));
+        return;
+    }
     match (request.method.as_str(), request.target.as_str()) {
         ("GET", "/health") => {
             let _ = respond(stream, 200, "{\"status\":\"ok\"}");

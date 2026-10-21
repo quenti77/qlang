@@ -209,14 +209,38 @@ fn the_json_server_still_works() {
     let r = exchange(
         &server,
         &format!(
-            "POST /run HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /run HTTP/1.1\r\nHost: localhost:{}\r\nContent-Length: {}\r\n\r\n{body}",
+            server.port,
             body.len()
         ),
     );
     assert!(r.contains("\"output\":\"42\\n\""), "{r}");
     assert!(
-        exchange(&server, "GET /health HTTP/1.1\r\nHost: t\r\n\r\n").contains("\"status\":\"ok\"")
+        exchange(&server, "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .contains("\"status\":\"ok\"")
     );
+    // a web page cannot use it, directly or through a name made to point here
+    for extra in [
+        "Origin: https://evil.example\r\n",
+        "Sec-Fetch-Site: cross-site\r\n",
+    ] {
+        let r = exchange(
+            &server,
+            &format!(
+                "POST /run HTTP/1.1\r\nHost: localhost\r\n{extra}Content-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(r.starts_with("HTTP/1.1 403 "), "{extra}: {r}");
+    }
+    let r = exchange(
+        &server,
+        &format!(
+            "POST /run HTTP/1.1\r\nHost: evil.example\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(r.starts_with("HTTP/1.1 403 "), "{r}");
 }
 
 #[test]

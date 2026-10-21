@@ -84,11 +84,36 @@ impl<V> Default for SmallMap<V> {
 }
 
 impl<V> SmallMap<V> {
+    /// An empty map with room for `n` entries.
+    pub fn with_capacity(n: usize) -> SmallMap<V> {
+        SmallMap {
+            entries: Vec::with_capacity(n),
+            index: None,
+        }
+    }
+
     #[inline]
-    fn position(&self, key: &str) -> Option<usize> {
+    pub fn position(&self, key: &str) -> Option<usize> {
         match &self.index {
             Some(ix) => ix.get(key).copied(),
             None => self.entries.iter().position(|(k, _)| k.as_str() == key),
+        }
+    }
+
+    /// The value at `index`, if that entry is the one named `key` (a cached position).
+    #[inline]
+    pub fn get_at(&self, index: usize, key: &str) -> Option<&V> {
+        match self.entries.get(index) {
+            Some((k, v)) if k.as_str() == key => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn get_mut_at(&mut self, index: usize, key: &str) -> Option<&mut V> {
+        match self.entries.get_mut(index) {
+            Some((k, v)) if k.as_str() == key => Some(v),
+            _ => None,
         }
     }
 

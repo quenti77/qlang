@@ -352,6 +352,8 @@ struct Interp<'a> {
     fmt_nodes: usize,
     /// The last `ulid` made by `ulid.new()`, to keep the next ones in order.
     last_ulid: u128,
+    /// Where each variable use found its variable last time, by node (see `Scope::get_cached`).
+    slots: Vec<u32>,
 }
 
 /// Deeper values print as `...` (this also stops cyclic structures).
@@ -373,6 +375,7 @@ impl<'a> Interp<'a> {
             fmt_depth: 0,
             fmt_nodes: 0,
             last_ulid: 0,
+            slots: Vec::new(),
         }
     }
 
@@ -423,6 +426,16 @@ impl<'a> Interp<'a> {
 
     fn fail<T>(&self, code: &str, msg: impl Into<String>, span: Span) -> R<T> {
         Err(self.error(code, msg, span))
+    }
+
+    /// The lookup cache of a node.
+    #[inline]
+    fn slot(&mut self, id: NodeId) -> &mut u32 {
+        let i = id as usize;
+        if i >= self.slots.len() {
+            self.slots.resize(i + 1024, NO_SLOT);
+        }
+        &mut self.slots[i]
     }
 
     fn tick(&mut self, span: Span) -> R<()> {
@@ -638,7 +651,8 @@ impl<'a> Interp<'a> {
             }
         };
         match it {
-            Value::Range(start, end, incl) => {
+            Value::Range(start, end) | Value::RangeIncl(start, end) => {
+                let incl = matches!(it, Value::RangeIncl(..));
                 let step = step_v.unwrap_or(1);
                 if step == 0 {
                     return self.fail("R031", "`step` cannot be 0", s.span);
@@ -777,16 +791,26 @@ impl<'a> Interp<'a> {
             ExprKind::None => Ok(Value::None),
             ExprKind::Str(parts) => self.eval_str(e, parts, env),
             ExprKind::Ident(name, _) => match prog.res.paths.get(&e.id) {
-                Some(PathRes::Global(m, n)) => match self.envs[*m].get(n) {
-                    Some(v) => Ok(v),
-                    None => self.fail(
-                        "R002",
-                        format!("`{n}` is used before it has a value"),
-                        e.span,
-                    ),
-                },
+                Some(PathRes::Global(m, n)) => {
+                    let envs = &self.envs[*m];
+                    let slot = {
+                        let i = e.id as usize;
+                        if i >= self.slots.len() {
+                            self.slots.resize(i + 1024, NO_SLOT);
+                        }
+                        &mut self.slots[i]
+                    };
+                    match envs.get_cached(n, slot) {
+                        Some(v) => Ok(v),
+                        None => self.fail(
+                            "R002",
+                            format!("`{n}` is used before it has a value"),
+                            e.span,
+                        ),
+                    }
+                }
                 Some(PathRes::Fn(fid)) => Ok(self.fn_value(*fid)),
-                _ => match env.get(name) {
+                _ => match env.get_cached(name, self.slot(e.id)) {
                     Some(v) => Ok(v),
                     None => self.fail(
                         "R002",
@@ -795,7 +819,7 @@ impl<'a> Interp<'a> {
                     ),
                 },
             },
-            ExprKind::SelfVal => match env.get("self") {
+            ExprKind::SelfVal => match env.get_cached("self", self.slot(e.id)) {
                 Some(v) => Ok(v),
                 None => self.fail("R002", "`self` is not available here", e.span),
             },
@@ -820,6 +844,11 @@ impl<'a> Interp<'a> {
                 _ => {
                     let lv = self.eval(l, env)?;
                     let rv = self.eval(r, env)?;
+                    if let (Value::Int(a), Value::Int(b)) = (&lv, &rv)
+                        && let Some(v) = int_fast(*op, *a, *b)
+                    {
+                        return Ok(v);
+                    }
                     self.binary(*op, lv, rv, e.span)
                 }
             },
@@ -953,7 +982,8 @@ impl<'a> Interp<'a> {
     ) -> R<Value> {
         let (a, b) = (self.eval(start, env)?, self.eval(end, env)?);
         match (a, b) {
-            (Value::Int(a), Value::Int(b)) => Ok(Value::Range(a, b, inclusive)),
+            (Value::Int(a), Value::Int(b)) if inclusive => Ok(Value::RangeIncl(a, b)),
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Range(a, b)),
             _ => self.fail("R001", "a range needs integer bounds", e.span),
         }
     }
@@ -966,7 +996,7 @@ impl<'a> Interp<'a> {
         if prog.res.result_tries.contains(&e.id) {
             // `Ok(x)` gives x; `Err(..)` leaves the function with that same error
             return match &v {
-                Value::Enum(_, vi, Some(_)) if self.is_err_variant(&v, *vi) => {
+                Value::Enum(_, vi, Some(_)) if self.is_err_variant(&v, *vi as usize) => {
                     Err(Ctrl::Return(v.clone()))
                 }
                 Value::Enum(_, _, Some(data)) if data.len() == 1 => Ok(data[0].clone()),
@@ -1071,7 +1101,9 @@ impl<'a> Interp<'a> {
     fn eval_field(&mut self, e: &Expr, obj: &Expr, name: &Ident, env: &Env) -> R<Value> {
         let prog = self.prog;
         match prog.res.paths.get(&e.id) {
-            Some(PathRes::EnumVariant(eid, vi)) => return Ok(Value::Enum(*eid, *vi, None)),
+            Some(PathRes::EnumVariant(eid, vi)) => {
+                return Ok(Value::Enum(*eid as u32, *vi as u32, None));
+            }
             Some(PathRes::StaticField(sid, n)) => {
                 return match self.statics.get(&(*sid, n.clone())) {
                     Some(v) => Ok(v.clone()),
@@ -1090,7 +1122,7 @@ impl<'a> Interp<'a> {
                     ("float", "NAN") => Value::Float(f64::NAN),
                     ("int", "MAX") => Value::Int(i64::MAX),
                     ("int", "MIN") => Value::Int(i64::MIN),
-                    ("uuid", "NIL") => Value::Uuid(0),
+                    ("uuid", "NIL") => Value::Uuid(Id::new(0)),
                     _ => Value::Unit,
                 });
             }
@@ -1171,7 +1203,7 @@ impl<'a> Interp<'a> {
                     // `Shape.Circle(2.0)`: a variant that carries data
                     Some(PathRes::EnumVariant(eid, vi)) => {
                         let argv = self.eval_args(e.id, args, env)?;
-                        return Ok(Value::Enum(*eid, *vi, Some(argv.into())));
+                        return Ok(Value::Enum(*eid as u32, *vi as u32, Some(Rc::new(argv))));
                     }
                     Some(PathRes::BuiltinStatic(ty, name)) => {
                         let argv = self.eval_args(e.id, args, env)?;
@@ -1248,7 +1280,7 @@ impl<'a> Interp<'a> {
         }
         self.depth += 1;
         self.frames.push((Name::new(name), span));
-        let scope = Scope::new(Some(parent.clone()));
+        let scope = Scope::with_capacity(Some(parent.clone()), decl.params.len() + 3);
         if let Some(s) = this {
             scope.define("self", s);
         }
@@ -1311,7 +1343,7 @@ impl<'a> Interp<'a> {
     fn class_name_of(&self, v: &Value) -> &str {
         match v {
             Value::Struct(o) => &self.prog.defs.structs[o.def].name,
-            Value::Enum(eid, ..) => &self.prog.defs.enums[*eid].name,
+            Value::Enum(eid, ..) => &self.prog.defs.enums[*eid as usize].name,
             _ => "?",
         }
     }
@@ -1325,7 +1357,7 @@ impl<'a> Interp<'a> {
             (Value::Int(_), Ty::Int)
             | (Value::Float(_), Ty::Float)
             | (Value::Bool(_), Ty::Bool) => true,
-            (Value::Str(_), Ty::Str) | (Value::Range(..), Ty::Range) => true,
+            (Value::Str(_), Ty::Str) | (Value::Range(..) | Value::RangeIncl(..), Ty::Range) => true,
             (Value::Uuid(_), Ty::Uuid)
             | (Value::Ulid(_), Ty::Ulid)
             | (Value::DateTime(_), Ty::DateTime) => true,
@@ -1345,7 +1377,7 @@ impl<'a> Interp<'a> {
                         && matches!(&imp.target, Ty::Struct(s, _) if classes.contains(s))
                 })
             }
-            (Value::Enum(e, ..), Ty::Enum(x, _)) => e == x,
+            (Value::Enum(e, ..), Ty::Enum(x, _)) => *e as usize == *x,
             (Value::Func(_), Ty::Fn(..)) => true,
             _ => false,
         }
@@ -1495,8 +1527,8 @@ impl<'a> Interp<'a> {
             Value::Int(i) => i.to_string(),
             Value::Float(f) => fmt_float(*f),
             Value::Bool(b) => b.to_string(),
-            Value::Uuid(u) => ids::format_uuid(*u),
-            Value::Ulid(u) => ids::format_ulid(*u),
+            Value::Uuid(u) => ids::format_uuid(u.get()),
+            Value::Ulid(u) => ids::format_ulid(u.get()),
             Value::DateTime(t) => datetime::to_iso(*t),
             Value::None => "none".to_string(),
             Value::Unit => String::new(),
@@ -1525,8 +1557,8 @@ impl<'a> Interp<'a> {
                 format!("{{{}}}", parts.join(", "))
             }
             Value::Enum(e, vi, data) => {
-                let d = &self.prog.defs.enums[*e];
-                let name = format!("{}.{}", d.name, d.variants[*vi].name);
+                let d = &self.prog.defs.enums[*e as usize];
+                let name = format!("{}.{}", d.name, d.variants[*vi as usize].name);
                 match data {
                     None => name,
                     Some(items) => {
@@ -1539,7 +1571,8 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
-            Value::Range(a, b, incl) => format!("{a}{}{b}", if *incl { "..=" } else { ".." }),
+            Value::Range(a, b) => format!("{a}..{b}"),
+            Value::RangeIncl(a, b) => format!("{a}..={b}"),
             Value::Func(_) => "<function>".to_string(),
             Value::Struct(o) => match self.find_cast_impl(v, &Ty::Str) {
                 Some(fid) => match self.call_fid(fid, Some(v.clone()), vec![], span)? {
@@ -2052,21 +2085,30 @@ impl<'a> Interp<'a> {
         // the common case, a variable, without building a `Place` (which owns its name)
         if let ExprKind::Ident(name, _) = &target.kind {
             let prog = self.prog;
-            let (scope, key): (Env, &str) = match prog.res.paths.get(&target.id) {
-                Some(PathRes::Global(m, n)) => (self.envs[*m].clone(), n.as_str()),
-                _ => (env.clone(), name.as_str()),
+            let global;
+            let (scope, key): (&Env, &str) = match prog.res.paths.get(&target.id) {
+                Some(PathRes::Global(m, n)) => {
+                    global = self.envs[*m].clone();
+                    (&global, n.as_str())
+                }
+                _ => (env, name.as_str()),
             };
             let v = match op {
                 None => self.eval(value, env)?,
                 Some(bop) => {
-                    let Some(cur) = scope.get(key) else {
+                    let Some(cur) = scope.get_cached(key, self.slot(target.id)) else {
                         return self.fail("R002", format!("`{key}` has no value yet"), target.span);
                     };
                     let rhs = self.eval(value, env)?;
-                    self.binary(bop, cur, rhs, e.span)?
+                    match (&cur, &rhs) {
+                        (Value::Int(a), Value::Int(b)) if int_fast(bop, *a, *b).is_some() => {
+                            int_fast(bop, *a, *b).unwrap_or(Value::Unit)
+                        }
+                        _ => self.binary(bop, cur, rhs, e.span)?,
+                    }
                 }
             };
-            if !scope.assign(key, v.clone()) {
+            if !scope.assign_cached(key, v.clone(), self.slot(target.id)) {
                 return self.fail("R002", format!("`{key}` has no value yet"), target.span);
             }
             return Ok(v);
@@ -2119,11 +2161,15 @@ impl<'a> Interp<'a> {
                 _ => false,
             },
             Pattern::Path { id, .. } => match (self.prog.res.patterns.get(id), v) {
-                (Some((eid, vi)), Value::Enum(e, x, _)) => eid == e && vi == x,
+                (Some((eid, vi)), Value::Enum(e, x, _)) => {
+                    *eid == *e as usize && *vi == *x as usize
+                }
                 _ => false,
             },
             Pattern::Variant { fields, id, .. } => match (self.prog.res.patterns.get(id), v) {
-                (Some((eid, vi)), Value::Enum(e, x, Some(data))) if eid == e && vi == x => {
+                (Some((eid, vi)), Value::Enum(e, x, Some(data)))
+                    if *eid == *e as usize && *vi == *x as usize =>
+                {
                     for (p, value) in fields.iter().zip(data.iter()) {
                         if !self.match_pattern(p, value, scope)? {
                             return Ok(false);
@@ -2136,7 +2182,9 @@ impl<'a> Interp<'a> {
             Pattern::Bind { name, id } => {
                 // a name that is a variant of the type matched (decided by the checker)
                 if let Some((eid, vi)) = self.prog.res.patterns.get(id) {
-                    return Ok(matches!(v, Value::Enum(e, x, _) if e == eid && x == vi));
+                    return Ok(
+                        matches!(v, Value::Enum(e, x, _) if *e as usize == *eid && *x as usize == *vi),
+                    );
                 }
                 if name.name != "_" {
                     scope.define(&name.name, v.clone());
@@ -2367,8 +2415,12 @@ impl<'a> Interp<'a> {
         };
         Ok(match (ty, name) {
             ("int" | "float", "parse") => return self.parse_number(ty, &args[0]),
-            ("uuid", "parse") => ids::parse_uuid(&text(&args[0])).map_or(Value::None, Value::Uuid),
-            ("ulid", "parse") => ids::parse_ulid(&text(&args[0])).map_or(Value::None, Value::Ulid),
+            ("uuid", "parse") => {
+                ids::parse_uuid(&text(&args[0])).map_or(Value::None, |u| Value::Uuid(Id::new(u)))
+            }
+            ("ulid", "parse") => {
+                ids::parse_ulid(&text(&args[0])).map_or(Value::None, |u| Value::Ulid(Id::new(u)))
+            }
             ("time", "now") => Value::Int(self.now(span)?),
             ("time", "sleep") => {
                 let ms = match args.first() {
@@ -2438,10 +2490,10 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
-            ("uuid", "v4") => Value::Uuid(ids::uuid_v4(self.random_bits(span)?)),
+            ("uuid", "v4") => Value::Uuid(Id::new(ids::uuid_v4(self.random_bits(span)?))),
             ("uuid", "v7") => {
                 let now = self.now(span)?;
-                Value::Uuid(ids::uuid_v7(now as u128, self.random_bits(span)?))
+                Value::Uuid(Id::new(ids::uuid_v7(now as u128, self.random_bits(span)?)))
             }
             ("ulid", "at") => {
                 let Value::Int(t) = args[0] else {
@@ -2450,7 +2502,7 @@ impl<'a> Interp<'a> {
                 if !(0..=ids::TIME_MASK as i64).contains(&t) {
                     return self.fail("R061", "a ulid can only hold a time between 0 and 281 474 976 710 655 milliseconds", span);
                 }
-                Value::Ulid(ids::make_ulid(t as u128, self.random_bits(span)?))
+                Value::Ulid(Id::new(ids::make_ulid(t as u128, self.random_bits(span)?)))
             }
             ("ulid", "new") => {
                 let now = self.now(span)?.max(0) as u128;
@@ -2460,7 +2512,7 @@ impl<'a> Interp<'a> {
                     id = self.last_ulid + 1;
                 }
                 self.last_ulid = id;
-                Value::Ulid(id)
+                Value::Ulid(Id::new(id))
             }
             ("random", "float") => {
                 Value::Float((self.random(span)? >> 11) as f64 / (1u64 << 53) as f64)
@@ -2567,7 +2619,7 @@ impl<'a> Interp<'a> {
         let Value::Enum(eid, ..) = v else {
             return false;
         };
-        self.prog.defs.enums[*eid].variants[vi].name == "Err"
+        self.prog.defs.enums[*eid as usize].variants[vi].name == "Err"
     }
 
     fn prelude_enum(&self, name: &str) -> EnumId {
@@ -2585,7 +2637,7 @@ impl<'a> Interp<'a> {
         let vi = self.prog.defs.enums[eid]
             .variant_index("Ok")
             .expect("Result has Ok");
-        Value::Enum(eid, vi, Some(Rc::from(vec![data])))
+        Value::Enum(eid as u32, vi as u32, Some(Rc::new(vec![data])))
     }
 
     /// Builds `Err(Error { message })`.
@@ -2598,7 +2650,7 @@ impl<'a> Interp<'a> {
         let vi = self.prog.defs.enums[eid]
             .variant_index("Err")
             .expect("Result has Err");
-        Value::Enum(eid, vi, Some(Rc::from(vec![error])))
+        Value::Enum(eid as u32, vi as u32, Some(Rc::new(vec![error])))
     }
 
     /// Turns a [`HostError`] into a `Result::err`: a host without the capability, or one
@@ -2879,8 +2931,8 @@ impl<'a> Interp<'a> {
                 Some(v) => v,
                 None => return Ok(None),
             },
-            (Value::Uuid(u), "version") => Value::Int(ids::uuid_version(*u)),
-            (Value::Ulid(u), "time") => Value::Int(ids::ulid_time(*u)),
+            (Value::Uuid(u), "version") => Value::Int(ids::uuid_version(u.get())),
+            (Value::Ulid(u), "time") => Value::Int(ids::ulid_time(u.get())),
             (Value::Str(s), "len") => Value::Int(s.chars().count() as i64),
             (Value::Str(s), "is_empty") => Value::Bool(s.is_empty()),
             (Value::Str(s), "trim_start") => Value::str(s.trim_start()),
@@ -3523,6 +3575,27 @@ fn num(v: &Value) -> Option<f64> {
         Value::Float(f) => Some(*f),
         _ => None,
     }
+}
+
+/// The result of `a op b` on two ints when it is the plain case (no overflow, no division by
+/// zero, nothing that could call user code): `None` sends the operation to the general path,
+/// which also builds the errors.
+#[inline(always)]
+fn int_fast(op: BinOp, a: i64, b: i64) -> Option<Value> {
+    Some(match op {
+        BinOp::Add => Value::Int(a.checked_add(b)?),
+        BinOp::Sub => Value::Int(a.checked_sub(b)?),
+        BinOp::Mul => Value::Int(a.checked_mul(b)?),
+        BinOp::IntDiv if b != 0 => Value::Int(a.checked_div(b)?),
+        BinOp::Mod if b != 0 => Value::Int(a.checked_rem(b)?),
+        BinOp::Lt => Value::Bool(a < b),
+        BinOp::LtEq => Value::Bool(a <= b),
+        BinOp::Gt => Value::Bool(a > b),
+        BinOp::GtEq => Value::Bool(a >= b),
+        BinOp::Eq => Value::Bool(a == b),
+        BinOp::NotEq => Value::Bool(a != b),
+        _ => return None,
+    })
 }
 
 fn ord_matches(op: BinOp, ord: Option<Ordering>) -> bool {

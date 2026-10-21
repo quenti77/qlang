@@ -325,6 +325,45 @@ impl Checker {
                 );
                 Ty::Unit
             }
+            StmtKind::LetTuple {
+                is_const,
+                pattern,
+                ty,
+                init,
+            } => {
+                let ann = ty.as_ref().map(|t| self.resolve_type(t));
+                let w = match &ann {
+                    Some(t) => Want::Exp(t.clone()),
+                    None => Want::Any,
+                };
+                let it = self.expr(init, &w);
+                let value_ty = match ann {
+                    Some(a) => {
+                        if !self.assignable(&it, &a) {
+                            self.mismatch(init.span, &a, &it);
+                        }
+                        a
+                    }
+                    None => {
+                        let it = self.resolve(&it);
+                        match it {
+                            Ty::Unit => {
+                                self.err("T003", "this expression has no value", init.span);
+                                Ty::Error
+                            }
+                            Ty::Never => Ty::Error,
+                            other => other,
+                        }
+                    }
+                };
+                let kind = if *is_const {
+                    LocalKind::Const
+                } else {
+                    LocalKind::Var
+                };
+                self.bind_tuple_pattern(pattern, &value_ty, kind);
+                Ty::Unit
+            }
             StmtKind::Return(value) => {
                 let ret = self.ret_stack.last().cloned().unwrap_or(Ty::Unit);
                 match value {
@@ -369,6 +408,8 @@ impl Checker {
             StmtKind::For {
                 var,
                 var2,
+                var_pattern,
+                var2_pattern,
                 iter,
                 step,
                 body,
@@ -420,25 +461,31 @@ impl Checker {
                 }
                 self.loop_depth += 1;
                 self.push_scope();
-                self.declare(
-                    var,
-                    Local {
-                        ty: elem,
-                        kind: LocalKind::Var,
-                        orig: None,
-                        span: var.span,
-                    },
-                );
-                if let Some(v2) = var2 {
-                    self.declare(
-                        v2,
+                match var_pattern {
+                    Some(p) => self.bind_tuple_pattern(p, &elem, LocalKind::Var),
+                    None => self.declare(
+                        var,
                         Local {
-                            ty: elem2,
+                            ty: elem,
                             kind: LocalKind::Var,
                             orig: None,
-                            span: v2.span,
+                            span: var.span,
                         },
-                    );
+                    ),
+                }
+                if let Some(v2) = var2 {
+                    match var2_pattern {
+                        Some(p) => self.bind_tuple_pattern(p, &elem2, LocalKind::Var),
+                        None => self.declare(
+                            v2,
+                            Local {
+                                ty: elem2,
+                                kind: LocalKind::Var,
+                                orig: None,
+                                span: v2.span,
+                            },
+                        ),
+                    }
                 }
                 self.check_block(body, &Want::Unused);
                 self.pop_scope();
@@ -460,6 +507,58 @@ impl Checker {
                 }
                 Ty::Never
             }
+        }
+    }
+
+    /// Declares the variables of a tuple pattern with the types of the matching elements of
+    /// `ty` (`let (a, (b, _)) = t`, `for (k, v) in pairs`).
+    fn bind_tuple_pattern(&mut self, pat: &TuplePattern, ty: &Ty, kind: LocalKind) {
+        match pat {
+            TuplePattern::Wild(_) => {}
+            TuplePattern::Name(n) => {
+                let ty = self.resolve(ty);
+                self.declare(
+                    n,
+                    Local {
+                        ty,
+                        kind,
+                        orig: None,
+                        span: n.span,
+                    },
+                );
+            }
+            TuplePattern::Tuple(items, span) => match self.resolve(ty) {
+                Ty::Tuple(ts) if ts.len() == items.len() => {
+                    for (p, t) in items.iter().zip(ts.iter()) {
+                        self.bind_tuple_pattern(p, t, kind);
+                    }
+                }
+                found => {
+                    match &found {
+                        Ty::Tuple(ts) => {
+                            let msg = format!(
+                                "the pattern takes {} values, but the tuple has {}",
+                                items.len(),
+                                ts.len()
+                            );
+                            self.err("T288", msg, *span);
+                        }
+                        Ty::Error => {}
+                        other => {
+                            let shown = self.show(other);
+                            self.err(
+                                "T289",
+                                format!("`{shown}` cannot be taken apart: only a tuple can"),
+                                *span,
+                            );
+                        }
+                    }
+                    // still declare the names, so they are not reported as unknown
+                    for p in items {
+                        self.bind_tuple_pattern(p, &Ty::Error, kind);
+                    }
+                }
+            },
         }
     }
 

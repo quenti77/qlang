@@ -220,8 +220,13 @@ statement
 // let x = 1   let x: int = 1   const PI = 3.14   let v: int? = none
 // L'initialisation est obligatoire : pas de variable non initialisée.
 variableDeclaration
-    : (Let | Const) Identifier (Colon type)? Assign Newline* expression
+    : (Let | Const) (Identifier | tuplePattern) (Colon type)? Assign Newline* expression
     ;
+
+// (a, (b, _)) : deux noms ou plus, `_` pour ignorer, motifs imbriqués
+tuplePattern: '(' loopTarget (Comma loopTarget)+ Comma? ')';
+
+loopTarget: Identifier | tuplePattern;
 
 // return   return expr   (sortie anticipée ; sinon la dernière expression est la valeur)
 returnStatement: Return expression?;
@@ -229,7 +234,7 @@ returnStatement: Return expression?;
 whileStatement: While expression Do block End;
 // for i in 0..10 step 2 do ... end   for x in items do ... end
 // for i, x in items do ... end    for key, value in map do ... end
-forStatement: For Identifier (Comma Identifier)? In expression (Step expression)? Do block End;
+forStatement: For (Identifier | tuplePattern) (Comma (Identifier | tuplePattern))? In expression (Step expression)? Do block End;
 
 breakStatement: Break;
 

@@ -540,7 +540,7 @@ impl<'a> Interp<'a> {
         if !b
             .stmts
             .iter()
-            .any(|s| matches!(s.kind, StmtKind::Let { .. }))
+            .any(|s| matches!(s.kind, StmtKind::Let { .. } | StmtKind::LetTuple { .. }))
         {
             return self.exec_stmts(&b.stmts, env);
         }
@@ -557,6 +557,11 @@ impl<'a> Interp<'a> {
                 env.define(&name.name, v);
                 Ok(Value::Unit)
             }
+            StmtKind::LetTuple { pattern, init, .. } => {
+                let v = self.eval(init, env)?;
+                self.bind_tuple_pattern(pattern, &v, env, init.span)?;
+                Ok(Value::Unit)
+            }
             StmtKind::Return(e) => {
                 let v = match e {
                     Some(e) => self.eval(e, env)?,
@@ -567,13 +572,7 @@ impl<'a> Interp<'a> {
             StmtKind::Break => Err(Ctrl::Break),
             StmtKind::Continue => Err(Ctrl::Continue),
             StmtKind::While { cond, body } => self.exec_while(s, cond, body, env),
-            StmtKind::For {
-                var,
-                var2,
-                iter,
-                step,
-                body,
-            } => self.exec_for(s, var, var2, iter, step, body, env),
+            StmtKind::For { .. } => self.exec_for(s, env),
         }
     }
 
@@ -593,18 +592,20 @@ impl<'a> Interp<'a> {
         Ok(Value::Unit)
     }
 
-    #[allow(clippy::too_many_arguments)]
     #[inline(never)]
-    fn exec_for(
-        &mut self,
-        s: &Stmt,
-        var: &Ident,
-        var2: &Option<Ident>,
-        iter: &Expr,
-        step: &Option<Expr>,
-        body: &Block,
-        env: &Env,
-    ) -> R<Value> {
+    fn exec_for(&mut self, s: &Stmt, env: &Env) -> R<Value> {
+        let StmtKind::For {
+            var,
+            var2,
+            var_pattern,
+            var2_pattern,
+            iter,
+            step,
+            body,
+        } = &s.kind
+        else {
+            unreachable!("exec_for is only called for a `for`");
+        };
         let it = self.eval(iter, env)?;
         let step_v = match step {
             Some(st) => match self.eval(st, env)? {
@@ -615,9 +616,15 @@ impl<'a> Interp<'a> {
         };
         let run_body = |this: &mut Self, v: Value, v2: Option<Value>| -> R<bool> {
             let scope = Scope::new(Some(env.clone()));
-            scope.define(&var.name, v);
+            match var_pattern {
+                Some(p) => this.bind_tuple_pattern(p, &v, &scope, iter.span)?,
+                None => scope.define(&var.name, v),
+            }
             if let (Some(name), Some(second)) = (var2, v2) {
-                scope.define(&name.name, second);
+                match var2_pattern {
+                    Some(p) => this.bind_tuple_pattern(p, &second, &scope, iter.span)?,
+                    None => scope.define(&name.name, second),
+                }
             }
             match this.exec_stmts(&body.stmts, &scope) {
                 Ok(_) | Err(Ctrl::Continue) => Ok(true),
@@ -715,6 +722,35 @@ impl<'a> Interp<'a> {
             _ => return self.fail("R032", "this value cannot be looped over", iter.span),
         }
         Ok(Value::Unit)
+    }
+
+    /// Takes a tuple apart into variables of `scope` (the checker made sure it has the shape).
+    fn bind_tuple_pattern(
+        &mut self,
+        pat: &TuplePattern,
+        v: &Value,
+        scope: &Env,
+        span: Span,
+    ) -> R<()> {
+        match pat {
+            TuplePattern::Wild(_) => {}
+            TuplePattern::Name(n) => scope.define(&n.name, v.clone()),
+            TuplePattern::Tuple(items, _) => match v {
+                Value::Tuple(vs) if vs.len() == items.len() => {
+                    for (p, x) in items.iter().zip(vs.iter()) {
+                        self.bind_tuple_pattern(p, x, scope, span)?;
+                    }
+                }
+                _ => {
+                    return self.fail(
+                        "R001",
+                        "this value is not a tuple of the expected size",
+                        span,
+                    );
+                }
+            },
+        }
+        Ok(())
     }
 
     fn eval_bool(&mut self, e: &Expr, env: &Env) -> R<bool> {

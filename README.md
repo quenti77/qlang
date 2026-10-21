@@ -407,7 +407,7 @@ $result = json_decode(stream_get_contents($pipes[1]), true);
 echo $result["output"];
 ```
 
-Ou, avec le serveur HTTP : `POST http://127.0.0.1:8080/run` avec la même requête.
+Ou, avec le serveur HTTP : `POST http://127.0.0.1:8080/run` avec la même requête (d'un programme, pas d'une page web : une requête qui porte `Origin` ou `Sec-Fetch-Site: cross-site` est refusée (403), et, quand le serveur n'écoute que sur cette machine, un `Host` autre que `localhost`, `127.0.0.1` ou `[::1]` aussi, contre le *DNS rebinding*).
 
 ### Sécurité
 

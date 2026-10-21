@@ -2,6 +2,7 @@
 
 ## À publier
 
+- `qlang serve` (protocole JSON) : refuse les requêtes venant d'une page web (`Origin`, `Sec-Fetch-Site`) et, sur une adresse locale, un `Host` qui n'est pas local (DNS rebinding).
 Sécurité (voir la section « Sécurité » du README) :
 
 - Limite de mémoire du programme `qlang` : `R904` au-delà d'un gigaoctet (`--max-memory MB`, `QLANG_MAX_MEMORY`, `0` pour la retirer). Avant, un programme pouvait en réserver une dizaine de gigaoctets avec les limites par défaut et faire tuer le processus (le serveur `qlang serve`, ou `run --json`, pour tout le monde).

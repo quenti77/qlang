@@ -18,7 +18,7 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 ureq = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 postgres = "0.19"
-tokio-postgres-rustls = "0.12"
+tokio-postgres-rustls = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 webpki-roots = "0.26"
 bytes = "1"

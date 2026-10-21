@@ -1143,7 +1143,7 @@ end
 let e: array<int> = empty()        -- T vient du type attendu, pas d'un argument
 
 fun get() -> Result<int, Error>
-  Result.ok(1)                     -- T et E viennent du type de retour de `get`
+  Result.Ok(1)                     -- T et E viennent du type de retour de `get`
 end
 ```
 
@@ -1699,7 +1699,8 @@ struct Result<T, E>
 end
 ```
 
-`Result<T, E>` représente soit une valeur (`ok`), soit une erreur (`err`) :
+`Result<T, E>` est une [énumération](#11-énumérations) à deux variantes : `Ok(valeur)`
+quand tout s'est bien passé, `Err(erreur)` sinon :
 
 ```
 fun divide(a: int, b: int) -> Result<int, Error>
@@ -1709,26 +1710,25 @@ fun divide(a: int, b: int) -> Result<int, Error>
   Ok(a div b)
 end
 
-let r = divide(10, 0)
-if r.is_err() then
-  print(r.unwrap_err().message)
-else
-  print(r.unwrap())
+match divide(10, 0)
+  case Ok(v) then print(v)
+  case Err(e) then print(e.message)
 end
 ```
 
-- `Ok(valeur)` et `Err(erreur)` construisent le résultat ; `T` et `E` se
-  déduisent du contexte (ici, le type de retour de `divide`). Quand rien ne
-  permet de les déduire, écris-les explicitement sur le type :
-  `Result<int, Error>.ok(valeur)` / `Result<int, Error>.err(erreur)` (pas de
-  sucre `?` de propagation : on déballe à la main).
+- `Ok(valeur)` et `Err(erreur)` construisent le résultat (ce sont aussi les variantes :
+  `Result.Ok(valeur)`, `Result.Err(erreur)`) ; `T` et `E` se déduisent du contexte (ici,
+  le type de retour de `divide`). Quand rien ne permet de les déduire, écris-les
+  explicitement sur le type : `Result<int, Error>.Ok(valeur)` /
+  `Result<int, Error>.Err(erreur)`.
+- `match` prend un résultat en morceaux, et le compilateur vérifie que `Ok` et `Err` sont
+  tous deux traités : la valeur n'est lisible que dans le cas `Ok`.
 - `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
 - `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
   programme (`panic`) si on se trompe de cas.
-- `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou
-  `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
-  prélude, exactement comme une variable locale masque une variable de portée
-  plus large.
+- `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou une
+  énumération `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
+  prélude, exactement comme une variable locale masque une variable de portée plus large.
 
 ### Prélude : JSON
 

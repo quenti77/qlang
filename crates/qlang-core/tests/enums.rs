@@ -166,3 +166,45 @@ fn duplicate_variants_and_fields_are_reported() {
     assert!(exec("enum E\n  A\n  A\nend").contains("T112"));
     assert!(exec("enum E\n  A(x: int, x: int)\nend").contains("T126"));
 }
+
+#[test]
+fn result_is_an_enum_that_match_takes_apart() {
+    let out = exec(
+        "fun divide(a: int, b: int) -> Result<int, Error>\n  if b == 0 then\n    return Err(Error { message: \"division by zero\" })\n  end\n  Ok(a div b)\nend\n\nfun show(r: Result<int, Error>) -> string\n  match r\n    case Ok(v) then \"ok {v}\"\n    case Err(e) then \"err {e.message}\"\n  end\nend\nprint(show(divide(10, 2)))\nprint(show(divide(1, 0)))\nprint(divide(10, 2))\nprint(divide(1, 0).is_err())\nprint(Result<int, Error>.Ok(3).is_ok())",
+    );
+    assert!(
+        out.starts_with("ok 5\nerr division by zero\nResult.Ok(5)\ntrue\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_match_on_a_result_must_cover_both_cases() {
+    let out = exec(
+        "fun f() -> Result<int, Error>\n  Ok(1)\nend\nlet n = match f()\n  case Ok(v) then v\nend\nprint(n)",
+    );
+    assert!(out.starts_with("COMPILE:"), "{out}");
+}
+
+#[test]
+fn the_value_of_an_ok_result_has_the_declared_type() {
+    let out = exec(
+        "fun f() -> Result<int, Error>\n  Ok(1)\nend\nmatch f()\n  case Ok(v) then\n    let s: string = v\n  case Err(e) then print(e.message)\nend",
+    );
+    assert!(out.starts_with("COMPILE:"), "{out}");
+}
+
+#[test]
+fn results_from_the_host_are_matchable_too() {
+    let mut host = MemoryHost::default();
+    host.externs.insert(
+        "open".into(),
+        Box::new(|_| Err(qlang_core::host::HostError::Other("no db".into()))),
+    );
+    let mut host = host;
+    let src = "extern fun open() -> Result<int, Error>\nmatch open()\n  case Ok(v) then print(v)\n  case Err(e) then print(e.message)\nend";
+    let prog = compile("main.q", src, &mut host).ok().unwrap();
+    let r = prog.run(&mut host, Limits::default());
+    assert!(r.error.is_none());
+    assert_eq!(host.output, "no db\n");
+}

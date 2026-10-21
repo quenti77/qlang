@@ -565,6 +565,7 @@ Motifs possibles dans un `case` :
 | `none`                 | `case none then` (pour une valeur nullable)      |
 | Variante d'énumération | `case Color.Red then`, `case Red then`            |
 | Variante avec données  | `case Circle(r) then`, `case Shape.Rect(w, _) then` |
+| Tuple                  | `case (0, y) then`, `case ("get", 200..=299) then`, `case (a, b) then` |
 | Intervalle             | `case 1..=9 then`, `case 0.5..1.5 then`          |
 | Liaison + garde        | `case x if x > 100 then` (`x` désigne la valeur testée) |
 
@@ -573,6 +574,12 @@ par la valeur testée (`case Red`, `case Circle(r)`) ; un nom qui est une varian
 type est la variante, sinon c'est une liaison. Pour une variante qui porte des données,
 on nomme chaque valeur entre parenthèses (`_` pour l'ignorer) : le nombre de noms doit
 être celui des valeurs.
+
+Un motif de tuple a un sous-motif par élément (valeur, intervalle, `none`, nom, `_`, ou un
+autre tuple) ; les noms sont liés dans la garde et dans le corps. Un variant d'énumération ne
+peut pas s'écrire dans un motif de tuple : nommer l'élément, puis le `match`er à part. Un
+motif de tuple fait de noms seulement (`case (a, b)`) accepte tout tuple, donc rend le `match`
+exhaustif ; dès qu'il teste une valeur, il faut un `else` ou un `case` qui accepte tout.
 
 Les `case` sont essayés dans l'ordre. Un nom seul (`case x then`) accepte toute
 valeur et la nomme ; `_` accepte toute valeur sans la nommer. Après un

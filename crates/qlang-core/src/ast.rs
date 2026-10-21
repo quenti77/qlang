@@ -359,12 +359,35 @@ pub enum Pattern {
     Path(Vec<Ident>),
     /// `x`: matches anything and binds the value.
     Bind(Ident),
+    /// `(0, y)`, `(a, b)`: a tuple whose elements match the patterns, in order.
+    Tuple(Vec<Pattern>),
     /// `Circle(r)`, `Shape.Circle(r, _)`: a variant that carries data; each field is bound
     /// to a name, or ignored (`None`, written `_`).
     Variant {
         path: Vec<Ident>,
         fields: Vec<Option<Ident>>,
     },
+}
+
+impl Pattern {
+    /// Whether the pattern matches every value of its type (a name, or tuples of such).
+    pub fn is_irrefutable(&self) -> bool {
+        match self {
+            Pattern::Bind(_) => true,
+            Pattern::Tuple(items) => items.iter().all(Pattern::is_irrefutable),
+            _ => false,
+        }
+    }
+
+    /// The variables the pattern declares.
+    pub fn bound_names<'a>(&'a self, out: &mut Vec<&'a Ident>) {
+        match self {
+            Pattern::Bind(n) => out.push(n),
+            Pattern::Variant { fields, .. } => out.extend(fields.iter().flatten()),
+            Pattern::Tuple(items) => items.iter().for_each(|p| p.bound_names(out)),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug)]

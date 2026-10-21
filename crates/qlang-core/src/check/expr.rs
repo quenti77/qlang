@@ -1378,7 +1378,14 @@ impl Checker {
                 self.check_cond(g);
             }
             let unguarded = case.guard.is_none();
-            if unguarded && let Some(&(eid, v)) = self.res.patterns.get(&(e.id, i)) {
+            if unguarded
+                && matches!(&case.pattern, Pattern::Tuple(_))
+                && case.pattern.is_irrefutable()
+                && !matches!(st, Ty::Nullable(_))
+            {
+                // `case (a, b)`: every tuple of the right shape
+                exhaustive = true;
+            } else if unguarded && let Some(&(eid, v)) = self.res.patterns.get(&(e.id, i)) {
                 // a variant, written with or without its type, with or without data
                 enum_id = Some(eid);
                 variants_seen.insert(v);
@@ -1477,6 +1484,7 @@ impl Checker {
             }
         };
         match p {
+            Pattern::Tuple(items) => self.check_tuple_pattern(mid, idx, items, span, &inner),
             Pattern::Int(_) => expect(self, Ty::Int),
             Pattern::Float(_) => expect(self, Ty::Float),
             Pattern::Str(_) => expect(self, Ty::Str),
@@ -1586,6 +1594,78 @@ impl Checker {
                     );
                 }
             }
+        }
+    }
+
+    /// `(0, y)` against a value of type `ty`: one sub-pattern for each element.
+    fn check_tuple_pattern(
+        &mut self,
+        mid: NodeId,
+        idx: usize,
+        items: &[Pattern],
+        span: Span,
+        ty: &Ty,
+    ) {
+        match self.resolve(ty) {
+            Ty::Tuple(ts) if ts.len() == items.len() => {
+                for (p, t) in items.iter().zip(ts.iter()) {
+                    self.check_sub_pattern(mid, idx, p, span, t);
+                }
+            }
+            found => {
+                match &found {
+                    Ty::Tuple(ts) => {
+                        let msg = format!(
+                            "this pattern has {} elements, but the tuple matched has {}",
+                            items.len(),
+                            ts.len()
+                        );
+                        self.err("T220", msg, span);
+                    }
+                    Ty::Error => {}
+                    other => {
+                        let shown = self.show(other);
+                        self.err(
+                            "T220",
+                            format!(
+                                "this pattern is a tuple, but the value matched has type `{shown}`"
+                            ),
+                            span,
+                        );
+                    }
+                }
+                // declare the names anyway: one mistake, one error
+                for p in items {
+                    self.check_sub_pattern(mid, idx, p, span, &Ty::Error);
+                }
+            }
+        }
+    }
+
+    /// A pattern inside a tuple pattern: a value, a range, `none`, a name, `_` or a tuple.
+    fn check_sub_pattern(&mut self, mid: NodeId, idx: usize, p: &Pattern, span: Span, ty: &Ty) {
+        match p {
+            Pattern::Bind(name) => {
+                if name.name != "_" {
+                    let ty = self.resolve(ty);
+                    self.declare(
+                        name,
+                        Local {
+                            ty,
+                            kind: LocalKind::Var,
+                            orig: None,
+                            span: name.span,
+                        },
+                    );
+                }
+            }
+            Pattern::Tuple(items) => self.check_tuple_pattern(mid, idx, items, span, ty),
+            Pattern::Path(_) | Pattern::Variant { .. } => self.err(
+                "T224",
+                "a variant cannot be matched inside a tuple pattern yet: name the element, then `match` it",
+                span,
+            ),
+            other => self.check_pattern(mid, idx, other, span, ty, false),
         }
     }
 

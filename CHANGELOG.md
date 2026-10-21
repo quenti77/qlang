@@ -1,5 +1,10 @@
 # Journal des changements
 
+## À publier
+
+- Docs : `README.md` présente `qlang-std`, section « Points encore ouverts » mise à jour.
+- `examples/syntax.q` passe `qlang check` (ajout de `examples/math.q`).
+
 ## 0.33.0
 
 - `Process.run` / `Process.run_with_input` : lancer un programme, avec la permission `--allow-process`.

@@ -2400,8 +2400,9 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 ## 21. Points encore ouverts
 
-- **Bibliothèque standard :** elle est volontairement petite (voir section 14) et
-  s'étoffera à l'usage.
+- **Bibliothèque standard :** elle couvre le quotidien (chaînes, tableaux, dictionnaires,
+  `Set`, tuples, maths, encodages, fichiers, réseau, processus, tests). Le reste vit en
+  paquets : voir `qlang-std` (CSV, gabarits, TOML) ; YAML, mail et S3 ne sont pas écrits.
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut), et pas de comparaison `<`.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme
@@ -2411,6 +2412,8 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Traits qui en exigent d'autres** (un trait qui suppose qu'un autre est
   aussi implémenté) : non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Format des commentaires de documentation** : le texte est libre pour l'instant.
-  À prévoir, selon l'usage : un format léger du type `@param` / `@return`, et une page de
-  documentation générée à partir de ces commentaires.
+- **Motifs :** une variante d'énumération dans un motif de tuple, et un motif imbriqué
+  dans une variante, ne sont pas encore acceptés.
+- **Tuples :** pas d'ordre (donc pas de tri) ni de passage à travers une `extern fun`.
+- **Format des commentaires de documentation** : le texte reste libre (`qlang doc` le recopie
+  tel quel). À prévoir, selon l'usage : un format léger du type `@param` / `@return`.

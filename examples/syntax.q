@@ -21,6 +21,21 @@ struct Savings extends Account
   public rate: float = 0.02
 end
 
+struct Box<T>
+  public value: T
+end
+
+impl<T> Box<T>
+  public fun new(value: T) -> Box<T>
+    Box { value: value }
+  end
+end
+
+struct Pair<A, B>
+  public first: A
+  public second: B
+end
+
 trait Shape
   fun area(self) -> float
 end
@@ -32,6 +47,15 @@ end
 
 fun sum<T: Add + Eq>(a: T, b: T) -> T
   a + b
+end
+
+impl Account
+  public fun new() -> Account
+    Account {}
+  end
+  public fun describe(self) -> string
+    "account"
+  end
 end
 
 impl Savings
@@ -77,5 +101,6 @@ let g = sum<float>(1.0, 2.0)
 let b = Box<int>.new(1)
 let p = Pair<int, string> { first: 1, second: "a" }
 let n = -2 ** 2 + (3 as float as int)
-a[0] = b = 4
+let a = [1, 2]
+a[0] = 4
 let c: (fun(int) -> int)? = none

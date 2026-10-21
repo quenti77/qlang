@@ -43,6 +43,14 @@ compilées en `musl`, dont l'allocateur est plus lent que celui de `glibc`).
   créer une à chaque tour de boucle.
 - L'affectation à une variable n'alloue plus.
 
+- Les cas rares de `eval` et de `exec_stmt` (chaînes, dictionnaires, `for`, `while`, `match`,
+  `?`...) sont dans des fonctions à part, non inlinées : le cadre de pile de `eval` et
+  `exec_stmt`, qui se répètent à chaque niveau d'appel, est plus petit. Les appels imbriqués
+  tiennent donc plus profond, ce qui compte surtout pour WebAssembly (la pile de V8 est
+  d'environ 1 Mo) : 999 niveaux contre 762 avant. `node --test crates/qlang-wasm/test/*.test.mjs`
+  vérifie qu'une récursion de 990 appels passe ; si ce test échoue après un changement de
+  l'interpréteur, un cadre de pile a grossi.
+
 ## Ce qui reste
 
 Le temps est maintenant réparti dans `eval`, `binary` et la recherche des variables par nom :

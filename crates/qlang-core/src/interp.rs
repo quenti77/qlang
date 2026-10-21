@@ -519,122 +519,138 @@ impl<'a> Interp<'a> {
             }
             StmtKind::Break => Err(Ctrl::Break),
             StmtKind::Continue => Err(Ctrl::Continue),
-            StmtKind::While { cond, body } => {
-                loop {
-                    if !self.eval_bool(cond, env)? {
-                        break;
-                    }
-                    match self.exec_block(body, env) {
-                        Ok(_) | Err(Ctrl::Continue) => {}
-                        Err(Ctrl::Break) => break,
-                        Err(e) => return Err(e),
-                    }
-                    self.tick(s.span)?;
-                }
-                Ok(Value::Unit)
-            }
+            StmtKind::While { cond, body } => self.exec_while(s, cond, body, env),
             StmtKind::For {
                 var,
                 var2,
                 iter,
                 step,
                 body,
-            } => {
-                let it = self.eval(iter, env)?;
-                let step_v = match step {
-                    Some(st) => match self.eval(st, env)? {
-                        Value::Int(i) => Some(i),
-                        _ => return self.fail("R030", "`step` must be an integer", st.span),
-                    },
-                    None => None,
-                };
-                let run_body = |this: &mut Self, v: Value, v2: Option<Value>| -> R<bool> {
-                    let scope = Scope::new(Some(env.clone()));
-                    scope.define(&var.name, v);
-                    if let (Some(name), Some(second)) = (var2, v2) {
-                        scope.define(&name.name, second);
-                    }
-                    match this.exec_stmts(&body.stmts, &scope) {
-                        Ok(_) | Err(Ctrl::Continue) => Ok(true),
-                        Err(Ctrl::Break) => Ok(false),
-                        Err(e) => Err(e),
-                    }
-                };
-                match it {
-                    Value::Range(start, end, incl) => {
-                        let step = step_v.unwrap_or(1);
-                        if step == 0 {
-                            return self.fail("R031", "`step` cannot be 0", s.span);
-                        }
-                        let mut i = start;
-                        loop {
-                            let in_range = if step > 0 {
-                                if incl { i <= end } else { i < end }
-                            } else if incl {
-                                i >= end
-                            } else {
-                                i > end
-                            };
-                            if !in_range {
-                                break;
-                            }
-                            if !run_body(self, Value::Int(i), None)? {
-                                break;
-                            }
-                            self.tick(s.span)?;
-                            i = match i.checked_add(step) {
-                                Some(n) => n,
-                                None => break,
-                            };
-                        }
-                    }
-                    Value::Array(a) => {
-                        let mut i = 0;
-                        loop {
-                            let item = a.borrow().get(i).cloned();
-                            let Some(v) = item else { break };
-                            let ok = if var2.is_some() {
-                                run_body(self, Value::Int(i as i64), Some(v))?
-                            } else {
-                                run_body(self, v, None)?
-                            };
-                            if !ok {
-                                break;
-                            }
-                            self.tick(s.span)?;
-                            i += 1;
-                        }
-                    }
-                    Value::Str(st) => {
-                        for (i, ch) in st.chars().enumerate() {
-                            let c = Value::str(&ch.to_string());
-                            let ok = if var2.is_some() {
-                                run_body(self, Value::Int(i as i64), Some(c))?
-                            } else {
-                                run_body(self, c, None)?
-                            };
-                            if !ok {
-                                break;
-                            }
-                            self.tick(s.span)?;
-                        }
-                    }
-                    Value::Map(m) => {
-                        // a snapshot: the map may be changed by the loop body
-                        self.charge(m.borrow().len(), s.span)?;
-                        let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
-                        for (k, v) in entries {
-                            if !run_body(self, k, Some(v))? {
-                                break;
-                            }
-                            self.tick(s.span)?;
-                        }
-                    }
-                    _ => return self.fail("R032", "this value cannot be looped over", iter.span),
-                }
-                Ok(Value::Unit)
-            }
+            } => self.exec_for(s, var, var2, iter, step, body, env),
         }
+    }
+
+    #[inline(never)]
+    fn exec_while(&mut self, s: &Stmt, cond: &Expr, body: &Block, env: &Env) -> R<Value> {
+        loop {
+            if !self.eval_bool(cond, env)? {
+                break;
+            }
+            match self.exec_block(body, env) {
+                Ok(_) | Err(Ctrl::Continue) => {}
+                Err(Ctrl::Break) => break,
+                Err(e) => return Err(e),
+            }
+            self.tick(s.span)?;
+        }
+        Ok(Value::Unit)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[inline(never)]
+    fn exec_for(
+        &mut self,
+        s: &Stmt,
+        var: &Ident,
+        var2: &Option<Ident>,
+        iter: &Expr,
+        step: &Option<Expr>,
+        body: &Block,
+        env: &Env,
+    ) -> R<Value> {
+        let it = self.eval(iter, env)?;
+        let step_v = match step {
+            Some(st) => match self.eval(st, env)? {
+                Value::Int(i) => Some(i),
+                _ => return self.fail("R030", "`step` must be an integer", st.span),
+            },
+            None => None,
+        };
+        let run_body = |this: &mut Self, v: Value, v2: Option<Value>| -> R<bool> {
+            let scope = Scope::new(Some(env.clone()));
+            scope.define(&var.name, v);
+            if let (Some(name), Some(second)) = (var2, v2) {
+                scope.define(&name.name, second);
+            }
+            match this.exec_stmts(&body.stmts, &scope) {
+                Ok(_) | Err(Ctrl::Continue) => Ok(true),
+                Err(Ctrl::Break) => Ok(false),
+                Err(e) => Err(e),
+            }
+        };
+        match it {
+            Value::Range(start, end, incl) => {
+                let step = step_v.unwrap_or(1);
+                if step == 0 {
+                    return self.fail("R031", "`step` cannot be 0", s.span);
+                }
+                let mut i = start;
+                loop {
+                    let in_range = if step > 0 {
+                        if incl { i <= end } else { i < end }
+                    } else if incl {
+                        i >= end
+                    } else {
+                        i > end
+                    };
+                    if !in_range {
+                        break;
+                    }
+                    if !run_body(self, Value::Int(i), None)? {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                    i = match i.checked_add(step) {
+                        Some(n) => n,
+                        None => break,
+                    };
+                }
+            }
+            Value::Array(a) => {
+                let mut i = 0;
+                loop {
+                    let item = a.borrow().get(i).cloned();
+                    let Some(v) = item else { break };
+                    let ok = if var2.is_some() {
+                        run_body(self, Value::Int(i as i64), Some(v))?
+                    } else {
+                        run_body(self, v, None)?
+                    };
+                    if !ok {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                    i += 1;
+                }
+            }
+            Value::Str(st) => {
+                for (i, ch) in st.chars().enumerate() {
+                    let c = Value::str(&ch.to_string());
+                    let ok = if var2.is_some() {
+                        run_body(self, Value::Int(i as i64), Some(c))?
+                    } else {
+                        run_body(self, c, None)?
+                    };
+                    if !ok {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                }
+            }
+            Value::Map(m) => {
+                // a snapshot: the map may be changed by the loop body
+                self.charge(m.borrow().len(), s.span)?;
+                let entries: Vec<(Value, Value)> = m.borrow().entries.clone();
+                for (k, v) in entries {
+                    if !run_body(self, k, Some(v))? {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                }
+            }
+            _ => return self.fail("R032", "this value cannot be looped over", iter.span),
+        }
+        Ok(Value::Unit)
     }
 
     fn eval_bool(&mut self, e: &Expr, env: &Env) -> R<bool> {
@@ -654,21 +670,7 @@ impl<'a> Interp<'a> {
             ExprKind::Float(v) => Ok(Value::Float(*v)),
             ExprKind::Bool(v) => Ok(Value::Bool(*v)),
             ExprKind::None => Ok(Value::None),
-            ExprKind::Str(parts) => {
-                let mut out = String::new();
-                for p in parts {
-                    match p {
-                        StrPart::Lit(s) => out.push_str(s),
-                        StrPart::Expr(x) => {
-                            let v = self.eval(x, env)?;
-                            out.push_str(&self.stringify(&v, x.span)?);
-                        }
-                    }
-                }
-                self.guard_alloc(out.len(), e.span)?;
-                self.charge_bytes(out.len(), e.span)?;
-                Ok(Value::str(&out))
-            }
+            ExprKind::Str(parts) => self.eval_str(e, parts, env),
             ExprKind::Ident(name, _) => match prog.res.paths.get(&e.id) {
                 Some(PathRes::Global(m, n)) => match self.envs[*m].get(n) {
                     Some(v) => Ok(v),
@@ -693,47 +695,10 @@ impl<'a> Interp<'a> {
                 None => self.fail("R002", "`self` is not available here", e.span),
             },
             ExprKind::Super => self.fail("R003", "`super` can only be used for calls", e.span),
-            ExprKind::Array(items) => {
-                let mut out = Vec::with_capacity(items.len());
-                for it in items {
-                    out.push(self.eval(it, env)?);
-                }
-                Ok(Value::array(out))
-            }
-            ExprKind::Map(items) => {
-                let mut m = MapObj::default();
-                for (k, v) in items {
-                    let kv = self.eval(k, env)?;
-                    let vv = self.eval(v, env)?;
-                    self.guard_alloc(m.len() + 1, e.span)?;
-                    if !m.insert(kv, vv) {
-                        return self.fail("R023", "this value cannot be used as a map key", k.span);
-                    }
-                }
-                Ok(Value::Map(Rc::new(RefCell::new(m))))
-            }
+            ExprKind::Array(items) => self.eval_array(items, env),
+            ExprKind::Map(items) => self.eval_map(e, items, env),
             ExprKind::StructLit(lit) => self.eval_struct_lit(e, lit, env),
-            ExprKind::Unary(op, inner) => {
-                let v = self.eval(inner, env)?;
-                match (op, &v) {
-                    (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
-                    (UnOp::Neg, Value::Int(i)) => match i.checked_neg() {
-                        Some(n) => Ok(Value::Int(n)),
-                        None => self.fail("R010", "integer overflow", e.span),
-                    },
-                    (UnOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
-                    (UnOp::Neg, _) => match self.find_method(
-                        &v,
-                        Lang::Neg.method_name(),
-                        Some(prog.defs.lang(Lang::Neg)),
-                        None,
-                    ) {
-                        Some(fid) => self.call_fid(fid, Some(v), vec![], e.span),
-                        None => self.fail("R004", "this value cannot be negated", e.span),
-                    },
-                    _ => self.fail("R001", "unexpected operand", e.span),
-                }
-            }
+            ExprKind::Unary(op, inner) => self.eval_unary(e, op, inner, env),
             ExprKind::Binary(op, l, r) => match op {
                 BinOp::And => {
                     if !self.eval_bool(l, env)? {
@@ -758,41 +723,11 @@ impl<'a> Interp<'a> {
                 start,
                 end,
                 inclusive,
-            } => {
-                let (a, b) = (self.eval(start, env)?, self.eval(end, env)?);
-                match (a, b) {
-                    (Value::Int(a), Value::Int(b)) => Ok(Value::Range(a, b, *inclusive)),
-                    _ => self.fail("R001", "a range needs integer bounds", e.span),
-                }
-            }
-            ExprKind::Try(inner) => {
-                let v = self.eval(inner, env)?;
-                if prog.res.result_tries.contains(&e.id) {
-                    // `Ok(x)` gives x; `Err(..)` leaves the function with that same error
-                    return match &v {
-                        Value::Enum(_, vi, Some(_)) if self.is_err_variant(&v, *vi) => {
-                            Err(Ctrl::Return(v.clone()))
-                        }
-                        Value::Enum(_, _, Some(data)) if data.len() == 1 => Ok(data[0].clone()),
-                        _ => self.fail("R001", "`?` expects a `Result`", e.span),
-                    };
-                }
-                match v {
-                    Value::None => Err(Ctrl::Return(Value::None)),
-                    other => Ok(other),
-                }
-            }
-            ExprKind::Cast(inner, _) => {
-                let v = self.eval(inner, env)?;
-                let target = prog.res.casts.get(&e.id).cloned().unwrap_or(Ty::Error);
-                self.convert(v, &target, e.span)
-            }
+            } => self.eval_range(e, start, end, *inclusive, env),
+            ExprKind::Try(inner) => self.eval_try(e, inner, env),
+            ExprKind::Cast(inner, _) => self.eval_cast(e, inner, env),
             ExprKind::Call { callee, args } => self.eval_call(e, callee, args, env),
-            ExprKind::Index(base, idx) => {
-                let b = self.eval(base, env)?;
-                let i = self.eval(idx, env)?;
-                self.index_get(&b, &i, e.span)
-            }
+            ExprKind::Index(base, idx) => self.eval_index(e, base, idx, env),
             ExprKind::Append(_) => self.fail("R003", "`x[]` can only be assigned to", e.span),
             ExprKind::Field(obj, name, _) => self.eval_field(e, obj, name, env),
             ExprKind::If {
@@ -813,30 +748,158 @@ impl<'a> Interp<'a> {
                 scrutinee,
                 cases,
                 else_block,
-            } => {
-                let v = self.eval(scrutinee, env)?;
-                for (i, case) in cases.iter().enumerate() {
-                    let scope = Scope::new(Some(env.clone()));
-                    if !self.match_pattern(&case.pattern, &v, e.id, i, &scope)? {
-                        continue;
-                    }
-                    if let Some(g) = &case.guard
-                        && !self.eval_bool(g, &scope)?
-                    {
-                        continue;
-                    }
-                    return self.exec_stmts(&case.body.stmts, &scope);
-                }
-                match else_block {
-                    Some(b) => self.exec_block(b, env),
-                    None => Ok(Value::Unit),
-                }
-            }
+            } => self.eval_match(e, scrutinee, cases, else_block, env),
             ExprKind::Lambda(f) => Ok(Value::Func(Rc::new(FuncVal {
                 decl: f.clone(),
                 env: env.clone(),
                 name: "<function>".into(),
             }))),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_str(&mut self, e: &Expr, parts: &[StrPart], env: &Env) -> R<Value> {
+        let mut out = String::new();
+        for p in parts {
+            match p {
+                StrPart::Lit(s) => out.push_str(s),
+                StrPart::Expr(x) => {
+                    let v = self.eval(x, env)?;
+                    out.push_str(&self.stringify(&v, x.span)?);
+                }
+            }
+        }
+        self.guard_alloc(out.len(), e.span)?;
+        self.charge_bytes(out.len(), e.span)?;
+        Ok(Value::str(&out))
+    }
+
+    #[inline(never)]
+    fn eval_array(&mut self, items: &[Expr], env: &Env) -> R<Value> {
+        let mut out = Vec::with_capacity(items.len());
+        for it in items {
+            out.push(self.eval(it, env)?);
+        }
+        Ok(Value::array(out))
+    }
+
+    #[inline(never)]
+    fn eval_map(&mut self, e: &Expr, items: &[(Expr, Expr)], env: &Env) -> R<Value> {
+        let mut m = MapObj::default();
+        for (k, v) in items {
+            let kv = self.eval(k, env)?;
+            let vv = self.eval(v, env)?;
+            self.guard_alloc(m.len() + 1, e.span)?;
+            if !m.insert(kv, vv) {
+                return self.fail("R023", "this value cannot be used as a map key", k.span);
+            }
+        }
+        Ok(Value::Map(Rc::new(RefCell::new(m))))
+    }
+
+    #[inline(never)]
+    fn eval_unary(&mut self, e: &Expr, op: &UnOp, inner: &Expr, env: &Env) -> R<Value> {
+        let prog = self.prog;
+
+        let v = self.eval(inner, env)?;
+        match (op, &v) {
+            (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
+            (UnOp::Neg, Value::Int(i)) => match i.checked_neg() {
+                Some(n) => Ok(Value::Int(n)),
+                None => self.fail("R010", "integer overflow", e.span),
+            },
+            (UnOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
+            (UnOp::Neg, _) => match self.find_method(
+                &v,
+                Lang::Neg.method_name(),
+                Some(prog.defs.lang(Lang::Neg)),
+                None,
+            ) {
+                Some(fid) => self.call_fid(fid, Some(v), vec![], e.span),
+                None => self.fail("R004", "this value cannot be negated", e.span),
+            },
+            _ => self.fail("R001", "unexpected operand", e.span),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_range(
+        &mut self,
+        e: &Expr,
+        start: &Expr,
+        end: &Expr,
+        inclusive: bool,
+        env: &Env,
+    ) -> R<Value> {
+        let (a, b) = (self.eval(start, env)?, self.eval(end, env)?);
+        match (a, b) {
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Range(a, b, inclusive)),
+            _ => self.fail("R001", "a range needs integer bounds", e.span),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_try(&mut self, e: &Expr, inner: &Expr, env: &Env) -> R<Value> {
+        let prog = self.prog;
+
+        let v = self.eval(inner, env)?;
+        if prog.res.result_tries.contains(&e.id) {
+            // `Ok(x)` gives x; `Err(..)` leaves the function with that same error
+            return match &v {
+                Value::Enum(_, vi, Some(_)) if self.is_err_variant(&v, *vi) => {
+                    Err(Ctrl::Return(v.clone()))
+                }
+                Value::Enum(_, _, Some(data)) if data.len() == 1 => Ok(data[0].clone()),
+                _ => self.fail("R001", "`?` expects a `Result`", e.span),
+            };
+        }
+        match v {
+            Value::None => Err(Ctrl::Return(Value::None)),
+            other => Ok(other),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_cast(&mut self, e: &Expr, inner: &Expr, env: &Env) -> R<Value> {
+        let prog = self.prog;
+
+        let v = self.eval(inner, env)?;
+        let target = prog.res.casts.get(&e.id).cloned().unwrap_or(Ty::Error);
+        self.convert(v, &target, e.span)
+    }
+
+    #[inline(never)]
+    fn eval_index(&mut self, e: &Expr, base: &Expr, idx: &Expr, env: &Env) -> R<Value> {
+        let b = self.eval(base, env)?;
+        let i = self.eval(idx, env)?;
+        self.index_get(&b, &i, e.span)
+    }
+
+    #[inline(never)]
+    fn eval_match(
+        &mut self,
+        e: &Expr,
+        scrutinee: &Expr,
+        cases: &[MatchCase],
+        else_block: &Option<Block>,
+        env: &Env,
+    ) -> R<Value> {
+        let v = self.eval(scrutinee, env)?;
+        for (i, case) in cases.iter().enumerate() {
+            let scope = Scope::new(Some(env.clone()));
+            if !self.match_pattern(&case.pattern, &v, e.id, i, &scope)? {
+                continue;
+            }
+            if let Some(g) = &case.guard
+                && !self.eval_bool(g, &scope)?
+            {
+                continue;
+            }
+            return self.exec_stmts(&case.body.stmts, &scope);
+        }
+        match else_block {
+            Some(b) => self.exec_block(b, env),
+            None => Ok(Value::Unit),
         }
     }
 

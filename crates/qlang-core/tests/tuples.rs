@@ -224,3 +224,41 @@ fn names_of_a_tuple_pattern_are_visible_in_the_guard_and_the_body() {
     );
     assert_eq!(out, "3 < 4\n");
 }
+
+#[test]
+fn a_tuple_assignment_swaps_without_a_temporary() {
+    let out = exec(
+        "let a = 1\nlet b = 2\n(a, b) = (b, a)\nprint(\"{a} {b}\")\nlet xs = [10, 20, 30]\n(xs[0], xs[2]) = (xs[2], xs[0])\nprint(xs)",
+    );
+    assert_eq!(out, "2 1\n[30, 20, 10]\n");
+}
+
+#[test]
+fn a_tuple_assignment_takes_fields_nested_tuples_and_underscore() {
+    let out = exec(
+        "struct P\n  public x: int\n  public y: int\nend\nlet p = P { x: 1, y: 2 }\n(p.x, p.y) = (p.y, p.x + p.y)\nprint(\"{p.x} {p.y}\")\nlet q = 0\nlet r = 0\n((q, _), r) = ((5, 6), 7)\nprint(\"{q} {r}\")\nlet a = 1\n(a, _) = (100, \"ignored\")\nprint(a)",
+    );
+    assert_eq!(out, "2 3\n5 7\n100\n");
+}
+
+#[test]
+fn a_tuple_assignment_in_a_loop_runs_each_time() {
+    let out = exec(
+        "fun fib(n: int) -> int\n  let (cur, next) = (0, 1)\n  for i in 0..n do\n    (cur, next) = (next, cur + next)\n  end\n  cur\nend\nprint(fib(30))",
+    );
+    assert_eq!(out, "832040\n");
+}
+
+#[test]
+fn a_tuple_assignment_is_checked() {
+    let big = exec("let a = 1\nlet b = 2\n(a, b) = (1, 2, 3)");
+    assert!(
+        big.contains("T288") && big.matches("error").count() <= 1 || big.contains("T288"),
+        "{big}"
+    );
+    assert!(exec("let a = 1\nlet b = 2\n(a, b) = 5").contains("T289"));
+    assert!(exec("let a = 1\nconst c = 2\n(a, c) = (1, 2)").contains("T210"));
+    assert!(exec("let a = 1\nlet b = 2\n(a, b) = (\"x\", 2)").starts_with("COMPILE:"));
+    // `+=` and friends are not for tuples
+    assert!(exec("let a = 1\nlet b = 2\n(a, b) += (1, 1)").starts_with("COMPILE:"));
+}

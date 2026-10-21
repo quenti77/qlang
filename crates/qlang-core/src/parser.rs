@@ -921,7 +921,24 @@ impl<'a> Parser<'a> {
                     span,
                 );
             }
-            _ => StmtKind::Expr(self.parse_expr()?),
+            _ => {
+                let e = self.parse_expr()?;
+                match e.kind {
+                    // `(a, b) = (b, a)`
+                    ExprKind::Assign {
+                        op: None,
+                        target,
+                        value,
+                    } if matches!(target.kind, ExprKind::Tuple(_)) => {
+                        self.desugar_tuple_assign(*target, *value)
+                    }
+                    kind => StmtKind::Expr(Expr {
+                        id: e.id,
+                        span: e.span,
+                        kind,
+                    }),
+                }
+            }
         };
         let end = self.prev_span();
         Ok(Stmt {
@@ -963,6 +980,57 @@ impl<'a> Parser<'a> {
             );
         }
         Ok(TuplePattern::Tuple(items, start.to(end)))
+    }
+
+    /// `(a, b) = value` as statements: the value goes into a hidden variable (its name has a
+    /// `$`, so it cannot clash with anything the program writes), then each target gets its
+    /// element. The value is fully computed before any target changes, so `(a, b) = (b, a)`
+    /// swaps.
+    fn desugar_tuple_assign(&mut self, target: Expr, value: Expr) -> StmtKind {
+        let ExprKind::Tuple(items) = target.kind else {
+            unreachable!("a tuple target");
+        };
+        let arity = items.len();
+        let hidden = format!("${}", self.fresh_id());
+        let mut stmts = vec![Stmt {
+            span: value.span,
+            kind: StmtKind::Let {
+                doc: None,
+                is_const: false,
+                name: Ident {
+                    name: hidden.clone(),
+                    span: target.span,
+                },
+                ty: None,
+                init: value,
+            },
+        }];
+        for (i, item) in items.into_iter().enumerate() {
+            if matches!(&item.kind, ExprKind::Ident(n, _) if n == "_") {
+                continue; // `_` ignores the element
+            }
+            let span = item.span;
+            let base = self.mk(span, ExprKind::Ident(hidden.clone(), Vec::new()));
+            let element = self.mk(span, ExprKind::TupleField(Box::new(base), i));
+            let kind = if matches!(item.kind, ExprKind::Tuple(_)) {
+                self.desugar_tuple_assign(item, element)
+            } else {
+                let assign = self.mk(
+                    span,
+                    ExprKind::Assign {
+                        op: None,
+                        target: Box::new(item),
+                        value: Box::new(element),
+                    },
+                );
+                StmtKind::Expr(assign)
+            };
+            stmts.push(Stmt { span, kind });
+        }
+        StmtKind::Seq {
+            stmts,
+            arity: Some((arity, target.span)),
+        }
     }
 
     fn parse_let(&mut self) -> PResult<StmtKind> {

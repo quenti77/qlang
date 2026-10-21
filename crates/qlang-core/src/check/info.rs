@@ -142,7 +142,12 @@ impl Collector {
     }
 
     pub fn local(&mut self, name: &ast::Ident, local: &Local, scope: Span) {
-        if name.name == "self" || name.name == "_" || local.orig.is_some() {
+        // `$...` are the hidden variables of a tuple assignment: not for the user to see
+        if name.name == "self"
+            || name.name == "_"
+            || name.name.starts_with('$')
+            || local.orig.is_some()
+        {
             return;
         }
         self.locals.push(RawLocal {

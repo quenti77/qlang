@@ -537,11 +537,12 @@ impl<'a> Interp<'a> {
     fn exec_block(&mut self, b: &Block, env: &Env) -> R<Value> {
         // a block that declares nothing has no variables of its own: run it in the
         // enclosing scope instead of making a new one for every pass through a loop
-        if !b
-            .stmts
-            .iter()
-            .any(|s| matches!(s.kind, StmtKind::Let { .. } | StmtKind::LetTuple { .. }))
-        {
+        if !b.stmts.iter().any(|s| {
+            matches!(
+                s.kind,
+                StmtKind::Let { .. } | StmtKind::LetTuple { .. } | StmtKind::Seq { .. }
+            )
+        }) {
             return self.exec_stmts(&b.stmts, env);
         }
         let scope = Scope::new(Some(env.clone()));
@@ -555,6 +556,10 @@ impl<'a> Interp<'a> {
             StmtKind::Let { name, init, .. } => {
                 let v = self.eval(init, env)?;
                 env.define(&name.name, v);
+                Ok(Value::Unit)
+            }
+            StmtKind::Seq { stmts, .. } => {
+                self.exec_stmts(stmts, env)?;
                 Ok(Value::Unit)
             }
             StmtKind::LetTuple { pattern, init, .. } => {

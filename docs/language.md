@@ -2104,6 +2104,12 @@ qlang serve app.q --port 8080
 curl "http://127.0.0.1:8080/hello?name=Ada"
 ```
 
+Avec `--watch`, le serveur recharge le programme quand l'un de ses fichiers (le principal ou un
+fichier importé) change : la nouvelle version répond à la requête suivante. Une erreur dans le
+nouveau code est affichée et l'ancienne version continue de répondre, jusqu'à la correction. Les
+variables du fichier (comme `visits` plus haut) repartent de leur valeur initiale à chaque
+rechargement. C'est fait pour le développement, pas pour la production.
+
 - **La fonction** s'appelle exactement `handle`, prend une `Request` et renvoie une
   `Response` : la vérification le contrôle avant le démarrage.
 - **La requête** :

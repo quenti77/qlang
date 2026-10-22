@@ -536,3 +536,35 @@ fn a_client_sending_too_slowly_is_cut_off() {
     assert!(closed, "the connection was still open after 40 s");
     assert!(started.elapsed() < std::time::Duration::from_secs(35));
 }
+
+#[test]
+fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
+    let v = |text: &str| {
+        format!("fun handle(req: Request) -> Response\n  Response.text(\"{text}\")\nend\n")
+    };
+    let server = start("watch", &v("one"), &["--watch"]);
+    let path = app_file("watch", &v("one"));
+    let get = |server: &Server| exchange(server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(get(&server).ends_with("one"));
+    let until = |server: &Server, want: &str| {
+        for _ in 0..40 {
+            if get(server).ends_with(want) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    };
+    std::fs::write(&path, v("two")).unwrap();
+    assert!(until(&server, "two"), "the program was not reloaded");
+    // a mistake: the previous version keeps answering
+    std::fs::write(&path, "fun handle(req: Request) -> Response\n  nope\nend\n").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let kept = get(&server);
+    assert!(kept.ends_with("two"), "{kept}");
+    std::fs::write(&path, v("three")).unwrap();
+    assert!(
+        until(&server, "three"),
+        "the fixed program was not reloaded"
+    );
+}

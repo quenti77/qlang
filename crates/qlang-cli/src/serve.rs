@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -45,6 +45,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            "--watch" => app.watch = true,
             "--trust-externs" => app.trust_externs = true,
             "--allow-process" => app.allow_process = true,
             "--extern" => {
@@ -475,6 +476,8 @@ struct AppOptions {
     extern_commands: Vec<String>,
     trust_externs: bool,
     allow_process: bool,
+    /// Reload the program when one of its files changes (`--watch`).
+    watch: bool,
     providers: Vec<crate::providers::Spec>,
     packages: crate::packages::Packages,
 }
@@ -619,8 +622,92 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
     }
 }
 
+/// Bumped by the watcher each time a file of the program changes (`--watch`).
+static RELOAD: AtomicU64 = AtomicU64::new(0);
+/// The last version of `RELOAD` whose outcome was announced (once, not once per worker).
+static ANNOUNCED: AtomicU64 = AtomicU64::new(0);
+/// The files of the running program, for the watcher.
+static WATCHED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// A cheap fingerprint of the watched files: their sizes and modification times.
+fn fingerprint() -> Vec<(String, u64, Option<std::time::SystemTime>)> {
+    let files = WATCHED.lock().map(|f| f.clone()).unwrap_or_default();
+    files
+        .into_iter()
+        .map(|f| match std::fs::metadata(&f) {
+            Ok(m) => (f, m.len(), m.modified().ok()),
+            Err(_) => (f, 0, None),
+        })
+        .collect()
+}
+
+/// Watches the files of the program; a change that stays put for a moment bumps `RELOAD`.
+fn watch_files() {
+    let _ = std::thread::Builder::new().spawn(|| {
+        let mut last = fingerprint();
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+            let now = fingerprint();
+            if now == last {
+                continue;
+            }
+            // editors write a file in several steps: wait for it to settle
+            std::thread::sleep(Duration::from_millis(100));
+            last = fingerprint();
+            RELOAD.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+}
+
+/// Compiles the program as it is now, without running it. The new source when it is sound;
+/// otherwise the mistakes are announced (once) and the running version stays.
+fn reload_check(file: &str, opts: &AppOptions, version: u64) -> Option<String> {
+    let announce = || ANNOUNCED.swap(version, Ordering::SeqCst) != version;
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            if announce() {
+                log(&format!(
+                    "reload: cannot read {file}: {e}; keeping the previous version\n"
+                ));
+            }
+            return None;
+        }
+    };
+    let mut host = crate::TerminalHost {
+        root: opts.root.clone(),
+        rng: 0,
+        db: Default::default(),
+        script_args: opts.script_args.clone(),
+        providers: Default::default(),
+        packages: opts.packages.clone(),
+        assume_externs: true,
+        allow_process: opts.allow_process,
+    };
+    match compile(file, &source, &mut host) {
+        Ok(_) => {
+            if announce() {
+                log("reloaded\n");
+            }
+            Some(source)
+        }
+        Err(e) => {
+            if announce() {
+                log(&e.render());
+                let n = e.diagnostics.len();
+                log(&format!(
+                    "reload: {n} error{}; keeping the previous version\n",
+                    if n == 1 { "" } else { "s" }
+                ));
+            }
+            None
+        }
+    }
+}
+
 /// One interpreter: compiles the program, runs it, then answers requests until told to stop.
 /// `ready` runs once the program has started (the first worker uses it to open the port).
+/// With `--watch` it starts over from the new source when a file has changed.
 fn worker(
     index: usize,
     file: &str,
@@ -629,68 +716,102 @@ fn worker(
     queue: &Arc<Mutex<mpsc::Receiver<Msg>>>,
     ready: impl FnOnce() -> Result<(), ExitCode>,
 ) -> Result<(), ExitCode> {
-    let seed = opts
-        .seed
-        .map(|s| s.wrapping_add(index as u64))
-        .unwrap_or_else(crate::system_entropy);
-    let providers =
-        match crate::providers::Providers::start(&opts.providers, &qlang_core::host::SQL_EXTERNS) {
+    let mut source = source.to_string();
+    let mut ready = Some(ready);
+    let mut seen = RELOAD.load(Ordering::SeqCst);
+    // the request that was taken from the queue just before a reload
+    let mut pending: Option<Job> = None;
+    loop {
+        let seed = opts
+            .seed
+            .map(|s| s.wrapping_add(index as u64))
+            .unwrap_or_else(crate::system_entropy);
+        let providers = match crate::providers::Providers::start(
+            &opts.providers,
+            &qlang_core::host::SQL_EXTERNS,
+        ) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("{e}");
                 return Err(ExitCode::from(1));
             }
         };
-    let mut host = crate::TerminalHost {
-        root: opts.root.clone(),
-        rng: seed,
-        db: Default::default(),
-        script_args: opts.script_args.clone(),
-        providers,
-        packages: opts.packages.clone(),
-        assume_externs: false,
-        allow_process: opts.allow_process,
-    };
-    let program = match compile(file, source, &mut host) {
-        Ok(p) => p,
-        Err(e) => {
-            eprint!("{}", e.render());
-            let n = e.diagnostics.len();
-            eprintln!("\n{n} error{} found", if n == 1 { "" } else { "s" });
-            return Err(ExitCode::from(1));
-        }
-    };
-    if index == 0 {
-        for w in &program.warnings {
-            eprint!("{}", w.render(&program.sources));
-        }
-    }
-    let mut limits = Limits::default();
-    if let Some(n) = opts.max_steps {
-        limits.max_steps = n;
-    }
-    let mut app = match program.start_app(&mut host, limits) {
-        Ok(a) => a,
-        Err(d) => {
-            eprint!("{}", d.render(&program.sources));
-            return Err(ExitCode::from(2));
-        }
-    };
-    ready()?;
-    loop {
-        // only one worker waits on the queue at a time, the others wait for their turn
-        let msg = match queue.lock() {
-            Ok(q) => q.recv(),
-            Err(_) => return Ok(()),
+        let mut host = crate::TerminalHost {
+            root: opts.root.clone(),
+            rng: seed,
+            db: Default::default(),
+            script_args: opts.script_args.clone(),
+            providers,
+            packages: opts.packages.clone(),
+            assume_externs: false,
+            allow_process: opts.allow_process,
         };
-        match msg {
-            Ok(Msg::Job(job)) => {
-                let answer = app
-                    .handle(job.request)
-                    .map_err(|d| d.render(&program.sources));
-                let _ = job.reply.send(answer);
+        let program = match compile(file, &source, &mut host) {
+            Ok(p) => p,
+            Err(e) => {
+                eprint!("{}", e.render());
+                let n = e.diagnostics.len();
+                eprintln!("\n{n} error{} found", if n == 1 { "" } else { "s" });
+                return Err(ExitCode::from(1));
             }
-            Ok(Msg::Stop) | Err(_) => return Ok(()),
+        };
+        if index == 0 {
+            for w in &program.warnings {
+                eprint!("{}", w.render(&program.sources));
+            }
+            if opts.watch {
+                let mut files: Vec<String> = vec![file.to_string()];
+                files.extend(program.sources.files.iter().map(|f| f.name.clone()));
+                files.dedup();
+                if let Ok(mut w) = WATCHED.lock() {
+                    *w = files;
+                }
+            }
+        }
+        let mut limits = Limits::default();
+        if let Some(n) = opts.max_steps {
+            limits.max_steps = n;
+        }
+        let mut app = match program.start_app(&mut host, limits) {
+            Ok(a) => a,
+            Err(d) => {
+                eprint!("{}", d.render(&program.sources));
+                return Err(ExitCode::from(2));
+            }
+        };
+        if let Some(r) = ready.take() {
+            r()?;
+            if opts.watch {
+                watch_files();
+            }
+        }
+        loop {
+            // only one worker waits on the queue at a time, the others wait for their turn
+            let msg = match pending.take() {
+                Some(job) => Ok(Msg::Job(job)),
+                None => match queue.lock() {
+                    Ok(q) => q.recv(),
+                    Err(_) => return Ok(()),
+                },
+            };
+            match msg {
+                Ok(Msg::Job(job)) => {
+                    let now = RELOAD.load(Ordering::SeqCst);
+                    if opts.watch && now != seen {
+                        seen = now;
+                        if let Some(new) = reload_check(file, opts, now) {
+                            source = new;
+                            pending = Some(job);
+                            break;
+                        }
+                    }
+                    let answer = app
+                        .handle(job.request)
+                        .map_err(|d| d.render(&program.sources));
+                    let _ = job.reply.send(answer);
+                }
+                Ok(Msg::Stop) | Err(_) => return Ok(()),
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 # Journal des changements
 
-## À publier
+## 0.37.0
 
 - Performance : une machine à registres typée compile au premier appel les fonctions et les boucles purement numériques (`int`, `float`, `bool`) : `fib(27)` ×4, une boucle `while` de 3 millions de tours ×6,5 à ×8. Le reste s'exécute comme avant, avec les mêmes résultats et les mêmes erreurs (voir `docs/performance.md`). `RunResult::vm_functions` et `Program::run_tree_walker` pour la mesure et la comparaison.
 

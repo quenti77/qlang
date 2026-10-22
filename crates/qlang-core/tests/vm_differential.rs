@@ -75,12 +75,24 @@ fn float_expr(rng: &mut Rng, vars: &[&str], depth: usize) -> String {
     }
     let a = float_expr(rng, vars, depth - 1);
     let b = float_expr(rng, vars, depth - 1);
-    match rng.below(6) {
+    match rng.below(18) {
         0 => format!("({a} + {b})"),
         1 => format!("({a} - {b})"),
         2 => format!("({a} * {b})"),
         3 => format!("({a} / {b})"),
         4 => format!("({a} mod {b})"),
+        5 => format!("({a} ** 2)"),
+        6 => format!("{a}.abs()"),
+        7 => format!("{a}.sqrt()"),
+        8 => format!("{a}.max({b})"),
+        9 => format!("{a}.min({b})"),
+        10 => format!("{a}.sin()"),
+        11 => format!("{a}.ln()"),
+        12 => format!("{a}.atan2({b})"),
+        13 => format!("{a}.clamp(-1.5, 2.5)"),
+        14 => format!("{a}.signum()"),
+        15 => format!("({} as float)", int_expr(rng, &[], 1)),
+        16 => format!("({a} + {})", rng.below(5)),
         _ => format!("(-{a})"),
     }
 }
@@ -90,7 +102,7 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
     let mut out = String::new();
     for _ in 0..1 + rng.below(3) {
         let target = rng.pick(vars);
-        match rng.below(if depth > 0 { 7 } else { 3 }) {
+        match rng.below(if depth > 0 { 8 } else { 3 }) {
             0 => out += &format!("{target} = {}\n", int_expr(rng, vars, 3)),
             1 => out += &format!("{target} += {}\n", int_expr(rng, vars, 2)),
             2 => out += &format!("{target} -= {}\n", int_expr(rng, vars, 2)),
@@ -109,6 +121,22 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
                 out += &format!(
                     "for {k} in 0..{} do\n{}if {target} > 1000000 then break end\nend\n",
                     rng.below(12),
+                    stmts(rng, &inner, depth - 1, false)
+                );
+            }
+            6 if loops => {
+                let k = format!("m{depth}");
+                let mut inner: Vec<&str> = vars.to_vec();
+                inner.push(&k);
+                let step = rng.pick(&["1", "2", "3", "-1", "-2", "0"]);
+                let (lo, hi) = if step.starts_with('-') {
+                    (rng.below(15), 0)
+                } else {
+                    (0, rng.below(15))
+                };
+                out += &format!(
+                    "for {k} in {lo}..{}{hi} step {step} do\n{}end\n",
+                    if rng.below(2) == 0 { "=" } else { "" },
                     stmts(rng, &inner, depth - 1, false)
                 );
             }
@@ -163,6 +191,11 @@ fn program(rng: &mut Rng) -> String {
     src
 }
 
+static FUNCS: [std::sync::atomic::AtomicU64; 2] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+
 static STEPS: [std::sync::atomic::AtomicU64; 2] = [
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
@@ -188,6 +221,16 @@ fn run_both(src: &str) -> (String, String) {
                 } else {
                     prog.run_tree_walker(&mut host, limits)
                 };
+                if vm {
+                    FUNCS[0].fetch_add(
+                        r.vm_functions.0 as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    FUNCS[1].fetch_add(
+                        r.vm_functions.1 as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
                 STEPS[usize::from(vm)].fetch_add(r.steps, std::sync::atomic::Ordering::Relaxed);
                 match r.error {
                     // the step counts differ on purpose: only the kind of error matters then
@@ -218,6 +261,22 @@ fn sweep(seed: u64, count: usize) {
     assert!(
         compiled > count / 2,
         "too few programs compiled: {compiled}/{count}"
+    );
+    // the machine really ran them: it counts fewer steps than the tree walker
+    let (walker, machine) = (
+        STEPS[0].load(std::sync::atomic::Ordering::Relaxed),
+        STEPS[1].load(std::sync::atomic::Ordering::Relaxed),
+    );
+    let (yes, no) = (
+        FUNCS[0].load(std::sync::atomic::Ordering::Relaxed),
+        FUNCS[1].load(std::sync::atomic::Ordering::Relaxed),
+    );
+    eprintln!(
+        "programs: {compiled}/{count}; steps machine {machine}, tree walker {walker}; functions compiled {yes}, refused {no}"
+    );
+    assert!(
+        machine < walker,
+        "the machine was not used ({machine} vs {walker} steps)"
     );
 }
 

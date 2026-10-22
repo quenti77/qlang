@@ -2,6 +2,7 @@
 
 ## Prochaine version
 
+- **Annotations** `#[Route("/users", method: "GET")]` sur les fonctions, méthodes, structures, champs, énumérations, variantes, traits et paramètres. Une annotation est une structure déclarée avec `#[annotation]` ; ses arguments sont des littéraux, vérifiés à la compilation (`T290`–`T295`, `P051`). La réflexion, qui les lira, viendra ensuite.
 - `qlang serve app.q --watch` : le programme est rechargé quand un de ses fichiers change ; une erreur de compilation est affichée et l'ancienne version continue de répondre.
 
 ## 0.39.0

@@ -4,11 +4,16 @@
 use qlang_core::check::compile;
 use qlang_core::host::{Limits, MemoryHost};
 
-/// Runs on a small stack (1 MB, like a browser's): a recursion per level would not fit.
+/// Runs on a small stack (1 MB, like a browser's): a recursion per level would not fit. The
+/// frames of a debug build are several times larger, so it gets more room.
 fn exec_small_stack(src: &str, max_steps: u64) -> String {
     let src = src.to_string();
     std::thread::Builder::new()
-        .stack_size(1 << 20)
+        .stack_size(if cfg!(debug_assertions) {
+            6 << 20
+        } else {
+            1 << 20
+        })
         .spawn(move || {
             let mut host = MemoryHost::default();
             let prog = match compile("main.q", &src, &mut host) {

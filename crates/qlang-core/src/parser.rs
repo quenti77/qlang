@@ -39,6 +39,9 @@ pub struct Parser<'a> {
     line_starts: Vec<usize>,
     /// Current nesting of expressions, blocks and types (bounded).
     depth: u32,
+    /// Annotations read, waiting for the declaration they belong to, and where the first began.
+    pending: Vec<Annotation>,
+    pending_start: Option<Span>,
     pub diags: Vec<Diagnostic>,
 }
 
@@ -81,7 +84,65 @@ impl<'a> Parser<'a> {
                 .chain(src.match_indices('\n').map(|(i, _)| i + 1))
                 .collect(),
             depth: 0,
+            pending: Vec::new(),
+            pending_start: None,
             diags: Vec::new(),
+        }
+    }
+
+    // ----------------------------------------------------------- annotations
+
+    /// Reads the `#[...]` annotations here, if any; they wait in `pending`.
+    fn parse_annotations(&mut self) -> PResult<()> {
+        while self.at(&Tok::Hash) {
+            let hash = self.bump().span;
+            self.pending_start.get_or_insert(hash);
+            self.expect(&Tok::LBracket)?;
+            self.nl.push(false);
+            let r: PResult<()> = (|| {
+                loop {
+                    let first = self.expect_ident()?;
+                    let mut path = vec![first];
+                    while self.eat(&Tok::Dot) {
+                        path.push(self.expect_ident()?);
+                    }
+                    let mut args = Vec::new();
+                    let mut end = path.last().map(|i| i.span).unwrap_or(hash);
+                    if self.eat(&Tok::LParen) {
+                        let (a, e) = self.parse_call_args()?;
+                        args = a;
+                        end = e;
+                    }
+                    self.pending.push(Annotation {
+                        span: path[0].span.to(end),
+                        path,
+                        args,
+                    });
+                    if !self.eat(&Tok::Comma) || self.at(&Tok::RBracket) {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RBracket)?;
+                Ok(())
+            })();
+            self.nl.pop();
+            r?;
+            self.skip_newlines();
+        }
+        Ok(())
+    }
+
+    /// The annotations read so far, and where the first began (the documentation comment is
+    /// above it).
+    fn take_annotations(&mut self) -> (Vec<Annotation>, Option<Span>) {
+        (std::mem::take(&mut self.pending), self.pending_start.take())
+    }
+
+    /// Where a declaration starting at `start` really starts: at its first annotation.
+    fn doc_start(start: Span, annotations_at: Option<Span>) -> Span {
+        match annotations_at {
+            Some(a) if a.start < start.start => a,
+            _ => start,
         }
     }
 
@@ -303,6 +364,31 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_item(&mut self) -> PResult<Item> {
+        self.parse_annotations()?;
+        let first = self.pending.first().map(|a| a.span);
+        let item = match self.parse_item_inner() {
+            Ok(item) => item,
+            Err(()) => {
+                self.pending.clear();
+                self.pending_start = None;
+                return Err(());
+            }
+        };
+        if let Some(span) = first
+            && !self.pending.is_empty()
+        {
+            self.pending.clear();
+            self.pending_start = None;
+            return self.error_at(
+                "P051",
+                "annotations only apply to a `fun`, `struct`, `enum`, `trait` or a member of one",
+                span,
+            );
+        }
+        Ok(item)
+    }
+
+    fn parse_item_inner(&mut self) -> PResult<Item> {
         match self.peek() {
             Tok::Import => self.parse_import().map(Item::Import),
             Tok::Export => self.parse_export().map(Item::Export),
@@ -421,6 +507,11 @@ impl<'a> Parser<'a> {
     /// `fun name<T>(params) -> ret` and, if `require_body`, its block and `end`.
     fn parse_fun(&mut self, named: bool, body: BodyMode) -> PResult<FunDecl> {
         let start = self.expect(&Tok::Fun)?;
+        let (annotations, annotations_at) = if named {
+            self.take_annotations()
+        } else {
+            (Vec::new(), None)
+        };
         let name = if named {
             Some(self.expect_ident()?)
         } else {
@@ -437,6 +528,7 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         let r: PResult<()> = (|| {
             while !self.at(&Tok::RParen) {
+                self.parse_annotations()?;
                 if self.at(&Tok::SelfKw) {
                     let span = self.bump().span;
                     if !params.is_empty() || has_self {
@@ -458,7 +550,12 @@ impl<'a> Parser<'a> {
                     }
                     self.bump();
                     let ty = self.parse_type()?;
-                    params.push(Param { name: pname, ty });
+                    let (annotations, _) = self.take_annotations();
+                    params.push(Param {
+                        annotations,
+                        name: pname,
+                        ty,
+                    });
                 }
                 if !self.eat(&Tok::Comma) {
                     break;
@@ -493,8 +590,13 @@ impl<'a> Parser<'a> {
             (None, self.prev_span())
         };
         let id = self.fresh_id();
-        let doc = if named { self.take_doc(start) } else { None };
+        let doc = if named {
+            self.take_doc(Self::doc_start(start, annotations_at))
+        } else {
+            None
+        };
         Ok(FunDecl {
+            annotations,
             doc,
             id,
             span: start.to(end_span),
@@ -528,7 +630,8 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self) -> PResult<StructDecl> {
         let start = self.expect(&Tok::Struct)?;
-        let doc = self.take_doc(start);
+        let (annotations, annotations_at) = self.take_annotations();
+        let doc = self.take_doc(Self::doc_start(start, annotations_at));
         let name = self.expect_ident()?;
         let tparams = if self.at(&Tok::Lt) {
             self.parse_type_params()?
@@ -562,6 +665,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(&Tok::End)?;
         Ok(StructDecl {
+            annotations,
             doc,
             span: start.to(end),
             name,
@@ -572,8 +676,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_field(&mut self) -> PResult<FieldDecl> {
+        self.parse_annotations()?;
         let first = self.peek_span();
-        let doc = self.take_doc(first);
+        let (annotations, annotations_at) = self.take_annotations();
+        let doc = self.take_doc(Self::doc_start(first, annotations_at));
         let vis = self.parse_visibility();
         let is_static = self.eat(&Tok::Static);
         let name = self.expect_ident()?;
@@ -586,6 +692,7 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(FieldDecl {
+            annotations,
             doc,
             vis,
             is_static,
@@ -617,6 +724,7 @@ impl<'a> Parser<'a> {
             }
             let before = self.pos;
             let r: PResult<MethodDecl> = (|| {
+                self.parse_annotations()?;
                 let vis = self.parse_visibility();
                 let is_override = self.eat(&Tok::Override);
                 if !self.at(&Tok::Fun) {
@@ -654,7 +762,8 @@ impl<'a> Parser<'a> {
 
     fn parse_trait(&mut self) -> PResult<TraitDecl> {
         let start = self.expect(&Tok::Trait)?;
-        let doc = self.take_doc(start);
+        let (annotations, annotations_at) = self.take_annotations();
+        let doc = self.take_doc(Self::doc_start(start, annotations_at));
         let name = self.expect_ident()?;
         let tparams = if self.at(&Tok::Lt) {
             self.parse_type_params()?
@@ -668,7 +777,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             let before = self.pos;
-            let r = if self.at(&Tok::Fun) {
+            let r = if self.parse_annotations().is_err() {
+                Err(())
+            } else if self.at(&Tok::Fun) {
                 self.parse_fun(true, BodyMode::Optional)
             } else {
                 self.unexpected("a method signature (`fun name(...)`) or `end`")
@@ -688,6 +799,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(&Tok::End)?;
         Ok(TraitDecl {
+            annotations,
             doc,
             span: start.to(end),
             name,
@@ -698,7 +810,8 @@ impl<'a> Parser<'a> {
 
     fn parse_enum(&mut self) -> PResult<EnumDecl> {
         let start = self.expect(&Tok::Enum)?;
-        let doc = self.take_doc(start);
+        let (annotations, annotations_at) = self.take_annotations();
+        let doc = self.take_doc(Self::doc_start(start, annotations_at));
         let name = self.expect_ident()?;
         let tparams = if self.at(&Tok::Lt) {
             self.parse_type_params()?
@@ -712,9 +825,14 @@ impl<'a> Parser<'a> {
                 break;
             }
             let before = self.pos;
+            if self.parse_annotations().is_err() {
+                self.sync(&[Tok::End]);
+                continue;
+            }
             let first = self.peek_span();
-            let variant_doc = self.take_doc(first);
-            match self.parse_variant(variant_doc) {
+            let (variant_annotations, at) = self.take_annotations();
+            let variant_doc = self.take_doc(Self::doc_start(first, at));
+            match self.parse_variant(variant_doc, variant_annotations) {
                 Ok(v) => {
                     variants.push(v);
                     if !self.end_of_stmt(&[Tok::End]) {
@@ -729,6 +847,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(&Tok::End)?;
         Ok(EnumDecl {
+            annotations,
             doc,
             span: start.to(end),
             name,
@@ -738,7 +857,11 @@ impl<'a> Parser<'a> {
     }
 
     /// `Name` or `Name(field: type, ...)`.
-    fn parse_variant(&mut self, doc: Option<Rc<str>>) -> PResult<VariantDecl> {
+    fn parse_variant(
+        &mut self,
+        doc: Option<Rc<str>>,
+        annotations: Vec<Annotation>,
+    ) -> PResult<VariantDecl> {
         let name = self.expect_ident()?;
         let mut fields = Vec::new();
         if self.at(&Tok::LParen) {
@@ -760,7 +883,11 @@ impl<'a> Parser<'a> {
                     }
                     self.bump();
                     let ty = self.parse_type()?;
-                    fields.push(Param { name: fname, ty });
+                    fields.push(Param {
+                        annotations: Vec::new(),
+                        name: fname,
+                        ty,
+                    });
                     if !self.eat(&Tok::Comma) {
                         break;
                     }
@@ -771,7 +898,12 @@ impl<'a> Parser<'a> {
             self.nl.pop();
             r?;
         }
-        Ok(VariantDecl { name, doc, fields })
+        Ok(VariantDecl {
+            annotations,
+            name,
+            doc,
+            fields,
+        })
     }
 
     // ---------------------------------------------------------------- blocks

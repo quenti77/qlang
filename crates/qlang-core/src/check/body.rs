@@ -5,7 +5,7 @@ use super::*;
 use crate::ast::{Ident, Item};
 
 impl Checker {
-    fn reset_body_state(&mut self, m: ModId) {
+    pub(super) fn reset_body_state(&mut self, m: ModId) {
         self.cur_mod = m;
         self.scopes.clear();
         self.tparam_scope.clear();
@@ -18,6 +18,8 @@ impl Checker {
 
     pub(crate) fn check_module_body(&mut self, m: ModId) {
         let ast = self.modules[m].ast.clone();
+        self.reset_body_state(m);
+        self.check_annotations(&ast);
         self.reset_body_state(m);
 
         // top-level statements, in order

@@ -64,14 +64,26 @@ pub struct TypeParam {
     pub bounds: Vec<TypeExpr>,
 }
 
+/// `#[Route("/users", method: "GET")]`: a note on a declaration, read by the checker and
+/// (through reflection) by the program.
+#[derive(Debug)]
+pub struct Annotation {
+    pub span: Span,
+    /// The name of the annotation struct: `Route` or `m.Route`.
+    pub path: Vec<Ident>,
+    pub args: Vec<CallArg>,
+}
+
 #[derive(Debug)]
 pub struct Param {
+    pub annotations: Vec<Annotation>,
     pub name: Ident,
     pub ty: TypeExpr,
 }
 
 #[derive(Debug)]
 pub struct FunDecl {
+    pub annotations: Vec<Annotation>,
     /// The documentation comment (`--" ... --"`) right above it.
     pub doc: Option<Rc<str>>,
     pub id: NodeId,
@@ -97,6 +109,7 @@ pub enum Visibility {
 
 #[derive(Debug)]
 pub struct FieldDecl {
+    pub annotations: Vec<Annotation>,
     pub doc: Option<Rc<str>>,
     pub vis: Option<Visibility>,
     pub is_static: bool,
@@ -107,6 +120,7 @@ pub struct FieldDecl {
 
 #[derive(Debug)]
 pub struct StructDecl {
+    pub annotations: Vec<Annotation>,
     pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
@@ -134,6 +148,7 @@ pub struct ImplDecl {
 
 #[derive(Debug)]
 pub struct TraitDecl {
+    pub annotations: Vec<Annotation>,
     pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
@@ -143,6 +158,7 @@ pub struct TraitDecl {
 
 #[derive(Debug)]
 pub struct EnumDecl {
+    pub annotations: Vec<Annotation>,
     pub doc: Option<Rc<str>>,
     pub span: Span,
     pub name: Ident,
@@ -153,6 +169,7 @@ pub struct EnumDecl {
 /// `Circle(radius: float)` or `Empty`.
 #[derive(Debug)]
 pub struct VariantDecl {
+    pub annotations: Vec<Annotation>,
     pub name: Ident,
     /// The documentation comment right above it.
     pub doc: Option<Rc<str>>,

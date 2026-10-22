@@ -116,11 +116,19 @@ fichier (l'appelée pourrait la changer).
 | Programme | avant | après | gain |
 | --- | --- | --- | --- |
 | `fib(27)` | 0,13 s | 0,03 s | ×4 |
-| boucle de 3 millions de tours (`loop.q`, au niveau du fichier) | 0,50 s | 0,08 s | ×6,5 |
-| boucles numériques dans des fonctions (`numloop.q`) | 0,76 s | 0,10 s | ×7,8 |
-| tableaux de nombres : crible, sommes préfixes, parcours (`numarray.q`) | 2,0 s | 0,45 s | ×4,5 |
-| 400 000 ajouts et lectures de tableau (`array.q`) | 0,12 s | 0,03 s | ×4 |
+| boucle de 3 millions de tours (`loop.q`, au niveau du fichier) | 0,50 s | 0,05 s | ×10 |
+| boucles numériques dans des fonctions (`numloop.q`) | 0,76 s | 0,07 s | ×10 |
+| tableaux de nombres : crible, sommes préfixes, parcours (`numarray.q`) | 2,0 s | 0,36 s | ×5,5 |
+| 400 000 ajouts et lectures de tableau (`array.q`) | 0,12 s | 0,03 s | ×4,5 |
 | dictionnaires, chaînes, structures | | | ×1,0 |
+
+**Les instructions elles-mêmes.** Trois réglages sur la boucle d'exécution de la machine (environ
+×1,5 de plus sur les boucles) : les constantes qui servent d'opérandes sont chargées une fois dans
+des registres au début de la fonction ou de la boucle ; une comparaison suivie d'un saut
+(`while i < n`, `if a == b`, `for`) est une seule instruction (`JnLtI`, `ForCheck`...) ; les pas
+d'évaluation ne sont plus comptés à chaque instruction mais à chaque tour de boucle et à chaque
+appel, ce qui borne tout aussi bien une boucle infinie ou une récursion sans fin. Ce qui reste
+est surtout le coût de la division (`mod`, `div`) et de l'aiguillage des instructions.
 
 **Ce qui est garanti.** Les deux moteurs donnent le même résultat : mêmes sorties, mêmes erreurs
 (`R010` dépassement, `R011` division par zéro, `R013`, `R014`, `R031`...), mêmes lignes et mêmes

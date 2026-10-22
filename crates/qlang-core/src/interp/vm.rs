@@ -14,6 +14,17 @@ use std::cell::Cell;
 
 type Reg = u16;
 
+/// A comparison.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Cmp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
 /// The kind of the elements of an array of numbers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Ety {
@@ -80,14 +91,6 @@ enum Op {
         base: Reg,
         site: u32,
     },
-    /// `for`: whether `cnt` is still in the range (`step` > 0 counts up, else down).
-    ForTest {
-        dst: Reg,
-        cnt: Reg,
-        lim: Reg,
-        step: Reg,
-        incl: bool,
-    },
     /// `cnt += step`, or jump to the end of the loop when that overflows.
     ForNext {
         cnt: Reg,
@@ -116,6 +119,27 @@ enum Op {
     EqF(Reg, Reg, Reg),
     NeF(Reg, Reg, Reg),
     Jmp(u32),
+    /// Jump when the comparison is false (a test and its jump in one instruction).
+    JnLtI(Reg, Reg, u32),
+    JnLeI(Reg, Reg, u32),
+    JnGtI(Reg, Reg, u32),
+    JnGeI(Reg, Reg, u32),
+    JnEqI(Reg, Reg, u32),
+    JnNeI(Reg, Reg, u32),
+    JnF {
+        a: Reg,
+        b: Reg,
+        t: u32,
+        cmp: Cmp,
+    },
+    /// `for`: leave the loop when `cnt` is out of the range.
+    ForCheck {
+        cnt: Reg,
+        lim: Reg,
+        step: Reg,
+        incl: bool,
+        exit: u32,
+    },
     /// Jump when the register is false.
     JmpF(Reg, u32),
     /// Jump when the register is true.
@@ -300,6 +324,10 @@ struct Gen<'a> {
     has_call: bool,
     /// Tuples that were only taken apart (`(a, b) = (b, a + b)`): the registers of their elements.
     tuples: Vec<(String, Vec<(Reg, Ty)>)>,
+    /// Constants used as operands: kept in registers loaded once, at the start. First pass: the
+    /// ones met; second pass: `consts_ready`, each with its register.
+    consts: Vec<(i64, Reg)>,
+    consts_ready: bool,
 }
 
 enum Access {
@@ -333,9 +361,78 @@ impl Gen<'_> {
 
     fn patch(&mut self, at: usize, target: u32) {
         match &mut self.ops[at] {
-            Op::Jmp(t) | Op::JmpF(_, t) | Op::JmpT(_, t) => *t = target,
+            Op::Jmp(t)
+            | Op::JmpF(_, t)
+            | Op::JmpT(_, t)
+            | Op::JnLtI(_, _, t)
+            | Op::JnLeI(_, _, t)
+            | Op::JnGtI(_, _, t)
+            | Op::JnGeI(_, _, t)
+            | Op::JnEqI(_, _, t)
+            | Op::JnNeI(_, _, t)
+            | Op::JnF { t, .. }
+            | Op::ForCheck { exit: t, .. } => *t = target,
             _ => {}
         }
+    }
+
+    /// A jump taken when `cond` is false: the comparison and the jump in one instruction
+    /// when `cond` is a comparison of two numbers. Returns the jump, to patch.
+    fn jump_if_false(&mut self, cond: &Expr) -> Option<usize> {
+        let mark = self.top;
+        let (len, slen) = (self.ops.len(), self.spans.len());
+        if let ExprKind::Binary(
+            op @ (BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq | BinOp::Eq | BinOp::NotEq),
+            l,
+            r,
+        ) = &cond.kind
+        {
+            let (a, ta) = self.value(l)?;
+            let (b, tb) = self.value(r)?;
+            let cmp = match op {
+                BinOp::Lt => Cmp::Lt,
+                BinOp::LtEq => Cmp::Le,
+                BinOp::Gt => Cmp::Gt,
+                BinOp::GtEq => Cmp::Ge,
+                BinOp::Eq => Cmp::Eq,
+                _ => Cmp::Ne,
+            };
+            let fused = match (&ta, &tb) {
+                (Ty::Int, Ty::Int) => Some(match cmp {
+                    Cmp::Lt => Op::JnLtI(a, b, 0),
+                    Cmp::Le => Op::JnLeI(a, b, 0),
+                    Cmp::Gt => Op::JnGtI(a, b, 0),
+                    Cmp::Ge => Op::JnGeI(a, b, 0),
+                    Cmp::Eq => Op::JnEqI(a, b, 0),
+                    Cmp::Ne => Op::JnNeI(a, b, 0),
+                }),
+                (Ty::Bool, Ty::Bool) if matches!(cmp, Cmp::Eq | Cmp::Ne) => {
+                    Some(if cmp == Cmp::Eq {
+                        Op::JnEqI(a, b, 0)
+                    } else {
+                        Op::JnNeI(a, b, 0)
+                    })
+                }
+                (Ty::Float, Ty::Float) => Some(Op::JnF { a, b, t: 0, cmp }),
+                _ => None,
+            };
+            if let Some(op) = fused {
+                let at = self.emit(op, cond.span);
+                self.top = mark;
+                return Some(at);
+            }
+            // mixed numbers: the general way (the operands are compiled again)
+            self.ops.truncate(len);
+            self.spans.truncate(slen);
+            self.top = mark;
+        }
+        let (c, tc) = self.value(cond)?;
+        if tc != Ty::Bool {
+            return None;
+        }
+        let at = self.emit(Op::JmpF(c, 0), cond.span);
+        self.top = mark;
+        Some(at)
     }
 
     /// How the variable named at this node is reached: a register, or a module variable.
@@ -431,6 +528,22 @@ impl Gen<'_> {
             && let Some(Access::Reg(r, t)) = self.access(e, false)
         {
             return Some((r, t));
+        }
+        // a literal operand lives in a register of its own, loaded once
+        let literal = match &e.kind {
+            ExprKind::Int(v) => Some((*v, Ty::Int)),
+            ExprKind::Float(v) => Some((v.to_bits() as i64, Ty::Float)),
+            ExprKind::Bool(b) => Some((i64::from(*b), Ty::Bool)),
+            _ => None,
+        };
+        if let Some((bits, ty)) = literal {
+            if self.consts_ready {
+                if let Some((_, r)) = self.consts.iter().find(|(b, _)| *b == bits) {
+                    return Some((*r, ty));
+                }
+            } else if !self.consts.iter().any(|(b, _)| *b == bits) {
+                self.consts.push((bits, 0));
+            }
         }
         let dst = self.alloc()?;
         let ty = self.into(e, dst)?;
@@ -618,13 +731,7 @@ impl Gen<'_> {
                 let mut ends = Vec::new();
                 let mut ty: Option<Ty> = None;
                 for (cond, block) in branches {
-                    let mark = self.top;
-                    let (c, tc) = self.value(cond)?;
-                    if tc != Ty::Bool {
-                        return None;
-                    }
-                    let skip = self.emit(Op::JmpF(c, 0), cond.span);
-                    self.top = mark;
+                    let skip = self.jump_if_false(cond)?;
                     let t = self.block(block, Some(dst))?;
                     if *ty.get_or_insert(t.clone()) != t {
                         return None;
@@ -995,13 +1102,7 @@ impl Gen<'_> {
             }
             StmtKind::While { cond, body } => {
                 let start = self.here();
-                let mark = self.top;
-                let (c, tc) = self.value(cond)?;
-                if tc != Ty::Bool {
-                    return None;
-                }
-                let exit = self.emit(Op::JmpF(c, 0), cond.span);
-                self.top = mark;
+                let exit = self.jump_if_false(cond)?;
                 self.loops.push(LoopCtx::default());
                 self.block(body, None)?;
                 let ctx = self.loops.pop()?;
@@ -1122,19 +1223,17 @@ impl Gen<'_> {
                     }
                 }
                 self.emit(Op::StepCheck(stp), span);
-                let test = self.alloc()?;
                 let head = self.here();
-                self.emit(
-                    Op::ForTest {
-                        dst: test,
+                let exit = self.emit(
+                    Op::ForCheck {
                         cnt,
                         lim,
                         step: stp,
                         incl: *inclusive,
+                        exit: 0,
                     },
                     span,
                 );
-                let exit = self.emit(Op::JmpF(test, 0), span);
                 self.scopes.push(vec![]);
                 let v = self.alloc()?;
                 self.scopes.last_mut()?.push((var.name.clone(), v, Ty::Int));
@@ -1241,13 +1340,7 @@ impl Gen<'_> {
             } => {
                 let mut ends = Vec::new();
                 for (cond, block) in branches {
-                    let m = self.top;
-                    let (c, tc) = self.value(cond)?;
-                    if tc != Ty::Bool {
-                        return None;
-                    }
-                    let skip = self.emit(Op::JmpF(c, 0), cond.span);
-                    self.top = m;
+                    let skip = self.jump_if_false(cond)?;
                     self.block(block, None)?;
                     ends.push(self.emit(Op::Jmp(0), e.span));
                     let next = self.here();
@@ -1307,6 +1400,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
         frees: Vec::new(),
         has_call: false,
         tuples: Vec::new(),
+        consts: Vec::new(),
+        consts_ready: false,
     };
     match unit {
         Unit::Fn(f) => {
@@ -1322,21 +1417,40 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             {
                 return None;
             }
-            let mut g = new_gen(def.ret.clone(), false);
-            for (p, t) in decl.params.iter().zip(&def.params) {
-                let r = g.alloc()?;
-                g.scopes[0].push((p.name.name.clone(), r, t.clone()));
-            }
-            if def.ret == Ty::Unit {
-                g.block(body, None)?;
-                g.emit(Op::RetUnit, decl.span);
-            } else {
-                let res = g.alloc()?;
-                if g.block(body, Some(res))? != def.ret {
-                    return None;
+            // `consts`: the constants the first pass met, kept in registers in the second
+            let attempt = |consts: Option<&[i64]>| -> Option<Gen> {
+                let mut g = new_gen(def.ret.clone(), false);
+                for (p, t) in decl.params.iter().zip(&def.params) {
+                    let r = g.alloc()?;
+                    g.scopes[0].push((p.name.name.clone(), r, t.clone()));
                 }
-                g.emit(Op::Ret(res), decl.span);
-            }
+                if let Some(list) = consts {
+                    for &bits in list {
+                        let r = g.alloc()?;
+                        g.consts.push((bits, r));
+                        g.emit(Op::ConstI(r, bits), decl.span);
+                    }
+                    g.consts_ready = true;
+                }
+                if def.ret == Ty::Unit {
+                    g.block(body, None)?;
+                    g.emit(Op::RetUnit, decl.span);
+                } else {
+                    let res = g.alloc()?;
+                    if g.block(body, Some(res))? != def.ret {
+                        return None;
+                    }
+                    g.emit(Op::Ret(res), decl.span);
+                }
+                Some(g)
+            };
+            let first = attempt(None)?;
+            let g = if first.consts.is_empty() {
+                first
+            } else {
+                let list: Vec<i64> = first.consts.iter().map(|c| c.0).collect();
+                attempt(Some(&list))?
+            };
             Some((
                 Code {
                     name: def.name.clone(),
@@ -1375,6 +1489,14 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             }
             g.top = g.frees.len();
             g.max = g.top;
+            if !probe.consts.is_empty() {
+                for &(bits, _) in &probe.consts {
+                    let r = g.alloc()?;
+                    g.consts.push((bits, r));
+                    g.emit(Op::ConstI(r, bits), s.span);
+                }
+                g.consts_ready = true;
+            }
             g.stmt(s)?;
             g.emit(Op::RetUnit, s.span);
             // a call could change a module variable the loop keeps in a register
@@ -1664,7 +1786,6 @@ impl Interp<'_> {
         loop {
             let op = code.ops[pc];
             pc += 1;
-            self.steps += 1;
             match op {
                 Op::ConstI(d, v) => r!(d) = v,
                 Op::Mov(d, a) => r!(d) = r!(a),
@@ -1905,22 +2026,6 @@ impl Interp<'_> {
                     }
                 }
                 Op::IncI(a) => r!(a) += 1,
-                Op::ForTest {
-                    dst,
-                    cnt,
-                    lim,
-                    step,
-                    incl,
-                } => {
-                    let (i, end, st) = (r!(cnt), r!(lim), r!(step));
-                    r!(dst) = i64::from(if st > 0 {
-                        if incl { i <= end } else { i < end }
-                    } else if incl {
-                        i >= end
-                    } else {
-                        i > end
-                    });
-                }
                 Op::ForNext { cnt, step, exit } => match r!(cnt).checked_add(r!(step)) {
                     Some(v) => r!(cnt) = v,
                     None => pc = exit as usize,
@@ -1965,6 +2070,8 @@ impl Interp<'_> {
                 Op::NeF(d, a, b) => r!(d) = i64::from(fl!(a) != fl!(b)),
                 Op::Jmp(t) => {
                     if (t as usize) < pc {
+                        // a step is counted for each turn of a loop and each call
+                        self.steps += 4;
                         if self.steps > self.limits.max_steps {
                             fail!(
                                 "R900",
@@ -1977,6 +2084,69 @@ impl Interp<'_> {
                         }
                     }
                     pc = t as usize;
+                }
+                Op::JnLtI(a, b, t) => {
+                    if r!(a) >= r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnLeI(a, b, t) => {
+                    if r!(a) > r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGtI(a, b, t) => {
+                    if r!(a) <= r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGeI(a, b, t) => {
+                    if r!(a) < r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnEqI(a, b, t) => {
+                    if r!(a) != r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnNeI(a, b, t) => {
+                    if r!(a) == r!(b) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnF { a, b, t, cmp } => {
+                    let (x, y) = (fl!(a), fl!(b));
+                    let holds = match cmp {
+                        Cmp::Lt => x < y,
+                        Cmp::Le => x <= y,
+                        Cmp::Gt => x > y,
+                        Cmp::Ge => x >= y,
+                        Cmp::Eq => x == y,
+                        Cmp::Ne => x != y,
+                    };
+                    if !holds {
+                        pc = t as usize;
+                    }
+                }
+                Op::ForCheck {
+                    cnt,
+                    lim,
+                    step,
+                    incl,
+                    exit,
+                } => {
+                    let (i, end, st) = (r!(cnt), r!(lim), r!(step));
+                    let inside = if st > 0 {
+                        if incl { i <= end } else { i < end }
+                    } else if incl {
+                        i >= end
+                    } else {
+                        i > end
+                    };
+                    if !inside {
+                        pc = exit as usize;
+                    }
                 }
                 Op::JmpF(c, t) => {
                     if r!(c) == 0 {
@@ -1993,6 +2163,7 @@ impl Interp<'_> {
                     base: b,
                     dst,
                 } => {
+                    self.steps += 4;
                     if self.steps > self.limits.max_steps {
                         fail!(
                             "R900",

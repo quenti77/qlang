@@ -543,6 +543,7 @@ fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
         format!("fun handle(req: Request) -> Response\n  Response.text(\"{text}\")\nend\n")
     };
     let server = start("watch", &v("one"), &["--watch"]);
+    // the texts differ in length: a file system with a coarse clock may keep the same time
     let path = app_file("watch", &v("one"));
     let get = |server: &Server| exchange(server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(get(&server).ends_with("one"));
@@ -555,16 +556,16 @@ fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
         }
         false
     };
-    std::fs::write(&path, v("two")).unwrap();
-    assert!(until(&server, "two"), "the program was not reloaded");
+    std::fs::write(&path, v("second")).unwrap();
+    assert!(until(&server, "second"), "the program was not reloaded");
     // a mistake: the previous version keeps answering
     std::fs::write(&path, "fun handle(req: Request) -> Response\n  nope\nend\n").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1000));
     let kept = get(&server);
-    assert!(kept.ends_with("two"), "{kept}");
-    std::fs::write(&path, v("three")).unwrap();
+    assert!(kept.ends_with("second"), "{kept}");
+    std::fs::write(&path, v("third one")).unwrap();
     assert!(
-        until(&server, "three"),
+        until(&server, "third one"),
         "the fixed program was not reloaded"
     );
 }

@@ -4,6 +4,7 @@
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
 mod externs;
+mod vm;
 
 use crate::ast::*;
 use crate::check::Program;
@@ -32,12 +33,19 @@ pub struct RunResult {
 impl Program {
     /// Run the program. Output and input go through `host`.
     pub fn run(&self, host: &mut dyn Host, limits: Limits) -> RunResult {
-        run(self, host, limits)
+        run(self, host, limits, true)
+    }
+
+    /// Like [`Program::run`], but every function goes through the tree walker (the typed
+    /// register machine is not used): to check that both give the same results.
+    pub fn run_tree_walker(&self, host: &mut dyn Host, limits: Limits) -> RunResult {
+        run(self, host, limits, false)
     }
 }
 
-pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits) -> RunResult {
+pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> RunResult {
     let mut it = Interp::new(prog, host, limits);
+    it.vm_enabled = vm;
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
     let mut exit_code = None;
@@ -356,6 +364,12 @@ struct Interp<'a> {
     slots: Vec<u32>,
     /// Nesting of the comparison in progress (`values_equal`, `order`).
     cmp_depth: usize,
+    /// The typed register machine (`interp/vm.rs`): what became of each function, the code of
+    /// those that were compiled, and the registers of the call in progress.
+    vm_state: Vec<vm::VmState>,
+    vm_codes: Vec<Rc<vm::Code>>,
+    vm_stack: Vec<i64>,
+    vm_enabled: bool,
 }
 
 /// Values nested deeper than this cannot be compared (`R005`).
@@ -382,6 +396,10 @@ impl<'a> Interp<'a> {
             last_ulid: 0,
             slots: Vec::new(),
             cmp_depth: 0,
+            vm_state: Vec::new(),
+            vm_codes: Vec::new(),
+            vm_stack: Vec::new(),
+            vm_enabled: true,
         }
     }
 
@@ -1281,6 +1299,9 @@ impl<'a> Interp<'a> {
         args: Vec<Value>,
         span: Span,
     ) -> R<Value> {
+        if let Some(r) = self.try_vm(fid, &this, &args, span) {
+            return r;
+        }
         let prog = self.prog;
         let def = &prog.defs.fns[fid];
         let decl = def.decl.clone().expect("function without body");

@@ -78,7 +78,55 @@ Mesuré contre la version 0.34.0, sur les mêmes programmes de `benches/` (meill
   Les erreurs (`R010`, `R011`) sont toujours construites par le chemin général.
 - Un appel réserve d'emblée la place des paramètres de sa portée.
 
-## Ce qui reste
+## La machine à registres typée (troisième lot)
+
+Le vérificateur connaît le type de chaque expression, et l'interpréteur d'arbre l'ignorait :
+chaque `a + b` redécouvrait à l'exécution que c'étaient deux `int`, chaque variable se cherchait
+par son nom, chaque appel construisait une portée. Pour le code qui ne calcule qu'avec des
+`int`, des `float` et des `bool`, tout cela est inutile.
+
+Au premier appel d'une fonction numérique (`interp/vm.rs`), elle est compilée en instructions
+sur des registres de 64 bits (un `float` est ses bits, un `bool` vaut 0 ou 1), avec l'opération
+déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
+
+- les fonctions dont les paramètres, les variables et le résultat sont `int`, `float` ou `bool`,
+  qui appellent d'autres fonctions de ce genre (récursion comprise) ;
+- les boucles `while` et `for a..b [step s]` **de n'importe quel code** : la boucle emprunte les
+  variables qu'elle partage avec le code autour (variables du fichier, variables locales d'une
+  fonction qui, elle, n'est pas compilée) dans des registres, et réécrit au retour celles
+  qu'elle a modifiées ;
+- l'arithmétique mêlant `int` et `float`, `as`, `**`, `abs`, `min`, `max`, `sqrt`, `floor`,
+  `sin`... (les méthodes rares passent par l'implémentation de l'interpréteur d'arbre, donc avec
+  les mêmes résultats et les mêmes erreurs) ;
+- `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
+- les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
+  de la portée à chaque accès, avec le même cache que l'interpréteur).
+
+Tout le reste (texte, tableaux, structures, fermetures, `print`, `match`...) tourne sur
+l'interpréteur d'arbre, qui appelle la machine et en reçoit les appels sans difficulté. Une
+boucle qui contient un appel à une fonction n'est pas compilée quand elle utilise une variable du
+fichier (l'appelée pourrait la changer).
+
+| Programme | avant | après | gain |
+| --- | --- | --- | --- |
+| `fib(27)` | 0,13 s | 0,03 s | ×4 |
+| boucle de 3 millions de tours (`loop.q`, au niveau du fichier) | 0,50 s | 0,08 s | ×6,5 |
+| boucles numériques dans des fonctions (`numloop.q`) | 0,76 s | 0,10 s | ×7,8 |
+| tableaux, dictionnaires, chaînes, structures | | | ×1,0 |
+
+**Ce qui est garanti.** Les deux moteurs donnent le même résultat : mêmes sorties, mêmes erreurs
+(`R010` dépassement, `R011` division par zéro, `R013`, `R014`, `R031`...), mêmes lignes et mêmes
+piles d'appels, mêmes limites (`R900`, `R901`). `tests/vm_differential.rs` le vérifie sur des
+programmes numériques aléatoires (`Program::run_tree_walker` sert de référence ; le balayage
+complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
+à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées.
+
+**Ce qui reste.** Les tableaux de nombres, les chaînes et les structures ne profitent de rien :
+il faudrait des registres qui tiennent des références, avec un ramasse-miettes à ménager. Une
+étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
+instructions (un JIT natif).
+
+## Ce qui reste (avant la machine à registres)
 
 Le temps est maintenant réparti dans `eval`, `binary` et la recherche des variables par nom :
 c'est le coût du parcours d'arbre lui-même. Pour aller nettement plus loin il faut changer de

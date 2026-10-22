@@ -184,6 +184,8 @@ enum Op {
         src: Reg,
         ety: Ety,
     },
+    /// A new empty array.
+    NewArr(Reg),
     /// `for x in array`: the element at `idx`, or leave the loop.
     ForArr {
         dst: Reg,
@@ -209,6 +211,8 @@ pub(super) struct Code {
     globals: Vec<GlobalRef>,
     /// For a compiled loop: the variables it shares with the code around it.
     frees: Vec<Free>,
+    /// Whether this is a compiled loop (it shows no frame of its own in a trace).
+    is_loop: bool,
 }
 
 /// A variable of a module, read or written by a compiled function.
@@ -322,6 +326,9 @@ struct Gen<'a> {
     frees: Vec<Free>,
     /// A call to a function was compiled (it could change a global a loop keeps in a register).
     has_call: bool,
+    /// In a loop: module variables are read and written where they live (a call in the loop
+    /// could change them), not kept in registers.
+    direct_globals: bool,
     /// Tuples that were only taken apart (`(a, b) = (b, a + b)`): the registers of their elements.
     tuples: Vec<(String, Vec<(Reg, Ty)>)>,
     /// Constants used as operands: kept in registers loaded once, at the start. First pass: the
@@ -446,7 +453,7 @@ impl Gen<'_> {
         match self.prog.res.paths.get(&e.id) {
             Some(PathRes::Global(m, n)) => {
                 let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
-                if self.loop_mode {
+                if self.loop_mode && !self.direct_globals {
                     let r = self.free(n, Some(*m), &ty, write)?;
                     Some(Access::Reg(r, ty))
                 } else {
@@ -578,6 +585,37 @@ impl Gen<'_> {
                     Some(ty)
                 }
             },
+            ExprKind::Array(items) => {
+                // an array made in a loop would pile up until the end of the call: only the
+                // code that runs once per call may make one
+                if !self.loops.is_empty() {
+                    return None;
+                }
+                let ty = self.prog.res.array_lits.get(&e.id)?.clone();
+                let Ty::Array(el) = &ty else { return None };
+                let ety = ety_of(el)?;
+                let tmp = self.alloc()?;
+                self.emit(Op::NewArr(tmp), span);
+                for it in items {
+                    let mark = self.top;
+                    let (r, t) = self.value(it)?;
+                    if t != **el {
+                        return None;
+                    }
+                    self.emit(
+                        Op::APush {
+                            arr: tmp,
+                            src: r,
+                            ety,
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                }
+                self.emit(Op::Mov(dst, tmp), span);
+                self.top = tmp as usize;
+                Some(ty)
+            }
             ExprKind::Unary(op, inner) => {
                 let mark = self.top;
                 let (r, ty) = self.value(inner)?;
@@ -1372,6 +1410,8 @@ struct Frame {
     base: usize,
     /// Register of the caller that receives the result.
     dst: Reg,
+    /// How many objects the table held when the call began.
+    mark: usize,
 }
 
 /// What is compiled: a function, or a loop statement.
@@ -1399,6 +1439,7 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
         preset: false,
         frees: Vec::new(),
         has_call: false,
+        direct_globals: false,
         tuples: Vec::new(),
         consts: Vec::new(),
         consts_ready: false,
@@ -1462,6 +1503,7 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     sites: g.sites,
                     globals: g.globals,
                     frees: Vec::new(),
+                    is_loop: false,
                 },
                 g.callees,
             ))
@@ -1480,7 +1522,14 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             // second pass: those variables are the first registers
             let mut g = new_gen(Ty::Unit, true);
             g.preset = true;
-            for (k, f) in probe.frees.iter().enumerate() {
+            // a call could change a module variable the loop keeps in a register
+            g.direct_globals = probe.has_call && probe.frees.iter().any(|f| f.global.is_some());
+            let shared: Vec<&Free> = probe
+                .frees
+                .iter()
+                .filter(|f| !g.direct_globals || f.global.is_none())
+                .collect();
+            for (k, f) in shared.into_iter().enumerate() {
                 g.frees.push(Free {
                     reg: k as Reg,
                     assigned: false,
@@ -1499,10 +1548,6 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             }
             g.stmt(s)?;
             g.emit(Op::RetUnit, s.span);
-            // a call could change a module variable the loop keeps in a register
-            if g.has_call && g.frees.iter().any(|f| f.global.is_some()) {
-                return None;
-            }
             Some((
                 Code {
                     name: "<loop>".to_string(),
@@ -1514,6 +1559,7 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     sites: g.sites,
                     globals: g.globals,
                     frees: g.frees,
+                    is_loop: true,
                 },
                 g.callees,
             ))
@@ -1551,6 +1597,27 @@ impl Interp<'_> {
             Ty::Bool => Value::Bool(bits != 0),
             Ty::Array(_) => self.vm_objs[bits as usize].clone(),
             _ => Value::Unit,
+        }
+    }
+
+    /// The call that began with `mark` objects in the table is over: the arrays it made are
+    /// dropped, except the one it returns (`v` is its handle when `ret_array`).
+    fn vm_leave(&mut self, mark: usize, v: i64, ret_array: bool) -> i64 {
+        let keep = (ret_array && v as usize >= mark).then(|| self.vm_objs[v as usize].clone());
+        for o in self.vm_objs.drain(mark..) {
+            if let Value::Array(rc) = &o {
+                self.vm_obj_ix.remove(&(Rc::as_ptr(rc) as usize));
+            }
+        }
+        match keep {
+            Some(a) => {
+                if let Value::Array(rc) = &a {
+                    self.vm_obj_ix.insert(Rc::as_ptr(rc) as usize, mark as u32);
+                }
+                self.vm_objs.push(a);
+                mark as i64
+            }
+            None => v,
         }
     }
 
@@ -1748,7 +1815,7 @@ impl Interp<'_> {
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }
         // a loop is not a call: it shows no frame of its own in the trace of an error
-        let own = usize::from(!code.frees.is_empty());
+        let own = usize::from(code.is_loop);
         if own == 0 {
             self.depth += 1;
             self.frames.push((Name::new(&code.name), span));
@@ -1984,6 +2051,13 @@ impl Interp<'_> {
                         }
                     }
                 }
+                Op::NewArr(dst) => {
+                    let rc = Rc::new(RefCell::new(Vec::new()));
+                    let h = self.vm_objs.len() as u32;
+                    self.vm_obj_ix.insert(Rc::as_ptr(&rc) as usize, h);
+                    self.vm_objs.push(Value::Array(rc));
+                    r!(dst) = i64::from(h);
+                }
                 Op::APush { arr, src, ety } => {
                     let v = elem_value(r!(src), ety);
                     let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
@@ -2180,6 +2254,7 @@ impl Interp<'_> {
                         pc,
                         base,
                         dst,
+                        mark: self.vm_objs.len(),
                     });
                     base += b as usize;
                     if stack.len() < base + callee.nregs {
@@ -2199,6 +2274,11 @@ impl Interp<'_> {
                     match frames.pop() {
                         None => return Ok(v),
                         Some(f) => {
+                            let v = if self.vm_objs.len() > f.mark {
+                                self.vm_leave(f.mark, v, matches!(code.ret, Ty::Array(_)))
+                            } else {
+                                v
+                            };
                             self.frames.pop();
                             self.depth -= 1;
                             cur = f.code;

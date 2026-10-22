@@ -246,3 +246,31 @@ fn a_loop_over_arrays_of_the_code_around_it() {
         "5994\n1000\n"
     );
 }
+
+#[test]
+fn arrays_made_inside_a_function() {
+    // a sieve builds its own array, a callee's array comes back, a temporary is dropped
+    let src = "fun sieve(n: int) -> array<bool>\n  let s = [true, true]\n  let i = 2\n  while i <= n do\n    s.push(true)\n    i += 1\n  end\n  i = 2\n  while i * i <= n do\n    if s[i] then\n      let j = i * i\n      while j <= n do\n        s[j] = false\n        j += i\n      end\n    end\n    i += 1\n  end\n  s\nend\nfun count(n: int) -> int\n  let c = 0\n  for p in sieve(n) do\n    if p then\n      c += 1\n    end\n  end\n  c - 2\nend\nfun pair(x: int) -> int\n  let t = [x, x + 1]\n  t[0] + t[1]\nend\nlet total = 0\nfor k in 0..1000 do\n  total += pair(k)\nend\nprint(count(100))\nprint(total)";
+    assert_eq!(same_compiled(src, 3), "25\n1000000\n");
+    // an empty literal gets its type from the declaration
+    assert_eq!(
+        same(
+            "fun f() -> int\n  let a: array<int> = []\n  a.push(4)\n  a.push(5)\n  a[0] * a[1]\nend\nprint(f())"
+        ),
+        "20\n"
+    );
+    // a callee's array that is returned through two calls
+    assert_eq!(
+        same(
+            "fun a() -> array<float>\n  [1.5, 2.5]\nend\nfun b() -> array<float>\n  let x = a()\n  x.push(3.0)\n  x\nend\nprint(b().sum())"
+        ),
+        "7.0\n"
+    );
+}
+
+#[test]
+fn a_loop_with_calls_and_module_variables() {
+    // the callee changes the variable the loop also changes: both see every write
+    let src = "let t = 0\nfun bump(k: int)\n  t += k * 2\nend\nfun twice(k: int) -> int\n  k * 2\nend\nfor i in 0..1000 do\n  bump(i)\n  t += twice(i) mod 3\nend\nprint(t)\nlet c = 0\nlet k = 5\nwhile c < 100 do\n  c += twice(k) mod 7\n  k += 1\nend\nprint(c)\nprint(k)";
+    assert_eq!(same_compiled(src, 3), "999999\n104\n39\n");
+}

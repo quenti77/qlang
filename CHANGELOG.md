@@ -1,5 +1,9 @@
 # Journal des changements
 
+## Prochaine version
+
+- Performance : une fonction compilée par la machine à registres peut **créer** un tableau de nombres (`[]` typé, `[a, b, c]`), hors d'une boucle ; ceux qui naissent pendant un appel sont libérés à son retour. Une boucle qui contient un appel reste compilée quand elle utilise des variables du fichier : 3 millions d'appels ×2,6.
+
 ## 0.38.0
 
 - Performance : la machine à registres typée travaille aussi sur les **tableaux de nombres** (`array<int>`, `array<float>`, `array<bool>`) donnés à une fonction ou empruntés par une boucle : crible, sommes préfixes, parcours ×4 à ×4,5. Division entière et modulo plus rapides pour les petits entiers.

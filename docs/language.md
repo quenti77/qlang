@@ -48,6 +48,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Copier une valeur](#copier-une-valeur)
     - [Le nom du type : `.class`](#le-nom-du-type--class)
     - [Annotations](#annotations)
+    - [Réflexion](#réflexion)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Méthode par défaut](#méthode-par-défaut)
     - [Un trait comme type](#un-trait-comme-type)
@@ -1003,6 +1004,47 @@ end
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
   type, sans parent ni champ `static` (`T291`, `T295`). Une annotation sur une instruction est une
   erreur (`P051`).
+
+### Réflexion
+
+`Reflect` décrit, pendant l'exécution, ce que la vérification connaît : une structure, une
+énumération, les fonctions du fichier, avec leurs annotations. Les types restent statiques :
+on lit des descriptions (`StructInfo`, `EnumInfo`, `FunctionInfo`...), des valeurs ordinaires.
+
+| Appel | Résultat |
+| --- | --- |
+| `Reflect.struct_info<Form>()` | `StructInfo` : `name`, `fields` (`FieldInfo` : `name`, `type_name`, `annotations`), `annotations` |
+| `Reflect.enum_info<Color>()` | `EnumInfo` : `name`, `variants` (`VariantInfo` : `name`, `fields`, `annotations`), `annotations` |
+| `Reflect.functions()` | `array<FunctionInfo>` des fonctions déclarées dans **ce fichier** : `name`, `params` (`ParamInfo` : `name`, `type_name`, `annotations`), `return_type`, `annotations` |
+| `Reflect.find<fun(Request) -> Response>("home")` | la fonction `home` de ce fichier si son type est exactement celui-là, sinon `none` |
+
+Une annotation lue est une `AnnotationInfo` : `name` (celui de sa structure) et `args`, les
+arguments par nom de champ, en `Json` (les valeurs par défaut sont remplies ; les nombres sont des
+flottants). Chaque description a `annotation("Route")`, qui rend l'annotation de ce nom ou `none`.
+
+```
+#[Route("/hello", method: "POST")]
+fun hello(req: Request) -> Response
+  Response.text("salut")
+end
+
+for info in Reflect.functions() do
+  let route = info.annotation("Route")
+  if route != none then
+    let path = route.args["path"]
+    if path != none then
+      print("{info.name} sert {path.as_string()}")   --> hello sert /hello
+    end
+  end
+end
+```
+
+`Reflect.find` rend une vraie valeur de fonction, appelable : avec `Reflect.functions()`, c'est ce
+qui permet de router des requêtes d'après des annotations (voir `examples/routes.q`). Seules les
+fonctions de premier niveau du fichier, sans paramètre de type, sont concernées (pas les
+méthodes). Les erreurs de forme : `T300` (mauvais nombre d'arguments ou de types), `T301` (le type
+n'est pas celui attendu), `T302` (nom inconnu : `struct_info`, `enum_info`, `functions` et `find`
+existent).
 
 ---
 
@@ -2058,7 +2100,7 @@ end
 ```
 
 Il n'y a **pas de conversion automatique** entre un `Json` décodé et une
-structure définie par l'utilisateur (qlang n'a pas de réflexion ni de macros
+structure définie par l'utilisateur (la réflexion décrit les champs mais ne construit pas de valeur, et il n'y a pas de macros
 `derive`) : pour reconstruire un `Post` à partir d'un `Json`, écris
 toi-même une méthode statique qui lit les champs un par un, par exemple
 `Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une

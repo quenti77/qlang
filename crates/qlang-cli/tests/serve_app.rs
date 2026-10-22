@@ -569,3 +569,24 @@ fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
         "the fixed program was not reloaded"
     );
 }
+
+#[test]
+fn the_routes_example_finds_its_handlers_by_reflection() {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/routes.q"
+    ))
+    .unwrap();
+    let server = start("routes", Box::leak(source.into_boxed_str()), &[]);
+    let get = |path: &str| exchange(&server, &format!("GET {path} HTTP/1.1\r\nHost: t\r\n\r\n"));
+    assert!(get("/").ends_with("Accueil"));
+    assert!(get("/hello?name=Ada").ends_with("Bonjour Ada !"));
+    assert!(get("/nothing").starts_with("HTTP/1.1 404"));
+    // the route is a POST one
+    assert!(get("/echo").starts_with("HTTP/1.1 404"));
+    let r = exchange(
+        &server,
+        "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 4\r\n\r\nping",
+    );
+    assert!(r.ends_with("ping"), "{r}");
+}

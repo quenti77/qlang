@@ -4,6 +4,7 @@
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
 mod externs;
+mod reflect;
 mod vm;
 
 use crate::ast::*;
@@ -1283,6 +1284,10 @@ impl<'a> Interp<'a> {
                     Some(PathRes::BuiltinStatic(ty, name)) => {
                         let argv = self.eval_args(e.id, args, env)?;
                         return self.static_call(ty, name, argv, e.span);
+                    }
+                    Some(PathRes::Reflect(op)) => {
+                        let argv = self.eval_args(e.id, args, env)?;
+                        return Ok(self.reflect(op, &argv));
                     }
                     _ => {}
                 }

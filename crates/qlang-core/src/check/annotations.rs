@@ -6,34 +6,47 @@ use super::*;
 use crate::ast::{Annotation, ExprKind, Item, Module, StrPart, UnOp};
 
 impl Checker {
-    pub(crate) fn check_annotations(&mut self, ast: &Module) {
-        for item in ast.items.iter() {
+    pub(crate) fn check_annotations(&mut self, m: ModId, ast: &Module) {
+        for (idx, item) in ast.items.iter().enumerate() {
             match item {
-                Item::Fun(f) => self.check_fun_annotations(f),
+                Item::Fun(f) => {
+                    let fid = self.mscopes[m].decl_ids[&idx];
+                    self.check_fun_annotations(f, Some(fid));
+                }
                 Item::Struct(s) => {
-                    self.check_annotation_list(&s.annotations, true);
+                    let sid = self.mscopes[m].decl_ids[&idx];
+                    self.check_annotation_list(&s.annotations, true, Some(AnnKey::Struct(sid)));
                     if s.annotations.iter().any(is_marker) {
                         self.check_annotation_struct(s);
                     }
-                    for f in &s.fields {
-                        self.check_annotation_list(&f.annotations, false);
+                    for (i, f) in s.fields.iter().enumerate() {
+                        self.check_annotation_list(
+                            &f.annotations,
+                            false,
+                            Some(AnnKey::Field(sid, i)),
+                        );
                     }
                 }
                 Item::Trait(t) => {
-                    self.check_annotation_list(&t.annotations, false);
+                    self.check_annotation_list(&t.annotations, false, None);
                     for sig in &t.sigs {
-                        self.check_fun_annotations(sig);
+                        self.check_fun_annotations(sig, None);
                     }
                 }
                 Item::Enum(e) => {
-                    self.check_annotation_list(&e.annotations, false);
-                    for v in &e.variants {
-                        self.check_annotation_list(&v.annotations, false);
+                    let eid = self.mscopes[m].decl_ids[&idx];
+                    self.check_annotation_list(&e.annotations, false, Some(AnnKey::Enum(eid)));
+                    for (i, v) in e.variants.iter().enumerate() {
+                        self.check_annotation_list(
+                            &v.annotations,
+                            false,
+                            Some(AnnKey::Variant(eid, i)),
+                        );
                     }
                 }
                 Item::Impl(i) => {
                     for md in &i.methods {
-                        self.check_fun_annotations(&md.fun);
+                        self.check_fun_annotations(&md.fun, None);
                     }
                 }
                 _ => {}
@@ -41,10 +54,11 @@ impl Checker {
         }
     }
 
-    fn check_fun_annotations(&mut self, f: &ast::FunDecl) {
-        self.check_annotation_list(&f.annotations, false);
-        for p in &f.params {
-            self.check_annotation_list(&p.annotations, false);
+    /// `fid`: the function, for the declarations reflection reaches (not methods).
+    fn check_fun_annotations(&mut self, f: &ast::FunDecl, fid: Option<FnId>) {
+        self.check_annotation_list(&f.annotations, false, fid.map(AnnKey::Fn));
+        for (i, p) in f.params.iter().enumerate() {
+            self.check_annotation_list(&p.annotations, false, fid.map(|f| AnnKey::Param(f, i)));
         }
     }
 
@@ -63,7 +77,7 @@ impl Checker {
     }
 
     /// `on_struct`: the declaration is a struct (where `#[annotation]` is allowed).
-    fn check_annotation_list(&mut self, list: &[Annotation], on_struct: bool) {
+    fn check_annotation_list(&mut self, list: &[Annotation], on_struct: bool, key: Option<AnnKey>) {
         for a in list {
             if is_marker(a) {
                 if !on_struct {
@@ -73,14 +87,14 @@ impl Checker {
                 }
                 continue;
             }
-            self.check_annotation(a);
+            if let (Some(data), Some(key)) = (self.check_annotation(a), key) {
+                self.res.annotations.entry(key).or_default().push(data);
+            }
         }
     }
 
-    fn check_annotation(&mut self, a: &Annotation) {
-        let Some(item) = self.lookup_path_item(&a.path, "annotation") else {
-            return;
-        };
+    fn check_annotation(&mut self, a: &Annotation) -> Option<AnnData> {
+        let item = self.lookup_path_item(&a.path, "annotation")?;
         let name = a.path.last().map(|i| i.name.as_str()).unwrap_or("");
         let sid = match item {
             ItemRef::Struct(sid) if self.defs.structs[sid].annotation => sid,
@@ -92,17 +106,18 @@ impl Checker {
                     ),
                     a.path[0].span,
                 );
-                return;
+                return None;
             }
         };
-        let fields: Vec<(String, Ty, bool)> = self.defs.structs[sid]
+        let fields: Vec<(String, Ty, Option<Rc<ast::Expr>>)> = self.defs.structs[sid]
             .fields
             .iter()
             .filter(|f| !f.is_static)
-            .map(|f| (f.name.clone(), f.ty.clone(), f.default.is_some()))
+            .map(|f| (f.name.clone(), f.ty.clone(), f.default.clone()))
             .collect();
         let errors_before = self.diags.len();
         let mut given: Vec<bool> = vec![false; fields.len()];
+        let mut values: Vec<Option<Lit>> = vec![None; fields.len()];
         let mut next = 0usize;
         for arg in &a.args {
             if !is_literal(&arg.value) {
@@ -149,6 +164,7 @@ impl Checker {
                 continue;
             }
             given[slot] = true;
+            values[slot] = literal_of(&arg.value);
             let fty = fields[slot].1.clone();
             let t = self.expr(&arg.value, &Want::Exp(fty.clone()));
             if !self.assignable(&t, &fty) {
@@ -157,10 +173,12 @@ impl Checker {
         }
         // an argument that was refused may be the one that is "missing"
         if self.diags.len() > errors_before {
-            return;
+            return None;
         }
-        for (i, (fname, _, has_default)) in fields.iter().enumerate() {
-            if !given[i] && !has_default {
+        let mut missing = false;
+        for (i, (fname, _, default)) in fields.iter().enumerate() {
+            if !given[i] && default.is_none() {
+                missing = true;
                 self.err(
                     "T293",
                     format!("`{name}` needs a value for `{fname}`"),
@@ -168,7 +186,50 @@ impl Checker {
                 );
             }
         }
+        if missing {
+            return None;
+        }
+        // the arguments given, and the defaults of the others (when they are literals)
+        let args = fields
+            .iter()
+            .zip(values)
+            .filter_map(|((fname, _, default), v)| {
+                let v = v.or_else(|| default.as_ref().and_then(|d| literal_of(d)))?;
+                Some((fname.clone(), v))
+            })
+            .collect();
+        Some(AnnData {
+            name: name.to_string(),
+            args,
+        })
     }
+}
+
+/// The value of a literal expression (see `is_literal`).
+fn literal_of(e: &ast::Expr) -> Option<Lit> {
+    Some(match &e.kind {
+        ExprKind::Int(i) => Lit::Int(*i),
+        ExprKind::Float(f) => Lit::Float(*f),
+        ExprKind::Bool(b) => Lit::Bool(*b),
+        ExprKind::None => Lit::None,
+        ExprKind::Str(parts) => {
+            let mut out = String::new();
+            for p in parts {
+                match p {
+                    StrPart::Lit(t) => out.push_str(t),
+                    StrPart::Expr(_) => return None,
+                }
+            }
+            Lit::Str(out)
+        }
+        ExprKind::Unary(UnOp::Neg, inner) => match &inner.kind {
+            ExprKind::Int(i) => Lit::Int(i.wrapping_neg()),
+            ExprKind::Float(f) => Lit::Float(-f),
+            _ => return None,
+        },
+        ExprKind::Array(items) => Lit::Array(items.iter().map(literal_of).collect::<Option<_>>()?),
+        _ => return None,
+    })
 }
 
 fn is_marker(a: &Annotation) -> bool {

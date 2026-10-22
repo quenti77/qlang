@@ -486,6 +486,12 @@ impl Checker {
                         // a variable holding a function: fall through to a value call
                     }
                     Some(Head::Type(ty, tref)) => {
+                        if let Ty::Struct(sid, _) = &ty
+                            && self.defs.structs[*sid].module == PRELUDE_MOD
+                            && self.defs.structs[*sid].name == "Reflect"
+                        {
+                            return self.call_reflect(callee, name, targs, args);
+                        }
                         return self.call_static(e, callee, &ty, &tref, name, targs, args, want);
                     }
                     None => {
@@ -1699,5 +1705,125 @@ fn callee_name(callee: &Expr) -> String {
         ExprKind::Ident(n, _) => n.clone(),
         ExprKind::Field(_, n, _) => n.name.clone(),
         _ => "function".to_string(),
+    }
+}
+
+impl Checker {
+    fn prelude_ty(&self, name: &str) -> Ty {
+        let sid = self
+            .defs
+            .structs
+            .iter()
+            .position(|s| s.module == PRELUDE_MOD && s.name == name)
+            .unwrap_or_else(|| panic!("prelude struct `{name}` not found"));
+        Ty::Struct(sid, Vec::new())
+    }
+
+    /// `Reflect.struct<T>()`, `Reflect.enum<T>()`, `Reflect.functions()` and
+    /// `Reflect.find<F>(name)`: the interpreter builds the answer from what the checker knows.
+    fn call_reflect(
+        &mut self,
+        callee: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+    ) -> Ty {
+        let arity = |ck: &mut Checker, targs_wanted: usize, args_wanted: usize| -> bool {
+            if targs.len() != targs_wanted || args.len() != args_wanted {
+                let t = if targs_wanted == 1 { "<Type>" } else { "" };
+                ck.err(
+                    "T300",
+                    format!(
+                        "`Reflect.{0}` is called as `Reflect.{0}{t}({1})`",
+                        name.name,
+                        if args_wanted == 1 { "name" } else { "" }
+                    ),
+                    callee.span,
+                );
+                ck.check_args_loose(args);
+                return false;
+            }
+            true
+        };
+        let op_ty = match name.name.as_str() {
+            "struct_info" => {
+                if !arity(self, 1, 0) {
+                    return Ty::Error;
+                }
+                match self.resolve_type(&targs[0]) {
+                    Ty::Struct(sid, _) => (ReflectOp::Struct(sid), self.prelude_ty("StructInfo")),
+                    Ty::Error => return Ty::Error,
+                    _ => {
+                        self.err(
+                            "T301",
+                            "`Reflect.struct_info` needs a struct type",
+                            targs[0].span,
+                        );
+                        return Ty::Error;
+                    }
+                }
+            }
+            "enum_info" => {
+                if !arity(self, 1, 0) {
+                    return Ty::Error;
+                }
+                match self.resolve_type(&targs[0]) {
+                    Ty::Enum(eid, _) => (ReflectOp::Enum(eid), self.prelude_ty("EnumInfo")),
+                    Ty::Error => return Ty::Error,
+                    _ => {
+                        self.err(
+                            "T301",
+                            "`Reflect.enum_info` needs an enum type",
+                            targs[0].span,
+                        );
+                        return Ty::Error;
+                    }
+                }
+            }
+            "functions" => {
+                if !arity(self, 0, 0) {
+                    return Ty::Error;
+                }
+                (
+                    ReflectOp::Functions(self.cur_mod),
+                    Ty::Array(Box::new(self.prelude_ty("FunctionInfo"))),
+                )
+            }
+            "find" => {
+                if !arity(self, 1, 1) {
+                    return Ty::Error;
+                }
+                let f = self.resolve_type(&targs[0]);
+                match &f {
+                    Ty::Fn(..) => {}
+                    Ty::Error => return Ty::Error,
+                    _ => {
+                        self.err(
+                            "T301",
+                            "`Reflect.find` needs a function type, like `fun(int) -> int`",
+                            targs[0].span,
+                        );
+                        return Ty::Error;
+                    }
+                }
+                let t = self.expr(&args[0].value, &Want::Exp(Ty::Str));
+                if !self.assignable(&t, &Ty::Str) {
+                    self.mismatch(args[0].value.span, &Ty::Str, &t);
+                }
+                (ReflectOp::Find(self.cur_mod, f.clone()), Ty::nullable(f))
+            }
+            other => {
+                self.err(
+                    "T302",
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions` and `find`)"),
+                    name.span,
+                );
+                self.check_args_loose(args);
+                return Ty::Error;
+            }
+        };
+        let (op, ty) = op_ty;
+        self.res.paths.insert(callee.id, PathRes::Reflect(op));
+        ty
     }
 }

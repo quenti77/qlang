@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#numbers" },
+    { "include": "#annotations" },
     { "include": "#declarations" },
     { "include": "#keywords" },
     { "include": "#constants" },
@@ -15,6 +16,20 @@
     { "include": "#punctuation" }
   ],
   "repository": {
+    "annotations": {
+      "name": "meta.annotation.qlang",
+      "begin": "#\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.definition.annotation.qlang" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.annotation.qlang" } },
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#constants" },
+        { "match": "[A-Za-z_][A-Za-z0-9_.]*(?=\\s*[(,\\]])", "name": "entity.name.function.annotation.qlang" },
+        { "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)", "name": "variable.parameter.qlang" }
+      ]
+    },
     "comments": {
       "patterns": [
         {

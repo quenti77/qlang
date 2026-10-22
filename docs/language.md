@@ -47,6 +47,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Héritage](#héritage)
     - [Copier une valeur](#copier-une-valeur)
     - [Le nom du type : `.class`](#le-nom-du-type--class)
+    - [Annotations](#annotations)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Méthode par défaut](#méthode-par-défaut)
     - [Un trait comme type](#un-trait-comme-type)
@@ -958,6 +959,50 @@ print(Holder<Dog> { item: Dog { n: "Rex" } }.describe()) --> "Dog: Rex"
 
 Si un type définit lui-même une méthode `class`, c'est elle qui est appelée :
 `.class()` est un comportement par défaut, pas un mot réservé.
+
+### Annotations
+
+Une **annotation** est une note posée sur une déclaration, entre `#[` et `]`. Le programme ne
+change pas : elle sert à décrire (une route, une règle de validation, une étiquette) pour du
+code qui la lira.
+
+Une annotation est une structure déclarée avec `#[annotation]`. Ses champs sont ses arguments :
+
+```
+#[annotation]
+struct Route
+  path: string
+  method: string = "GET"
+end
+
+#[annotation]
+struct Min
+  value: int
+end
+
+#[Route("/users", method: "POST")]
+fun create_user() -> int
+  1
+end
+
+struct Form
+  #[Min(0)]
+  age: int
+end
+```
+
+- On peut annoter une `fun`, une méthode (dans un `impl` ou un `trait`), une `struct` et ses
+  champs, une `enum` et ses variantes, un `trait`, un paramètre : `fun f(#[Min(1)] n: int)`.
+- Plusieurs annotations : l'une sous l'autre, ou séparées par une virgule (`#[Min(0), Tags(["id"])]`).
+  Un commentaire de documentation reste au-dessus de la première.
+- Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
+  champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
+  `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
+- La vérification contrôle le nom (`T001`, `T290` si ce n'est pas une annotation), les arguments
+  (`T292` nom inconnu, en trop ou donné deux fois ; `T293` argument manquant ; `T294` pas un
+  littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
+  type, sans parent ni champ `static` (`T291`, `T295`). Une annotation sur une instruction est une
+  erreur (`P051`).
 
 ---
 

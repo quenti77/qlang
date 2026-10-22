@@ -192,6 +192,8 @@ pub struct StructDef {
     pub span: Span,
     pub tparams: Vec<ParamId>,
     pub parent: Option<(StructId, Vec<Ty>)>,
+    /// Declared with `#[annotation]`: it can be used as an annotation.
+    pub annotation: bool,
     /// Fields declared by this struct only.
     pub fields: Vec<FieldDef>,
 }

@@ -1,6 +1,7 @@
 //! Type checker: loads modules, declares and resolves all definitions, then
 //! checks every body. Its output is a [`Program`] ready to interpret.
 
+mod annotations;
 mod body;
 mod calls;
 mod captured;

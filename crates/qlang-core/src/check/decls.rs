@@ -93,6 +93,10 @@ impl Checker {
                         // need it (to check `Name<...>` argument counts) before that runs
                         tparams: vec![0; s.tparams.len()],
                         parent: None,
+                        annotation: s
+                            .annotations
+                            .iter()
+                            .any(|a| a.path.len() == 1 && a.path[0].name == "annotation"),
                         fields: Vec::new(),
                     });
                     self.mscopes[m].decl_ids.insert(idx, id);

@@ -98,6 +98,12 @@ déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
 - l'arithmétique mêlant `int` et `float`, `as`, `**`, `abs`, `min`, `max`, `sqrt`, `floor`,
   `sin`... (les méthodes rares passent par l'implémentation de l'interpréteur d'arbre, donc avec
   les mêmes résultats et les mêmes erreurs) ;
+- les **tableaux de nombres** (`array<int>`, `array<float>`, `array<bool>`) donnés à une fonction ou
+  empruntés par une boucle : lecture et écriture `xs[i]`, `xs[i] += v`, `xs[] = v`, `push`, `len`,
+  `for x in xs`, `for i, x in xs`, et `sum`, `sort`, `reverse`, `contains`, `insert`, `remove`...
+  (les méthodes passent par l'implémentation de l'interpréteur d'arbre). Un registre tient alors
+  un numéro de tableau dans la table de l'appel : la machine ne **crée** pas de tableau (`[]`, un
+  littéral, `slice`), seulement ceux qu'on lui donne, ce qui évite d'avoir à suivre leur durée de vie ;
 - `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
 - les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
   de la portée à chaque accès, avec le même cache que l'interpréteur).
@@ -112,7 +118,9 @@ fichier (l'appelée pourrait la changer).
 | `fib(27)` | 0,13 s | 0,03 s | ×4 |
 | boucle de 3 millions de tours (`loop.q`, au niveau du fichier) | 0,50 s | 0,08 s | ×6,5 |
 | boucles numériques dans des fonctions (`numloop.q`) | 0,76 s | 0,10 s | ×7,8 |
-| tableaux, dictionnaires, chaînes, structures | | | ×1,0 |
+| tableaux de nombres : crible, sommes préfixes, parcours (`numarray.q`) | 2,0 s | 0,45 s | ×4,5 |
+| 400 000 ajouts et lectures de tableau (`array.q`) | 0,12 s | 0,03 s | ×4 |
+| dictionnaires, chaînes, structures | | | ×1,0 |
 
 **Ce qui est garanti.** Les deux moteurs donnent le même résultat : mêmes sorties, mêmes erreurs
 (`R010` dépassement, `R011` division par zéro, `R013`, `R014`, `R031`...), mêmes lignes et mêmes
@@ -121,8 +129,9 @@ programmes numériques aléatoires (`Program::run_tree_walker` sert de référen
 complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées.
 
-**Ce qui reste.** Les tableaux de nombres, les chaînes et les structures ne profitent de rien :
-il faudrait des registres qui tiennent des références, avec un ramasse-miettes à ménager. Une
+**Ce qui reste.** Les chaînes, les structures, les tableaux de tableaux et la création de
+tableaux dans une fonction compilée ne profitent de rien : il faudrait des registres qui
+tiennent des références, avec leur durée de vie à suivre. Une
 étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
 instructions (un JIT natif).
 

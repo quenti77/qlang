@@ -528,6 +528,50 @@ pub enum PathRes {
     BuiltinStatic(&'static str, &'static str),
     /// `Point.class`: the name of a struct or enum, known at compile time.
     ClassName(String),
+    /// A call of `Reflect`: described by `ReflectOp`.
+    Reflect(ReflectOp),
+}
+
+/// What a call of `Reflect` asks for (see `docs/language.md`, « Réflexion »).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReflectOp {
+    /// `Reflect.struct_info<T>()`
+    Struct(StructId),
+    /// `Reflect.enum_info<T>()`
+    Enum(EnumId),
+    /// `Reflect.functions()` in this module.
+    Functions(ModId),
+    /// `Reflect.find<F>(name)`: a function of this module whose type is `F`.
+    Find(ModId, Ty),
+}
+
+/// A declaration an annotation is put on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AnnKey {
+    Struct(StructId),
+    Field(StructId, usize),
+    Enum(EnumId),
+    Variant(EnumId, usize),
+    Fn(FnId),
+    Param(FnId, usize),
+}
+
+/// The value of an annotation argument.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lit {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str(String),
+    None,
+    Array(Vec<Lit>),
+}
+
+/// An annotation as reflection reads it: the name of its struct and its arguments by field.
+#[derive(Clone, Debug)]
+pub struct AnnData {
+    pub name: String,
+    pub args: Vec<(String, Lit)>,
 }
 
 #[derive(Default)]
@@ -544,6 +588,8 @@ pub struct Resolutions {
     /// The type of each use of a variable whose type is `int`, `float` or `bool` (the typed
     /// register machine needs it for the variables a loop shares with the code around it).
     pub ident_tys: FxHashMap<NodeId, Ty>,
+    /// The annotations of each declaration, for `Reflect`.
+    pub annotations: FxHashMap<AnnKey, Vec<AnnData>>,
     /// The type of each array literal whose elements are `int`, `float` or `bool`.
     pub array_lits: FxHashMap<NodeId, Ty>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).

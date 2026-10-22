@@ -284,6 +284,116 @@ impl<T: ToJson> ToJson for array<T>
     end
 end
 
+-- ===== reflection =====
+
+--" An annotation as reflection reads it: the `name` of its struct (`Route`) and its arguments
+by field name, as JSON values (numbers are floats). --"
+struct AnnotationInfo
+    public name: string
+    public args: map<string, Json>
+end
+
+--" A parameter of a function or a variant, as reflection describes it. --"
+struct ParamInfo
+    public name: string
+    public type_name: string
+    public annotations: array<AnnotationInfo>
+end
+
+--" A field of a struct, as reflection describes it. --"
+struct FieldInfo
+    public name: string
+    public type_name: string
+    public annotations: array<AnnotationInfo>
+end
+
+--" A struct, as `Reflect.struct_info<T>()` describes it. --"
+struct StructInfo
+    public name: string
+    public fields: array<FieldInfo>
+    public annotations: array<AnnotationInfo>
+end
+
+--" A variant of an enum, as reflection describes it. --"
+struct VariantInfo
+    public name: string
+    public fields: array<ParamInfo>
+    public annotations: array<AnnotationInfo>
+end
+
+--" An enum, as `Reflect.enum_info<T>()` describes it. --"
+struct EnumInfo
+    public name: string
+    public variants: array<VariantInfo>
+    public annotations: array<AnnotationInfo>
+end
+
+--" A function, as `Reflect.functions()` describes it. --"
+struct FunctionInfo
+    public name: string
+    public params: array<ParamInfo>
+    public return_type: string
+    public annotations: array<AnnotationInfo>
+end
+
+--" The annotation called `name` in `list`, or `none`. --"
+fun reflect_find_annotation(list: array<AnnotationInfo>, name: string) -> AnnotationInfo?
+    for a in list do
+        if a.name == name then
+            return a
+        end
+    end
+    none
+end
+
+impl ParamInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+impl FieldInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+impl StructInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+impl VariantInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+impl EnumInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+impl FunctionInfo
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+end
+
+--" Reflection: `Reflect.struct_info<T>()`, `Reflect.enum_info<T>()`, `Reflect.functions()` (the functions
+of this file) and `Reflect.find<fun(A) -> B>("name")` (a function of this file, if its type is
+that one). --"
+struct Reflect
+end
+
 -- ===== value tree (decode target) =====
 
 --" A parsed JSON value: a string, a number, a bool, null, an array or an object.

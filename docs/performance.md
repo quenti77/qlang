@@ -102,16 +102,19 @@ déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
   empruntés par une boucle : lecture et écriture `xs[i]`, `xs[i] += v`, `xs[] = v`, `push`, `len`,
   `for x in xs`, `for i, x in xs`, et `sum`, `sort`, `reverse`, `contains`, `insert`, `remove`...
   (les méthodes passent par l'implémentation de l'interpréteur d'arbre). Un registre tient alors
-  un numéro de tableau dans la table de l'appel : la machine ne **crée** pas de tableau (`[]`, un
-  littéral, `slice`), seulement ceux qu'on lui donne, ce qui évite d'avoir à suivre leur durée de vie ;
+  un numéro de tableau dans la table de l'appel. Une fonction peut aussi **créer** un tableau
+  (`[]` avec un type déclaré, `[a, b, c]` de nombres), à condition que ce ne soit pas dans une
+  boucle : les tableaux nés pendant un appel sont libérés à son retour (sauf celui qu'il renvoie),
+  ce qui borne la table sans avoir à suivre leur durée de vie ;
 - `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
 - les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
   de la portée à chaque accès, avec le même cache que l'interpréteur).
 
 Tout le reste (texte, tableaux, structures, fermetures, `print`, `match`...) tourne sur
 l'interpréteur d'arbre, qui appelle la machine et en reçoit les appels sans difficulté. Une
-boucle qui contient un appel à une fonction n'est pas compilée quand elle utilise une variable du
-fichier (l'appelée pourrait la changer).
+boucle qui contient un appel à une fonction lit et écrit alors les variables du fichier à leur
+place, et non dans des registres (l'appelée pourrait les changer) : un peu plus lent, mais
+toujours compilée.
 
 | Programme | avant | après | gain |
 | --- | --- | --- | --- |
@@ -120,6 +123,7 @@ fichier (l'appelée pourrait la changer).
 | boucles numériques dans des fonctions (`numloop.q`) | 0,76 s | 0,07 s | ×10 |
 | tableaux de nombres : crible, sommes préfixes, parcours (`numarray.q`) | 2,0 s | 0,36 s | ×5,5 |
 | 400 000 ajouts et lectures de tableau (`array.q`) | 0,12 s | 0,03 s | ×4,5 |
+| 3 millions d'appels d'une fonction qui fait un petit tableau (`smallarray.q`) | 1,7 s | 0,65 s | ×2,6 |
 | dictionnaires, chaînes, structures | | | ×1,0 |
 
 **Les instructions elles-mêmes.** Trois réglages sur la boucle d'exécution de la machine (environ
@@ -138,7 +142,7 @@ complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` s
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées.
 
 **Ce qui reste.** Les chaînes, les structures, les tableaux de tableaux et la création de
-tableaux dans une fonction compilée ne profitent de rien : il faudrait des registres qui
+tableaux dans une boucle ne profitent de rien : il faudrait des registres qui
 tiennent des références, avec leur durée de vie à suivre. Une
 étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
 instructions (un JIT natif).

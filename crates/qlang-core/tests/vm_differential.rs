@@ -256,6 +256,11 @@ fn array_program(rng: &mut Rng) -> String {
     src += "fun same(xs: array<int>) -> array<int>\n  xs[0] += 1\n  xs\nend\n";
     src += "fun fl(fs: array<float>) -> float\n  let t = 0.0\n  for i in 0..fs.len() do\n    fs[i] = fs[i] * 1.5 + i\n    t += fs[i]\n  end\n  t + fs.sum()\nend\n";
     src += "fun bl(bs: array<bool>) -> int\n  let c = 0\n  for i in 0..bs.len() do\n    bs[i] = not bs[i]\n    if bs[i] then c += 1 end\n  end\n  c\nend\n";
+    // functions that make their own arrays: some come back, some are dropped on return
+    src += "fun mk(k: int) -> array<int>\n  let a = [k, k + 1]\n  a.push(k * 2)\n  a\nend\n";
+    src += "fun mk2(k: int) -> int\n  let t = mk(k)\n  let u: array<float> = [1.5]\n  u.push(2.5)\n  t[2] + t.len() + u.sum().floor()\nend\n";
+    src += "fun rec(k: int) -> array<int>\n  if k <= 0 then\n    [0]\n  else\n    let r = rec(k - 1)\n    r.push(k)\n    r\n  end\nend\n";
+    src += "print(mk2(3))\nprint(mk(2))\nprint(rec(4))\nprint(total(rec(5)))\n";
     src += "let data = [3, 1, 4, 1, 5, 9, 2, 6]\nlet fdata = [1.5, 2.5, -3.25]\nlet bdata = [true, false, false, true]\n";
     for _ in 0..3 {
         src += &format!("print(work(data, {}))\nprint(data)\n", rng.below(5));

@@ -661,7 +661,14 @@ impl Checker {
                 );
                 Ty::Error
             }
-            ExprKind::Array(items) => self.check_array(items, want),
+            ExprKind::Array(items) => {
+                let t = self.check_array(items, want);
+                let r = self.resolve(&t);
+                if matches!(&r, Ty::Array(el) if matches!(**el, Ty::Int | Ty::Float | Ty::Bool)) {
+                    self.res.array_lits.insert(e.id, r);
+                }
+                t
+            }
             ExprKind::Map(items) => self.check_map(items, want),
             ExprKind::StructLit(lit) => self.check_struct_lit(e, lit, want),
             ExprKind::Unary(op, inner) => {

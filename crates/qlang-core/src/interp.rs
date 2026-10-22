@@ -28,6 +28,8 @@ pub struct RunResult {
     pub exit_code: Option<i32>,
     /// Evaluation steps used.
     pub steps: u64,
+    /// How many functions the typed register machine compiled, and how many it refused.
+    pub vm_functions: (usize, usize),
 }
 
 impl Program {
@@ -66,6 +68,16 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
         error,
         exit_code,
         steps: it.steps,
+        vm_functions: (
+            it.vm_state
+                .iter()
+                .filter(|s| matches!(s, vm::VmState::Yes(_)))
+                .count(),
+            it.vm_state
+                .iter()
+                .filter(|s| matches!(s, vm::VmState::No))
+                .count(),
+        ),
     }
 }
 

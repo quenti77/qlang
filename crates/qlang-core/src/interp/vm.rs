@@ -24,8 +24,42 @@ enum Op {
     ModI(Reg, Reg, Reg),
     /// `int / int` is a `float`
     DivII(Reg, Reg, Reg),
-    AddImm(Reg, Reg, i64),
     NegI(Reg, Reg),
+    PowI(Reg, Reg, Reg),
+    ItoF(Reg, Reg),
+    FtoI(Reg, Reg),
+    AbsI(Reg, Reg),
+    AbsF(Reg, Reg),
+    SqrtI(Reg, Reg),
+    SqrtF(Reg, Reg),
+    MinI(Reg, Reg, Reg),
+    MaxI(Reg, Reg, Reg),
+    MinF(Reg, Reg, Reg),
+    MaxF(Reg, Reg, Reg),
+    PowF(Reg, Reg, Reg),
+    /// A built-in method of a number, run by the tree walker's own implementation (so that
+    /// its results and errors are the same): receiver and arguments from `base`.
+    Method {
+        dst: Reg,
+        base: Reg,
+        site: u32,
+    },
+    /// `for`: whether `cnt` is still in the range (`step` > 0 counts up, else down).
+    ForTest {
+        dst: Reg,
+        cnt: Reg,
+        lim: Reg,
+        step: Reg,
+        incl: bool,
+    },
+    /// `cnt += step`, or jump to the end of the loop when that overflows.
+    ForNext {
+        cnt: Reg,
+        step: Reg,
+        exit: u32,
+    },
+    /// The `step` of a `for` must not be 0.
+    StepCheck(Reg),
     AddF(Reg, Reg, Reg),
     SubF(Reg, Reg, Reg),
     MulF(Reg, Reg, Reg),
@@ -69,6 +103,15 @@ pub(super) struct Code {
     spans: Vec<Span>,
     param_tys: Vec<Ty>,
     ret: Ty,
+    sites: Vec<Site>,
+}
+
+/// A method call made through [`Op::Method`]: its name, the types of the receiver and the
+/// arguments, and of the result.
+struct Site {
+    name: String,
+    tys: Vec<Ty>,
+    ret: Ty,
 }
 
 #[derive(Clone)]
@@ -77,6 +120,32 @@ pub(super) enum VmState {
     No,
     /// Index into `Interp::vm_codes`.
     Yes(u32),
+}
+
+/// The methods of `int` and `float` the machine knows: argument types and result type (the
+/// same as the checker's table, restricted to numeric results).
+fn number_method(recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
+    Some(match (recv, name) {
+        (Ty::Int, "abs") => (vec![], Ty::Int),
+        (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
+        (Ty::Int, "sqrt") => (vec![], Ty::Float),
+        (Ty::Float, "abs" | "sqrt") => (vec![], Ty::Float),
+        (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
+        (Ty::Float, "floor" | "ceil" | "round" | "trunc") => (vec![], Ty::Int),
+        (
+            Ty::Int | Ty::Float,
+            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "exp" | "ln" | "log10" | "log2"
+            | "to_radians" | "to_degrees",
+        ) => (vec![], Ty::Float),
+        (Ty::Int, "log" | "atan2") => (vec![Ty::Int], Ty::Float),
+        (Ty::Float, "log" | "atan2") => (vec![Ty::Float], Ty::Float),
+        (Ty::Int, "signum") => (vec![], Ty::Int),
+        (Ty::Float, "signum") => (vec![], Ty::Float),
+        (Ty::Int, "clamp") => (vec![Ty::Int, Ty::Int], Ty::Int),
+        (Ty::Float, "clamp") => (vec![Ty::Float, Ty::Float], Ty::Float),
+        (Ty::Float, "is_nan" | "is_infinite") => (vec![], Ty::Bool),
+        _ => return None,
+    })
 }
 
 fn scalar(t: &Ty) -> bool {
@@ -96,6 +165,7 @@ struct Gen<'a> {
     /// The functions called, by `FnId` (a call names its target by that number until all
     /// the functions of the group are compiled, then it is renumbered).
     callees: Vec<FnId>,
+    sites: Vec<Site>,
 }
 
 #[derive(Default)]
@@ -224,8 +294,19 @@ impl Gen<'_> {
             }
             ExprKind::Binary(op, l, r) => {
                 let mark = self.top;
-                let (a, ta) = self.value(l)?;
-                let (b, tb) = self.value(r)?;
+                let (mut a, mut ta) = self.value(l)?;
+                let (mut b, mut tb) = self.value(r)?;
+                // an `int` next to a `float` is turned into a float first (as the tree walker does)
+                if !matches!(op, BinOp::IntDiv) && matches!((&ta, &tb), (Ty::Int, Ty::Float)) {
+                    let t = self.alloc()?;
+                    self.emit(Op::ItoF(t, a), span);
+                    (a, ta) = (t, Ty::Float);
+                } else if !matches!(op, BinOp::IntDiv) && matches!((&ta, &tb), (Ty::Float, Ty::Int))
+                {
+                    let t = self.alloc()?;
+                    self.emit(Op::ItoF(t, b), span);
+                    (b, tb) = (t, Ty::Float);
+                }
                 if ta != tb {
                     return None;
                 }
@@ -237,12 +318,14 @@ impl Gen<'_> {
                     BinOp::Mul if int => (Op::MulI(dst, a, b), Ty::Int),
                     BinOp::IntDiv if int => (Op::IntDivI(dst, a, b), Ty::Int),
                     BinOp::Mod if int => (Op::ModI(dst, a, b), Ty::Int),
+                    BinOp::Pow if int => (Op::PowI(dst, a, b), Ty::Int),
                     BinOp::Div if int => (Op::DivII(dst, a, b), Ty::Float),
                     BinOp::Add if float => (Op::AddF(dst, a, b), Ty::Float),
                     BinOp::Sub if float => (Op::SubF(dst, a, b), Ty::Float),
                     BinOp::Mul if float => (Op::MulF(dst, a, b), Ty::Float),
                     BinOp::Div if float => (Op::DivF(dst, a, b), Ty::Float),
                     BinOp::Mod if float => (Op::ModF(dst, a, b), Ty::Float),
+                    BinOp::Pow if float => (Op::PowF(dst, a, b), Ty::Float),
                     BinOp::Lt if int => (Op::LtI(dst, a, b), Ty::Bool),
                     BinOp::LtEq if int => (Op::LeI(dst, a, b), Ty::Bool),
                     BinOp::Gt if int => (Op::GtI(dst, a, b), Ty::Bool),
@@ -260,6 +343,27 @@ impl Gen<'_> {
                 self.emit(opc, span);
                 self.top = mark;
                 Some(out)
+            }
+            ExprKind::Cast(inner, _) => {
+                let target = self.prog.res.casts.get(&e.id)?.clone();
+                let mark = self.top;
+                let (r, ty) = self.value(inner)?;
+                match (&ty, &target) {
+                    (Ty::Int, Ty::Float) => {
+                        self.emit(Op::ItoF(dst, r), span);
+                    }
+                    (Ty::Float, Ty::Int) => {
+                        self.emit(Op::FtoI(dst, r), span);
+                    }
+                    (a, b) if a == b && scalar(a) => {
+                        if r != dst {
+                            self.emit(Op::Mov(dst, r), span);
+                        }
+                    }
+                    _ => return None,
+                }
+                self.top = mark;
+                Some(target)
             }
             ExprKind::If {
                 branches,
@@ -293,6 +397,9 @@ impl Gen<'_> {
                     self.patch(j, end);
                 }
                 ty
+            }
+            ExprKind::Call { callee, args } if matches!(callee.kind, ExprKind::Field(..)) => {
+                self.method_call(e, callee, args, dst)
             }
             ExprKind::Call { callee, args } => {
                 if !matches!(callee.kind, ExprKind::Ident(..))
@@ -333,6 +440,67 @@ impl Gen<'_> {
             }
             _ => None,
         }
+    }
+
+    /// `x.abs()`, `n.sqrt()`, `a.max(b)`...: the methods of numbers.
+    fn method_call(&mut self, e: &Expr, callee: &Expr, args: &[CallArg], dst: Reg) -> Option<Ty> {
+        let ExprKind::Field(obj, name, targs) = &callee.kind else {
+            return None;
+        };
+        if !targs.is_empty()
+            || args.iter().any(|a| a.name.is_some())
+            || self.prog.res.arg_order.contains_key(&e.id)
+            || self.prog.res.trait_calls.contains(&e.id)
+            || self.prog.res.class_calls.contains(&e.id)
+            || self.prog.res.super_calls.contains_key(&callee.id)
+            || self.prog.res.paths.get(&callee.id).is_some()
+        {
+            return None;
+        }
+        let mark = self.top;
+        let base = self.top as Reg;
+        let recv = self.alloc()?;
+        let rt = self.into(obj, recv)?;
+        let (want, ret) = number_method(&rt, &name.name)?;
+        if want.len() != args.len() {
+            return None;
+        }
+        let mut tys = vec![rt.clone()];
+        for (a, w) in args.iter().zip(&want) {
+            let r = self.alloc()?;
+            if self.into(&a.value, r)? != *w {
+                return None;
+            }
+            tys.push(w.clone());
+        }
+        let span = e.span;
+        let fast = match (rt.clone(), name.name.as_str()) {
+            (Ty::Int, "abs") => Some(Op::AbsI(dst, recv)),
+            (Ty::Float, "abs") => Some(Op::AbsF(dst, recv)),
+            (Ty::Int, "sqrt") => Some(Op::SqrtI(dst, recv)),
+            (Ty::Float, "sqrt") => Some(Op::SqrtF(dst, recv)),
+            (Ty::Int, "min") => Some(Op::MinI(dst, recv, recv + 1)),
+            (Ty::Int, "max") => Some(Op::MaxI(dst, recv, recv + 1)),
+            (Ty::Float, "min") => Some(Op::MinF(dst, recv, recv + 1)),
+            (Ty::Float, "max") => Some(Op::MaxF(dst, recv, recv + 1)),
+            _ => None,
+        };
+        match fast {
+            Some(op) => {
+                self.emit(op, span);
+            }
+            None => {
+                let site = self.sites.len() as u32;
+                self.sites.push(Site {
+                    name: name.name.clone(),
+                    tys,
+                    ret: ret.clone(),
+                });
+                self.emit(Op::Method { dst, base, site }, span);
+            }
+        }
+        self.top = mark;
+        Some(ret)
     }
 
     fn callee_index(&mut self, fid: FnId) -> Option<u32> {
@@ -435,7 +603,7 @@ impl Gen<'_> {
                 var_pattern: None,
                 var2_pattern: None,
                 iter,
-                step: None,
+                step,
                 body,
             } => {
                 let ExprKind::Range {
@@ -455,13 +623,27 @@ impl Gen<'_> {
                 if self.into(end, lim)? != Ty::Int {
                     return None;
                 }
+                let stp = self.alloc()?;
+                match step {
+                    Some(st) => {
+                        if self.into(st, stp)? != Ty::Int {
+                            return None;
+                        }
+                    }
+                    None => {
+                        self.emit(Op::ConstI(stp, 1), span);
+                    }
+                }
+                self.emit(Op::StepCheck(stp), span);
                 let test = self.alloc()?;
                 let head = self.here();
                 self.emit(
-                    if *inclusive {
-                        Op::LeI(test, cnt, lim)
-                    } else {
-                        Op::LtI(test, cnt, lim)
+                    Op::ForTest {
+                        dst: test,
+                        cnt,
+                        lim,
+                        step: stp,
+                        incl: *inclusive,
                     },
                     span,
                 );
@@ -477,10 +659,20 @@ impl Gen<'_> {
                 for j in ctx.continues {
                     self.patch(j, next);
                 }
-                self.emit(Op::AddImm(cnt, cnt, 1), span);
+                let step_at = self.emit(
+                    Op::ForNext {
+                        cnt,
+                        step: stp,
+                        exit: 0,
+                    },
+                    span,
+                );
                 self.emit(Op::Jmp(head), span);
                 let end = self.here();
                 self.patch(exit, end);
+                if let Op::ForNext { exit, .. } = &mut self.ops[step_at] {
+                    *exit = end;
+                }
                 for j in ctx.breaks {
                     self.patch(j, end);
                 }
@@ -669,6 +861,7 @@ impl Interp<'_> {
                     loops: Vec::new(),
                     ret: def.ret.clone(),
                     callees: Vec::new(),
+                    sites: Vec::new(),
                 };
                 for (p, t) in decl.params.iter().zip(&def.params) {
                     let r = g.alloc()?;
@@ -692,6 +885,7 @@ impl Interp<'_> {
                         spans: g.spans,
                         param_tys: def.params.clone(),
                         ret: def.ret.clone(),
+                        sites: g.sites,
                     },
                     g.callees,
                 ))
@@ -828,10 +1022,100 @@ impl Interp<'_> {
                     }
                     r!(d) = ((r!(a) as f64) / (r!(b) as f64)).to_bits() as i64;
                 }
-                Op::AddImm(d, a, k) => match r!(a).checked_add(k) {
+                Op::PowI(d, a, b) => {
+                    if r!(b) < 0 {
+                        fail!(
+                            "R012",
+                            "negative exponent: use decimals (`2.0 ** -1`) for fractions"
+                        );
+                    }
+                    match u32::try_from(r!(b)).ok().and_then(|e| r!(a).checked_pow(e)) {
+                        Some(v) => r!(d) = v,
+                        None => fail!("R010", "integer overflow"),
+                    }
+                }
+                Op::PowF(d, a, b) => r!(d) = fl!(a).powf(fl!(b)).to_bits() as i64,
+                Op::ItoF(d, a) => r!(d) = (r!(a) as f64).to_bits() as i64,
+                Op::FtoI(d, a) => {
+                    let f = fl!(a);
+                    if !f.is_finite() || f >= 9.3e18 || f <= -9.3e18 {
+                        fail!("R013", format!("cannot convert {f} to an integer"));
+                    }
+                    r!(d) = f.trunc() as i64;
+                }
+                Op::AbsI(d, a) => match r!(a).checked_abs() {
                     Some(v) => r!(d) = v,
                     None => fail!("R010", "integer overflow"),
                 },
+                Op::AbsF(d, a) => r!(d) = fl!(a).abs().to_bits() as i64,
+                Op::SqrtI(d, a) => {
+                    if r!(a) < 0 {
+                        fail!("R014", "square root of a negative number");
+                    }
+                    r!(d) = (r!(a) as f64).sqrt().to_bits() as i64;
+                }
+                Op::SqrtF(d, a) => {
+                    if fl!(a) < 0.0 {
+                        fail!("R014", "square root of a negative number");
+                    }
+                    r!(d) = fl!(a).sqrt().to_bits() as i64;
+                }
+                Op::MinI(d, a, b) => r!(d) = r!(a).min(r!(b)),
+                Op::MaxI(d, a, b) => r!(d) = r!(a).max(r!(b)),
+                Op::MinF(d, a, b) => r!(d) = fl!(a).min(fl!(b)).to_bits() as i64,
+                Op::MaxF(d, a, b) => r!(d) = fl!(a).max(fl!(b)).to_bits() as i64,
+                Op::Method { dst, base: b, site } => {
+                    let span = code.spans[pc - 1];
+                    let st = &code.sites[site as usize];
+                    let to_value = |bits: i64, t: &Ty| match t {
+                        Ty::Int => Value::Int(bits),
+                        Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+                        _ => Value::Bool(bits != 0),
+                    };
+                    let recv = to_value(stack[base + b as usize], &st.tys[0]);
+                    let argv: Vec<Value> = st.tys[1..]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| to_value(stack[base + b as usize + 1 + i], t))
+                        .collect();
+                    let name = st.name.clone();
+                    let ret = st.ret.clone();
+                    let out = match self.builtin_method(&recv, &name, &argv, span)? {
+                        Some(v) => v,
+                        None => return self.fail("R008", "this value has no such method", span),
+                    };
+                    r!(dst) = match (out, ret) {
+                        (Value::Int(i), Ty::Int) => i,
+                        (Value::Float(f), Ty::Float) => f.to_bits() as i64,
+                        (Value::Bool(b), Ty::Bool) => i64::from(b),
+                        _ => return self.fail("R001", "unexpected result of a method", span),
+                    };
+                }
+                Op::ForTest {
+                    dst,
+                    cnt,
+                    lim,
+                    step,
+                    incl,
+                } => {
+                    let (i, end, st) = (r!(cnt), r!(lim), r!(step));
+                    r!(dst) = i64::from(if st > 0 {
+                        if incl { i <= end } else { i < end }
+                    } else if incl {
+                        i >= end
+                    } else {
+                        i > end
+                    });
+                }
+                Op::ForNext { cnt, step, exit } => match r!(cnt).checked_add(r!(step)) {
+                    Some(v) => r!(cnt) = v,
+                    None => pc = exit as usize,
+                },
+                Op::StepCheck(st) => {
+                    if r!(st) == 0 {
+                        fail!("R031", "`step` cannot be 0");
+                    }
+                }
                 Op::NegI(d, a) => match r!(a).checked_neg() {
                     Some(v) => r!(d) = v,
                     None => fail!("R010", "integer overflow"),

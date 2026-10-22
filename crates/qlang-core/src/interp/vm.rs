@@ -1964,11 +1964,17 @@ impl Interp<'_> {
                 Op::EqF(d, a, b) => r!(d) = i64::from(fl!(a) == fl!(b)),
                 Op::NeF(d, a, b) => r!(d) = i64::from(fl!(a) != fl!(b)),
                 Op::Jmp(t) => {
-                    if (t as usize) < pc && self.steps > self.limits.max_steps {
-                        fail!(
-                            "R900",
-                            "the program ran for too long (step limit reached: infinite loop?)"
-                        );
+                    if (t as usize) < pc {
+                        if self.steps > self.limits.max_steps {
+                            fail!(
+                                "R900",
+                                "the program ran for too long (step limit reached: infinite loop?)"
+                            );
+                        }
+                        // the machine allocates (arrays grow): look at the memory now and then
+                        if self.steps & 0x3FFF < 64 {
+                            self.check_memory(code.spans[pc - 1])?;
+                        }
                     }
                     pc = t as usize;
                 }

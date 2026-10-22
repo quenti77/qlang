@@ -820,6 +820,14 @@ impl Checker {
         }
     }
 
+    /// Remembers the type of a use of a variable when it is `int`, `float` or `bool`.
+    fn note_ident_ty(&mut self, id: NodeId, ty: &Ty) {
+        let t = self.resolve(ty);
+        if matches!(t, Ty::Int | Ty::Float | Ty::Bool) {
+            self.res.ident_tys.insert(id, t);
+        }
+    }
+
     fn check_ident(&mut self, e: &Expr, name: &str, targs: &[TypeExpr]) -> Ty {
         if let Some((local, origin)) = self.lookup_var(name) {
             let res = match origin {
@@ -827,6 +835,7 @@ impl Checker {
                 VarOrigin::Module(m) => PathRes::Global(m, name.to_string()),
             };
             self.res.paths.insert(e.id, res);
+            self.note_ident_ty(e.id, &local.ty);
             return local.ty;
         }
         match self.lookup_item(name) {
@@ -834,6 +843,7 @@ impl Checker {
             Some(ItemRef::Var(m, vname)) => match self.mscopes[m].vars.get(&vname).cloned() {
                 Some(l) => {
                     self.res.paths.insert(e.id, PathRes::Global(m, vname));
+                    self.note_ident_ty(e.id, &l.ty);
                     l.ty
                 }
                 None => {
@@ -1148,6 +1158,7 @@ impl Checker {
                         );
                         }
                         let declared = l.orig.clone().unwrap_or_else(|| l.ty.clone());
+                        self.note_ident_ty(target.id, &declared);
                         assigned_var = Some((name.clone(), declared.clone()));
                         declared
                     }
@@ -1158,6 +1169,7 @@ impl Checker {
                                     self.err("T211", format!("cannot assign to `{name}`: it belongs to another module"), target.span);
                                 }
                                 self.res.paths.insert(target.id, PathRes::Global(m, vname));
+                                self.note_ident_ty(target.id, &l.ty);
                                 l.ty
                             } else {
                                 Ty::Error

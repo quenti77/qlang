@@ -10,6 +10,7 @@
 //! through [`Interp::call_fid`].
 
 use super::*;
+use std::cell::Cell;
 
 type Reg = u16;
 
@@ -91,6 +92,15 @@ enum Op {
         base: Reg,
         dst: Reg,
     },
+    /// Read / write a variable of the module (a global), by its entry in `Code::globals`.
+    LoadG {
+        dst: Reg,
+        g: u32,
+    },
+    StoreG {
+        src: Reg,
+        g: u32,
+    },
     Ret(Reg),
     RetUnit,
 }
@@ -104,6 +114,30 @@ pub(super) struct Code {
     param_tys: Vec<Ty>,
     ret: Ty,
     sites: Vec<Site>,
+    globals: Vec<GlobalRef>,
+    /// For a compiled loop: the variables it shares with the code around it.
+    frees: Vec<Free>,
+}
+
+/// A variable of a module, read or written by a compiled function.
+struct GlobalRef {
+    module: ModId,
+    name: String,
+    ty: Ty,
+    /// Where the variable was found last time (see `Scope::get_cached`).
+    slot: Cell<u32>,
+}
+
+/// A variable a compiled loop shares with the code around it: it is loaded into a register
+/// when the loop starts and written back when it ends (when the loop assigned it).
+#[derive(Clone)]
+struct Free {
+    name: String,
+    reg: Reg,
+    ty: Ty,
+    /// The module whose variable it is; `None` for a local variable of the enclosing code.
+    global: Option<ModId>,
+    assigned: bool,
 }
 
 /// A method call made through [`Op::Method`]: its name, the types of the receiver and the
@@ -166,6 +200,21 @@ struct Gen<'a> {
     /// the functions of the group are compiled, then it is renumbered).
     callees: Vec<FnId>,
     sites: Vec<Site>,
+    globals: Vec<GlobalRef>,
+    /// Compiling a loop (not a function): its free variables live in registers.
+    loop_mode: bool,
+    /// The free variables are known (second pass): no new one may appear.
+    preset: bool,
+    frees: Vec<Free>,
+    /// A call to a function was compiled (it could change a global a loop keeps in a register).
+    has_call: bool,
+    /// Tuples that were only taken apart (`(a, b) = (b, a + b)`): the registers of their elements.
+    tuples: Vec<(String, Vec<(Reg, Ty)>)>,
+}
+
+enum Access {
+    Reg(Reg, Ty),
+    Global(u32, Ty),
 }
 
 #[derive(Default)]
@@ -199,9 +248,82 @@ impl Gen<'_> {
         }
     }
 
-    /// Whether the name at this node means a local variable (not a global or a function).
-    fn is_local_use(&self, id: NodeId) -> bool {
-        matches!(self.prog.res.paths.get(&id), None | Some(PathRes::Local))
+    /// How the variable named at this node is reached: a register, or a module variable.
+    fn access(&mut self, e: &Expr, write: bool) -> Option<Access> {
+        let ExprKind::Ident(name, targs) = &e.kind else {
+            return None;
+        };
+        if !targs.is_empty() {
+            return None;
+        }
+        match self.prog.res.paths.get(&e.id) {
+            Some(PathRes::Global(m, n)) => {
+                let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
+                if self.loop_mode {
+                    let r = self.free(n, Some(*m), &ty, write)?;
+                    Some(Access::Reg(r, ty))
+                } else {
+                    let g = self.global(*m, n, &ty);
+                    Some(Access::Global(g, ty))
+                }
+            }
+            None | Some(PathRes::Local) => {
+                if let Some((r, t)) = self.lookup(name) {
+                    return Some(Access::Reg(r, t));
+                }
+                if !self.loop_mode {
+                    return None;
+                }
+                let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
+                let r = self.free(name, None, &ty, write)?;
+                Some(Access::Reg(r, ty))
+            }
+            _ => None,
+        }
+    }
+
+    fn global(&mut self, module: ModId, name: &str, ty: &Ty) -> u32 {
+        if let Some(i) = self
+            .globals
+            .iter()
+            .position(|g| g.module == module && g.name == name)
+        {
+            return i as u32;
+        }
+        self.globals.push(GlobalRef {
+            module,
+            name: name.to_string(),
+            ty: ty.clone(),
+            slot: Cell::new(NO_SLOT),
+        });
+        (self.globals.len() - 1) as u32
+    }
+
+    /// The register of a variable shared with the code around the loop.
+    fn free(&mut self, name: &str, global: Option<ModId>, ty: &Ty, write: bool) -> Option<Reg> {
+        if let Some(f) = self
+            .frees
+            .iter_mut()
+            .find(|f| f.name == name && f.global == global)
+        {
+            if f.ty != *ty {
+                return None;
+            }
+            f.assigned |= write;
+            return Some(f.reg);
+        }
+        if self.preset {
+            return None;
+        }
+        let reg = self.alloc()?;
+        self.frees.push(Free {
+            name: name.to_string(),
+            reg,
+            ty: ty.clone(),
+            global,
+            assigned: write,
+        });
+        Some(reg)
     }
 
     fn lookup(&self, name: &str) -> Option<(Reg, Ty)> {
@@ -213,13 +335,12 @@ impl Gen<'_> {
             .map(|(_, r, t)| (*r, t.clone()))
     }
 
-    /// Where the value of `e` is, and its type: a local's own register, or a new temporary.
+    /// Where the value of `e` is, and its type: a variable's own register, or a new temporary.
     fn value(&mut self, e: &Expr) -> Option<(Reg, Ty)> {
-        if let ExprKind::Ident(name, _) = &e.kind
-            && self.is_local_use(e.id)
-            && let Some(found) = self.lookup(name)
+        if matches!(e.kind, ExprKind::Ident(..))
+            && let Some(Access::Reg(r, t)) = self.access(e, false)
         {
-            return Some(found);
+            return Some((r, t));
         }
         let dst = self.alloc()?;
         let ty = self.into(e, dst)?;
@@ -242,16 +363,18 @@ impl Gen<'_> {
                 self.emit(Op::ConstI(dst, i64::from(*b)), span);
                 Some(Ty::Bool)
             }
-            ExprKind::Ident(name, targs) => {
-                if !targs.is_empty() || !self.is_local_use(e.id) {
-                    return None;
+            ExprKind::Ident(..) => match self.access(e, false)? {
+                Access::Reg(r, ty) => {
+                    if r != dst {
+                        self.emit(Op::Mov(dst, r), span);
+                    }
+                    Some(ty)
                 }
-                let (r, ty) = self.lookup(name)?;
-                if r != dst {
-                    self.emit(Op::Mov(dst, r), span);
+                Access::Global(g, ty) => {
+                    self.emit(Op::LoadG { dst, g }, span);
+                    Some(ty)
                 }
-                Some(ty)
-            }
+            },
             ExprKind::Unary(op, inner) => {
                 let mark = self.top;
                 let (r, ty) = self.value(inner)?;
@@ -344,6 +467,15 @@ impl Gen<'_> {
                 self.top = mark;
                 Some(out)
             }
+            ExprKind::TupleField(inner, idx) => {
+                let ExprKind::Ident(name, _) = &inner.kind else {
+                    return None;
+                };
+                let (_, regs) = self.tuples.iter().rev().find(|(n, _)| n == name)?;
+                let (r, t) = regs.get(*idx)?.clone();
+                self.emit(Op::Mov(dst, r), span);
+                Some(t)
+            }
             ExprKind::Cast(inner, _) => {
                 let target = self.prog.res.casts.get(&e.id)?.clone();
                 let mark = self.top;
@@ -434,6 +566,7 @@ impl Gen<'_> {
                     }
                 }
                 let code = self.callee_index(fid)?;
+                self.has_call = true;
                 self.emit(Op::Call { code, base, dst }, span);
                 self.top = mark;
                 Some(def.ret.clone())
@@ -542,6 +675,64 @@ impl Gen<'_> {
     fn stmt(&mut self, s: &Stmt) -> Option<()> {
         let span = s.span;
         match &s.kind {
+            StmtKind::Seq { stmts, .. } => {
+                for st in stmts {
+                    self.stmt(st)?;
+                }
+                Some(())
+            }
+            StmtKind::Let {
+                name,
+                init:
+                    Expr {
+                        kind: ExprKind::Tuple(items),
+                        ..
+                    },
+                ..
+            } if name.name.starts_with('$') => {
+                // the hidden variable of `(a, b) = (b, a + b)`: every element is computed first
+                let mut regs = Vec::new();
+                for it in items {
+                    let r = self.alloc()?;
+                    let t = self.into(it, r)?;
+                    if !scalar(&t) {
+                        return None;
+                    }
+                    regs.push((r, t));
+                }
+                self.tuples.push((name.name.clone(), regs));
+                Some(())
+            }
+            StmtKind::LetTuple {
+                pattern: TuplePattern::Tuple(names, _),
+                init:
+                    Expr {
+                        kind: ExprKind::Tuple(items),
+                        ..
+                    },
+                ..
+            } if names.len() == items.len()
+                && names
+                    .iter()
+                    .all(|n| matches!(n, TuplePattern::Name(_) | TuplePattern::Wild(_))) =>
+            {
+                // `let (a, b) = (x, y)`: the values are computed first, then named
+                let mut regs = Vec::new();
+                for it in items {
+                    let r = self.alloc()?;
+                    let t = self.into(it, r)?;
+                    if !scalar(&t) {
+                        return None;
+                    }
+                    regs.push((r, t));
+                }
+                for (n, (r, t)) in names.iter().zip(regs) {
+                    if let TuplePattern::Name(id) = n {
+                        self.scopes.last_mut()?.push((id.name.clone(), r, t));
+                    }
+                }
+                Some(())
+            }
             StmtKind::Let { name, init, .. } => {
                 let dst = self.alloc()?;
                 let ty = self.into(init, dst)?;
@@ -555,6 +746,10 @@ impl Gen<'_> {
             }
             StmtKind::Expr(e) => self.effect(e),
             StmtKind::Return(e) => {
+                if self.loop_mode {
+                    // a `return` inside a loop leaves a function the machine knows nothing of
+                    return None;
+                }
                 let mark = self.top;
                 match e {
                     Some(e) => {
@@ -700,29 +895,28 @@ impl Gen<'_> {
         let mark = self.top;
         match &e.kind {
             ExprKind::Assign { op, target, value } => {
-                let ExprKind::Ident(name, _) = &target.kind else {
-                    return None;
+                let (reg, ty, global) = match self.access(target, true)? {
+                    Access::Reg(r, t) => (r, t, None),
+                    Access::Global(g, t) => (self.alloc()?, t, Some(g)),
                 };
-                if !self.is_local_use(target.id) {
+                if let (Some(g), Some(_)) = (global, op) {
+                    // read the variable first, as the tree walker does, then the right side
+                    self.emit(Op::LoadG { dst: reg, g }, e.span);
+                }
+                let (r, t) = self.value(value)?;
+                if t != ty {
                     return None;
                 }
-                let (reg, ty) = self.lookup(name)?;
                 match op {
                     None => {
-                        // evaluated into a temporary first: `x = x + 1` reads the old `x`
-                        let (r, t) = self.value(value)?;
-                        if t != ty {
-                            return None;
-                        }
-                        if r != reg {
+                        if global.is_none() && r != reg {
                             self.emit(Op::Mov(reg, r), e.span);
+                        }
+                        if let Some(g) = global {
+                            self.emit(Op::StoreG { src: r, g }, e.span);
                         }
                     }
                     Some(bop) => {
-                        let (r, t) = self.value(value)?;
-                        if t != ty {
-                            return None;
-                        }
                         let int = ty == Ty::Int;
                         let float = ty == Ty::Float;
                         let opc = match bop {
@@ -738,6 +932,9 @@ impl Gen<'_> {
                             _ => return None,
                         };
                         self.emit(opc, e.span);
+                        if let Some(g) = global {
+                            self.emit(Op::StoreG { src: reg, g }, e.span);
+                        }
                     }
                 }
             }
@@ -787,9 +984,128 @@ struct Frame {
     dst: Reg,
 }
 
+/// What is compiled: a function, or a loop statement.
+#[derive(Clone, Copy)]
+pub(super) enum Unit<'a> {
+    Fn(FnId),
+    Loop(&'a Stmt),
+}
+
+/// Compiles one unit; also the functions it calls.
+fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
+    let new_gen = |ret: Ty, loop_mode: bool| Gen {
+        prog,
+        ops: Vec::new(),
+        spans: Vec::new(),
+        scopes: vec![Vec::new()],
+        top: 0,
+        max: 0,
+        loops: Vec::new(),
+        ret,
+        callees: Vec::new(),
+        sites: Vec::new(),
+        globals: Vec::new(),
+        loop_mode,
+        preset: false,
+        frees: Vec::new(),
+        has_call: false,
+        tuples: Vec::new(),
+    };
+    match unit {
+        Unit::Fn(f) => {
+            let def = &prog.defs.fns[f];
+            let decl = def.decl.as_ref()?;
+            let body = decl.body.as_ref()?;
+            if decl.external
+                || !decl.tparams.is_empty()
+                || def.has_self
+                || def.impl_id.is_some()
+                || !def.params.iter().all(scalar)
+                || !(scalar(&def.ret) || def.ret == Ty::Unit)
+            {
+                return None;
+            }
+            let mut g = new_gen(def.ret.clone(), false);
+            for (p, t) in decl.params.iter().zip(&def.params) {
+                let r = g.alloc()?;
+                g.scopes[0].push((p.name.name.clone(), r, t.clone()));
+            }
+            if def.ret == Ty::Unit {
+                g.block(body, None)?;
+                g.emit(Op::RetUnit, decl.span);
+            } else {
+                let res = g.alloc()?;
+                if g.block(body, Some(res))? != def.ret {
+                    return None;
+                }
+                g.emit(Op::Ret(res), decl.span);
+            }
+            Some((
+                Code {
+                    name: def.name.clone(),
+                    nregs: g.max + 1,
+                    ops: g.ops,
+                    spans: g.spans,
+                    param_tys: def.params.clone(),
+                    ret: def.ret.clone(),
+                    sites: g.sites,
+                    globals: g.globals,
+                    frees: Vec::new(),
+                },
+                g.callees,
+            ))
+        }
+        Unit::Loop(s) => {
+            if !matches!(s.kind, StmtKind::While { .. } | StmtKind::For { .. }) {
+                return None;
+            }
+            // first pass: which variables the loop shares with the code around it
+            let mut probe = new_gen(Ty::Unit, true);
+            probe.stmt(s)?;
+            if probe.frees.is_empty() {
+                // nothing to compute with: not worth it
+                return None;
+            }
+            // second pass: those variables are the first registers
+            let mut g = new_gen(Ty::Unit, true);
+            g.preset = true;
+            for (k, f) in probe.frees.iter().enumerate() {
+                g.frees.push(Free {
+                    reg: k as Reg,
+                    assigned: false,
+                    ..f.clone()
+                });
+            }
+            g.top = g.frees.len();
+            g.max = g.top;
+            g.stmt(s)?;
+            g.emit(Op::RetUnit, s.span);
+            // a call could change a module variable the loop keeps in a register
+            if g.has_call && g.frees.iter().any(|f| f.global.is_some()) {
+                return None;
+            }
+            Some((
+                Code {
+                    name: "<loop>".to_string(),
+                    nregs: g.max + 1,
+                    ops: g.ops,
+                    spans: g.spans,
+                    param_tys: Vec::new(),
+                    ret: Ty::Unit,
+                    sites: g.sites,
+                    globals: g.globals,
+                    frees: g.frees,
+                },
+                g.callees,
+            ))
+        }
+    }
+}
+
 impl Interp<'_> {
     /// Calls `fid` on the machine when it is compiled (compiling it now if it is the first
     /// time). `None` when it cannot run there: the tree walker does it.
+    #[inline(always)]
     pub(super) fn try_vm(
         &mut self,
         fid: FnId,
@@ -797,9 +1113,16 @@ impl Interp<'_> {
         args: &[Value],
         span: Span,
     ) -> Option<R<Value>> {
-        if this.is_some() || !self.vm_enabled {
+        // the common refusals, without a call: a method, or a function known not to compile
+        if this.is_some() || !self.vm_enabled || matches!(self.vm_state.get(fid), Some(VmState::No))
+        {
             return None;
         }
+        self.try_vm_slow(fid, args, span)
+    }
+
+    #[inline(never)]
+    fn try_vm_slow(&mut self, fid: FnId, args: &[Value], span: Span) -> Option<R<Value>> {
         if self.vm_state.len() <= fid {
             let n = self.prog.defs.fns.len().max(fid + 1);
             self.vm_state.resize(n, VmState::Unknown);
@@ -822,93 +1145,61 @@ impl Interp<'_> {
                 _ => return None,
             });
         }
-        Some(self.vm_run(idx, regs, span).map(|r| match code.ret {
-            Ty::Int => Value::Int(r),
-            Ty::Float => Value::Float(f64::from_bits(r as u64)),
-            Ty::Bool => Value::Bool(r != 0),
-            _ => Value::Unit,
-        }))
+        Some(
+            self.vm_run(idx, regs, Vec::new(), span)
+                .map(|r| match code.ret {
+                    Ty::Int => Value::Int(r),
+                    Ty::Float => Value::Float(f64::from_bits(r as u64)),
+                    Ty::Bool => Value::Bool(r != 0),
+                    _ => Value::Unit,
+                }),
+        )
     }
 
-    /// Compiles `fid` and every function it calls (a call to a function that is not plain
-    /// numeric code makes the whole group fall back to the tree walker, and `fid` is marked so).
+    /// Compiles the function `fid` and everything it calls.
     fn vm_compile(&mut self, fid: FnId) -> Option<u32> {
+        let r = self.vm_compile_unit(Unit::Fn(fid));
+        if r.is_none() {
+            self.vm_state[fid] = VmState::No;
+        }
+        r
+    }
+
+    /// Compiles a function or a loop, and every function it calls (a call to a function that
+    /// is not plain numeric code makes the whole group fall back to the tree walker).
+    fn vm_compile_unit(&mut self, root: Unit) -> Option<u32> {
         let prog = self.prog;
-        let mut batch: Vec<(FnId, Code, Vec<FnId>)> = Vec::new();
-        let mut pending = vec![fid];
-        let mut seen: Vec<FnId> = vec![fid];
-        while let Some(f) = pending.pop() {
-            let def = &prog.defs.fns[f];
-            let compiled = (|| {
-                let decl = def.decl.as_ref()?;
-                let body = decl.body.as_ref()?;
-                if decl.external
-                    || !decl.tparams.is_empty()
-                    || def.has_self
-                    || def.impl_id.is_some()
-                    || !def.params.iter().all(scalar)
-                    || !(scalar(&def.ret) || def.ret == Ty::Unit)
-                {
-                    return None;
-                }
-                let mut g = Gen {
-                    prog,
-                    ops: Vec::new(),
-                    spans: Vec::new(),
-                    scopes: vec![Vec::new()],
-                    top: 0,
-                    max: 0,
-                    loops: Vec::new(),
-                    ret: def.ret.clone(),
-                    callees: Vec::new(),
-                    sites: Vec::new(),
-                };
-                for (p, t) in decl.params.iter().zip(&def.params) {
-                    let r = g.alloc()?;
-                    g.scopes[0].push((p.name.name.clone(), r, t.clone()));
-                }
-                if def.ret == Ty::Unit {
-                    g.block(body, None)?;
-                    g.emit(Op::RetUnit, decl.span);
-                } else {
-                    let res = g.alloc()?;
-                    if g.block(body, Some(res))? != def.ret {
-                        return None;
-                    }
-                    g.emit(Op::Ret(res), decl.span);
-                }
-                Some((
-                    Code {
-                        name: def.name.clone(),
-                        nregs: g.max + 1,
-                        ops: g.ops,
-                        spans: g.spans,
-                        param_tys: def.params.clone(),
-                        ret: def.ret.clone(),
-                        sites: g.sites,
-                    },
-                    g.callees,
-                ))
-            })();
-            let Some((code, callees)) = compiled else {
-                self.vm_state[fid] = VmState::No;
-                return None;
-            };
+        let mut batch: Vec<(Option<FnId>, Code)> = Vec::new();
+        let mut pending: Vec<Unit> = vec![root];
+        let mut seen: Vec<FnId> = Vec::new();
+        if let Unit::Fn(f) = root {
+            seen.push(f);
+        }
+        while let Some(unit) = pending.pop() {
+            let (code, callees) = gen_unit(prog, unit)?;
             for c in &callees {
                 if !seen.contains(c) && !matches!(self.vm_state.get(*c), Some(VmState::Yes(_))) {
                     seen.push(*c);
-                    pending.push(*c);
+                    pending.push(Unit::Fn(*c));
                 }
             }
-            batch.push((f, code, callees));
+            batch.push((
+                match unit {
+                    Unit::Fn(f) => Some(f),
+                    Unit::Loop(_) => None,
+                },
+                code,
+            ));
         }
-        // number the functions of the group, then point every call at its target
+        // number the group, then point every call at its target
         let first = self.vm_codes.len() as u32;
         let mut index: HashMap<FnId, u32> = HashMap::new();
-        for (k, (f, _, _)) in batch.iter().enumerate() {
-            index.insert(*f, first + k as u32);
+        for (k, (f, _)) in batch.iter().enumerate() {
+            if let Some(f) = f {
+                index.insert(*f, first + k as u32);
+            }
         }
-        for (_, code, callees) in &mut batch {
+        for (_, code) in &mut batch {
             for op in &mut code.ops {
                 if let Op::Call { code: target, .. } = op {
                     let f = *target as usize;
@@ -921,37 +1212,97 @@ impl Interp<'_> {
                     };
                 }
             }
-            let _ = callees;
         }
-        for (f, code, _) in batch {
-            if self.vm_state.len() <= f {
-                self.vm_state.resize(f + 1, VmState::Unknown);
+        let mut root_index = first;
+        for (k, (f, code)) in batch.into_iter().enumerate() {
+            let i = self.vm_codes.len() as u32;
+            if k == 0 {
+                root_index = i;
             }
-            self.vm_state[f] = VmState::Yes(self.vm_codes.len() as u32);
+            if let Some(f) = f {
+                if self.vm_state.len() <= f {
+                    self.vm_state.resize(f + 1, VmState::Unknown);
+                }
+                self.vm_state[f] = VmState::Yes(i);
+            }
             self.vm_codes.push(Rc::new(code));
         }
-        match self.vm_state[fid] {
-            VmState::Yes(i) => Some(i),
-            _ => None,
-        }
+        Some(root_index)
     }
 
-    fn vm_run(&mut self, root: u32, args: Vec<i64>, span: Span) -> R<i64> {
+    /// Runs a `while` or `for` statement on the machine when it is a numeric loop: the
+    /// variables it shares with the code around it are loaded into registers, and the ones it
+    /// assigns are written back at the end. `None` when it cannot (the tree walker runs it).
+    pub(super) fn try_vm_loop(&mut self, s: &Stmt, env: &Env) -> Option<R<Value>> {
+        if !self.vm_enabled {
+            return None;
+        }
+        let key = s as *const Stmt as usize;
+        let idx = match self.vm_loops.get(&key) {
+            Some(None) => return None,
+            Some(Some(i)) => *i,
+            None => {
+                let r = self.vm_compile_unit(Unit::Loop(s));
+                self.vm_loops.insert(key, r);
+                r?
+            }
+        };
+        let code = self.vm_codes[idx as usize].clone();
+        let mut init = Vec::with_capacity(code.frees.len());
+        for f in &code.frees {
+            let v = match f.global {
+                Some(m) => self.envs[m].get(&f.name),
+                None => env.get(&f.name),
+            };
+            let bits = match (v, &f.ty) {
+                (Some(Value::Int(i)), Ty::Int) => i,
+                (Some(Value::Float(x)), Ty::Float) => x.to_bits() as i64,
+                (Some(Value::Bool(b)), Ty::Bool) => i64::from(b),
+                _ => return None,
+            };
+            init.push((f.reg, bits));
+        }
+        if let Err(e) = self.vm_run(idx, Vec::new(), init, s.span) {
+            return Some(Err(e));
+        }
+        for f in code.frees.iter().filter(|f| f.assigned) {
+            let bits = self.vm_stack[f.reg as usize];
+            let v = match f.ty {
+                Ty::Int => Value::Int(bits),
+                Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+                _ => Value::Bool(bits != 0),
+            };
+            match f.global {
+                Some(m) => self.envs[m].assign(&f.name, v),
+                None => env.assign(&f.name, v),
+            };
+        }
+        Some(Ok(Value::Unit))
+    }
+
+    fn vm_run(&mut self, root: u32, args: Vec<i64>, init: Vec<(Reg, i64)>, span: Span) -> R<i64> {
         let mut stack = std::mem::take(&mut self.vm_stack);
         stack.clear();
         let code = self.vm_codes[root as usize].clone();
         stack.resize(code.nregs.max(args.len()), 0);
         stack[..args.len()].copy_from_slice(&args);
+        for (r, v) in init {
+            stack[r as usize] = v;
+        }
         let mut frames: Vec<Frame> = Vec::new();
         if self.depth >= self.limits.max_depth {
             self.vm_stack = stack;
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }
-        self.depth += 1;
-        self.frames.push((Name::new(&code.name), span));
+        // a loop is not a call: it shows no frame of its own in the trace of an error
+        let own = usize::from(!code.frees.is_empty());
+        if own == 0 {
+            self.depth += 1;
+            self.frames.push((Name::new(&code.name), span));
+        }
         let r = self.vm_loop(&mut stack, &mut frames, root);
         // leave the interpreter's own call bookkeeping as it was
-        for _ in 0..=frames.len() {
+        for _ in 0..frames.len() + usize::from(own == 0) {
             self.frames.pop();
             self.depth -= 1;
         }
@@ -1064,6 +1415,37 @@ impl Interp<'_> {
                 Op::MaxI(d, a, b) => r!(d) = r!(a).max(r!(b)),
                 Op::MinF(d, a, b) => r!(d) = fl!(a).min(fl!(b)).to_bits() as i64,
                 Op::MaxF(d, a, b) => r!(d) = fl!(a).max(fl!(b)).to_bits() as i64,
+                Op::LoadG { dst, g } => {
+                    let gr = &code.globals[g as usize];
+                    let mut c = gr.slot.get();
+                    let v = self.envs[gr.module].get_cached(&gr.name, &mut c);
+                    gr.slot.set(c);
+                    r!(dst) = match v {
+                        Some(Value::Int(i)) => i,
+                        Some(Value::Float(f)) => f.to_bits() as i64,
+                        Some(Value::Bool(b)) => i64::from(b),
+                        Some(_) => fail!("R001", "unexpected type of a variable"),
+                        None => fail!(
+                            "R002",
+                            format!("`{}` is used before it has a value", gr.name)
+                        ),
+                    };
+                }
+                Op::StoreG { src, g } => {
+                    let gr = &code.globals[g as usize];
+                    let bits = r!(src);
+                    let value = match gr.ty {
+                        Ty::Int => Value::Int(bits),
+                        Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+                        _ => Value::Bool(bits != 0),
+                    };
+                    let mut c = gr.slot.get();
+                    let ok = self.envs[gr.module].assign_cached(&gr.name, value, &mut c);
+                    gr.slot.set(c);
+                    if !ok {
+                        fail!("R002", format!("`{}` has no value yet", gr.name));
+                    }
+                }
                 Op::Method { dst, base: b, site } => {
                     let span = code.spans[pc - 1];
                     let st = &code.sites[site as usize];

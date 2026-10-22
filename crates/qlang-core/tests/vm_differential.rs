@@ -97,6 +97,12 @@ fn float_expr(rng: &mut Rng, vars: &[&str], depth: usize) -> String {
     }
 }
 
+static UNIQUE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn unique() -> usize {
+    UNIQUE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Statements that use and change the integer variables `vars` (`acc` among them).
 fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
     let mut out = String::new();
@@ -115,7 +121,7 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
                 )
             }
             4 if loops => {
-                let k = format!("k{depth}");
+                let k = format!("k{}", unique());
                 let mut inner: Vec<&str> = vars.to_vec();
                 inner.push(&k);
                 out += &format!(
@@ -125,7 +131,7 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
                 );
             }
             6 if loops => {
-                let k = format!("m{depth}");
+                let k = format!("m{}", unique());
                 let mut inner: Vec<&str> = vars.to_vec();
                 inner.push(&k);
                 let step = rng.pick(&["1", "2", "3", "-1", "-2", "0"]);
@@ -141,17 +147,16 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
                 );
             }
             5 if loops => {
+                let w = format!("w{}", unique());
                 out += &format!(
-                    "let w{depth} = 0\nwhile w{depth} < {} do\nw{depth} += 1\n{}end\n",
+                    "let {w} = 0\nwhile {w} < {} do\n{w} += 1\n{}end\n",
                     rng.below(8),
                     stmts(rng, vars, depth - 1, false)
                 );
             }
             _ => {
-                out += &format!(
-                    "let t{depth} = {}\n{target} += t{depth}\n",
-                    int_expr(rng, vars, 2)
-                )
+                let t = format!("t{}", unique());
+                out += &format!("let {t} = {}\n{target} += {t}\n", int_expr(rng, vars, 2));
             }
         }
     }
@@ -176,12 +181,51 @@ fn program(rng: &mut Rng) -> String {
         float_expr(rng, &["a", "b"], 3),
         float_expr(rng, &["a", "b", "c"], 2)
     );
+    // module variables, used by functions and by loops of the top level
+    src += "let g1 = 3\nlet g2 = 1.5\nlet flag = true\n";
+    src += &format!(
+        "fun bump(x: int) -> int\n  g1 += x mod 4\n  g1 + {}\nend\n",
+        int_expr(rng, &["x", "g1"], 2)
+    );
+    src += &format!(
+        "fun scale(x: float) -> float\n  g2 = g2 * 0.5 + x\n  g2\nend\nfun readg(x: int) -> int\n  let t = {}\n  t + g1\nend\n",
+        int_expr(rng, &["x", "g1"], 2)
+    );
+    // a function the machine does not compile (it prints), with a numeric loop inside
+    src += &format!(
+        "fun noisy(n: int) -> int\n  let acc = 0\n  let w = n\n{}  print(\"noisy {{acc}}\")\n  acc\nend\n",
+        stmts(rng, &["acc", "w", "n"], 2, true)
+    );
     src += "fun h(p: bool, q: int) -> bool\n  p and (q > 3) or (q == 0)\nend\n";
     for _ in 0..4 {
         let (x, y) = (rng.below(30) as i64 - 8, rng.below(30) as i64 - 8);
         src += &format!("print(f({x}, {y}))\n");
     }
     src += &format!("print(rec({}, 1))\n", rng.below(60));
+    // loops of the top level over module variables
+    for k in 0..3 {
+        let acc = format!("acc{k}");
+        let vars = ["g1", acc.as_str()];
+        src += &format!("let {acc} = 1\n");
+        src += &stmts(rng, &vars, 2, true);
+        src += &format!("print(g1)\nprint({acc})\n");
+    }
+    src += &format!(
+        "for q in 0..{} do\n  g2 += q * 0.25\n  if q mod 3 == 0 then flag = not flag end\nend\nprint(g2)\nprint(flag)\n",
+        rng.below(20)
+    );
+    src += &format!(
+        "print(bump({}))\nprint(scale({:.1}))\nprint(readg({}))\n",
+        rng.below(9),
+        rng.below(50) as f64 / 10.0,
+        rng.below(9)
+    );
+    src += &format!("print(noisy({}))\n", rng.below(9));
+    // a loop that calls a function which changes the variables it uses
+    src += &format!(
+        "let tot = 0\nfor q in 0..{} do\n  tot += bump(q)\n  g1 += 1\nend\nprint(tot)\nprint(g1)\n",
+        rng.below(12)
+    );
     src += &format!(
         "print(g({:.2}, {:.2}))\n",
         rng.below(400) as f64 / 10.0 - 20.0,
@@ -253,6 +297,9 @@ fn sweep(seed: u64, count: usize) {
         let src = program(&mut rng);
         let (vm, walker) = run_both(&src);
         if vm.starts_with("COMPILE") {
+            if std::env::var("SHOW_COMPILE_ERRORS").is_ok() && i < 3 {
+                eprintln!("{vm}\n{src}");
+            }
             continue;
         }
         compiled += 1;

@@ -539,6 +539,9 @@ pub struct Resolutions {
     /// Enum variant patterns (`Pattern::Path`, `Variant`, and a `Bind` that names a variant):
     /// the pattern's id to the variant.
     pub patterns: FxHashMap<NodeId, (EnumId, usize)>,
+    /// The type of each use of a variable whose type is `int`, `float` or `bool` (the typed
+    /// register machine needs it for the variables a loop shares with the code around it).
+    pub ident_tys: FxHashMap<NodeId, Ty>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: FxHashSet<NodeId>,
     /// Method calls made through a trait (a generic bound or a trait-typed value): at

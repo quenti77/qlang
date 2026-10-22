@@ -28,7 +28,8 @@ pub struct RunResult {
     pub exit_code: Option<i32>,
     /// Evaluation steps used.
     pub steps: u64,
-    /// How many functions the typed register machine compiled, and how many it refused.
+    /// How many functions and loops the typed register machine compiled, and how many functions
+    /// it refused.
     pub vm_functions: (usize, usize),
 }
 
@@ -72,7 +73,8 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
             it.vm_state
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::Yes(_)))
-                .count(),
+                .count()
+                + it.vm_loops.values().filter(|l| l.is_some()).count(),
             it.vm_state
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::No))
@@ -382,6 +384,8 @@ struct Interp<'a> {
     vm_codes: Vec<Rc<vm::Code>>,
     vm_stack: Vec<i64>,
     vm_enabled: bool,
+    /// Loop statements compiled for the machine (by address), `None` for those it refused.
+    vm_loops: HashMap<usize, Option<u32>>,
 }
 
 /// Values nested deeper than this cannot be compared (`R005`).
@@ -412,6 +416,7 @@ impl<'a> Interp<'a> {
             vm_codes: Vec::new(),
             vm_stack: Vec::new(),
             vm_enabled: true,
+            vm_loops: HashMap::new(),
         }
     }
 
@@ -654,6 +659,9 @@ impl<'a> Interp<'a> {
 
     #[inline(never)]
     fn exec_while(&mut self, s: &Stmt, cond: &Expr, body: &Block, env: &Env) -> R<Value> {
+        if let Some(r) = self.try_vm_loop(s, env) {
+            return r;
+        }
         loop {
             if !self.eval_bool(cond, env)? {
                 break;
@@ -682,6 +690,9 @@ impl<'a> Interp<'a> {
         else {
             unreachable!("exec_for is only called for a `for`");
         };
+        if let Some(r) = self.try_vm_loop(s, env) {
+            return r;
+        }
         let it = self.eval(iter, env)?;
         let step_v = match step {
             Some(st) => match self.eval(st, env)? {

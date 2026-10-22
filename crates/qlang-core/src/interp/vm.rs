@@ -14,6 +14,41 @@ use std::cell::Cell;
 
 type Reg = u16;
 
+/// The kind of the elements of an array of numbers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Ety {
+    I,
+    F,
+    B,
+}
+
+fn ety_of(t: &Ty) -> Option<Ety> {
+    match t {
+        Ty::Int => Some(Ety::I),
+        Ty::Float => Some(Ety::F),
+        Ty::Bool => Some(Ety::B),
+        _ => None,
+    }
+}
+
+/// The element of an array as a register value, if it has the kind expected.
+fn elem_bits(v: &Value, ety: Ety) -> Option<i64> {
+    match (v, ety) {
+        (Value::Int(i), Ety::I) => Some(*i),
+        (Value::Float(f), Ety::F) => Some(f.to_bits() as i64),
+        (Value::Bool(b), Ety::B) => Some(i64::from(*b)),
+        _ => None,
+    }
+}
+
+fn elem_value(bits: i64, ety: Ety) -> Value {
+    match ety {
+        Ety::I => Value::Int(bits),
+        Ety::F => Value::Float(f64::from_bits(bits as u64)),
+        Ety::B => Value::Bool(bits != 0),
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Op {
     ConstI(Reg, i64),
@@ -101,6 +136,39 @@ enum Op {
         src: Reg,
         g: u32,
     },
+    /// Arrays: a register holds a handle (an index in the table of arrays of the run).
+    ALen(Reg, Reg),
+    ALoad {
+        dst: Reg,
+        arr: Reg,
+        idx: Reg,
+        ety: Ety,
+    },
+    /// The index of an element assigned must exist (checked before the right side is computed).
+    ACheck {
+        arr: Reg,
+        idx: Reg,
+    },
+    AStore {
+        arr: Reg,
+        idx: Reg,
+        src: Reg,
+        ety: Ety,
+    },
+    APush {
+        arr: Reg,
+        src: Reg,
+        ety: Ety,
+    },
+    /// `for x in array`: the element at `idx`, or leave the loop.
+    ForArr {
+        dst: Reg,
+        arr: Reg,
+        idx: Reg,
+        exit: u32,
+        ety: Ety,
+    },
+    IncI(Reg),
     Ret(Reg),
     RetUnit,
 }
@@ -146,6 +214,8 @@ struct Site {
     name: String,
     tys: Vec<Ty>,
     ret: Ty,
+    /// The call expression (`sum` of an empty array of floats depends on it).
+    node: NodeId,
 }
 
 #[derive(Clone)]
@@ -184,6 +254,26 @@ fn number_method(recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
 
 fn scalar(t: &Ty) -> bool {
     matches!(t, Ty::Int | Ty::Float | Ty::Bool)
+}
+
+/// The methods of an array of numbers the machine knows: argument types and result type.
+fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
+    let el = el.clone();
+    Some(match name {
+        "len" => (vec![], Ty::Int),
+        "is_empty" => (vec![], Ty::Bool),
+        "push" | "contains" => (vec![el], if name == "push" { Ty::Unit } else { Ty::Bool }),
+        "reverse" | "sort" | "clear" => (vec![], Ty::Unit),
+        "sum" if el != Ty::Bool => (vec![], el),
+        "insert" => (vec![Ty::Int, el], Ty::Unit),
+        "remove" => (vec![Ty::Int], el),
+        _ => return None,
+    })
+}
+
+/// What a register can hold: a number, a boolean, or an array of those (by handle).
+fn vty(t: &Ty) -> bool {
+    scalar(t) || matches!(t, Ty::Array(e) if scalar(e))
 }
 
 struct Gen<'a> {
@@ -467,6 +557,29 @@ impl Gen<'_> {
                 self.top = mark;
                 Some(out)
             }
+            ExprKind::Index(base, idx) => {
+                let mark = self.top;
+                let (arr, at) = self.value(base)?;
+                let Ty::Array(el) = &at else {
+                    return None;
+                };
+                let ety = ety_of(el)?;
+                let (i, ti) = self.value(idx)?;
+                if ti != Ty::Int {
+                    return None;
+                }
+                self.emit(
+                    Op::ALoad {
+                        dst,
+                        arr,
+                        idx: i,
+                        ety,
+                    },
+                    span,
+                );
+                self.top = mark;
+                Some((**el).clone())
+            }
             ExprKind::TupleField(inner, idx) => {
                 let ExprKind::Ident(name, _) = &inner.kind else {
                     return None;
@@ -552,8 +665,8 @@ impl Gen<'_> {
                     || def.has_self
                     || def.impl_id.is_some()
                     || def.params.len() != args.len()
-                    || !def.params.iter().all(scalar)
-                    || !(scalar(&def.ret) || def.ret == Ty::Unit)
+                    || !def.params.iter().all(vty)
+                    || !(vty(&def.ret) || def.ret == Ty::Unit)
                 {
                     return None;
                 }
@@ -594,7 +707,10 @@ impl Gen<'_> {
         let base = self.top as Reg;
         let recv = self.alloc()?;
         let rt = self.into(obj, recv)?;
-        let (want, ret) = number_method(&rt, &name.name)?;
+        let (want, ret) = match &rt {
+            Ty::Array(el) => array_method(el, &name.name)?,
+            _ => number_method(&rt, &name.name)?,
+        };
         if want.len() != args.len() {
             return None;
         }
@@ -616,6 +732,12 @@ impl Gen<'_> {
             (Ty::Int, "max") => Some(Op::MaxI(dst, recv, recv + 1)),
             (Ty::Float, "min") => Some(Op::MinF(dst, recv, recv + 1)),
             (Ty::Float, "max") => Some(Op::MaxF(dst, recv, recv + 1)),
+            (Ty::Array(_), "len") => Some(Op::ALen(dst, recv)),
+            (Ty::Array(el), "push") => Some(Op::APush {
+                arr: recv,
+                src: recv + 1,
+                ety: ety_of(&el)?,
+            }),
             _ => None,
         };
         match fast {
@@ -628,12 +750,114 @@ impl Gen<'_> {
                     name: name.name.clone(),
                     tys,
                     ret: ret.clone(),
+                    node: e.id,
                 });
                 self.emit(Op::Method { dst, base, site }, span);
             }
         }
         self.top = mark;
         Some(ret)
+    }
+
+    /// `xs[i] = v`, `xs[i] += v`, `xs[] = v`.
+    fn assign_element(
+        &mut self,
+        e: &Expr,
+        op: Option<BinOp>,
+        target: &Expr,
+        value: &Expr,
+    ) -> Option<()> {
+        match &target.kind {
+            ExprKind::Append(base) => {
+                if op.is_some() {
+                    return None;
+                }
+                let (arr, at) = self.value(base)?;
+                let Ty::Array(el) = &at else {
+                    return None;
+                };
+                let ety = ety_of(el)?;
+                let (r, t) = self.value(value)?;
+                if t != **el {
+                    return None;
+                }
+                self.emit(Op::APush { arr, src: r, ety }, e.span);
+                Some(())
+            }
+            ExprKind::Index(base, idx) => {
+                let (arr, at) = self.value(base)?;
+                let Ty::Array(el) = &at else {
+                    return None;
+                };
+                let el = (**el).clone();
+                let ety = ety_of(&el)?;
+                let (i, ti) = self.value(idx)?;
+                if ti != Ty::Int {
+                    return None;
+                }
+                // the index must exist before the right side is computed
+                self.emit(Op::ACheck { arr, idx: i }, target.span);
+                match op {
+                    None => {
+                        let (r, t) = self.value(value)?;
+                        if t != el {
+                            return None;
+                        }
+                        self.emit(
+                            Op::AStore {
+                                arr,
+                                idx: i,
+                                src: r,
+                                ety,
+                            },
+                            e.span,
+                        );
+                    }
+                    Some(bop) => {
+                        let cur = self.alloc()?;
+                        self.emit(
+                            Op::ALoad {
+                                dst: cur,
+                                arr,
+                                idx: i,
+                                ety,
+                            },
+                            target.span,
+                        );
+                        let (r, t) = self.value(value)?;
+                        if t != el {
+                            return None;
+                        }
+                        let int = el == Ty::Int;
+                        let float = el == Ty::Float;
+                        let opc = match bop {
+                            BinOp::Add if int => Op::AddI(cur, cur, r),
+                            BinOp::Sub if int => Op::SubI(cur, cur, r),
+                            BinOp::Mul if int => Op::MulI(cur, cur, r),
+                            BinOp::IntDiv if int => Op::IntDivI(cur, cur, r),
+                            BinOp::Mod if int => Op::ModI(cur, cur, r),
+                            BinOp::Add if float => Op::AddF(cur, cur, r),
+                            BinOp::Sub if float => Op::SubF(cur, cur, r),
+                            BinOp::Mul if float => Op::MulF(cur, cur, r),
+                            BinOp::Div if float => Op::DivF(cur, cur, r),
+                            _ => return None,
+                        };
+                        self.emit(opc, e.span);
+                        self.emit(
+                            Op::AStore {
+                                arr,
+                                idx: i,
+                                src: cur,
+                                ety,
+                            },
+                            e.span,
+                        );
+                    }
+                }
+                Some(())
+            }
+            _ => None,
+        }
     }
 
     fn callee_index(&mut self, fid: FnId) -> Option<u32> {
@@ -736,7 +960,7 @@ impl Gen<'_> {
             StmtKind::Let { name, init, .. } => {
                 let dst = self.alloc()?;
                 let ty = self.into(init, dst)?;
-                if !scalar(&ty) {
+                if !vty(&ty) {
                     return None;
                 }
                 // the temporaries of the initializer are free again, the variable stays
@@ -790,6 +1014,74 @@ impl Gen<'_> {
                 for j in ctx.breaks {
                     self.patch(j, end);
                 }
+                Some(())
+            }
+            StmtKind::For {
+                var,
+                var2,
+                var_pattern: None,
+                var2_pattern: None,
+                iter,
+                step: None,
+                body,
+            } if !matches!(iter.kind, ExprKind::Range { .. }) => {
+                let mark = self.top;
+                let (arr, at) = self.value(iter)?;
+                let Ty::Array(el) = &at else {
+                    return None;
+                };
+                let el = (**el).clone();
+                let ety = ety_of(&el)?;
+                let cnt = self.alloc()?;
+                self.emit(Op::ConstI(cnt, 0), span);
+                self.scopes.push(vec![]);
+                // `for x in xs` / `for i, x in xs`
+                let (idx_name, item_name) = match var2 {
+                    Some(v2) => (Some(var.name.clone()), v2.name.clone()),
+                    None => (None, var.name.clone()),
+                };
+                let idx_reg = match &idx_name {
+                    Some(n) => {
+                        let r = self.alloc()?;
+                        self.scopes.last_mut()?.push((n.clone(), r, Ty::Int));
+                        Some(r)
+                    }
+                    None => None,
+                };
+                let item = self.alloc()?;
+                self.scopes.last_mut()?.push((item_name, item, el));
+                let head = self.here();
+                let get = self.emit(
+                    Op::ForArr {
+                        dst: item,
+                        arr,
+                        idx: cnt,
+                        exit: 0,
+                        ety,
+                    },
+                    span,
+                );
+                if let Some(r) = idx_reg {
+                    self.emit(Op::Mov(r, cnt), span);
+                }
+                self.loops.push(LoopCtx::default());
+                self.block(body, None)?;
+                let ctx = self.loops.pop()?;
+                let next = self.here();
+                for j in ctx.continues {
+                    self.patch(j, next);
+                }
+                self.emit(Op::IncI(cnt), span);
+                self.emit(Op::Jmp(head), span);
+                let end = self.here();
+                if let Op::ForArr { exit, .. } = &mut self.ops[get] {
+                    *exit = end;
+                }
+                for j in ctx.breaks {
+                    self.patch(j, end);
+                }
+                self.scopes.pop();
+                self.top = mark;
                 Some(())
             }
             StmtKind::For {
@@ -894,6 +1186,11 @@ impl Gen<'_> {
     fn effect(&mut self, e: &Expr) -> Option<()> {
         let mark = self.top;
         match &e.kind {
+            ExprKind::Assign { op, target, value }
+                if matches!(target.kind, ExprKind::Index(..) | ExprKind::Append(_)) =>
+            {
+                self.assign_element(e, *op, target, value)?;
+            }
             ExprKind::Assign { op, target, value } => {
                 let (reg, ty, global) = match self.access(target, true)? {
                     Access::Reg(r, t) => (r, t, None),
@@ -1020,8 +1317,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                 || !decl.tparams.is_empty()
                 || def.has_self
                 || def.impl_id.is_some()
-                || !def.params.iter().all(scalar)
-                || !(scalar(&def.ret) || def.ret == Ty::Unit)
+                || !def.params.iter().all(vty)
+                || !(vty(&def.ret) || def.ret == Ty::Unit)
             {
                 return None;
             }
@@ -1103,6 +1400,43 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
 }
 
 impl Interp<'_> {
+    /// A register value for `v`, a value of type `t`: the number itself, or the handle of an
+    /// array (added to the table of the run if it is not there yet).
+    fn vm_bits(&mut self, v: &Value, t: &Ty) -> Option<i64> {
+        match (v, t) {
+            (Value::Int(i), Ty::Int) => Some(*i),
+            (Value::Float(f), Ty::Float) => Some(f.to_bits() as i64),
+            (Value::Bool(b), Ty::Bool) => Some(i64::from(*b)),
+            (Value::Array(rc), Ty::Array(_)) => {
+                let key = Rc::as_ptr(rc) as usize;
+                if let Some(h) = self.vm_obj_ix.get(&key) {
+                    return Some(i64::from(*h));
+                }
+                let h = self.vm_objs.len() as u32;
+                self.vm_objs.push(v.clone());
+                self.vm_obj_ix.insert(key, h);
+                Some(i64::from(h))
+            }
+            _ => None,
+        }
+    }
+
+    /// The value a register holds, of type `t`.
+    fn vm_value(&self, bits: i64, t: &Ty) -> Value {
+        match t {
+            Ty::Int => Value::Int(bits),
+            Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+            Ty::Bool => Value::Bool(bits != 0),
+            Ty::Array(_) => self.vm_objs[bits as usize].clone(),
+            _ => Value::Unit,
+        }
+    }
+
+    fn vm_release(&mut self) {
+        self.vm_objs.clear();
+        self.vm_obj_ix.clear();
+    }
+
     /// Calls `fid` on the machine when it is compiled (compiling it now if it is the first
     /// time). `None` when it cannot run there: the tree walker does it.
     #[inline(always)]
@@ -1136,24 +1470,21 @@ impl Interp<'_> {
         if args.len() != code.param_tys.len() {
             return None;
         }
+        self.vm_release();
         let mut regs: Vec<i64> = Vec::with_capacity(code.nregs);
         for (a, t) in args.iter().zip(&code.param_tys) {
-            regs.push(match (a, t) {
-                (Value::Int(i), Ty::Int) => *i,
-                (Value::Float(f), Ty::Float) => f.to_bits() as i64,
-                (Value::Bool(b), Ty::Bool) => i64::from(*b),
-                _ => return None,
-            });
+            match self.vm_bits(a, t) {
+                Some(b) => regs.push(b),
+                None => {
+                    self.vm_release();
+                    return None;
+                }
+            }
         }
-        Some(
-            self.vm_run(idx, regs, Vec::new(), span)
-                .map(|r| match code.ret {
-                    Ty::Int => Value::Int(r),
-                    Ty::Float => Value::Float(f64::from_bits(r as u64)),
-                    Ty::Bool => Value::Bool(r != 0),
-                    _ => Value::Unit,
-                }),
-        )
+        let r = self.vm_run(idx, regs, Vec::new(), span);
+        let out = r.map(|bits| self.vm_value(bits, &code.ret));
+        self.vm_release();
+        Some(out)
     }
 
     /// Compiles the function `fid` and everything it calls.
@@ -1248,35 +1579,35 @@ impl Interp<'_> {
             }
         };
         let code = self.vm_codes[idx as usize].clone();
+        self.vm_release();
         let mut init = Vec::with_capacity(code.frees.len());
         for f in &code.frees {
             let v = match f.global {
                 Some(m) => self.envs[m].get(&f.name),
                 None => env.get(&f.name),
             };
-            let bits = match (v, &f.ty) {
-                (Some(Value::Int(i)), Ty::Int) => i,
-                (Some(Value::Float(x)), Ty::Float) => x.to_bits() as i64,
-                (Some(Value::Bool(b)), Ty::Bool) => i64::from(b),
-                _ => return None,
-            };
-            init.push((f.reg, bits));
+            let bits = v.and_then(|v| self.vm_bits(&v, &f.ty));
+            match bits {
+                Some(b) => init.push((f.reg, b)),
+                None => {
+                    self.vm_release();
+                    return None;
+                }
+            }
         }
         if let Err(e) = self.vm_run(idx, Vec::new(), init, s.span) {
+            self.vm_release();
             return Some(Err(e));
         }
         for f in code.frees.iter().filter(|f| f.assigned) {
             let bits = self.vm_stack[f.reg as usize];
-            let v = match f.ty {
-                Ty::Int => Value::Int(bits),
-                Ty::Float => Value::Float(f64::from_bits(bits as u64)),
-                _ => Value::Bool(bits != 0),
-            };
+            let v = self.vm_value(bits, &f.ty);
             match f.global {
                 Some(m) => self.envs[m].assign(&f.name, v),
                 None => env.assign(&f.name, v),
             };
         }
+        self.vm_release();
         Some(Ok(Value::Unit))
     }
 
@@ -1350,21 +1681,32 @@ impl Interp<'_> {
                     None => fail!("R010", "integer overflow"),
                 },
                 Op::IntDivI(d, a, b) => {
-                    if r!(b) == 0 {
+                    let (x, y) = (r!(a), r!(b));
+                    if y == 0 {
                         fail!("R011", "division by zero");
                     }
-                    match r!(a).checked_div(r!(b)) {
-                        Some(v) => r!(d) = v,
-                        None => fail!("R010", "integer overflow"),
+                    // two small non-negative numbers: the 32-bit division is much faster
+                    if (x | y) as u64 >> 31 == 0 {
+                        r!(d) = i64::from(x as u32 / y as u32);
+                    } else {
+                        match x.checked_div(y) {
+                            Some(v) => r!(d) = v,
+                            None => fail!("R010", "integer overflow"),
+                        }
                     }
                 }
                 Op::ModI(d, a, b) => {
-                    if r!(b) == 0 {
+                    let (x, y) = (r!(a), r!(b));
+                    if y == 0 {
                         fail!("R011", "division by zero");
                     }
-                    match r!(a).checked_rem(r!(b)) {
-                        Some(v) => r!(d) = v,
-                        None => fail!("R010", "integer overflow"),
+                    if (x | y) as u64 >> 31 == 0 {
+                        r!(d) = i64::from(x as u32 % y as u32);
+                    } else {
+                        match x.checked_rem(y) {
+                            Some(v) => r!(d) = v,
+                            None => fail!("R010", "integer overflow"),
+                        }
                     }
                 }
                 Op::DivII(d, a, b) => {
@@ -1420,25 +1762,20 @@ impl Interp<'_> {
                     let mut c = gr.slot.get();
                     let v = self.envs[gr.module].get_cached(&gr.name, &mut c);
                     gr.slot.set(c);
-                    r!(dst) = match v {
-                        Some(Value::Int(i)) => i,
-                        Some(Value::Float(f)) => f.to_bits() as i64,
-                        Some(Value::Bool(b)) => i64::from(b),
-                        Some(_) => fail!("R001", "unexpected type of a variable"),
-                        None => fail!(
+                    let Some(v) = v else {
+                        fail!(
                             "R002",
                             format!("`{}` is used before it has a value", gr.name)
-                        ),
+                        );
                     };
+                    match self.vm_bits(&v, &gr.ty) {
+                        Some(b) => r!(dst) = b,
+                        None => fail!("R001", "unexpected type of a variable"),
+                    }
                 }
                 Op::StoreG { src, g } => {
                     let gr = &code.globals[g as usize];
-                    let bits = r!(src);
-                    let value = match gr.ty {
-                        Ty::Int => Value::Int(bits),
-                        Ty::Float => Value::Float(f64::from_bits(bits as u64)),
-                        _ => Value::Bool(bits != 0),
-                    };
+                    let value = self.vm_value(r!(src), &gr.ty);
                     let mut c = gr.slot.get();
                     let ok = self.envs[gr.module].assign_cached(&gr.name, value, &mut c);
                     gr.slot.set(c);
@@ -1449,30 +1786,125 @@ impl Interp<'_> {
                 Op::Method { dst, base: b, site } => {
                     let span = code.spans[pc - 1];
                     let st = &code.sites[site as usize];
-                    let to_value = |bits: i64, t: &Ty| match t {
-                        Ty::Int => Value::Int(bits),
-                        Ty::Float => Value::Float(f64::from_bits(bits as u64)),
-                        _ => Value::Bool(bits != 0),
-                    };
-                    let recv = to_value(stack[base + b as usize], &st.tys[0]);
+                    let recv = self.vm_value(stack[base + b as usize], &st.tys[0]);
                     let argv: Vec<Value> = st.tys[1..]
                         .iter()
                         .enumerate()
-                        .map(|(i, t)| to_value(stack[base + b as usize + 1 + i], t))
+                        .map(|(i, t)| self.vm_value(stack[base + b as usize + 1 + i], t))
                         .collect();
                     let name = st.name.clone();
                     let ret = st.ret.clone();
+                    self.cur_call = st.node;
                     let out = match self.builtin_method(&recv, &name, &argv, span)? {
                         Some(v) => v,
                         None => return self.fail("R008", "this value has no such method", span),
                     };
-                    r!(dst) = match (out, ret) {
-                        (Value::Int(i), Ty::Int) => i,
-                        (Value::Float(f), Ty::Float) => f.to_bits() as i64,
-                        (Value::Bool(b), Ty::Bool) => i64::from(b),
-                        _ => return self.fail("R001", "unexpected result of a method", span),
-                    };
+                    if ret != Ty::Unit {
+                        match self.vm_bits(&out, &ret) {
+                            Some(v) => r!(dst) = v,
+                            None => {
+                                return self.fail("R001", "unexpected result of a method", span);
+                            }
+                        }
+                    }
                 }
+                Op::ALen(d, a) => {
+                    let Value::Array(rc) = &self.vm_objs[r!(a) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    r!(d) = rc.borrow().len() as i64;
+                }
+                Op::ALoad { dst, arr, idx, ety } => {
+                    let i = r!(idx);
+                    let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let a = rc.borrow();
+                    match usize::try_from(i).ok().and_then(|u| a.get(u)) {
+                        Some(v) => match elem_bits(v, ety) {
+                            Some(b) => {
+                                drop(a);
+                                r!(dst) = b;
+                            }
+                            None => {
+                                drop(a);
+                                fail!("R001", "an element of an unexpected type");
+                            }
+                        },
+                        None => {
+                            let len = a.len();
+                            drop(a);
+                            fail!("R020", format!("index {i} is out of bounds (length {len})"));
+                        }
+                    }
+                }
+                Op::ACheck { arr, idx } => {
+                    let i = r!(idx);
+                    let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let len = rc.borrow().len();
+                    if usize::try_from(i).ok().filter(|u| *u < len).is_none() {
+                        fail!("R020", format!("index {i} is out of bounds (length {len})"));
+                    }
+                }
+                Op::AStore { arr, idx, src, ety } => {
+                    let (i, v) = (r!(idx), elem_value(r!(src), ety));
+                    let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let mut a = rc.borrow_mut();
+                    let len = a.len();
+                    match usize::try_from(i).ok().filter(|u| *u < len) {
+                        Some(u) => a[u] = v,
+                        None => {
+                            drop(a);
+                            fail!("R020", format!("index {i} is out of bounds (length {len})"));
+                        }
+                    }
+                }
+                Op::APush { arr, src, ety } => {
+                    let v = elem_value(r!(src), ety);
+                    let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let rc = rc.clone();
+                    let len = rc.borrow().len();
+                    if len + 1 > self.limits.max_alloc {
+                        fail!("R903", "a value became too large (memory limit reached)");
+                    }
+                    rc.borrow_mut().push(v);
+                }
+                Op::ForArr {
+                    dst,
+                    arr,
+                    idx,
+                    exit,
+                    ety,
+                } => {
+                    let i = r!(idx);
+                    let Value::Array(rc) = &self.vm_objs[r!(arr) as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let a = rc.borrow();
+                    match a.get(i as usize) {
+                        Some(v) => match elem_bits(v, ety) {
+                            Some(b) => {
+                                drop(a);
+                                r!(dst) = b;
+                            }
+                            None => {
+                                drop(a);
+                                fail!("R001", "an element of an unexpected type");
+                            }
+                        },
+                        None => {
+                            drop(a);
+                            pc = exit as usize;
+                        }
+                    }
+                }
+                Op::IncI(a) => r!(a) += 1,
                 Op::ForTest {
                     dst,
                     cnt,
@@ -1602,5 +2034,18 @@ impl Interp<'_> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn an_instruction_stays_small() {
+        // the dispatch loop reads one per step: it must fit in a quarter of a cache line
+        assert!(
+            std::mem::size_of::<super::Op>() <= 16,
+            "{}",
+            std::mem::size_of::<super::Op>()
+        );
     }
 }

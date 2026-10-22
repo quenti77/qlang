@@ -1,5 +1,9 @@
 # Journal des changements
 
+## À publier
+
+- Performance : la machine à registres typée travaille aussi sur les **tableaux de nombres** (`array<int>`, `array<float>`, `array<bool>`) donnés à une fonction ou empruntés par une boucle : crible, sommes préfixes, parcours ×4 à ×4,5. Division entière et modulo plus rapides pour les petits entiers.
+
 ## 0.37.0
 
 - Performance : une machine à registres typée compile au premier appel les fonctions et les boucles purement numériques (`int`, `float`, `bool`) : `fib(27)` ×4, une boucle `while` de 3 millions de tours ×6,5 à ×8. Le reste s'exécute comme avant, avec les mêmes résultats et les mêmes erreurs (voir `docs/performance.md`). `RunResult::vm_functions` et `Program::run_tree_walker` pour la mesure et la comparaison.

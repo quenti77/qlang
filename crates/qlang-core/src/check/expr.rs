@@ -823,7 +823,8 @@ impl Checker {
     /// Remembers the type of a use of a variable when it is `int`, `float` or `bool`.
     fn note_ident_ty(&mut self, id: NodeId, ty: &Ty) {
         let t = self.resolve(ty);
-        if matches!(t, Ty::Int | Ty::Float | Ty::Bool) {
+        let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
+        if scalar(&t) || matches!(&t, Ty::Array(e) if scalar(&self.resolve(e))) {
             self.res.ident_tys.insert(id, t);
         }
     }

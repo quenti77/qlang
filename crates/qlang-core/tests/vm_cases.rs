@@ -164,3 +164,85 @@ fn what_the_machine_cannot_do_still_runs() {
         "14\n16 items\n"
     );
 }
+
+/// Like `same`, and checks that at least `n` functions or loops were compiled.
+fn same_compiled(src: &str, n: usize) -> String {
+    let (vm, walker, used) = both(src, Limits::default());
+    assert_eq!(vm, walker, "the engines disagree on:\n{src}");
+    assert!(used.0 >= n, "only {} compiled, wanted {n}:\n{src}", used.0);
+    vm
+}
+
+#[test]
+fn arrays_of_numbers_are_worked_on_in_place() {
+    assert_eq!(
+        same_compiled(
+            "fun fill(xs: array<int>, n: int)\n  for i in 0..n do\n    xs[] = i * i\n  end\nend\nfun total(xs: array<int>) -> int\n  let t = 0\n  for x in xs do\n    t += x\n  end\n  t\nend\nlet a: array<int> = []\nfill(a, 5)\nprint(a)\nprint(total(a))\nprint(a.len())",
+            2
+        ),
+        "[0, 1, 4, 9, 16]\n30\n5\n"
+    );
+    // the same array under two names, changed through one of them
+    assert_eq!(
+        same_compiled(
+            "fun f(xs: array<int>) -> int\n  let ys = xs\n  ys[0] = 99\n  xs[0] + ys[0]\nend\nlet a = [1, 2, 3]\nprint(f(a))\nprint(a)",
+            1
+        ),
+        "198\n[99, 2, 3]\n"
+    );
+    // floats and booleans, `for i, x`, and an array given back
+    assert_eq!(
+        same_compiled(
+            "fun f(fs: array<float>, bs: array<bool>) -> array<float>\n  for i, x in fs do\n    fs[i] = x * 2.0\n    bs[i] = x > 1.0\n  end\n  fs\nend\nlet a = [0.5, 1.5, 2.5]\nlet b = [false, false, false]\nprint(f(a, b))\nprint(b)",
+            1
+        ),
+        "[1.0, 3.0, 5.0]\n[false, true, true]\n"
+    );
+    // methods of arrays through the tree walker's own implementation
+    assert_eq!(
+        same_compiled(
+            "fun f(xs: array<int>) -> int\n  xs.sort()\n  xs.reverse()\n  xs.insert(1, 100)\n  let r = xs.remove(0)\n  r + xs.sum() + xs.len() + (if xs.contains(100) then 1 else 0 end)\nend\nlet a = [3, 1, 2]\nprint(f(a))\nprint(a)",
+            1
+        ),
+        "110\n[100, 2, 1]\n"
+    );
+}
+
+#[test]
+fn array_errors_are_the_same() {
+    let out = same_compiled(
+        "fun f(xs: array<int>, i: int) -> int\n  xs[i]\nend\nlet a = [1, 2, 3]\nprint(f(a, 5))",
+        1,
+    );
+    assert!(out.contains("R020") && out.contains("length 3"), "{out}");
+    let out = same_compiled(
+        "fun f(xs: array<int>, i: int)\n  xs[i] += 1\nend\nlet a = [1, 2, 3]\nf(a, -1)",
+        1,
+    );
+    assert!(out.contains("R020"), "{out}");
+    // the index is checked before the right side is computed
+    let out = same_compiled(
+        "fun f(xs: array<int>) -> int\n  xs[10] = 1 div 0\n  0\nend\nlet a = [1]\nprint(f(a))",
+        1,
+    );
+    assert!(out.contains("R020") && !out.contains("R011"), "{out}");
+    let (vm, walker, _) = both(
+        "fun f(xs: array<int>)\n  for i in 0..100 do\n    xs.push(i)\n  end\nend\nlet a: array<int> = []\nf(a)",
+        Limits {
+            max_alloc: 10,
+            ..Limits::default()
+        },
+    );
+    assert!(vm.contains("R903") && walker.contains("R903"), "{vm}");
+}
+
+#[test]
+fn a_loop_over_arrays_of_the_code_around_it() {
+    assert_eq!(
+        same_compiled(
+            "let data: array<int> = []\nfor i in 0..1000 do\n  data[] = i mod 13\nend\nlet s = 0\nfor x in data do\n  s += x\nend\nprint(s)\nprint(data.len())",
+            2
+        ),
+        "5994\n1000\n"
+    );
+}

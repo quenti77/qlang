@@ -386,6 +386,10 @@ struct Interp<'a> {
     vm_enabled: bool,
     /// Loop statements compiled for the machine (by address), `None` for those it refused.
     vm_loops: HashMap<usize, Option<u32>>,
+    /// The arrays a run of the machine works on (a register holds an index in this table), and
+    /// where each one is, by address.
+    vm_objs: Vec<Value>,
+    vm_obj_ix: HashMap<usize, u32>,
 }
 
 /// Values nested deeper than this cannot be compared (`R005`).
@@ -417,6 +421,8 @@ impl<'a> Interp<'a> {
             vm_stack: Vec::new(),
             vm_enabled: true,
             vm_loops: HashMap::new(),
+            vm_objs: Vec::new(),
+            vm_obj_ix: HashMap::new(),
         }
     }
 

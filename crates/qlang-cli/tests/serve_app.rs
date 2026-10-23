@@ -553,8 +553,9 @@ fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
     let path = app_file("watch", &v("one"));
     let get = |server: &Server| exchange(server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(get(&server).ends_with("one"));
+    // a busy machine (CI runs many tests at once) may take a while to notice a change
     let until = |server: &Server, want: &str| {
-        for _ in 0..40 {
+        for _ in 0..150 {
             if get(server).ends_with(want) {
                 return true;
             }

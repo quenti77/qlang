@@ -1,6 +1,6 @@
 # Journal des changements
 
-## Prochaine version
+## 0.44.0
 
 - Performance : la machine à registres compile les **énumérations** et **`match`** (variantes avec valeurs, motifs, gardes, intervalles, `Ok`/`Err`, `?` sur `Result` et sur `T?`, `==` entre valeurs), et une fonction générique ou `extern` appelée depuis du code compilé n'empêche plus de le compiler. Énumérations et `match` ×5, chaînes de `Result` ×6.
 

@@ -2291,6 +2291,33 @@ impl Checker {
                 }
                 (ReflectOp::Get, Ty::nullable(Ty::Any))
             }
+            "info_of" | "items" => {
+                if !arity(self, 0, 1) {
+                    return Ty::Error;
+                }
+                let t = self.expr(&args[0].value, &Want::Exp(Ty::Any));
+                if !self.assignable(&t, &Ty::Any) {
+                    self.mismatch(args[0].value.span, &Ty::Any, &t);
+                }
+                if name.name == "info_of" {
+                    (
+                        ReflectOp::InfoOf,
+                        Ty::nullable(self.prelude_ty("StructInfo")),
+                    )
+                } else {
+                    (ReflectOp::Items, Ty::nullable(Ty::Array(Box::new(Ty::Any))))
+                }
+            }
+            "parts" => {
+                if !arity(self, 0, 1) {
+                    return Ty::Error;
+                }
+                let t = self.expr(&args[0].value, &Want::Exp(Ty::Any));
+                if !self.assignable(&t, &Ty::Any) {
+                    self.mismatch(args[0].value.span, &Ty::Any, &t);
+                }
+                (ReflectOp::Parts, Ty::nullable(self.prelude_ty("EnumParts")))
+            }
             "construct" => {
                 if !arity(self, 1, 1) {
                     return Ty::Error;
@@ -2394,7 +2421,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `get`, `construct`, `type_name`, `find`, `methods` and `find_method`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods` and `find_method`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

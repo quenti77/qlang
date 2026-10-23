@@ -170,7 +170,7 @@ textes (champ `doc`).
 `qlang doc` en fait une page Markdown : pour chaque fichier, ses noms exportés (tous s'il
 n'a pas de `export`) avec leur signature et leur commentaire, puis les champs, méthodes et
 variantes `public` de leurs types. `qlang doc` seul documente le projet (sans les fichiers
-de test) ; `qlang doc lib.q` un fichier ; `-o API.md` écrit dans un fichier.
+de test ni le dossier `examples`) ; `qlang doc lib.q` un fichier ; `-o API.md` écrit dans un fichier.
 
 ---
 
@@ -228,8 +228,9 @@ let y = 3
 print("{x} + {y} = {x + y}")
 ```
 
-L'expression à l'intérieur de `{ }` ne peut pas contenir de guillemet `"` non
-échappé. Pour afficher une accolade, écrire `\{`. Toute valeur peut être
+L'expression à l'intérieur de `{ }` peut contenir des chaînes à elle
+(`"{noms.join(", ")}"`) ; une accolade dans une telle chaîne s'écrit aussi `\{`.
+Pour afficher une accolade, écrire `\{`. Toute valeur peut être
 interpolée : elle est convertie avec `as string` (voir
 [Conversions](#conversions)).
 
@@ -1051,6 +1052,7 @@ end
   champs, une `enum` et ses variantes, un `trait`, un paramètre : `fun f(#[Min(1)] n: int)`.
 - Plusieurs annotations : l'une sous l'autre, ou séparées par une virgule (`#[Min(0), Tags(["id"])]`).
   Un commentaire de documentation reste au-dessus de la première.
+- Pour un champ `float`, un nombre entier suffit : `#[Min(1)]` (lu `1.0`).
 - Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
   champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
   `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
@@ -1115,6 +1117,9 @@ n'est pas celui attendu), `T302` (nom inconnu : `struct_info`, `enum_info`, `fun
 | `Reflect.get(valeur, "champ")` | le champ d'une structure, en `Any?` (`none` s'il n'existe pas) ; la visibilité est ignorée |
 | `Reflect.construct<T>(champs)` | `Result<T, Error>` : une `T` construite depuis un `map<string, Any>` (valeurs par défaut respectées) |
 | `Reflect.type_name<T>()` | le nom du type `T` (`"array<User>"`) |
+| `Reflect.parts(a)` | un `EnumParts?` : le nom de l'énumération, de la variante et les données (chacune en `Any`) d'une valeur d'énumération contenue dans l'`Any` `a` ; `none` pour le reste. Sert à ouvrir un `Result` rendu par `Callable.call` |
+| `Reflect.info_of(a)` | le `StructInfo?` de la structure que contient l'`Any` `a` (pour parcourir ses champs avec `Reflect.get`) |
+| `Reflect.items(a)` | les éléments, en `Any`, du tableau que contient l'`Any` `a` (`array<Any>?`) |
 
 `Callable` a les champs de `FunctionInfo` (`name`, `params`, `return_type`, `annotations`) et
 `call(args: array<Any>) -> Result<Any, Error>` : `err` quand le nombre d'arguments ou un de leurs

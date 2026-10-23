@@ -1,5 +1,14 @@
 # Journal des changements
 
+## 0.49.0
+
+Troisième version du cycle « frameworks web en qlang » : de quoi écrire le paquet `web` de `qlang-std` (conteneur d'injection, routeur à paramètres injectés, middleware, validation, constructeur de requêtes, migrations, sessions).
+
+- **L'interpolation peut contenir des chaînes** : `"{noms.join(", ")}"` marche (plus besoin d'une variable intermédiaire).
+- **`Reflect.parts(a)`** ouvre une valeur d'énumération contenue dans un `Any` (un `Result` rendu par `Callable.call`) ; **`Reflect.info_of(a)`** rend le `StructInfo` de la structure qu'un `Any` contient ; **`Reflect.items(a)`** ses éléments si c'est un tableau. Avec `Reflect.get`, de quoi parcourir une valeur dont le type n'est connu qu'à l'exécution (validation de formulaires imbriqués).
+- Un champ `float` d'annotation accepte un nombre entier : `#[Min(1)]`.
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.2.0 apporte `web/` : `container.q`, `app.q`, `middleware.q`, `validate.q`, `query.q`, `migrate.q`, `session.q`.
+
 ## 0.48.0
 
 Deuxième version du cycle « frameworks web en qlang » : de quoi recevoir des fichiers, garder des secrets, tenir la charge et parler à MySQL.

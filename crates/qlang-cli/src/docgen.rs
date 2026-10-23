@@ -9,7 +9,7 @@ use qlang_core::check::{CompileOptions, ItemInfo, compile_with};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const SKIPPED_DIRS: [&str; 3] = ["target", "node_modules", "dist"];
+const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", "dist", "examples"];
 
 fn is_test_file(path: &Path) -> bool {
     let name = path

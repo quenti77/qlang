@@ -595,6 +595,12 @@ pub enum ReflectOp {
     Invoke,
     /// `Reflect.get(value, name)`: a field of a struct, as an `Any`.
     Get,
+    /// `Reflect.parts(value)`: the variant and the data of an enumeration value held by an `Any`.
+    Parts,
+    /// `Reflect.info_of(value)`: the `StructInfo` of the struct an `Any` holds.
+    InfoOf,
+    /// `Reflect.items(value)`: the elements of an array an `Any` holds.
+    Items,
     /// `Reflect.construct<T>(fields)`: a struct built from its fields.
     Construct(Ty),
     /// `Reflect.type_name<T>()`.

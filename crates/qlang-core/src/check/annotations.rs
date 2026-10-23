@@ -175,6 +175,14 @@ impl Checker {
             given[slot] = true;
             values[slot] = literal_of(&arg.value);
             let fty = fields[slot].1.clone();
+            // `#[Min(1)]` for a `float` field: a whole-number literal is fine there
+            if fty == Ty::Float
+                && let Some(Lit::Int(i)) = values[slot]
+            {
+                values[slot] = Some(Lit::Float(i as f64));
+                self.expr(&arg.value, &Want::Any);
+                continue;
+            }
             let t = self.expr(&arg.value, &Want::Exp(fty.clone()));
             if !self.assignable(&t, &fty) {
                 self.mismatch(arg.value.span, &fty, &t);

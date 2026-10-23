@@ -41,6 +41,21 @@ impl Checker {
         if self.collecting() {
             match &head {
                 Some(Head::Type(_, tref)) => {
+                    let at = match &e.kind {
+                        ExprKind::Field(_, name, _) => name.span,
+                        _ => e.span,
+                    };
+                    match tref {
+                        TypeRef::Struct(id) => {
+                            let d = self.defs.structs[*id].span;
+                            self.note_ref(at, d);
+                        }
+                        TypeRef::Enum(id) => {
+                            let d = self.defs.enums[*id].span;
+                            self.note_ref(at, d);
+                        }
+                        TypeRef::Builtin(_) => {}
+                    }
                     let key = match tref {
                         TypeRef::Struct(id) => self.defs.structs[*id].name.clone(),
                         TypeRef::Enum(id) => self.defs.enums[*id].name.clone(),
@@ -198,6 +213,9 @@ impl Checker {
                 let Some(item) = self.module_member(m, name) else {
                     return Ty::Error;
                 };
+                if let Some(d) = self.item_def_span(&item) {
+                    self.note_ref(name.span, d);
+                }
                 match item {
                     ItemRef::Fn(fid) => self.fn_value(e, fid, targs),
                     ItemRef::Var(m2, vn) => match self.mscopes[m2].vars.get(&vn).cloned() {
@@ -258,6 +276,8 @@ impl Checker {
         match tref {
             TypeRef::Enum(eid) => {
                 if let Some(vi) = self.defs.enums[*eid].variant_index(&name.name) {
+                    let vspan = self.defs.enums[*eid].variants[vi].span;
+                    self.note_ref(name.span, vspan);
                     self.res.paths.insert(e.id, PathRes::EnumVariant(*eid, vi));
                     if !self.defs.enums[*eid].variants[vi].fields.is_empty() {
                         self.err(
@@ -294,6 +314,7 @@ impl Checker {
                             .cloned()
                             .zip(aargs.iter().cloned())
                             .collect();
+                        self.note_ref(name.span, f.span);
                         self.check_vis(
                             f.vis,
                             asid,
@@ -326,6 +347,9 @@ impl Checker {
         }
         if let Some(um) = self.find_user_method(ty, &name.name) {
             let f = self.defs.fns[um.fid].clone();
+            if let Some(d) = self.fn_def_span(um.fid) {
+                self.note_ref(name.span, d);
+            }
             if !f.has_self {
                 self.res.paths.insert(e.id, PathRes::Fn(um.fid));
                 let _ = targs;
@@ -394,6 +418,7 @@ impl Checker {
                             .cloned()
                             .zip(aargs.iter().cloned())
                             .collect();
+                        self.note_ref(name.span, f.span);
                         self.check_vis(f.vis, asid, name.span, &format!("field `{}`", name.name));
                         return f.ty.subst(&map);
                     }
@@ -600,6 +625,13 @@ impl Checker {
         let def = self.defs.fns[fid].clone();
         self.check_extern_available(fid, e.span);
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
+        if let Some(d) = self.fn_def_span(fid) {
+            let at = match &callee.kind {
+                ExprKind::Field(_, name, _) => name.span,
+                _ => callee.span,
+            };
+            self.note_ref(at, d);
+        }
         if let Some(c) = &mut self.collect {
             c.expr(
                 callee,
@@ -903,6 +935,9 @@ impl Checker {
         }
         if let Some(um) = self.find_user_method(&rt, &name.name) {
             let f = self.defs.fns[um.fid].clone();
+            if let Some(d) = self.fn_def_span(um.fid) {
+                self.note_ref(name.span, d);
+            }
             if !f.has_self {
                 let shown = self.show(&rt);
                 self.err(
@@ -1042,6 +1077,7 @@ impl Checker {
         {
             let def = self.defs.enums[*eid].clone();
             let variant = &def.variants[vi];
+            self.note_ref(name.span, variant.span);
             self.res
                 .paths
                 .insert(callee.id, PathRes::EnumVariant(*eid, vi));
@@ -1138,6 +1174,9 @@ impl Checker {
         // a static field holding a function, or an enum variant: not callable here
         if let Some(um) = self.find_user_method(ty, &name.name) {
             let f = self.defs.fns[um.fid].clone();
+            if let Some(d) = self.fn_def_span(um.fid) {
+                self.note_ref(name.span, d);
+            }
             if f.has_self {
                 let shown = self.show(ty);
                 self.err(

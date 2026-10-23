@@ -1,11 +1,11 @@
 {
   "name": "qlang",
   "displayName": "qlang",
-  "description": "Language support for qlang: syntax highlighting, errors as you type, tooltips, completion, snippets and a Run command.",
+  "description": "Language support for qlang: syntax highlighting, errors as you type, hovers, completion, go to definition, references, rename, symbols, snippets and a Run command.",
   "version": "0.45.0",
   "publisher": "qlang",
   "license": "MIT",
-  "engines": { "vscode": "^1.80.0" },
+  "engines": { "vscode": "^1.82.0" },
   "categories": ["Programming Languages", "Snippets"],
   "keywords": ["qlang"],
   "repository": { "type": "git", "url": "https://github.com/quenti77/qlang" },
@@ -36,7 +36,7 @@
     "snippets": [{ "language": "qlang", "path": "./snippets/qlang.json" }],
     "commands": [
       { "command": "qlang.run", "title": "qlang: Run File", "icon": "$(play)" },
-      { "command": "qlang.check", "title": "qlang: Check File" }
+      { "command": "qlang.restart", "title": "qlang: Restart Language Server" }
     ],
     "menus": {
       "editor/title/run": [
@@ -44,7 +44,7 @@
       ],
       "commandPalette": [
         { "command": "qlang.run", "when": "editorLangId == qlang" },
-        { "command": "qlang.check", "when": "editorLangId == qlang" }
+        { "command": "qlang.restart", "when": "editorLangId == qlang" }
       ]
     },
     "configuration": {
@@ -59,13 +59,7 @@
         "qlang.diagnostics.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Underline errors while you type, by running `qlang check`."
-        },
-        "qlang.diagnostics.delay": {
-          "type": "number",
-          "default": 400,
-          "minimum": 0,
-          "description": "Milliseconds to wait after you stop typing before checking."
+          "description": "Show the errors the language server (`qlang lsp`) reports while you type."
         }
       }
     }
@@ -73,6 +67,9 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "package": "vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.0.0",

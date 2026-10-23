@@ -1,5 +1,11 @@
 # Journal des changements
 
+## 0.46.0
+
+- **Serveur de langage** : `qlang lsp` parle le Language Server Protocol sur l'entrée et la sortie standard. Pour tout éditeur : erreurs pendant la frappe (y compris dans les fichiers importés), infobulles, autocomplétion, aide à la saisie des paramètres, **aller à la définition**, **références**, **renommage** dans tout le projet (variables, paramètres, fonctions, méthodes, types, champs, variantes ; il refuse le raccourci `Point { x }` qui nomme deux choses à la fois), plan du fichier et recherche de symboles. Le texte non enregistré est pris en compte.
+- L'extension VS Code utilise ce serveur à la place de son code JavaScript (`qlang.diagnostics.delay` disparaît ; la commande « qlang: Check File » devient « qlang: Restart Language Server »). Elle demande VS Code 1.82 et embarque `vscode-languageclient`.
+- Le protocole JSON (`"info": true`) ajoute `refs` : chaque usage d'un nom avec l'emplacement de sa définition.
+
 ## 0.45.0
 
 - Performance : la machine à registres compile les **tuples** (valeurs, paramètres, résultats, `t.0`, `let (q, r) = f(x)`, motifs de tuples dans `match`, `==`) et l'**appel d'une valeur fonction** (`f(x)` avec `f: fun(int) -> int`) : une fonction qui reçoit une fermeture est compilée, la fermeture elle-même reste interprétée. Tuples ×5,8, boucles qui appellent une fermeture ×2,5. 20 000 programmes aléatoires de plus donnent les mêmes résultats sur les deux moteurs.

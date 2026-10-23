@@ -6,6 +6,7 @@ mod docgen;
 mod init;
 mod install;
 mod json;
+mod lsp;
 mod mem;
 mod packages;
 mod process;
@@ -52,6 +53,9 @@ USAGE:
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
                                          (--watch: reload when a file of the program changes)
+    qlang lsp                            language server (Language Server Protocol, on standard
+                                         input and output): errors, hovers, completion, go to
+                                         definition, references, rename, symbols
     qlang packages                       the packages of the project here, as JSON (for editors)
     qlang install                        fetch the git packages listed in qlang.toml into
                                          .qlang/packages, at the commits of qlang.lock
@@ -107,6 +111,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
             }
         }
         Some("serve") => serve::serve(&it.collect::<Vec<_>>()),
+        Some("lsp") => lsp::run(),
         Some("packages") => packages_json(),
         Some("init") => init::init(&it.collect::<Vec<_>>()),
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),

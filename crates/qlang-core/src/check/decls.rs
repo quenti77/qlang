@@ -300,13 +300,24 @@ impl Checker {
         match path {
             [one] => {
                 let r = self.lookup_item(&one.name);
-                if r.is_none() {
-                    self.err("T001", format!("unknown {what} `{}`", one.name), one.span);
+                match &r {
+                    None => self.err("T001", format!("unknown {what} `{}`", one.name), one.span),
+                    Some(item) => {
+                        if let Some(d) = self.item_def_span(item) {
+                            self.note_ref(one.span, d);
+                        }
+                    }
                 }
                 r
             }
             [first, second] => match self.lookup_item(&first.name) {
-                Some(ItemRef::Module(m)) => self.module_member(m, second),
+                Some(ItemRef::Module(m)) => {
+                    let r = self.module_member(m, second);
+                    if let Some(d) = r.as_ref().and_then(|item| self.item_def_span(item)) {
+                        self.note_ref(second.span, d);
+                    }
+                    r
+                }
                 Some(_) => {
                     self.err(
                         "T001",

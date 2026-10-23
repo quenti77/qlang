@@ -12,7 +12,7 @@ mod expr;
 mod info;
 mod unify;
 
-pub use info::{ExprInfo, Info, ItemInfo, LocalInfo, Member};
+pub use info::{ExprInfo, Info, ItemInfo, LocalInfo, Member, RefInfo};
 
 use crate::ast::{self, Item};
 use crate::diag::{Diagnostic, MAX_DIAGNOSTICS, Severity};

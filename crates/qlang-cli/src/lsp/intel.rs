@@ -364,7 +364,7 @@ pub fn name_completions(info: &Info, file: &str, line0: usize, col: usize) -> Ve
         });
     }
     for t in [
-        "int", "float", "bool", "string", "uuid", "ulid", "datetime", "array", "map",
+        "int", "float", "bool", "string", "uuid", "ulid", "datetime", "bytes", "array", "map",
     ] {
         add(Item {
             label: t.to_string(),

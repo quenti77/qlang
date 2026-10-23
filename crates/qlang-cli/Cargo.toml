@@ -26,3 +26,4 @@ ctrlc = { version = "3.5.2", features = ["termination"] }
 argon2 = { version = "0.5", default-features = false, features = ["std", "alloc", "password-hash"] }
 getrandom = "0.2"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }

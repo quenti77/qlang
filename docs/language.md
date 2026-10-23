@@ -74,6 +74,9 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
     - [Expressions régulières](#expressions-régulières)
+    - [Encodages et hachages](#encodages-et-hachages)
+    - [Octets : `bytes`](#octets--bytes)
+    - [Secrets : `Crypto` et `Password`](#secrets--crypto-et-password)
   - [16. Prélude : `Result`, `Error` et JSON](#16-prélude--result-error-et-json)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
@@ -82,6 +85,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Prélude : `http`](#prélude--http)
     - [Prélude : `Db`](#prélude--db)
     - [Prélude : fichiers et environnement](#prélude--fichiers-et-environnement)
+    - [Prélude : le journal `Log`](#prélude--le-journal-log)
   - [18. Fins de ligne](#18-fins-de-ligne)
   - [19. Mots-clés réservés](#19-mots-clés-réservés)
   - [20. Erreurs et limites](#20-erreurs-et-limites)
@@ -2044,9 +2048,9 @@ condition à récupérer avec `Result`.
 
 ### Encodages et hachages
 
-Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; le texte est le seul type,
-il n'y a pas de tableau d'octets, donc un décodage renvoie `none` si le résultat n'est pas du
-texte UTF-8 valide :
+Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; un décodage en texte renvoie
+`none` si le résultat n'est pas du texte UTF-8 valide. Pour des données quelconques, voir
+[`bytes`](#octets--bytes) : chaque fonction a une variante `*_bytes` :
 
 | Fonction | Rôle |
 | --- | --- |
@@ -2063,6 +2067,71 @@ print(Base64.decode("TWFu"))     -- Man
 ```
 
 Ces noms commencent par une majuscule pour ne pas être masqués par une variable `url` ou `hash`.
+
+### Octets : `bytes`
+
+`bytes` est une suite d'octets qui ne change jamais : un fichier, un corps de requête, une
+empreinte. Ce n'est pas du texte (un texte est de l'UTF-8 valide) et pas un tableau d'entiers.
+
+```
+let b = "héllo".to_bytes()
+print(b.len())               -- 6 : des octets, pas des caractères
+print(b.hex())               -- 68c3a96c6c6f
+print(b.to_string())         -- héllo (none si ce n'est pas du texte valide)
+print(b.slice(0, 3))         -- bytes[68 c3 a9]
+print(b.at(1))               -- 195 (none hors des octets)
+```
+
+| Appel | Résultat |
+| --- | --- |
+| `s.to_bytes()` | les octets UTF-8 d'un texte |
+| `bytes.empty()` | aucun octet |
+| `bytes.from_array([1, 2, 255])` | les octets de ces entiers, ou `none` si l'un n'est pas de 0 à 255 |
+| `b.len()`, `b.is_empty()`, `b.at(i)` | taille ; `i`-ième octet (0 à 255) ou `none` |
+| `b.slice(début, fin)`, `b.concat(autre)` | des octets ; `slice` reste dans les limites |
+| `b.to_string()`, `b.to_array()` | le texte (`string?`) ; un `array<int>` |
+| `b.hex()`, `b.base64()` | le texte hexadécimal ; le texte base64 |
+| `b.find(x)`, `b.contains(x)`, `b.starts_with(x)`, `b.ends_with(x)` | recherche d'octets |
+| `Base64.encode_bytes(b)`, `Base64.encode_url_bytes(b)`, `Base64.decode_bytes(s)` | base64 ; `decode_bytes` donne un `bytes?` |
+| `Hex.encode_bytes(b)`, `Hex.decode_bytes(s)`, `Url.encode_bytes(b)`, `Url.decode_bytes(s)` | idem |
+| `Hash.sha256_bytes(b)`, `sha1_bytes`, `md5_bytes`, `hmac_sha256_bytes(clé, message)` | l'empreinte en hexadécimal |
+| `Hash.sha256_raw(b)`, `Hash.hmac_sha256_raw(clé, message)` | l'empreinte en octets (32) |
+| `random.bytes(n)` | `n` octets au hasard (0 à 1 048 576), du générateur de `random` |
+| `fs.read_bytes(chemin)`, `fs.write_bytes(chemin, b)` | un fichier en octets |
+
+- `==` compare le contenu ; il n'y a ni `<` ni indice `b[i]` (utilise `at`).
+- `print` montre les 32 premiers octets : `bytes[68 c3 a9]`.
+- Dans un `Json`, des octets sont du texte base64 (`Json.of`, `Json.to<bytes>`).
+- `bytes` n'est pas un mot réservé : `let bytes = 3` reste valable (comme `map`).
+- Une `extern fun` peut prendre et rendre des `bytes` ; à un programme externe (`--extern`,
+  `qlang.toml`), ils passent en base64.
+
+### Secrets : `Crypto` et `Password`
+
+`random` est un générateur qu'on peut fixer (`--seed`) : bien pour les tests, **jamais** pour un
+secret. `Crypto` demande des octets à la source sécurisée du système.
+
+| Appel | Résultat |
+| --- | --- |
+| `Crypto.random_bytes(n)` | `Result<bytes, Error>` : `n` octets imprévisibles |
+| `Crypto.token(n)` | `Result<string, Error>` : un jeton (session, lien de réinitialisation, clé d'API) fait de `n` octets en base64 « URL » (32 octets : 43 caractères) |
+| `Crypto.equal(a, b)`, `Crypto.equal_bytes(a, b)` | `true` si les deux sont égaux, **sans révéler où ils diffèrent** (temps constant) : pour comparer un jeton, une signature ou une empreinte reçus |
+
+`Password` garde des mots de passe. Il fabrique un texte à ranger dans la base (**Argon2id**, avec
+son propre sel au hasard et ses réglages dedans) et n'en garde jamais le mot de passe :
+
+```
+let hash = Password.hash("s3cret").unwrap()      -- "$argon2id$v=19$m=19456,t=2,p=1$..."
+Password.verify("s3cret", hash).unwrap()         -- true
+Password.verify("autre", hash).unwrap()          -- false
+Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vieilli
+```
+
+- `verify` rend `err` si le texte n'est pas un hash. Calculer un hash prend quelques dizaines de
+  millisecondes, exprès.
+- Après une connexion réussie, `needs_rehash` dit s'il faut refaire le hash (et le ranger).
+- Seule la commande `qlang` offre `Password` et `Crypto` (un autre hôte : erreur `T250` avant même
+  de lancer ; un hôte de test peut répondre de sa graine, jamais pour de vrais secrets).
 
 ## 16. Prélude : `Result`, `Error` et JSON
 
@@ -2462,6 +2531,7 @@ Options de `qlang serve app.q` :
 | `--bind ADRESSE` | l'adresse d'écoute (`127.0.0.1` par défaut : seulement cette machine)                     |
 | `--max-steps N`  | le nombre d'étapes d'évaluation **par requête**                                           |
 | `--static DOSSIER` | sert les fichiers de ce dossier tels quels, **avant** d'appeler le programme            |
+| `--compress`     | compresse en gzip les réponses de texte pour les clients qui l'acceptent               |
 | `--dev`          | le détail d'une erreur du programme est dans la réponse 500 (jamais en production)    |
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
@@ -2478,16 +2548,35 @@ Options de `qlang serve app.q` :
   données ou des fichiers, pas dans une variable.
 - **Arrêt** : Ctrl-C ou un signal `TERM` arrête proprement le serveur : les requêtes déjà
   acceptées reçoivent leur réponse (5 secondes au plus), les nouvelles reçoivent `503`.
-- **Le serveur** est minimal : HTTP/1.1 sans TLS ni connexions persistantes, 16 connexions
-  en même temps au plus, corps limité à 1 Mo, pas de requêtes en morceaux (`Transfer-Encoding:
-  chunked`). Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
+- **Le serveur** est simple : HTTP/1.1 sans TLS, 64 connexions en même temps au plus, corps
+  limité à 1 Mo. Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
   inverse** et ne l'exposez pas directement à Internet.
+  - **Connexions persistantes** : une connexion sert jusqu'à 100 requêtes (5 secondes de silence
+    la ferment ; `Connection: close` aussi), requêtes envoyées d'un coup comprises.
+  - **Corps en morceaux** (`Transfer-Encoding: chunked`) et `Expect: 100-continue` sont compris ;
+    un corps annoncé de deux façons à la fois est refusé (`400`).
+  - **Octets** : `req.raw` est le corps exact (`bytes?`) ; `Response.bytes(données, type)`
+    répond avec des octets ; une `Response` dont `raw` est rempli envoie ces octets à la place
+    de `body`.
+  - **Formulaires avec fichiers** : `req.multipart()` rend les `Part` d'un corps
+    `multipart/form-data` (`name`, `filename: string?`, `content_type: string?`, `data: bytes`,
+    `text()`), ou `err` s'il est mal formé.
+  - **Réponses au fil de l'eau** : `Response.stream(type, suivant)` rappelle `suivant()` sans
+    cesse et envoie chaque texte reçu tout de suite (`Transfer-Encoding: chunked`), jusqu'à
+    `none` ; `Response.sse(suivant)` fait de même avec des `SseEvent { data, event?, id?,
+    retry? }` (`text/event-stream`). Le worker qui répond ne sert que cette connexion tant
+    que ça dure (donne assez de `--workers`) ; si le client part, le flux s'arrête au morceau
+    suivant. Entre deux morceaux, `time.sleep` attend.
+  - **Compression** : avec `--compress`, un texte, JSON, JavaScript, XML ou SVG de 1 Ko ou plus
+    est envoyé en gzip aux clients qui l'acceptent (`Content-Encoding: gzip`, `Vary`), sauf si le
+    programme a déjà choisi un encodage. Désactivé par défaut (un proxy le fait aussi bien).
 
 ### Prélude : `Db`
 
 `Db.connect(url)` ouvre une connexion à une base de données ; le schéma de
-l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`, ou
-`postgres://utilisateur:mot_de_passe@hôte/base`. Pour Postgres en TLS, ajoute
+l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`,
+`postgres://utilisateur:mot_de_passe@hôte/base` ou `mysql://utilisateur:mot_de_passe@hôte/base`
+(MySQL et MariaDB ; `mariadb://` est accepté). Pour Postgres et MySQL en TLS, ajoute
 `?sslmode=require` (ou `prefer`/`verify-ca`/`verify-full`, ils sont traités
 pareil ici) : `postgres://user:pass@hôte/base?sslmode=require`. Le certificat
 du serveur est toujours vérifié contre les autorités publiques (Mozilla) ;
@@ -2549,6 +2638,10 @@ end
   (`sql_connect`, `sql_query`, `sql_execute`, `sql_close`) que l'hôte fournit :
   `qlang` les fournit pour SQLite et Postgres, et un autre environnement peut brancher
   sa propre base sous les mêmes noms.
+- **MySQL / MariaDB** : les colonnes gardent leur type (entiers, flottants, texte) ; une date
+  (`DATE`, `DATETIME`, `TIMESTAMP`) devient un texte `2026-10-23` ou `2026-10-23 14:05:09`, une
+  heure (`TIME`) un texte, un `BLOB` ou un texte invalide `none`. Les requêtes sont préparées
+  côté serveur (`?`). Les transactions marchent comme ailleurs. Testé avec MySQL 8.0 et 9.5.
 - **Limites actuelles** : côté Postgres, seuls les types scalaires courants (`bool`,
   entiers, flottants, texte) sont bien convertis, les autres (date, uuid, json,
   tableau...) retombent en texte si possible, sinon `none` ; pas de BLOB SQLite (devient
@@ -2559,7 +2652,8 @@ end
 `fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
 contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
 `Result` : un fichier absent ou une erreur de permission donnent un
-`Result::err`, jamais un arrêt du programme.
+`Result::err`, jamais un arrêt du programme. `fs.read_bytes(chemin)` et `fs.write_bytes(chemin,
+octets)` font de même avec des [`bytes`](#octets--bytes) (une image, une archive).
 
 ```
 let r = fs.read("config.json")
@@ -2589,6 +2683,31 @@ côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait
 `qlang-cli`, les arguments après `--` sur la ligne de commande sont ceux que
 `env.args()` renvoie (`qlang run script.q -- a b`), et `fs` respecte `--root`
 comme les imports.
+
+### Prélude : le journal `Log`
+
+`Log` écrit le journal du programme : `Log.debug("détail")`, `Log.info("démarré")`,
+`Log.warn("lent")`, `Log.error("échec")`, ou `Log.write("info", "message", { "user": "ada" })` avec
+des champs en plus (un autre niveau est écrit comme `info`).
+
+```
+Log.info("démarré")
+Log.write("error", "paiement refusé", { "commande": "42", "raison": "carte expirée" })
+```
+
+La commande `qlang` écrit une ligne par appel sur la **sortie d'erreur** (pas sur la sortie : le
+journal ne se mélange pas aux résultats) :
+
+```
+2026-10-23T18:50:33.145Z INFO  démarré
+2026-10-23T18:50:33.146Z ERROR paiement refusé commande=42 raison="carte expirée"
+```
+
+- `--log-level debug|info|warn|error` (ou la variable `QLANG_LOG`) cache les niveaux plus bas ;
+  `info` par défaut.
+- `--log-format json` (ou `QLANG_LOG_FORMAT=json`) écrit un objet par ligne :
+  `{"level":"error","message":"...","commande":"42","time":"..."}`.
+- Un autre hôte garde ou jette les lignes ; elles ne font jamais échouer le programme.
 
 ## 18. Fins de ligne
 

@@ -274,3 +274,11 @@ fn a_loop_with_calls_and_module_variables() {
     let src = "let t = 0\nfun bump(k: int)\n  t += k * 2\nend\nfun twice(k: int) -> int\n  k * 2\nend\nfor i in 0..1000 do\n  bump(i)\n  t += twice(i) mod 3\nend\nprint(t)\nlet c = 0\nlet k = 5\nwhile c < 100 do\n  c += twice(k) mod 7\n  k += 1\nend\nprint(c)\nprint(k)";
     assert_eq!(same_compiled(src, 3), "999999\n104\n39\n");
 }
+
+#[test]
+fn arrays_made_in_loops_are_dropped_with_each_turn() {
+    // a new array every turn: nothing piles up, and a returned one survives its call
+    let src = "fun f(n: int) -> int\n  let total = 0\n  for i in 0..n do\n    let t = [i, i + 1, i + 2]\n    t.push(i)\n    total += t[0] + t[3] + t.len()\n  end\n  total\nend\nfun row(k: int) -> array<int>\n  let r: array<int> = []\n  for i in 0..k do\n    r[] = i * i\n  end\n  r\nend\nfun use_rows(n: int) -> int\n  let s = 0\n  let i = 0\n  while i < n do\n    let r = row(i mod 5)\n    for x in r do\n      s += x\n    end\n    i += 1\n  end\n  s\nend\nprint(f(200000))\nprint(use_rows(100000))";
+    // the sum over i < 200000 of (i + i + 4), then 20000 turns of 0 + 0 + 1 + 5 + 14
+    assert_eq!(same_compiled(src, 3), "40000600000\n400000\n");
+}

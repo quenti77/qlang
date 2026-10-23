@@ -204,6 +204,31 @@ enum Op {
         base: Reg,
         fmt: u32,
     },
+    /// `obj.field`: the field `Code::fields[fld]` of the structure in `obj`.
+    Field {
+        dst: Reg,
+        obj: Reg,
+        fld: u32,
+    },
+    /// `obj.field = src`
+    SetField {
+        obj: Reg,
+        src: Reg,
+        fld: u32,
+    },
+    /// A structure literal: the values of the fields written are in the registers from `base`.
+    NewStruct {
+        dst: Reg,
+        base: Reg,
+        lit: u32,
+    },
+    /// A call of a method of a structure, dispatched by the interpreter as usual: receiver
+    /// and arguments from `base`.
+    CallMethod {
+        dst: Reg,
+        base: Reg,
+        site: u32,
+    },
     /// A built-in function (`print`): its argument is in `base`.
     Builtin {
         base: Reg,
@@ -237,12 +262,26 @@ pub(super) struct Code {
     /// The text constants and the shapes of the interpolated strings.
     strs: Vec<Value>,
     fmts: Vec<Vec<FmtPart>>,
+    fields: Vec<FieldSite>,
+    lits: Vec<LitSite>,
     /// For a compiled loop: the variables it shares with the code around it.
     frees: Vec<Free>,
     /// Whether this is a compiled loop (it shows no frame of its own in a trace).
     is_loop: bool,
     /// Whether it uses object registers (their frame must be emptied when it returns).
     uses_objs: bool,
+}
+
+/// A field read or written by name, and its type.
+struct FieldSite {
+    name: String,
+    ty: Ty,
+}
+
+/// A structure literal: the structure and the names of the fields written, in order.
+struct LitSite {
+    sid: StructId,
+    names: Vec<(String, Ty)>,
 }
 
 /// A piece of an interpolated string: literal text, or the next value (of this type).
@@ -280,6 +319,8 @@ struct Site {
     ret: Ty,
     /// The call expression (`sum` of an empty array of floats depends on it).
     node: NodeId,
+    /// The method name as the interpreter's dispatch wants it (user methods).
+    ident: Option<Ident>,
 }
 
 #[derive(Clone)]
@@ -357,12 +398,15 @@ fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
 
 /// What a register can hold: a number, a boolean, a string, or an array of numbers.
 fn vty(t: &Ty) -> bool {
-    scalar(t) || *t == Ty::Str || matches!(t, Ty::Array(e) if scalar(e))
+    scalar(t)
+        || *t == Ty::Str
+        || matches!(t, Ty::Array(e) if scalar(e))
+        || matches!(t, Ty::Struct(_, args) if args.is_empty())
 }
 
 /// Whether a value of this type lives in the object registers.
 fn is_obj(t: &Ty) -> bool {
-    matches!(t, Ty::Array(_) | Ty::Str)
+    matches!(t, Ty::Array(_) | Ty::Str | Ty::Struct(..))
 }
 
 /// Whether code needs the object registers: it has an array operation, or an array among its
@@ -386,6 +430,10 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::CmpS { .. }
                     | Op::Format { .. }
                     | Op::Builtin { .. }
+                    | Op::Field { .. }
+                    | Op::SetField { .. }
+                    | Op::NewStruct { .. }
+                    | Op::CallMethod { .. }
                     | Op::ALen(..)
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
@@ -413,6 +461,8 @@ struct Gen<'a> {
     globals: Vec<GlobalRef>,
     strs: Vec<Value>,
     fmts: Vec<Vec<FmtPart>>,
+    fields: Vec<FieldSite>,
+    lits: Vec<LitSite>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
     /// The free variables are known (second pass): no new one may appear.
@@ -466,6 +516,167 @@ impl Gen<'_> {
             };
             self.emit(op, span);
         }
+    }
+
+    /// The type of the field `name` of the structure `sid` (or of a parent), when a register
+    /// can hold it.
+    fn field_ty(&self, sid: StructId, name: &str) -> Option<Ty> {
+        for (asid, _) in self.prog.defs.ancestry(sid, &[]) {
+            let sd = &self.prog.defs.structs[asid];
+            if let Some(f) = sd.fields.iter().find(|f| f.name == name) {
+                return (!f.is_static && vty(&f.ty)).then(|| f.ty.clone());
+            }
+        }
+        None
+    }
+
+    fn field_site(&mut self, name: &str, ty: &Ty) -> Option<u32> {
+        let i = match self
+            .fields
+            .iter()
+            .position(|f| f.name == name && f.ty == *ty)
+        {
+            Some(i) => i,
+            None => {
+                self.fields.push(FieldSite {
+                    name: name.to_string(),
+                    ty: ty.clone(),
+                });
+                self.fields.len() - 1
+            }
+        };
+        u32::try_from(i).ok()
+    }
+
+    /// The instruction for `d = a <op> b` on values of the type `ty` (compound assignment).
+    fn compound(bop: BinOp, ty: &Ty, d: Reg, a: Reg, b: Reg) -> Option<Op> {
+        let int = *ty == Ty::Int;
+        let float = *ty == Ty::Float;
+        Some(match bop {
+            BinOp::Add if *ty == Ty::Str => Op::AddS(d, a, b),
+            BinOp::Add if int => Op::AddI(d, a, b),
+            BinOp::Sub if int => Op::SubI(d, a, b),
+            BinOp::Mul if int => Op::MulI(d, a, b),
+            BinOp::IntDiv if int => Op::IntDivI(d, a, b),
+            BinOp::Mod if int => Op::ModI(d, a, b),
+            BinOp::Add if float => Op::AddF(d, a, b),
+            BinOp::Sub if float => Op::SubF(d, a, b),
+            BinOp::Mul if float => Op::MulF(d, a, b),
+            BinOp::Div if float => Op::DivF(d, a, b),
+            _ => return None,
+        })
+    }
+
+    /// `obj.field = v`, `obj.field += v`.
+    fn assign_field(
+        &mut self,
+        e: &Expr,
+        op: Option<BinOp>,
+        target: &Expr,
+        value: &Expr,
+    ) -> Option<()> {
+        let ExprKind::Field(obj, name, targs) = &target.kind else {
+            return None;
+        };
+        if !targs.is_empty() {
+            return None;
+        }
+        let (o, ot) = self.value(obj)?;
+        let Ty::Struct(sid, _) = &ot else {
+            return None;
+        };
+        let ty = self.field_ty(*sid, &name.name)?;
+        let fld = self.field_site(&name.name, &ty)?;
+        match op {
+            None => {
+                let (r, t) = self.value(value)?;
+                if t != ty {
+                    return None;
+                }
+                self.emit(
+                    Op::SetField {
+                        obj: o,
+                        src: r,
+                        fld,
+                    },
+                    e.span,
+                );
+            }
+            Some(bop) => {
+                let cur = self.alloc()?;
+                self.emit(
+                    Op::Field {
+                        dst: cur,
+                        obj: o,
+                        fld,
+                    },
+                    target.span,
+                );
+                let (r, t) = self.value(value)?;
+                if t != ty {
+                    return None;
+                }
+                let opc = Self::compound(bop, &ty, cur, cur, r)?;
+                self.emit(opc, e.span);
+                self.emit(
+                    Op::SetField {
+                        obj: o,
+                        src: cur,
+                        fld,
+                    },
+                    e.span,
+                );
+            }
+        }
+        Some(())
+    }
+
+    /// The method `name` of the structure `sid` (or of a parent) with a `self`: parameter
+    /// types and result type, if all the impls that define it agree and a register can hold them.
+    fn user_method(&self, sid: StructId, name: &str) -> Option<(Vec<Ty>, Ty)> {
+        let defs = &self.prog.defs;
+        // a field holding a function is called through the field
+        if defs
+            .ancestry(sid, &[])
+            .iter()
+            .any(|(a, _)| defs.structs[*a].fields.iter().any(|f| f.name == name))
+        {
+            return None;
+        }
+        let mut found: Option<(Vec<Ty>, Ty)> = None;
+        for (asid, _) in defs.ancestry(sid, &[]) {
+            for imp in &defs.impls {
+                if !matches!(&imp.target, Ty::Struct(s, a) if *s == asid && a.is_empty())
+                    || !imp.tparams.is_empty()
+                {
+                    continue;
+                }
+                for (n, fid) in &imp.methods {
+                    if n != name {
+                        continue;
+                    }
+                    let f = &defs.fns[*fid];
+                    let decl = f.decl.as_ref()?;
+                    if !f.has_self
+                        || !decl.tparams.is_empty()
+                        || !f.params.iter().all(vty)
+                        || !(vty(&f.ret) || f.ret == Ty::Unit)
+                    {
+                        return None;
+                    }
+                    let sig = (f.params.clone(), f.ret.clone());
+                    match &found {
+                        None => found = Some(sig),
+                        Some(prev) if *prev == sig => {}
+                        Some(_) => return None,
+                    }
+                }
+            }
+            if found.is_some() {
+                return found;
+            }
+        }
+        found
     }
 
     fn here(&self) -> u32 {
@@ -637,6 +848,9 @@ impl Gen<'_> {
 
     /// Where the value of `e` is, and its type: a variable's own register, or a new temporary.
     fn value(&mut self, e: &Expr) -> Option<(Reg, Ty)> {
+        if matches!(e.kind, ExprKind::SelfVal) {
+            return self.lookup("self");
+        }
         if matches!(e.kind, ExprKind::Ident(..))
             && let Some(Access::Reg(r, t)) = self.access(e, false)
         {
@@ -714,6 +928,50 @@ impl Gen<'_> {
                 self.emit(Op::MovO(dst, tmp), span);
                 self.top = tmp as usize;
                 Some(ty)
+            }
+            ExprKind::SelfVal => {
+                let (r, t) = self.lookup("self")?;
+                self.mov(dst, r, &t, span);
+                Some(t)
+            }
+            ExprKind::Field(obj, name, targs)
+                if targs.is_empty() && self.prog.res.paths.get(&e.id).is_none() =>
+            {
+                let mark = self.top;
+                let (o, ot) = self.value(obj)?;
+                let Ty::Struct(sid, _) = &ot else {
+                    return None;
+                };
+                let ty = self.field_ty(*sid, &name.name)?;
+                let fld = self.field_site(&name.name, &ty)?;
+                self.emit(Op::Field { dst, obj: o, fld }, span);
+                self.top = mark;
+                Some(ty)
+            }
+            ExprKind::StructLit(lit) => {
+                if lit.base.is_some() {
+                    return None;
+                }
+                let sid = *self.prog.res.struct_lits.get(&e.id)?;
+                if !self.prog.defs.structs[sid].tparams.is_empty() {
+                    return None;
+                }
+                let mark = self.top;
+                let base = self.top as Reg;
+                let mut names = Vec::new();
+                for item in &lit.fields {
+                    let want = self.field_ty(sid, &item.name.name)?;
+                    let r = self.alloc()?;
+                    if self.into(&item.value, r)? != want {
+                        return None;
+                    }
+                    names.push((item.name.name.clone(), want));
+                }
+                self.lits.push(LitSite { sid, names });
+                let lit = u32::try_from(self.lits.len() - 1).ok()?;
+                self.emit(Op::NewStruct { dst, base, lit }, span);
+                self.top = mark;
+                Some(Ty::Struct(sid, Vec::new()))
             }
             ExprKind::Str(parts) => {
                 if parts.iter().all(|p| matches!(p, StrPart::Lit(_))) {
@@ -981,6 +1239,7 @@ impl Gen<'_> {
                         tys: vec![t],
                         ret: Ty::Unit,
                         node: e.id,
+                        ident: None,
                     });
                     self.emit(Op::Builtin { base, site }, span);
                     self.top = mark;
@@ -1040,7 +1299,9 @@ impl Gen<'_> {
         let base = self.top as Reg;
         let recv = self.alloc()?;
         let rt = self.into(obj, recv)?;
+        let user = matches!(&rt, Ty::Struct(..));
         let (want, ret) = match &rt {
+            Ty::Struct(sid, _) => self.user_method(*sid, &name.name)?,
             Ty::Array(el) => array_method(el, &name.name)?,
             Ty::Str => string_method(&name.name)?,
             _ => number_method(&rt, &name.name)?,
@@ -1085,8 +1346,15 @@ impl Gen<'_> {
                     tys,
                     ret: ret.clone(),
                     node: e.id,
+                    ident: user.then(|| name.clone()),
                 });
-                self.emit(Op::Method { dst, base, site }, span);
+                if user {
+                    // the method could change a variable of the module
+                    self.has_call = true;
+                    self.emit(Op::CallMethod { dst, base, site }, span);
+                } else {
+                    self.emit(Op::Method { dst, base, site }, span);
+                }
             }
         }
         self.top = mark;
@@ -1522,6 +1790,12 @@ impl Gen<'_> {
             {
                 self.assign_element(e, *op, target, value)?;
             }
+            ExprKind::Assign { op, target, value }
+                if matches!(target.kind, ExprKind::Field(..))
+                    && self.prog.res.paths.get(&target.id).is_none() =>
+            {
+                self.assign_field(e, *op, target, value)?;
+            }
             ExprKind::Assign { op, target, value } => {
                 let (reg, ty, global) = match self.access(target, true)? {
                     Access::Reg(r, t) => (r, t, None),
@@ -1630,6 +1904,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
         globals: Vec::new(),
         strs: Vec::new(),
         fmts: Vec::new(),
+        fields: Vec::new(),
+        lits: Vec::new(),
         loop_mode,
         preset: false,
         frees: Vec::new(),
@@ -1644,10 +1920,20 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             let def = &prog.defs.fns[f];
             let decl = def.decl.as_ref()?;
             let body = decl.body.as_ref()?;
+            // a method of a non-generic impl: `self` is its first parameter
+            let self_ty: Option<Ty> = match def.impl_id {
+                Some(i) => {
+                    let imp = &prog.defs.impls[i];
+                    if !imp.tparams.is_empty() || !vty(&imp.target) {
+                        return None;
+                    }
+                    def.has_self.then(|| imp.target.clone())
+                }
+                None => None,
+            };
             if decl.external
                 || !decl.tparams.is_empty()
-                || def.has_self
-                || def.impl_id.is_some()
+                || (def.has_self && self_ty.is_none())
                 || !def.params.iter().all(vty)
                 || !(vty(&def.ret) || def.ret == Ty::Unit)
             {
@@ -1656,6 +1942,10 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
             // `consts`: the constants the first pass met, kept in registers in the second
             let attempt = |consts: Option<&[i64]>| -> Option<Gen> {
                 let mut g = new_gen(def.ret.clone(), false);
+                if let Some(t) = &self_ty {
+                    let r = g.alloc()?;
+                    g.scopes[0].push(("self".to_string(), r, t.clone()));
+                }
                 for (p, t) in decl.params.iter().zip(&def.params) {
                     let r = g.alloc()?;
                     g.scopes[0].push((p.name.name.clone(), r, t.clone()));
@@ -1692,19 +1982,22 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                 let list: Vec<i64> = first.consts.iter().map(|c| c.0).collect();
                 attempt(Some(&list))?
             };
-            let uses_objs = uses_objects(&g.ops, &def.params, &g.sites, &g.globals);
+            let param_tys: Vec<Ty> = self_ty.iter().chain(def.params.iter()).cloned().collect();
+            let uses_objs = uses_objects(&g.ops, &param_tys, &g.sites, &g.globals);
             Some((
                 Code {
                     name: def.name.clone(),
                     nregs: g.max + 1,
                     ops: g.ops,
                     spans: g.spans,
-                    param_tys: def.params.clone(),
+                    param_tys,
                     ret: def.ret.clone(),
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
                     fmts: g.fmts,
+                    fields: g.fields,
+                    lits: g.lits,
                     frees: Vec::new(),
                     is_loop: false,
                     uses_objs,
@@ -1766,6 +2059,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     globals: g.globals,
                     strs: g.strs,
                     fmts: g.fmts,
+                    fields: g.fields,
+                    lits: g.lits,
                     frees: g.frees,
                     is_loop: true,
                     uses_objs,
@@ -1788,7 +2083,9 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         (Value::Int(i), Ty::Int) => Some(Slot::N(*i)),
         (Value::Float(f), Ty::Float) => Some(Slot::N(f.to_bits() as i64)),
         (Value::Bool(b), Ty::Bool) => Some(Slot::N(i64::from(*b))),
-        (Value::Array(_), Ty::Array(_)) | (Value::Str(_), Ty::Str) => Some(Slot::O(v.clone())),
+        (Value::Array(_), Ty::Array(_))
+        | (Value::Str(_), Ty::Str)
+        | (Value::Struct(_), Ty::Struct(..)) => Some(Slot::O(v.clone())),
         _ => None,
     }
 }
@@ -1799,7 +2096,7 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         Ty::Int => Value::Int(stack[i]),
         Ty::Float => Value::Float(f64::from_bits(stack[i] as u64)),
         Ty::Bool => Value::Bool(stack[i] != 0),
-        Ty::Array(_) | Ty::Str => ostack[i].clone(),
+        Ty::Array(_) | Ty::Str | Ty::Struct(..) => ostack[i].clone(),
         _ => Value::Unit,
     }
 }
@@ -1830,16 +2127,21 @@ impl Interp<'_> {
         args: &[Value],
         span: Span,
     ) -> Option<R<Value>> {
-        // the common refusals, without a call: a method, or a function known not to compile
-        if this.is_some() || !self.vm_enabled || matches!(self.vm_state.get(fid), Some(VmState::No))
-        {
+        // the common refusal, without a call: a function known not to compile
+        if !self.vm_enabled || matches!(self.vm_state.get(fid), Some(VmState::No)) {
             return None;
         }
-        self.try_vm_slow(fid, args, span)
+        self.try_vm_slow(fid, this, args, span)
     }
 
     #[inline(never)]
-    fn try_vm_slow(&mut self, fid: FnId, args: &[Value], span: Span) -> Option<R<Value>> {
+    fn try_vm_slow(
+        &mut self,
+        fid: FnId,
+        this: &Option<Value>,
+        args: &[Value],
+        span: Span,
+    ) -> Option<R<Value>> {
         if self.vm_state.len() <= fid {
             let n = self.prog.defs.fns.len().max(fid + 1);
             self.vm_state.resize(n, VmState::Unknown);
@@ -1850,12 +2152,14 @@ impl Interp<'_> {
             VmState::Unknown => self.vm_compile(fid)?,
         };
         let code = self.vm_codes[idx as usize].clone();
-        if args.len() != code.param_tys.len() {
+        // a method takes its `self` first
+        let all: Vec<&Value> = this.iter().chain(args.iter()).collect();
+        if all.len() != code.param_tys.len() || this.is_some() != self.prog.defs.fns[fid].has_self {
             return None;
         }
         self.vm_release();
-        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(args.len());
-        for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
+        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(all.len());
+        for (k, (a, t)) in all.iter().zip(&code.param_tys).enumerate() {
             init.push((k as Reg, slot_of(a, t)?));
         }
         let r = self.vm_run(idx, init, span);
@@ -1863,7 +2167,9 @@ impl Interp<'_> {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
             Ty::Bool => Value::Bool(bits != 0),
-            Ty::Array(_) | Ty::Str => std::mem::replace(&mut self.vm_result, Value::Unit),
+            Ty::Array(_) | Ty::Str | Ty::Struct(..) => {
+                std::mem::replace(&mut self.vm_result, Value::Unit)
+            }
             _ => Value::Unit,
         });
         self.vm_release();
@@ -2261,6 +2567,75 @@ impl Interp<'_> {
                     }
                 }
                 Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
+                Op::Field { dst, obj, fld } => {
+                    let site = &code.fields[fld as usize];
+                    let v = match &o!(obj) {
+                        Value::Struct(st) => st.fields.borrow().get(&site.name).cloned(),
+                        _ => None,
+                    };
+                    let Some(v) = v else {
+                        fail!("R005", format!("this value has no field `{}`", site.name));
+                    };
+                    if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
+                        fail!("R001", "a field of an unexpected type");
+                    }
+                }
+                Op::SetField { obj, src, fld } => {
+                    let site = &code.fields[fld as usize];
+                    let v = reg_value(stack, ostack, base + src as usize, &site.ty);
+                    match &o!(obj) {
+                        Value::Struct(st) => {
+                            st.fields.borrow_mut().insert(&site.name, v);
+                        }
+                        _ => fail!("R005", format!("this value has no field `{}`", site.name)),
+                    }
+                }
+                Op::NewStruct { dst, base: b, lit } => {
+                    let site = &code.lits[lit as usize];
+                    let prog = self.prog;
+                    let mut fields = SmallMap::default();
+                    for (k, (name, t)) in site.names.iter().enumerate() {
+                        fields.insert(name, reg_value(stack, ostack, base + b as usize + k, t));
+                    }
+                    for (asid, _) in prog.defs.ancestry(site.sid, &[]) {
+                        let sd = &prog.defs.structs[asid];
+                        for f in &sd.fields {
+                            if f.is_static || fields.contains_key(&f.name) {
+                                continue;
+                            }
+                            if let Some(d) = &f.default {
+                                let scope = Scope::new(Some(self.envs[sd.module].clone()));
+                                let v = self.eval(d, &scope)?;
+                                fields.insert(&f.name, v);
+                            }
+                        }
+                    }
+                    o!(dst) = Value::Struct(Rc::new(StructObj {
+                        def: site.sid,
+                        fields: RefCell::new(fields),
+                    }));
+                }
+                Op::CallMethod { dst, base: b, site } => {
+                    let span = code.spans[pc - 1];
+                    let st = &code.sites[site as usize];
+                    let at = base + b as usize;
+                    let recv = reg_value(stack, ostack, at, &st.tys[0]);
+                    let argv: Vec<Value> = st.tys[1..]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| reg_value(stack, ostack, at + 1 + i, t))
+                        .collect();
+                    self.cur_call = st.node;
+                    let Some(ident) = st.ident.as_ref() else {
+                        fail!("R001", "a method call without a name");
+                    };
+                    let out = self.call_method(recv, ident, argv, span)?;
+                    if st.ret != Ty::Unit
+                        && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
+                    {
+                        fail!("R001", "unexpected result of a method");
+                    }
+                }
                 Op::AddS(d, a, b) => {
                     let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
                         fail!("R001", "a string was expected");

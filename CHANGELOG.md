@@ -3,6 +3,7 @@
 ## Prochaine version
 
 - Performance : la machine à registres compile aussi les **textes** (littéraux, `+`, comparaisons, interpolation, `print`, méthodes courantes) et peut créer des tableaux dans une boucle : une boucle de traitement de texte va 4 fois plus vite. Deux banques de registres (nombres, valeurs) remplacent la table de tableaux.
+- Performance : et les **structures** (champs, littéraux) avec leurs **méthodes** (le corps est compilé, l'appel passe par l'interpréteur, donc héritage, `override` et traits inchangés) : ×2 à ×2,5 sur du code orienté objet. 40 000 programmes aléatoires (nombres, tableaux, textes, structures) donnent les mêmes résultats sur les deux moteurs.
 
 ## 0.41.0
 

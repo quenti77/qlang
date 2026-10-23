@@ -831,7 +831,11 @@ impl Checker {
     fn note_ident_ty(&mut self, id: NodeId, ty: &Ty) {
         let t = self.resolve(ty);
         let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
-        if scalar(&t) || t == Ty::Str || matches!(&t, Ty::Array(e) if scalar(&self.resolve(e))) {
+        if scalar(&t)
+            || t == Ty::Str
+            || matches!(&t, Ty::Struct(_, args) if args.is_empty())
+            || matches!(&t, Ty::Array(e) if scalar(&self.resolve(e)))
+        {
             self.res.ident_tys.insert(id, t);
         }
     }

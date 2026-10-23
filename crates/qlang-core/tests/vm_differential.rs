@@ -463,6 +463,96 @@ fn string_program(rng: &mut Rng) -> String {
     src
 }
 
+/// Statements on the structures `p` (a `P`) and `q` (a `Q`, which extends `P`), with `acc`,
+/// `n` (ints) and `s` (a string) to compute with.
+fn struct_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let who = |rng: &mut Rng| rng.pick(&["p", "q"]);
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 20 } else { 16 }) {
+            0 => out += &format!("{}.a = {}\n", who(rng), int_expr(rng, &vars, 2)),
+            1 => out += &format!("{}.a += {}\n", who(rng), int_expr(rng, &vars, 1)),
+            2 => out += &format!("{}.b = {}.b * 1.5 - 0.25\n", who(rng), who(rng)),
+            3 => out += &format!("{}.s += \"x{{n}}\"\n", who(rng)),
+            4 => out += &format!("{0}.ok = not {0}.ok\n", who(rng)),
+            5 => out += &format!("acc += {}.bump({})\n", who(rng), int_expr(rng, &vars, 1)),
+            6 => out += &format!("acc += {}.combine({})\n", who(rng), who(rng)),
+            7 => out += "q.c += 1\n",
+            8 => out += "acc += q.c + q.a + p.a\n",
+            9 => {
+                let u = unique();
+                out += &format!(
+                    "let r{u} = P {{ a: {}, b: 1.5, s: \"z\" }}\nacc += r{u}.a + r{u}.label().len()\n",
+                    int_expr(rng, &vars, 1)
+                );
+            }
+            10 => {
+                let u = unique();
+                out += &format!("let r{u} = P.make({})\np = r{u}\n", int_expr(rng, &vars, 1));
+            }
+            11 => out += &format!("print({}.label())\n", who(rng)),
+            12 => out += &format!("s = {}.label() + {}.label()\n", who(rng), who(rng)),
+            13 => out += &format!("{}.scale(0.5 + n)\n", who(rng)),
+            14 => out += &format!("if {}.ok then acc += 1 else n += 1 end\n", who(rng)),
+            15 => out += &format!("acc += {}\n", int_expr(rng, &vars, 2)),
+            16 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if acc > 100000 then break end\nend\n",
+                    rng.below(7),
+                    struct_stmts(rng, depth - 1)
+                );
+            }
+            17 => {
+                let u = unique();
+                out += &format!(
+                    "let w{u} = 0\nwhile w{u} < {} do\n  w{u} += 1\n{}end\n",
+                    rng.below(5),
+                    struct_stmts(rng, depth - 1)
+                );
+            }
+            18 => {
+                out += &format!(
+                    "if {}.a > {} then\n{}else\n{}end\n",
+                    who(rng),
+                    rng.below(10),
+                    struct_stmts(rng, depth - 1),
+                    struct_stmts(rng, depth - 1)
+                )
+            }
+            _ => out += "n += p.a mod 3\n",
+        }
+    }
+    out
+}
+
+fn struct_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += "struct P\n  public a: int\n  public b: float\n  public s: string\n  public ok: bool = true\nend\n";
+    src += "struct Q extends P\n  public c: int = 5\nend\n";
+    src += &format!(
+        "impl P\n  public fun bump(self, k: int) -> int\n    self.a += k\n    self.a mod {}\n  end\n  public fun label(self) -> string\n    \"{{self.a}}:{{self.s}}:{{self.b}}\"\n  end\n  public fun scale(self, f: float)\n    self.b = self.b * f\n  end\n  public fun combine(self, o: P) -> int\n    self.a + o.a * 2\n  end\n  public fun make(k: int) -> P\n    P {{ a: k, b: 0.5, s: \"m\" }}\n  end\nend\n",
+        rng.pick(&["7", "3", "11"])
+    );
+    src += "impl Q\n  public override fun bump(self, k: int) -> int\n    self.c += 1\n    self.a - k\n  end\n  public override fun label(self) -> string\n    \"Q{self.c}\" + \"{self.a}\"\n  end\nend\n";
+    src += &format!(
+        "fun work(p: P, q: Q, n: int) -> int\n  let acc = 0\n  let n = n\n  let s = \"\"\n  let p = p\n{}  acc + n + s.len()\nend\n",
+        struct_stmts(rng, 2)
+    );
+    src += "fun sum_all(p: P, q: Q) -> int\n  p.a + q.a + q.c\nend\n";
+    src += "let tp = P { a: 4, b: 2.5, s: \"t\" }\nlet tq = Q { a: 1, b: 1.0, s: \"u\" }\n";
+    for _ in 0..3 {
+        src += &format!("print(work(tp, tq, {}))\n", rng.below(5));
+    }
+    src += "print(sum_all(tp, tq))\nprint(tp.label())\nprint(tq.label())\n";
+    // loops of the top level over the structures
+    src += "let acc = 0\nlet n = 1\nlet s = \"top\"\nlet p = tp\nlet q = tq\n";
+    src += &struct_stmts(rng, 2);
+    src += "print(s)\nprint(acc)\nprint(p.label())\nprint(q.label())\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
@@ -674,6 +764,23 @@ fn the_machine_and_the_tree_walker_agree_on_strings_in_many_more_programs() {
             seed.wrapping_mul(0xA24B_AED4_963E_E407) | 1,
             500,
             string_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_structures() {
+    sweep_with(0x5712_AC75_0000_0003, 300, struct_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_structures_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xC13F_A9A9_02A6_328F) | 1,
+            500,
+            struct_program,
         );
     }
 }

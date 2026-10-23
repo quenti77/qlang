@@ -437,6 +437,7 @@ impl Interp<'_> {
             Value::Uuid(u) => self.json_text(&ids::format_uuid(u.get())),
             Value::Ulid(u) => self.json_text(&ids::format_ulid(u.get())),
             Value::DateTime(t) => self.json_text(&datetime::to_iso(*t)),
+            Value::Bytes(b) => self.json_text(&crate::codec::base64_encode(b, false)),
             Value::Any(a) => {
                 let inner = a.value.clone();
                 self.json_from_value(&inner, depth + 1, span)?
@@ -611,6 +612,9 @@ impl Interp<'_> {
                 .map(|u| Value::Ulid(Id::new(u)))
                 .ok_or_else(bad),
             Ty::DateTime => datetime::parse(text).map(Value::DateTime).ok_or_else(bad),
+            Ty::Bytes => crate::codec::base64_decode(text)
+                .map(|b| Value::Bytes(Rc::from(b)))
+                .ok_or_else(bad),
             _ => Err(format!("a {shown} cannot be read from text")),
         }
     }
@@ -718,6 +722,15 @@ impl Interp<'_> {
                 Some(x) if kind == "string" => Ok(Ok(Value::Str(x))),
                 _ => wrong("a string"),
             },
+            Ty::Bytes => {
+                let Some(text) = s.filter(|_| kind == "string") else {
+                    return wrong("bytes as a base64 string");
+                };
+                match crate::codec::base64_decode(&text) {
+                    Some(b) => Ok(Ok(Value::Bytes(Rc::from(b)))),
+                    None => Ok(Err(at("not valid base64".to_string()))),
+                }
+            }
             Ty::Uuid | Ty::Ulid | Ty::DateTime => {
                 let Some(text) = s.filter(|_| kind == "string") else {
                     return wrong(&format!("a {shown} as a string"));

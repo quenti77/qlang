@@ -82,6 +82,7 @@ impl Interp<'_> {
             (Value::Float(f), _) => HostValue::Float(*f),
             (Value::Bool(b), _) => HostValue::Bool(*b),
             (Value::Str(s), _) => HostValue::Str(s.to_string()),
+            (Value::Bytes(b), _) => HostValue::Bytes(b.to_vec()),
             (Value::Enum(e, i, _), _) => HostValue::Str(
                 self.prog.defs.enums[*e as usize].variants[*i as usize]
                     .name
@@ -256,6 +257,15 @@ impl Interp<'_> {
             HostValue::Bool(b) => {
                 self.json_value("bool", none(), none(), Value::Bool(*b), none(), none())
             }
+            // a `Json` has no bytes: they read as base64 text
+            HostValue::Bytes(b) => self.json_value(
+                "string",
+                Value::str(&crate::codec::base64_encode(b, false)),
+                none(),
+                none(),
+                none(),
+                none(),
+            ),
             HostValue::Int(i) => self.json_value(
                 "number",
                 none(),
@@ -358,6 +368,15 @@ impl Interp<'_> {
                 self.check_size(s.len(), span)?;
                 Ok(Value::str(s))
             }
+            (Ty::Bytes, HostValue::Bytes(b)) => {
+                self.check_size(b.len(), span)?;
+                Ok(Value::Bytes(Rc::from(b.clone())))
+            }
+            // an external command sends bytes as base64 text
+            (Ty::Bytes, HostValue::Str(s)) => match crate::codec::base64_decode(s) {
+                Some(b) => Ok(Value::Bytes(Rc::from(b))),
+                None => bad("base64 text"),
+            },
             (Ty::Enum(e, _), HostValue::Str(name)) => {
                 match self.prog.defs.enums[*e].variant_index(name) {
                     Some(i) => Ok(Value::Enum(*e as u32, i as u32, None)),
@@ -449,6 +468,7 @@ fn host_kind(h: &HostValue) -> &'static str {
         HostValue::Int(_) => "an int",
         HostValue::Float(_) => "a float",
         HostValue::Str(_) => "a string",
+        HostValue::Bytes(_) => "bytes",
         HostValue::Array(_) => "an array",
         HostValue::Map(_) => "a map",
     }
@@ -460,6 +480,7 @@ fn ty_word(t: &Ty) -> &'static str {
         Ty::Float => "float",
         Ty::Bool => "bool",
         Ty::Str => "string",
+        Ty::Bytes => "bytes",
         Ty::Array(_) => "array",
         Ty::Map(..) => "map",
         Ty::Enum(..) => "enum",

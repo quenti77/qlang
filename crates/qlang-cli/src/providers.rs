@@ -195,6 +195,7 @@ fn to_json(v: &HostValue) -> Json {
         HostValue::Int(i) => Json::from(*i),
         HostValue::Float(f) => serde_json::Number::from_f64(*f).map_or(Json::Null, Json::Number),
         HostValue::Str(s) => Json::String(s.clone()),
+        HostValue::Bytes(b) => Json::String(qlang_core::codec::base64_encode(b, false)),
         HostValue::Array(items) => Json::Array(items.iter().map(to_json).collect()),
         HostValue::Map(entries) => Json::Object(
             entries

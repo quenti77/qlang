@@ -66,6 +66,7 @@ fn http_send_returns_the_status_and_body_on_success() {
             status: 200,
             headers: vec![],
             body: "hello".to_string(),
+            raw: None,
         }),
     );
     let out = exec(
@@ -108,6 +109,7 @@ fn request_headers_and_body_default_to_empty_and_none() {
             status: 201,
             headers: vec![],
             body: "created".to_string(),
+            raw: None,
         }),
     );
     let out = exec(

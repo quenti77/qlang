@@ -25,7 +25,7 @@ pub fn assigned_from_closures(module: &Module) -> HashSet<String> {
                 }
             }
             Item::Stmt(s) => Scope::default().stmt(s, &mut out),
-            Item::Import(_) | Item::Export(_) | Item::Enum(_) => {}
+            Item::Import(_) | Item::Export(_) | Item::Enum(_) | Item::Alias(_) => {}
         }
     }
     out

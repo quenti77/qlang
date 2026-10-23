@@ -400,6 +400,17 @@ impl<'a> Parser<'a> {
             Tok::Impl => self.parse_impl().map(Item::Impl),
             Tok::Trait => self.parse_trait().map(Item::Trait),
             Tok::Enum => self.parse_enum().map(Item::Enum),
+            // `type` is not a keyword: it starts an alias only as `type Name =`
+            Tok::Ident(ref w)
+                if w == "type"
+                    && matches!(self.peek2(), Tok::Ident(_))
+                    && self
+                        .toks
+                        .get(self.pos + 2)
+                        .is_some_and(|t| t.tok == Tok::Assign) =>
+            {
+                self.parse_alias().map(Item::Alias)
+            }
             Tok::Public | Tok::Private | Tok::Protected | Tok::Static | Tok::Override => {
                 let span = self.peek_span();
                 self.error_at(
@@ -410,6 +421,19 @@ impl<'a> Parser<'a> {
             }
             _ => self.parse_stmt().map(Item::Stmt),
         }
+    }
+
+    /// `type Name = type`
+    fn parse_alias(&mut self) -> PResult<AliasDecl> {
+        let start = self.bump().span;
+        let name = self.expect_ident()?;
+        self.expect(&Tok::Assign)?;
+        let ty = self.parse_type()?;
+        Ok(AliasDecl {
+            span: start.to(ty.span),
+            name,
+            ty: Rc::new(ty),
+        })
     }
 
     /// `extern fun name(params) -> ret`: a function the host environment provides.
@@ -1591,7 +1615,16 @@ impl<'a> Parser<'a> {
                 }
                 Tok::Dot => {
                     self.bump();
-                    let name = self.expect_ident()?;
+                    // `a.as<T>()`: `as` is a keyword, but a member can be called that
+                    let name = if self.at(&Tok::As) {
+                        let span = self.bump().span;
+                        Ident {
+                            name: "as".to_string(),
+                            span,
+                        }
+                    } else {
+                        self.expect_ident()?
+                    };
                     let span = e.span.to(name.span);
                     e = self.mk(span, ExprKind::Field(Box::new(e), name, Vec::new()));
                 }

@@ -4,8 +4,8 @@
 use super::*;
 
 impl Interp<'_> {
-    pub(super) fn reflect(&mut self, op: &ReflectOp, args: &[Value]) -> Value {
-        match op {
+    pub(super) fn reflect(&mut self, op: &ReflectOp, args: &[Value], span: Span) -> R<Value> {
+        Ok(match op {
             ReflectOp::Struct(sid) => self.struct_info(*sid),
             ReflectOp::Enum(eid) => self.enum_info(*eid),
             ReflectOp::Functions(m) => {
@@ -27,7 +27,7 @@ impl Interp<'_> {
                 let (Ty::Fn(params, ret), Some(obj), Some(Value::Str(name))) =
                     (f, args.first(), args.get(1))
                 else {
-                    return Value::None;
+                    return Ok(Value::None);
                 };
                 let found = self.methods_of(ty).into_iter().find(|&fid| {
                     let def = &self.prog.defs.fns[fid];
@@ -41,7 +41,7 @@ impl Interp<'_> {
             }
             ReflectOp::Find(m, ty) => {
                 let (Ty::Fn(params, ret), Some(Value::Str(name))) = (ty, args.first()) else {
-                    return Value::None;
+                    return Ok(Value::None);
                 };
                 let found = self.reflectable_functions(*m).find(|&fid| {
                     let def = &self.prog.defs.fns[fid];
@@ -52,11 +52,12 @@ impl Interp<'_> {
                 });
                 found.map_or(Value::None, |fid| self.fn_value(fid))
             }
-        }
+            _ => return self.dynamic(op, args, span),
+        })
     }
 
     /// The functions declared at the top of module `m` (not methods, not `extern`).
-    fn reflectable_functions(&self, m: ModId) -> impl Iterator<Item = FnId> + '_ {
+    pub(super) fn reflectable_functions(&self, m: ModId) -> impl Iterator<Item = FnId> + '_ {
         self.prog
             .defs
             .fns
@@ -109,7 +110,7 @@ impl Interp<'_> {
         }))
     }
 
-    fn info(&self, ty: &str, fields: &[(&str, Value)]) -> Value {
+    pub(super) fn info(&self, ty: &str, fields: &[(&str, Value)]) -> Value {
         self.new_struct(self.prelude_struct(ty), fields)
     }
 
@@ -182,11 +183,12 @@ impl Interp<'_> {
                 ("name", Value::str(name)),
                 ("type_name", self.type_name(ty)),
                 ("annotations", annotations),
+                ("ty", self.any_box(Value::None, ty)),
             ],
         )
     }
 
-    fn struct_info(&self, sid: StructId) -> Value {
+    pub(super) fn struct_info(&self, sid: StructId) -> Value {
         let def = &self.prog.defs.structs[sid];
         let fields = def
             .fields
@@ -249,6 +251,11 @@ impl Interp<'_> {
     }
 
     fn function_info(&self, fid: FnId) -> Value {
+        self.info("FunctionInfo", &self.function_fields(fid))
+    }
+
+    /// The fields of a `FunctionInfo` (a `Callable` has them too).
+    pub(super) fn function_fields(&self, fid: FnId) -> Vec<(&'static str, Value)> {
         let def = &self.prog.defs.fns[fid];
         let names: Vec<&str> = def
             .decl
@@ -267,15 +274,12 @@ impl Interp<'_> {
                 )
             })
             .collect();
-        self.info(
-            "FunctionInfo",
-            &[
-                ("name", Value::str(&def.name)),
-                ("has_self", Value::Bool(def.has_self)),
-                ("params", Value::array(params)),
-                ("return_type", self.type_name(&def.ret)),
-                ("annotations", self.annotation_infos(AnnKey::Fn(fid))),
-            ],
-        )
+        vec![
+            ("name", Value::str(&def.name)),
+            ("has_self", Value::Bool(def.has_self)),
+            ("params", Value::array(params)),
+            ("return_type", self.type_name(&def.ret)),
+            ("annotations", self.annotation_infos(AnnKey::Fn(fid))),
+        ]
     }
 }

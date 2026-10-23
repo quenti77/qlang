@@ -38,6 +38,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Arguments nommés](#arguments-nommés)
     - [Fonctions anonymes](#fonctions-anonymes)
     - [Type d'une fonction](#type-dune-fonction)
+    - [Alias de type](#alias-de-type)
     - [Déclarations locales](#déclarations-locales)
   - [9. Structures, méthodes et héritage](#9-structures-méthodes-et-héritage)
     - [Déclarer une structure](#déclarer-une-structure)
@@ -49,6 +50,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Le nom du type : `.class`](#le-nom-du-type--class)
     - [Annotations](#annotations)
     - [Réflexion](#réflexion)
+    - [`Any`](#any)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Méthode par défaut](#méthode-par-défaut)
     - [Un trait comme type](#un-trait-comme-type)
@@ -75,6 +77,7 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
   - [16. Prélude : `Result`, `Error` et JSON](#16-prélude--result-error-et-json)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
+    - [Convertir : `Json.of` et `Json.to`](#convertir--jsonof-et-jsonto)
   - [17. Prélude : réseau, bases de données et système](#17-prélude--réseau-bases-de-données-et-système)
     - [Prélude : `http`](#prélude--http)
     - [Prélude : `Db`](#prélude--db)
@@ -773,6 +776,54 @@ print(apply(double, 21))
 `fun(int) -> int?` désigne une fonction qui renvoie un `int?`. Pour une fonction
 elle-même nullable, utiliser des parenthèses : `(fun(int) -> int)?`.
 
+### Alias de type
+
+`type Nom = type` donne un nom à un type. L'alias et le type sont **le même type** : rien n'est
+converti, on peut passer l'un là où l'autre est attendu.
+
+```
+type Handler = fun(Request) -> Response
+type Middleware = fun(Request, Handler) -> Response
+type Names = array<string>
+
+fun wrap(m: Middleware, h: Handler) -> Handler
+  fun(req: Request) -> Response
+    m(req, h)
+  end
+end
+```
+
+- `type` n'est pas un mot réservé : `let type = 3` reste valable. Il ne commence un alias que
+  sous la forme `type Nom =`, au niveau du fichier.
+- Un alias se déclare dans un fichier, s'exporte (`export Handler`) et s'importe comme une
+  structure. Il n'a pas de paramètre de type (`T121` si on en donne).
+- Il ne sert qu'à **écrire un type** : on ne peut pas construire une valeur par son nom
+  (`Names { ... }` n'existe pas : écris le nom du vrai type).
+- Un alias qui se désigne lui-même, directement ou par un autre, est une erreur (`T122`), et le
+  type d'un alias est vérifié même si rien ne l'utilise.
+
+### Types à l'exécution
+
+Les types sont effacés à l'exécution, sauf pour une fonction générique qui **les nomme** : si son
+corps utilise `Reflect.type_name<T>()`, `a.as<T>()`, `Any.of(x)`, `Json.to<T>(j)` ou
+`Reflect.construct<T>(...)` avec son propre paramètre de type `T`, chaque appel lui passe le type
+choisi.
+
+```
+fun decode<T>(text: string) -> Result<T, Error>
+  Json.to<T>(Json.parse(text)?)
+end
+
+let input = decode<CreateUser>("\{\"name\": \"Ann\"\}")
+```
+
+- Cela vaut aussi pour une fonction qui en appelle une autre en lui passant son `T`
+  (`name_of<array<T>>()`) et pour les paramètres de type d'une **méthode** (`bag.get<int>()`).
+- Les paramètres de type d'une **structure** générique (`Stack<T>`) ne sont pas connus : dans
+  ses méthodes, `T` garde son nom.
+- Seul un appel direct fournit les types : une fonction passée comme valeur puis appelée ne les
+  reçoit pas.
+
 ### Déclarations locales
 
 Les déclarations `fun` nommées existent seulement au niveau du fichier. Dans un
@@ -1048,6 +1099,68 @@ et `Reflect.find_method` (par exemple un contrôleur : une structure dont les m�
 `#[Route(...)]`). La réflexion ignore la visibilité : une méthode privée peut être trouvée et appelée. Les erreurs de forme : `T300` (mauvais nombre d'arguments ou de types), `T301` (le type
 n'est pas celui attendu), `T302` (nom inconnu : `struct_info`, `enum_info`, `functions`, `find`,
 `methods` et `find_method` existent).
+
+#### Plus de réflexion
+
+| Appel | Résultat |
+| --- | --- |
+| `Reflect.functions(m)` | les fonctions du module `m` (`import "x.q" as m`) au lieu de celles du fichier |
+| `Reflect.structs()` / `Reflect.structs(m)` | `array<StructInfo>` des structures (sans paramètre de type, ni annotation) du fichier ou de `m` |
+| `Reflect.callable("nom")` / `Reflect.callable(m, "nom")` | un `Callable?` : la fonction de ce nom, à appeler avec des `Any` |
+| `Reflect.callables()` / `Reflect.callables(m)` | `array<Callable>` : toutes les fonctions (sans paramètre de type) du fichier ou de `m` |
+| `Reflect.get(valeur, "champ")` | le champ d'une structure, en `Any?` (`none` s'il n'existe pas) ; la visibilité est ignorée |
+| `Reflect.construct<T>(champs)` | `Result<T, Error>` : une `T` construite depuis un `map<string, Any>` (valeurs par défaut respectées) |
+| `Reflect.type_name<T>()` | le nom du type `T` (`"array<User>"`) |
+
+`Callable` a les champs de `FunctionInfo` (`name`, `params`, `return_type`, `annotations`) et
+`call(args: array<Any>) -> Result<Any, Error>` : `err` quand le nombre d'arguments ou un de leurs
+types ne convient pas (`argument 1: expected int, found string`). Les fonctions génériques ne
+peuvent pas être trouvées. `Reflect.construct` ne remplit que des champs du bon type
+(``field `id`: expected int, found string``), signale un champ manquant (``missing field `name` ``)
+ou inconnu.
+
+Un module n'est pas une valeur : `Reflect.functions(m)`, `structs(m)`, `callable(m, ...)` et
+`callables(m)` s'écrivent avec le nom du module, pas avec une variable qui le contiendrait. Pour
+qu'une bibliothèque travaille sur les fonctions de l'application, c'est l'application qui appelle
+`Reflect.callables(providers)` et passe le tableau.
+
+**Lire les types d'une signature.** Un `ParamInfo` (paramètre d'un `Callable`, d'une
+`FunctionInfo`, d'une variante) sait lire une valeur de son type :
+- `p.parse("42")` lit un texte (segment de chemin, paramètre de requête) comme `int`, `float`,
+  `bool`, `string`, `uuid`, `ulid`, `datetime`, ou l'un d'eux suivi de `?` (texte vide : `none`) ;
+  rend un `Result<Any, Error>` (``\`x\` is not a valid int``) ;
+- `p.decode(json)` lit un `Json` comme ce type, comme le fait `Json.to<T>` (voir plus bas) ;
+- avec `p.annotation("Path")`, `p.type_name` et `Callable.call`, c'est de quoi remplir les
+  paramètres d'un gestionnaire de requête : `show(#[Path] id: int, repo: Repo) -> string`.
+
+Une `AnnotationInfo` lit ses arguments avec `get_string("path")`, `get_int`, `get_float` et
+`get_bool` (`none` si l'argument n'existe pas ou n'a pas ce type).
+
+### `Any`
+
+Un `Any` est une valeur **avec son type**, pour ranger ensemble des valeurs de types différents
+(un conteneur de services, une liste d'arguments) sans perdre le typage : on n'en sort qu'en
+disant quel type on attend.
+
+```
+let a = Any.of(42)
+print(a.as<int>())       -- 42
+print(a.as<string>())    -- none
+print(a.type_name())     -- int
+
+let user = User { id: 1, name: "Ada" }
+let services: map<string, Any> = { "user": Any.of(user) }
+```
+
+- `Any.of(valeur)` n'a pas de conversion implicite dans l'autre sens : `x as int` ne marche pas
+  sur un `Any`, il faut `a.as<T>()` qui rend un `T?` (`none` si le type ne convient pas).
+- `as<T>` réussit si le type mémorisé est exactement `T`, si la valeur est une structure fille
+  de `T`, ou si elle implémente le trait `T` : un `Animal` qui contient un `Dog` se lit en
+  `Dog`. `T` ne peut pas être un type nullable ni `Any`.
+- Le type mémorisé est celui de l'expression : `Any.of([])` est refusé (`T303`, donne un type :
+  `let xs: array<int> = []`).
+- `==` n'existe pas entre `Any` (`T005`) ; `print` affiche la valeur qu'il contient.
+- Un `Any` peut sortir vers l'hôte (champ d'une structure), comme `null`, mais pas en revenir.
 
 ---
 
@@ -2102,12 +2215,53 @@ else
 end
 ```
 
-Il n'y a **pas de conversion automatique** entre un `Json` décodé et une
-structure définie par l'utilisateur (la réflexion décrit les champs mais ne construit pas de valeur, et il n'y a pas de macros
-`derive`) : pour reconstruire un `Post` à partir d'un `Json`, écris
-toi-même une méthode statique qui lit les champs un par un, par exemple
-`Post.from_json(json: Json) -> Result<Post, Error>` (convention, pas une
-interface imposée par le langage, comme `new`).
+`j.to_text()` donne le texte JSON d'un `Json` (`{"a":1,"b":[true,null]}`) ; un `Json` implémente
+aussi `ToJson`, donc il peut entrer dans un `json_object`.
+
+### Convertir : `Json.of` et `Json.to`
+
+Pas besoin d'écrire `to_json` et `from_json` à la main pour les cas courants : deux fonctions
+lisent la **forme du type**.
+
+```
+struct User
+  public id: int
+  public name: string
+  #[JsonName("e_mail")]
+  public email: string = ""
+  #[JsonSkip]
+  public cache: int = 0
+  password_hash: string = ""
+end
+
+let j = Json.of(User { id: 1, name: "Ada" })
+print(j.to_text())        -- {"id":1,"name":"Ada","e_mail":""}
+
+let r = Json.to<User>(Json.parse("\{\"id\": 7, \"name\": \"Bob\"\}").unwrap())
+print(r.unwrap().name)    -- Bob
+```
+
+**`Json.of(valeur)`** rend un `Json` :
+- une structure devient un objet de ses champs **`public`** seulement (un champ privé ne sort
+  jamais), dans l'ordre de la déclaration, parents d'abord ;
+- `#[JsonName("x")]` renomme un champ, `#[JsonSkip]` le laisse de côté ;
+- `none` devient `null`, `uuid`/`ulid`/`datetime` un texte, un tableau ou un tuple un tableau, un
+  dictionnaire un objet (clés en texte) ;
+- une énumération sans données devient le nom de la variante (`"Empty"`), avec données un objet
+  avec `type` : `{"type":"Circle","radius":2.5}` ;
+- une fonction ou un intervalle ne se convertit pas (`R084`) ; la profondeur est limitée.
+- C'est la forme du type qui compte : une méthode `to_json` écrite à la main n'est pas appelée
+  par `Json.of`.
+
+**`Json.to<T>(json)`** rend un `Result<T, Error>` et dit **où** ça ne va pas :
+- seuls les champs `public` se lisent depuis le `Json` : un `{"password_hash": "..."}` reçu ne
+  remplit rien. Un champ manquant prend sa valeur par défaut, ou `none` s'il est nullable, sinon
+  l'erreur est `address.city: missing` ;
+- un mauvais type donne `id: expected an int, found string`, un nombre à virgule pour un `int`
+  est refusé, un élément de tableau s'écrit `[2]: expected an int, found string` ;
+- les membres en trop sont ignorés ; les génériques (`Page<User>`), `T?`, les énumérations
+  (nom ou objet avec `type`), les dictionnaires, `uuid`, `ulid` et `datetime` sont compris ;
+- une fonction, un `Any` ou un intervalle ne peuvent pas être la cible (`T305`).
 
 ## 17. Prélude : réseau, bases de données et système
 
@@ -2125,16 +2279,21 @@ struct Request
   public path: string = ""
   public query: map<string, string> = {}
   public params: map<string, string> = {}
+  public query_all: map<string, array<string>> = {}
+  public headers_all: map<string, array<string>> = {}
+  public cookies: map<string, string> = {}
+  public attrs: map<string, Any> = {}
 end
 
 struct Response
   public status: int
   public headers: map<string, string> = {}
   public body: string
+  public cookies: array<Cookie> = []
 end
 ```
 
-`path`, `query` et `params` ne servent que pour une requête **reçue** (voir
+`path`, `query`, `params`, `query_all`, `headers_all`, `cookies` et `attrs` ne servent que pour une requête **reçue** (voir
 [Répondre à des requêtes HTTP](#répondre-à-des-requêtes-http)) ; `headers` d'une `Response` donne
 les en-têtes reçus (noms en minuscules).
 
@@ -2210,6 +2369,16 @@ rechargement. C'est fait pour le développement, pas pour la production.
   - `headers`, dont les noms sont en **minuscules**, et `req.header("User-Agent")`, qui cherche
     un en-tête sans tenir compte de la casse (`string?`) ;
   - `body`, le corps (`none` s'il n'y en a pas).
+  - `query_all` garde **toutes** les valeurs d'un paramètre répété (`?t=1&t=2` donne `{"t": ["1",
+    "2"]}`) et `headers_all` celles d'un en-tête envoyé plusieurs fois, en gardant `query` et
+    `headers` tels quels (la dernière valeur gagne) ; `req.header_all("X-Tag")` les rend en tableau ;
+  - `cookies` est le contenu de l'en-tête `Cookie`, valeurs décodées (`who=Ada%20L` donne
+    `"Ada L"`) ;
+  - `req.form()` rend le corps `application/x-www-form-urlencoded` décodé
+    (`Result<map<string, string>, Error>`, `err` si la requête n'est pas un formulaire) ;
+  - `attrs` est un espace pour le programme : un middleware y met par exemple l'utilisateur
+    trouvé (`req.attrs["user"] = Any.of(user)`), le gestionnaire le relit avec `as<T>()`. Il
+    est vide à l'arrivée, propre à chaque requête, et ne sort pas du programme.
 - **La réponse** : `status` (de 100 à 599), `body`, et `headers` facultatifs. Des raccourcis :
 
   | Appel                       | Résultat                                                    |
@@ -2221,6 +2390,15 @@ rechargement. C'est fait pour le développement, pas pour la production.
   | `Response.not_found()`      | statut 404                                                  |
   | `r.with_status(201)`        | la même réponse avec un autre statut                        |
   | `r.with_header("X-Id", "7")` | la même réponse avec un en-tête de plus                    |
+
+  | `r.with_cookie(Cookie { ... })` | la même réponse avec un cookie de plus (un en-tête `Set-Cookie` chacun) |
+
+  Un `Cookie` a `name`, `value` (envoyée encodée en pourcentage), `path` (`"/"`), `domain`
+  (`none`), `max_age` en secondes (`none` : cookie de session), `secure` (`false`), `http_only`
+  (`true`) et `same_site` (`"Lax"`, `"Strict"` ou `"None"`). Un nom qui n'est pas un jeton HTTP,
+  ou un attribut qui contient `;` ou un caractère de contrôle, est une erreur du programme (500).
+  `HttpError { status, message }` est une erreur avec un statut ; `e.to_response()` en fait
+  une réponse texte.
 
   Sans `Content-Type`, le serveur ajoute `text/plain; charset=utf-8`. Les en-têtes qui
   contiennent un retour à la ligne sont ignorés, et `Content-Length` et `Connection` sont gérés
@@ -2284,6 +2462,7 @@ Options de `qlang serve app.q` :
 | `--bind ADRESSE` | l'adresse d'écoute (`127.0.0.1` par défaut : seulement cette machine)                     |
 | `--max-steps N`  | le nombre d'étapes d'évaluation **par requête**                                           |
 | `--static DOSSIER` | sert les fichiers de ce dossier tels quels, **avant** d'appeler le programme            |
+| `--dev`          | le détail d'une erreur du programme est dans la réponse 500 (jamais en production)    |
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |

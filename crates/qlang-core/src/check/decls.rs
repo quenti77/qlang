@@ -152,6 +152,17 @@ impl Checker {
                     self.mscopes[m].decl_ids.insert(idx, id);
                     self.add_item(&t.name, ItemRef::Trait(id));
                 }
+                Item::Alias(a) => {
+                    let id = self.defs.aliases.len();
+                    self.defs.aliases.push(AliasDef {
+                        name: a.name.name.clone(),
+                        module: m,
+                        span: a.name.span,
+                        ty: a.ty.clone(),
+                        state: AliasState::Unresolved,
+                    });
+                    self.add_item(&a.name, ItemRef::Alias(id));
+                }
                 Item::Stmt(s) => {
                     if let StmtKind::Let { name, .. } = &s.kind {
                         self.add_item(name, ItemRef::Var(m, name.name.clone()));
@@ -436,6 +447,12 @@ impl Checker {
                 return Ty::Array(Box::new(t));
             }
         }
+        if path.len() == 1 && path[0].name == "Any" && self.lookup_item("Any").is_none() {
+            if !args.is_empty() {
+                self.err("T121", "`Any` takes no type arguments", span);
+            }
+            return Ty::Any;
+        }
         let Some(item) = self.lookup_path_item(path, "type") else {
             return Ty::Error;
         };
@@ -493,6 +510,36 @@ impl Checker {
         let name = path.last().map(|i| i.name.clone()).unwrap_or_default();
         let targs: Vec<Ty> = args.iter().map(|a| self.resolve_type(a)).collect();
         match item {
+            ItemRef::Alias(id) => {
+                if !args.is_empty() {
+                    self.err("T121", format!("`{name}` takes no type arguments"), span);
+                }
+                match self.defs.aliases[id].state.clone() {
+                    AliasState::Done(t) => t,
+                    AliasState::Resolving => {
+                        self.err(
+                            "T122",
+                            format!("the type alias `{name}` refers to itself"),
+                            span,
+                        );
+                        Ty::Error
+                    }
+                    AliasState::Unresolved => {
+                        self.defs.aliases[id].state = AliasState::Resolving;
+                        let (te, module) = {
+                            let a = &self.defs.aliases[id];
+                            (a.ty.clone(), a.module)
+                        };
+                        let saved = std::mem::replace(&mut self.cur_mod, module);
+                        let saved_scope = std::mem::take(&mut self.tparam_scope);
+                        let t = self.resolve_type(&te);
+                        self.tparam_scope = saved_scope;
+                        self.cur_mod = saved;
+                        self.defs.aliases[id].state = AliasState::Done(t.clone());
+                        t
+                    }
+                }
+            }
             ItemRef::Struct(id) => {
                 let n = self.defs.structs[id].tparams.len();
                 if targs.len() != n {
@@ -891,7 +938,8 @@ impl Checker {
     /// parent, not recursive) whose fields are all allowed.
     pub(crate) fn boundary_problem(&self, ty: &Ty, path: &mut Vec<StructId>) -> Option<String> {
         match ty {
-            Ty::Error | Ty::Int | Ty::Float | Ty::Bool | Ty::Str => None,
+            // an `Any` (the `attrs` of a `Request`) leaves as `null` and cannot come back
+            Ty::Error | Ty::Any | Ty::Int | Ty::Float | Ty::Bool | Ty::Str => None,
             // an enumeration crosses as the name of its variant, if none carries data
             Ty::Enum(id, _) => (!self.defs.enums[*id].is_plain()).then(|| {
                 format!(

@@ -165,7 +165,7 @@ est surtout le coût de la division (`mod`, `div`) et de l'aiguillage des instru
 piles d'appels, mêmes limites (`R900`, `R901`). `tests/vm_differential.rs` le vérifie sur des
 programmes numériques aléatoires (`Program::run_tree_walker` sert de référence ; le balayage
 complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
-à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées.
+à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées. Avec `QLANG_VM_DUMP=1`, le programme affiche sur la sortie d'erreur les instructions de chaque fonction et boucle compilée.
 
 **Ce qui reste.** Les énumérations, `match`, les fermetures, les structures génériques et les
 valeurs de types plus rares (identifiants, dates, tuples) ne sont pas compilés. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes

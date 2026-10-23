@@ -190,8 +190,73 @@ enum Op {
         src: Reg,
         ety: Ety,
     },
+    /// The same four for arrays of objects.
+    ALoadO {
+        dst: Reg,
+        arr: Reg,
+        idx: Reg,
+    },
+    AStoreO {
+        arr: Reg,
+        idx: Reg,
+        src: Reg,
+    },
+    APushO {
+        arr: Reg,
+        src: Reg,
+    },
+    ForArrO {
+        dst: Reg,
+        arr: Reg,
+        idx: Reg,
+        exit: u32,
+    },
     /// A new empty array.
     NewArr(Reg),
+    /// A new empty map.
+    NewMap(Reg),
+    /// The keys and the values of a map, as two arrays (`for k, v in map`).
+    MapSnap {
+        keys: Reg,
+        vals: Reg,
+        map: Reg,
+    },
+    /// `none`
+    ConstNone(Reg),
+    /// A number into the object register of a `T?` / a number out of it (when it is not `none`).
+    Box {
+        dst: Reg,
+        src: Reg,
+        ety: Ety,
+    },
+    Unbox {
+        dst: Reg,
+        src: Reg,
+        ety: Ety,
+    },
+    /// Whether the `T?` in the second register is `none`.
+    IsNone(Reg, Reg),
+    /// `base[idx]` for a map or a text, as the interpreter does it (`Code::sites[site]` holds
+    /// the types), and the same for a key that must exist.
+    IndexG {
+        dst: Reg,
+        base: Reg,
+        idx: Reg,
+        site: u32,
+    },
+    MapReq {
+        dst: Reg,
+        map: Reg,
+        key: Reg,
+        site: u32,
+    },
+    /// `map[key] = val`
+    MapSet {
+        map: Reg,
+        key: Reg,
+        val: Reg,
+        site: u32,
+    },
     /// Strings: a constant of `Code::strs`, concatenation, comparison.
     ConstS(Reg, u32),
     AddS(Reg, Reg, Reg),
@@ -344,85 +409,34 @@ pub(super) enum VmState {
     Yes(u32),
 }
 
-/// The methods of `int` and `float` the machine knows: argument types and result type (the
-/// same as the checker's table, restricted to numeric results).
-fn number_method(recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
-    Some(match (recv, name) {
-        (Ty::Int, "abs") => (vec![], Ty::Int),
-        (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
-        (Ty::Int, "sqrt") => (vec![], Ty::Float),
-        (Ty::Float, "abs" | "sqrt") => (vec![], Ty::Float),
-        (Ty::Float, "min" | "max" | "pow") => (vec![Ty::Float], Ty::Float),
-        (Ty::Float, "floor" | "ceil" | "round" | "trunc") => (vec![], Ty::Int),
-        (
-            Ty::Int | Ty::Float,
-            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "exp" | "ln" | "log10" | "log2"
-            | "to_radians" | "to_degrees",
-        ) => (vec![], Ty::Float),
-        (Ty::Int, "log" | "atan2") => (vec![Ty::Int], Ty::Float),
-        (Ty::Float, "log" | "atan2") => (vec![Ty::Float], Ty::Float),
-        (Ty::Int, "signum") => (vec![], Ty::Int),
-        (Ty::Float, "signum") => (vec![], Ty::Float),
-        (Ty::Int, "clamp") => (vec![Ty::Int, Ty::Int], Ty::Int),
-        (Ty::Float, "clamp") => (vec![Ty::Float, Ty::Float], Ty::Float),
-        (Ty::Float, "is_nan" | "is_infinite") => (vec![], Ty::Bool),
-        (Ty::Int, "to_hex" | "to_oct" | "to_bin" | "char") => (vec![], Ty::Str),
-        (Ty::Float, "to_fixed") => (vec![Ty::Int], Ty::Str),
-        _ => return None,
-    })
-}
-
-/// The methods of a string the machine knows (those with a number, a boolean or a string for
-/// result): argument types and result type.
-fn string_method(name: &str) -> Option<(Vec<Ty>, Ty)> {
-    Some(match name {
-        "len" | "code" => (vec![], Ty::Int),
-        "is_empty" | "is_digit" | "is_alpha" | "is_blank" => (vec![], Ty::Bool),
-        "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse"
-        | "snake_case" | "camel_case" | "kebab_case" | "title_case" => (vec![], Ty::Str),
-        "eq_ignore_case" | "contains" | "starts_with" | "ends_with" => (vec![Ty::Str], Ty::Bool),
-        "count" => (vec![Ty::Str], Ty::Int),
-        "pad_left" | "pad_right" => (vec![Ty::Int, Ty::Str], Ty::Str),
-        "replace" => (vec![Ty::Str, Ty::Str], Ty::Str),
-        "repeat" => (vec![Ty::Int], Ty::Str),
-        "substring" => (vec![Ty::Int, Ty::Int], Ty::Str),
-        "lines" | "words" | "chars" => (vec![], Ty::Array(Box::new(Ty::Str))),
-        "split" => (vec![Ty::Str], Ty::Array(Box::new(Ty::Str))),
-        _ => return None,
-    })
+fn scalar_ety(t: &Ty) -> Option<Ety> {
+    match t {
+        Ty::Int => Some(Ety::I),
+        Ty::Float => Some(Ety::F),
+        Ty::Bool => Some(Ety::B),
+        _ => None,
+    }
 }
 
 fn scalar(t: &Ty) -> bool {
     matches!(t, Ty::Int | Ty::Float | Ty::Bool)
 }
 
-/// The methods of an array of numbers the machine knows: argument types and result type.
-fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
-    let el = el.clone();
-    Some(match name {
-        "len" => (vec![], Ty::Int),
-        "is_empty" => (vec![], Ty::Bool),
-        "push" | "contains" => (vec![el], if name == "push" { Ty::Unit } else { Ty::Bool }),
-        "reverse" | "sort" | "clear" => (vec![], Ty::Unit),
-        "sum" if scalar(&el) && el != Ty::Bool => (vec![], el),
-        "join" if el == Ty::Str => (vec![Ty::Str], Ty::Str),
-        "insert" => (vec![Ty::Int, el], Ty::Unit),
-        "remove" => (vec![Ty::Int], el),
-        _ => return None,
-    })
-}
-
 /// What a register can hold: a number, a boolean, a string, or an array of numbers.
 fn vty(t: &Ty) -> bool {
     scalar(t)
         || *t == Ty::Str
-        || matches!(t, Ty::Array(e) if vty(e))
+        || matches!(t, Ty::Array(e) | Ty::Nullable(e) if vty(e))
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
+        || matches!(t, Ty::Map(k, v) if matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && vty(v))
 }
 
 /// Whether a value of this type lives in the object registers.
 fn is_obj(t: &Ty) -> bool {
-    matches!(t, Ty::Array(_) | Ty::Str | Ty::Struct(..))
+    matches!(
+        t,
+        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..)
+    )
 }
 
 /// Whether code needs the object registers: it has an array operation, or an array among its
@@ -441,6 +455,15 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                 Op::MovO(..)
                     | Op::RetO(_)
                     | Op::NewArr(_)
+                    | Op::NewMap(_)
+                    | Op::MapSnap { .. }
+                    | Op::ConstNone(_)
+                    | Op::Box { .. }
+                    | Op::Unbox { .. }
+                    | Op::IsNone(..)
+                    | Op::IndexG { .. }
+                    | Op::MapReq { .. }
+                    | Op::MapSet { .. }
                     | Op::ConstS(..)
                     | Op::AddS(..)
                     | Op::CmpS { .. }
@@ -457,6 +480,10 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::AStore { .. }
                     | Op::APush { .. }
                     | Op::ForArr { .. }
+                    | Op::ALoadO { .. }
+                    | Op::AStoreO { .. }
+                    | Op::APushO { .. }
+                    | Op::ForArrO { .. }
             )
         })
 }
@@ -513,6 +540,39 @@ struct LoopCtx {
 
 impl Gen<'_> {
     fn emit(&mut self, op: Op, span: Span) -> usize {
+        // the arrays of objects have instructions of their own (the others stay fast)
+        let op = match op {
+            Op::ALoad {
+                dst,
+                arr,
+                idx,
+                ety: Ety::O,
+            } => Op::ALoadO { dst, arr, idx },
+            Op::AStore {
+                arr,
+                idx,
+                src,
+                ety: Ety::O,
+            } => Op::AStoreO { arr, idx, src },
+            Op::APush {
+                arr,
+                src,
+                ety: Ety::O,
+            } => Op::APushO { arr, src },
+            Op::ForArr {
+                dst,
+                arr,
+                idx,
+                exit,
+                ety: Ety::O,
+            } => Op::ForArrO {
+                dst,
+                arr,
+                idx,
+                exit,
+            },
+            other => other,
+        };
         self.ops.push(op);
         self.spans.push(span);
         self.ops.len() - 1
@@ -608,10 +668,7 @@ impl Gen<'_> {
         let fld = self.field_site(&name.name, &ty)?;
         match op {
             None => {
-                let (r, t) = self.value(value)?;
-                if t != ty {
-                    return None;
-                }
+                let r = self.value_as(value, &ty)?;
                 self.emit(
                     Op::SetField {
                         obj: o,
@@ -853,6 +910,101 @@ impl Gen<'_> {
         }
     }
 
+    /// A use of a `T?` variable that a test narrowed to `T`: the value as a `T`.
+    fn narrow_access(&mut self, e: &Expr, acc: Access) -> Option<Access> {
+        let Some(n) = self.prog.res.ident_narrow.get(&e.id).cloned() else {
+            return Some(acc);
+        };
+        let declared = match &acc {
+            Access::Reg(_, t) | Access::Global(_, t) => t.clone(),
+        };
+        if !matches!(&declared, Ty::Nullable(inner) if **inner == n) {
+            return Some(acc);
+        }
+        let src = match acc {
+            Access::Reg(r, _) => r,
+            Access::Global(g, _) => {
+                let tmp = self.alloc()?;
+                self.emit(Op::LoadG { dst: tmp, g }, e.span);
+                tmp
+            }
+        };
+        match scalar_ety(&n) {
+            Some(ety) => {
+                let tmp = self.alloc()?;
+                self.emit(Op::Unbox { dst: tmp, src, ety }, e.span);
+                Some(Access::Reg(tmp, n))
+            }
+            None => Some(Access::Reg(src, n)),
+        }
+    }
+
+    /// Compiles `e` into `dst` as a value of the type `want`: for a `T?`, `none` and a plain
+    /// `T` are accepted too.
+    fn compile_as(&mut self, e: &Expr, dst: Reg, want: &Ty) -> Option<()> {
+        let Ty::Nullable(inner) = want else {
+            return (self.into(e, dst)? == *want).then_some(());
+        };
+        if matches!(e.kind, ExprKind::None) {
+            self.emit(Op::ConstNone(dst), e.span);
+            return Some(());
+        }
+        if let ExprKind::If {
+            branches,
+            else_block,
+        } = &e.kind
+        {
+            return self
+                .if_expr(e, branches, else_block.as_ref(), dst, Some(want))
+                .map(|_| ());
+        }
+        let mark = self.top;
+        let tmp = self.alloc()?;
+        let t = self.into(e, tmp)?;
+        if t == *want {
+            self.mov(dst, tmp, want, e.span);
+        } else if t == **inner {
+            match scalar_ety(&t) {
+                Some(ety) => {
+                    self.emit(Op::Box { dst, src: tmp, ety }, e.span);
+                }
+                None => {
+                    self.emit(Op::MovO(dst, tmp), e.span);
+                }
+            }
+        } else if t == Ty::NoneT {
+            self.emit(Op::ConstNone(dst), e.span);
+        } else {
+            return None;
+        }
+        self.top = mark;
+        Some(())
+    }
+
+    /// A register holding the value of `e` as a `want`.
+    fn value_as(&mut self, e: &Expr, want: &Ty) -> Option<Reg> {
+        if matches!(want, Ty::Nullable(_)) {
+            let tmp = self.alloc()?;
+            self.compile_as(e, tmp, want)?;
+            Some(tmp)
+        } else {
+            let (r, t) = self.value(e)?;
+            (t == *want).then_some(r)
+        }
+    }
+
+    fn new_site(&mut self, tys: Vec<Ty>, ret: Ty, node: NodeId) -> u32 {
+        self.sites.push(Site {
+            name: String::new(),
+            tys,
+            ret,
+            node,
+            ident: None,
+            fid: None,
+        });
+        (self.sites.len() - 1) as u32
+    }
+
     fn global(&mut self, module: ModId, name: &str, ty: &Ty) -> u32 {
         if let Some(i) = self
             .globals
@@ -912,7 +1064,8 @@ impl Gen<'_> {
             return self.lookup("self");
         }
         if matches!(e.kind, ExprKind::Ident(..))
-            && let Some(Access::Reg(r, t)) = self.access(e, false)
+            && let Some(acc) = self.access(e, false)
+            && let Some(Access::Reg(r, t)) = self.narrow_access(e, acc)
         {
             return Some((r, t));
         }
@@ -953,16 +1106,19 @@ impl Gen<'_> {
                 self.emit(Op::ConstI(dst, i64::from(*b)), span);
                 Some(Ty::Bool)
             }
-            ExprKind::Ident(..) => match self.access(e, false)? {
-                Access::Reg(r, ty) => {
-                    self.mov(dst, r, &ty, span);
-                    Some(ty)
+            ExprKind::Ident(..) => {
+                let acc = self.access(e, false)?;
+                match self.narrow_access(e, acc)? {
+                    Access::Reg(r, ty) => {
+                        self.mov(dst, r, &ty, span);
+                        Some(ty)
+                    }
+                    Access::Global(g, ty) => {
+                        self.emit(Op::LoadG { dst, g }, span);
+                        Some(ty)
+                    }
                 }
-                Access::Global(g, ty) => {
-                    self.emit(Op::LoadG { dst, g }, span);
-                    Some(ty)
-                }
-            },
+            }
             ExprKind::Array(items) => {
                 let ty = self.prog.res.array_lits.get(&e.id)?.clone();
                 let Ty::Array(el) = &ty else { return None };
@@ -971,10 +1127,7 @@ impl Gen<'_> {
                 self.emit(Op::NewArr(tmp), span);
                 for it in items {
                     let mark = self.top;
-                    let (r, t) = self.value(it)?;
-                    if t != **el {
-                        return None;
-                    }
+                    let r = self.value_as(it, el)?;
                     self.emit(
                         Op::APush {
                             arr: tmp,
@@ -988,6 +1141,39 @@ impl Gen<'_> {
                 self.emit(Op::MovO(dst, tmp), span);
                 self.top = tmp as usize;
                 Some(ty)
+            }
+            ExprKind::Map(items) => {
+                let ty = self.prog.res.array_lits.get(&e.id)?.clone();
+                let Ty::Map(k, v) = &ty else { return None };
+                let tmp = self.alloc()?;
+                self.emit(Op::NewMap(tmp), span);
+                let site = self.new_site(
+                    vec![ty.clone(), (**k).clone(), (**v).clone()],
+                    Ty::Unit,
+                    e.id,
+                );
+                for (kx, vx) in items {
+                    let mark = self.top;
+                    let kr = self.value_as(kx, k)?;
+                    let vr = self.value_as(vx, v)?;
+                    self.emit(
+                        Op::MapSet {
+                            map: tmp,
+                            key: kr,
+                            val: vr,
+                            site,
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                }
+                self.emit(Op::MovO(dst, tmp), span);
+                self.top = tmp as usize;
+                Some(ty)
+            }
+            ExprKind::None => {
+                self.emit(Op::ConstNone(dst), span);
+                Some(Ty::NoneT)
             }
             ExprKind::SelfVal => {
                 let (r, t) = self.lookup("self")?;
@@ -1022,9 +1208,7 @@ impl Gen<'_> {
                 for item in &lit.fields {
                     let want = self.field_ty(sid, &item.name.name)?;
                     let r = self.alloc()?;
-                    if self.into(&item.value, r)? != want {
-                        return None;
-                    }
+                    self.compile_as(&item.value, r, &want)?;
                     names.push((item.name.name.clone(), want));
                 }
                 self.lits.push(LitSite { sid, names });
@@ -1118,6 +1302,27 @@ impl Gen<'_> {
                 self.patch(j, end);
                 Some(Ty::Bool)
             }
+            ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), l, r)
+                if matches!(l.kind, ExprKind::None) != matches!(r.kind, ExprKind::None) =>
+            {
+                // `x == none`, `x != none`
+                let other = if matches!(l.kind, ExprKind::None) {
+                    r
+                } else {
+                    l
+                };
+                let mark = self.top;
+                let (a, ta) = self.value(other)?;
+                if !matches!(ta, Ty::Nullable(_)) {
+                    return None;
+                }
+                self.emit(Op::IsNone(dst, a), span);
+                if matches!(op, BinOp::NotEq) {
+                    self.emit(Op::Not(dst, dst), span);
+                }
+                self.top = mark;
+                Some(Ty::Bool)
+            }
             ExprKind::Binary(op, l, r) => {
                 let mark = self.top;
                 let (mut a, mut ta) = self.value(l)?;
@@ -1193,14 +1398,32 @@ impl Gen<'_> {
             ExprKind::Index(base, idx) => {
                 let mark = self.top;
                 let (arr, at) = self.value(base)?;
-                let Ty::Array(el) = &at else {
-                    return None;
+                let (el, key): (Ty, Ty) = match &at {
+                    Ty::Array(el) => ((**el).clone(), Ty::Int),
+                    // `map[key]` is `V?`; `text[i]` is a text
+                    Ty::Map(k, v) => (Ty::nullable((**v).clone()), (**k).clone()),
+                    Ty::Str => (Ty::Str, Ty::Int),
+                    _ => return None,
                 };
-                let ety = ety_of(el)?;
                 let (i, ti) = self.value(idx)?;
-                if ti != Ty::Int {
+                if ti != key {
                     return None;
                 }
+                if !matches!(at, Ty::Array(_)) {
+                    let site = self.new_site(vec![at.clone(), ti], el.clone(), e.id);
+                    self.emit(
+                        Op::IndexG {
+                            dst,
+                            base: arr,
+                            idx: i,
+                            site,
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(el);
+                }
+                let ety = ety_of(&el)?;
                 self.emit(
                     Op::ALoad {
                         dst,
@@ -1211,7 +1434,7 @@ impl Gen<'_> {
                     span,
                 );
                 self.top = mark;
-                Some((**el).clone())
+                Some(el)
             }
             ExprKind::TupleField(inner, idx) => {
                 let ExprKind::Ident(name, _) = &inner.kind else {
@@ -1246,30 +1469,7 @@ impl Gen<'_> {
             ExprKind::If {
                 branches,
                 else_block,
-            } => {
-                let else_block = else_block.as_ref()?;
-                let mut ends = Vec::new();
-                let mut ty: Option<Ty> = None;
-                for (cond, block) in branches {
-                    let skip = self.jump_if_false(cond)?;
-                    let t = self.block(block, Some(dst))?;
-                    if *ty.get_or_insert(t.clone()) != t {
-                        return None;
-                    }
-                    ends.push(self.emit(Op::Jmp(0), span));
-                    let next = self.here();
-                    self.patch(skip, next);
-                }
-                let t = self.block(else_block, Some(dst))?;
-                if *ty.get_or_insert(t.clone()) != t {
-                    return None;
-                }
-                let end = self.here();
-                for j in ends {
-                    self.patch(j, end);
-                }
-                ty
-            }
+            } => self.if_expr(e, branches, else_block.as_ref(), dst, None),
             ExprKind::Call { callee, args } if matches!(callee.kind, ExprKind::Field(..)) => {
                 self.method_call(e, callee, args, dst)
             }
@@ -1327,9 +1527,7 @@ impl Gen<'_> {
                 let base = self.top as Reg;
                 for (a, want) in args.iter().zip(&def.params) {
                     let r = self.alloc()?;
-                    if self.into(&a.value, r)? != *want {
-                        return None;
-                    }
+                    self.compile_as(&a.value, r, want)?;
                 }
                 self.has_call = true;
                 if self.deny.contains(&fid) {
@@ -1377,9 +1575,14 @@ impl Gen<'_> {
         let user = matches!(&rt, Ty::Struct(..));
         let (want, ret) = match &rt {
             Ty::Struct(sid, _) => self.user_method(*sid, &name.name)?,
-            Ty::Array(el) => array_method(el, &name.name)?,
-            Ty::Str => string_method(&name.name)?,
-            _ => number_method(&rt, &name.name)?,
+            // a built-in method: the signature the checker found for this call
+            _ => {
+                let (srt, params, ret) = self.prog.res.builtin_sigs.get(&e.id)?;
+                if *srt != rt {
+                    return None;
+                }
+                (params.clone(), ret.clone())
+            }
         };
         if want.len() != args.len() {
             return None;
@@ -1387,9 +1590,7 @@ impl Gen<'_> {
         let mut tys = vec![rt.clone()];
         for (a, w) in args.iter().zip(&want) {
             let r = self.alloc()?;
-            if self.into(&a.value, r)? != *w {
-                return None;
-            }
+            self.compile_as(&a.value, r, w)?;
             tys.push(w.clone());
         }
         let span = e.span;
@@ -1468,15 +1669,60 @@ impl Gen<'_> {
                     return None;
                 };
                 let ety = ety_of(el)?;
-                let (r, t) = self.value(value)?;
-                if t != **el {
-                    return None;
-                }
+                let r = self.value_as(value, el)?;
                 self.emit(Op::APush { arr, src: r, ety }, e.span);
                 Some(())
             }
             ExprKind::Index(base, idx) => {
                 let (arr, at) = self.value(base)?;
+                if let Ty::Map(k, v) = &at {
+                    // `map[key] = v`, `map[key] += v`
+                    let (kr, kt) = self.value(idx)?;
+                    if kt != **k {
+                        return None;
+                    }
+                    let site =
+                        self.new_site(vec![at.clone(), kt, (**v).clone()], (**v).clone(), e.id);
+                    match op {
+                        None => {
+                            let r = self.value_as(value, v)?;
+                            self.emit(
+                                Op::MapSet {
+                                    map: arr,
+                                    key: kr,
+                                    val: r,
+                                    site,
+                                },
+                                e.span,
+                            );
+                        }
+                        Some(bop) => {
+                            let cur = self.alloc()?;
+                            self.emit(
+                                Op::MapReq {
+                                    dst: cur,
+                                    map: arr,
+                                    key: kr,
+                                    site,
+                                },
+                                target.span,
+                            );
+                            let r = self.value_as(value, v)?;
+                            let opc = Self::compound(bop, v, cur, cur, r)?;
+                            self.emit(opc, e.span);
+                            self.emit(
+                                Op::MapSet {
+                                    map: arr,
+                                    key: kr,
+                                    val: cur,
+                                    site,
+                                },
+                                e.span,
+                            );
+                        }
+                    }
+                    return Some(());
+                }
                 let Ty::Array(el) = &at else {
                     return None;
                 };
@@ -1490,10 +1736,7 @@ impl Gen<'_> {
                 self.emit(Op::ACheck { arr, idx: i }, target.span);
                 match op {
                     None => {
-                        let (r, t) = self.value(value)?;
-                        if t != el {
-                            return None;
-                        }
+                        let r = self.value_as(value, &el)?;
                         self.emit(
                             Op::AStore {
                                 arr,
@@ -1515,10 +1758,7 @@ impl Gen<'_> {
                             },
                             target.span,
                         );
-                        let (r, t) = self.value(value)?;
-                        if t != el {
-                            return None;
-                        }
+                        let r = self.value_as(value, &el)?;
                         let opc = Self::compound(bop, &el, cur, cur, r)?;
                         self.emit(opc, e.span);
                         self.emit(
@@ -1545,8 +1785,47 @@ impl Gen<'_> {
         u32::try_from(fid).ok()
     }
 
+    /// `if ... then a else b end` as a value in `dst`; with `want`, each branch is a `want`.
+    fn if_expr(
+        &mut self,
+        e: &Expr,
+        branches: &[(Expr, Block)],
+        else_block: Option<&Block>,
+        dst: Reg,
+        want: Option<&Ty>,
+    ) -> Option<Ty> {
+        let span = e.span;
+        let else_block = else_block?;
+        let mut ends = Vec::new();
+        let mut ty: Option<Ty> = None;
+        for (cond, block) in branches {
+            let skip = self.jump_if_false(cond)?;
+            let t = self.block_as(block, Some(dst), want)?;
+            if *ty.get_or_insert(t.clone()) != t {
+                return None;
+            }
+            ends.push(self.emit(Op::Jmp(0), span));
+            let next = self.here();
+            self.patch(skip, next);
+        }
+        let t = self.block_as(else_block, Some(dst), want)?;
+        if *ty.get_or_insert(t.clone()) != t {
+            return None;
+        }
+        let end = self.here();
+        for j in ends {
+            self.patch(j, end);
+        }
+        ty
+    }
+
     /// A block in its own scope. With `dst`, the value of its last expression goes there.
     fn block(&mut self, b: &Block, dst: Option<Reg>) -> Option<Ty> {
+        self.block_as(b, dst, None)
+    }
+
+    /// The same, the last expression being converted to the type `want` when there is one.
+    fn block_as(&mut self, b: &Block, dst: Option<Reg>, want: Option<&Ty>) -> Option<Ty> {
         self.scopes.push(Vec::new());
         let mark = self.top;
         let mut ty = Ty::Unit;
@@ -1554,9 +1833,13 @@ impl Gen<'_> {
         for (i, s) in b.stmts.iter().enumerate() {
             let last = i + 1 == n;
             match (&s.kind, dst, last) {
-                (StmtKind::Expr(e), Some(d), true) => {
-                    ty = self.into(e, d)?;
-                }
+                (StmtKind::Expr(e), Some(d), true) => match want {
+                    Some(w) => {
+                        self.compile_as(e, d, w)?;
+                        ty = w.clone();
+                    }
+                    None => ty = self.into(e, d)?,
+                },
                 _ => {
                     self.stmt(s)?;
                     if last && dst.is_some() {
@@ -1637,7 +1920,13 @@ impl Gen<'_> {
             }
             StmtKind::Let { name, init, .. } => {
                 let dst = self.alloc()?;
-                let ty = self.into(init, dst)?;
+                let ty = match self.prog.res.let_tys.get(&init.id).cloned() {
+                    Some(declared) => {
+                        self.compile_as(init, dst, &declared)?;
+                        declared
+                    }
+                    None => self.into(init, dst)?,
+                };
                 if !vty(&ty) {
                     return None;
                 }
@@ -1655,10 +1944,8 @@ impl Gen<'_> {
                 let mark = self.top;
                 match e {
                     Some(e) => {
-                        let (r, ty) = self.value(e)?;
-                        if ty != self.ret {
-                            return None;
-                        }
+                        let ret = self.ret.clone();
+                        let r = self.value_as(e, &ret)?;
                         let op = if is_obj(&self.ret) {
                             Op::RetO(r)
                         } else {
@@ -1704,18 +1991,32 @@ impl Gen<'_> {
             } if !matches!(iter.kind, ExprKind::Range { .. }) => {
                 let mark = self.top;
                 let (arr, at) = self.value(iter)?;
-                let Ty::Array(el) = &at else {
-                    return None;
+                // a map is looped over through snapshots of its keys and values
+                let (arr, el, map_vals) = match &at {
+                    Ty::Array(el) => (arr, (**el).clone(), None),
+                    Ty::Map(k, v) => {
+                        let keys = self.alloc()?;
+                        let vals = self.alloc()?;
+                        self.emit(
+                            Op::MapSnap {
+                                keys,
+                                vals,
+                                map: arr,
+                            },
+                            span,
+                        );
+                        (keys, (**k).clone(), Some((vals, (**v).clone())))
+                    }
+                    _ => return None,
                 };
-                let el = (**el).clone();
                 let ety = ety_of(&el)?;
                 let cnt = self.alloc()?;
                 self.emit(Op::ConstI(cnt, 0), span);
                 self.scopes.push(vec![]);
-                // `for x in xs` / `for i, x in xs`
-                let (idx_name, item_name) = match var2 {
-                    Some(v2) => (Some(var.name.clone()), v2.name.clone()),
-                    None => (None, var.name.clone()),
+                // `for x in xs` / `for i, x in xs` / `for k, v in map`
+                let (idx_name, item_name) = match (var2, &map_vals) {
+                    (Some(v2), None) => (Some(var.name.clone()), v2.name.clone()),
+                    _ => (None, var.name.clone()),
                 };
                 let idx_reg = match &idx_name {
                     Some(n) => {
@@ -1741,6 +2042,21 @@ impl Gen<'_> {
                 if let Some(r) = idx_reg {
                     self.emit(Op::Mov(r, cnt), span);
                 }
+                if let (Some((vals, vt)), Some(v2)) = (&map_vals, var2) {
+                    let vr = self.alloc()?;
+                    self.emit(
+                        Op::ALoad {
+                            dst: vr,
+                            arr: *vals,
+                            idx: cnt,
+                            ety: ety_of(vt)?,
+                        },
+                        span,
+                    );
+                    self.scopes
+                        .last_mut()?
+                        .push((v2.name.clone(), vr, vt.clone()));
+                }
                 self.loops.push(LoopCtx::default());
                 self.block(body, None)?;
                 let ctx = self.loops.pop()?;
@@ -1751,7 +2067,7 @@ impl Gen<'_> {
                 self.emit(Op::IncI(cnt), span);
                 self.emit(Op::Jmp(head), span);
                 let end = self.here();
-                if let Op::ForArr { exit, .. } = &mut self.ops[get] {
+                if let Op::ForArr { exit, .. } | Op::ForArrO { exit, .. } = &mut self.ops[get] {
                     *exit = end;
                 }
                 for j in ctx.breaks {
@@ -1881,10 +2197,7 @@ impl Gen<'_> {
                     // read the variable first, as the tree walker does, then the right side
                     self.emit(Op::LoadG { dst: reg, g }, e.span);
                 }
-                let (r, t) = self.value(value)?;
-                if t != ty {
-                    return None;
-                }
+                let r = self.value_as(value, &ty)?;
                 match op {
                     None => {
                         if global.is_none() {
@@ -2040,7 +2353,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     g.emit(Op::RetUnit, decl.span);
                 } else {
                     let res = g.alloc()?;
-                    if g.block(body, Some(res))? != def.ret {
+                    if g.block_as(body, Some(res), Some(&def.ret))? != def.ret {
                         return None;
                     }
                     let op = if is_obj(&def.ret) {
@@ -2162,7 +2475,11 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         (Value::Bool(b), Ty::Bool) => Some(Slot::N(i64::from(*b))),
         (Value::Array(_), Ty::Array(_))
         | (Value::Str(_), Ty::Str)
-        | (Value::Struct(_), Ty::Struct(..)) => Some(Slot::O(v.clone())),
+        | (Value::Struct(_), Ty::Struct(..))
+        | (Value::Map(_), Ty::Map(..)) => Some(Slot::O(v.clone())),
+        // `T?`: `none`, or a `T` (always in an object register, a number too)
+        (Value::None, Ty::Nullable(_)) => Some(Slot::O(Value::None)),
+        (_, Ty::Nullable(inner)) => slot_of(v, inner).map(|_| Slot::O(v.clone())),
         _ => None,
     }
 }
@@ -2173,7 +2490,9 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         Ty::Int => Value::Int(stack[i]),
         Ty::Float => Value::Float(f64::from_bits(stack[i] as u64)),
         Ty::Bool => Value::Bool(stack[i] != 0),
-        Ty::Array(_) | Ty::Str | Ty::Struct(..) => ostack[i].clone(),
+        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) => {
+            ostack[i].clone()
+        }
         _ => Value::Unit,
     }
 }
@@ -2244,7 +2563,7 @@ impl Interp<'_> {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
             Ty::Bool => Value::Bool(bits != 0),
-            Ty::Array(_) | Ty::Str | Ty::Struct(..) => {
+            Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) => {
                 std::mem::replace(&mut self.vm_result, Value::Unit)
             }
             _ => Value::Unit,
@@ -2314,6 +2633,14 @@ impl Interp<'_> {
                 ));
             }
             break;
+        }
+        if std::env::var("QLANG_VM_DUMP").is_ok() {
+            for (f, c) in &batch {
+                eprintln!("== {:?} {} frees={}", f, c.name, c.frees.len());
+                for (i, op) in c.ops.iter().enumerate() {
+                    eprintln!("{i:3} {op:?}");
+                }
+            }
         }
         // number the group, then point every call at its target
         let first = self.vm_codes.len() as u32;
@@ -2601,7 +2928,22 @@ impl Interp<'_> {
                 | Op::AddS(..)
                 | Op::CmpS { .. }
                 | Op::Format { .. }
-                | Op::Builtin { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                | Op::Builtin { .. }
+                | Op::IndexG { .. }
+                | Op::MapReq { .. }
+                | Op::MapSet { .. }
+                | Op::MapSnap { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                Op::NewMap(dst) => o!(dst) = Value::Map(Rc::new(RefCell::new(MapObj::default()))),
+                Op::ConstNone(dst) => o!(dst) = Value::None,
+                Op::Box { dst, src, ety } => o!(dst) = elem_value(r!(src), ety),
+                Op::Unbox { dst, src, ety } => match (&o!(src), ety) {
+                    (Value::Int(i), Ety::I) => r!(dst) = *i,
+                    (Value::Float(f), Ety::F) => r!(dst) = f.to_bits() as i64,
+                    (Value::Bool(b), Ety::B) => r!(dst) = i64::from(*b),
+                    (Value::None, _) => fail!("R006", "the value is `none`"),
+                    _ => fail!("R001", "a value of an unexpected type"),
+                },
+                Op::IsNone(d, a) => r!(d) = i64::from(matches!(o!(a), Value::None)),
                 Op::ALen(d, a) => {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");
@@ -2610,25 +2952,6 @@ impl Interp<'_> {
                 }
                 Op::ALoad { dst, arr, idx, ety } => {
                     let i = r!(idx);
-                    if ety == Ety::O {
-                        let got = {
-                            let Value::Array(rc) = &o!(arr) else {
-                                fail!("R001", "an array was expected");
-                            };
-                            let a = rc.borrow();
-                            match usize::try_from(i).ok().and_then(|u| a.get(u)) {
-                                Some(v) => Ok(v.clone()),
-                                None => Err(a.len()),
-                            }
-                        };
-                        match got {
-                            Ok(v) => o!(dst) = v,
-                            Err(len) => {
-                                fail!("R020", format!("index {i} is out of bounds (length {len})"))
-                            }
-                        }
-                        continue;
-                    }
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2662,12 +2985,7 @@ impl Interp<'_> {
                     }
                 }
                 Op::AStore { arr, idx, src, ety } => {
-                    let v = if ety == Ety::O {
-                        o!(src).clone()
-                    } else {
-                        elem_value(r!(src), ety)
-                    };
-                    let i = r!(idx);
+                    let (i, v) = (r!(idx), elem_value(r!(src), ety));
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2708,12 +3026,72 @@ impl Interp<'_> {
                 Op::NewArr(dst) => {
                     o!(dst) = Value::Array(Rc::new(RefCell::new(Vec::new())));
                 }
-                Op::APush { arr, src, ety } => {
-                    let v = if ety == Ety::O {
-                        o!(src).clone()
-                    } else {
-                        elem_value(r!(src), ety)
+                Op::ALoadO { dst, arr, idx } => {
+                    let i = r!(idx);
+                    let got = {
+                        let Value::Array(rc) = &o!(arr) else {
+                            fail!("R001", "an array was expected");
+                        };
+                        let a = rc.borrow();
+                        match usize::try_from(i).ok().and_then(|u| a.get(u)) {
+                            Some(v) => Ok(v.clone()),
+                            None => Err(a.len()),
+                        }
                     };
+                    match got {
+                        Ok(v) => o!(dst) = v,
+                        Err(len) => {
+                            fail!("R020", format!("index {i} is out of bounds (length {len})"))
+                        }
+                    }
+                }
+                Op::AStoreO { arr, idx, src } => {
+                    let (i, v) = (r!(idx), o!(src).clone());
+                    let Value::Array(rc) = &ostack[base + arr as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let mut a = rc.borrow_mut();
+                    let len = a.len();
+                    match usize::try_from(i).ok().filter(|u| *u < len) {
+                        Some(u) => a[u] = v,
+                        None => {
+                            drop(a);
+                            fail!("R020", format!("index {i} is out of bounds (length {len})"));
+                        }
+                    }
+                }
+                Op::APushO { arr, src } => {
+                    let v = o!(src).clone();
+                    let Value::Array(rc) = &ostack[base + arr as usize] else {
+                        fail!("R001", "an array was expected");
+                    };
+                    let rc = rc.clone();
+                    let len = rc.borrow().len();
+                    if len + 1 > self.limits.max_alloc {
+                        fail!("R903", "a value became too large (memory limit reached)");
+                    }
+                    rc.borrow_mut().push(v);
+                }
+                Op::ForArrO {
+                    dst,
+                    arr,
+                    idx,
+                    exit,
+                } => {
+                    let i = r!(idx);
+                    let got = {
+                        let Value::Array(rc) = &o!(arr) else {
+                            fail!("R001", "an array was expected");
+                        };
+                        rc.borrow().get(i as usize).cloned()
+                    };
+                    match got {
+                        Some(v) => o!(dst) = v,
+                        None => pc = exit as usize,
+                    }
+                }
+                Op::APush { arr, src, ety } => {
+                    let v = elem_value(r!(src), ety);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2732,19 +3110,6 @@ impl Interp<'_> {
                     ety,
                 } => {
                     let i = r!(idx);
-                    if ety == Ety::O {
-                        let got = {
-                            let Value::Array(rc) = &o!(arr) else {
-                                fail!("R001", "an array was expected");
-                            };
-                            rc.borrow().get(i as usize).cloned()
-                        };
-                        match got {
-                            Some(v) => o!(dst) = v,
-                            None => pc = exit as usize,
-                        }
-                        continue;
-                    }
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -3140,6 +3505,77 @@ impl Interp<'_> {
                 let v = reg_value(stack, ostack, base + b as usize, &st.tys[0]);
                 let name = st.name.clone();
                 self.builtin_fn(&name, vec![v], span)?;
+            }
+            Op::IndexG {
+                dst,
+                base: b,
+                idx,
+                site,
+            } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let at = base;
+                let bv = reg_value(stack, ostack, at + b as usize, &st.tys[0]);
+                let iv = reg_value(stack, ostack, at + idx as usize, &st.tys[1]);
+                let out = self.index_get(&bv, &iv, span)?;
+                if !set_reg(stack, ostack, base + dst as usize, &out, &st.ret) {
+                    fail!("R001", "unexpected result of an index");
+                }
+            }
+            Op::MapReq {
+                dst,
+                map,
+                key,
+                site,
+            } => {
+                let st = &code.sites[site as usize];
+                let k = reg_value(stack, ostack, base + key as usize, &st.tys[1]);
+                let found = match &o!(map) {
+                    Value::Map(m) => m.borrow().get(&k).cloned(),
+                    _ => None,
+                };
+                let Some(v) = found else {
+                    fail!(
+                        "R022",
+                        "this key is not in the map (use `get(key, default)` or check `has(key)` first)"
+                    );
+                };
+                if !set_reg(stack, ostack, base + dst as usize, &v, &st.ret) {
+                    fail!("R001", "unexpected value in a map");
+                }
+            }
+            Op::MapSnap { keys, vals, map } => {
+                let span = code.spans[pc - 1];
+                let entries: Vec<(Value, Value)> = match &o!(map) {
+                    Value::Map(m) => {
+                        self.charge(m.borrow().len(), span)?;
+                        m.borrow().entries.clone()
+                    }
+                    _ => fail!("R001", "a map was expected"),
+                };
+                let (ks, vs): (Vec<Value>, Vec<Value>) = entries.into_iter().unzip();
+                o!(keys) = Value::array(ks);
+                o!(vals) = Value::array(vs);
+            }
+            Op::MapSet {
+                map,
+                key,
+                val,
+                site,
+            } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let k = reg_value(stack, ostack, base + key as usize, &st.tys[1]);
+                let v = reg_value(stack, ostack, base + val as usize, &st.tys[2]);
+                let m = match &o!(map) {
+                    Value::Map(m) => m.clone(),
+                    _ => fail!("R001", "a map was expected"),
+                };
+                let len = m.borrow().len();
+                self.guard_alloc(len + 1, span)?;
+                if !m.borrow_mut().insert(k, v) {
+                    fail!("R023", "this value cannot be used as a map key");
+                }
             }
             _ => {}
         }

@@ -96,6 +96,9 @@ impl Checker {
     pub fn lookup_var(&self, name: &str) -> Option<(Local, VarOrigin)> {
         for s in self.scopes.iter().rev() {
             if let Some(l) = s.get(name) {
+                if l.from_module {
+                    return Some((l.clone(), VarOrigin::Module(self.cur_mod)));
+                }
                 return Some((l.clone(), VarOrigin::Local));
             }
         }
@@ -114,13 +117,14 @@ impl Checker {
         {
             return;
         }
-        let Some((l, _)) = self.lookup_var(name) else {
+        let Some((l, origin)) = self.lookup_var(name) else {
             return;
         };
         let orig = l.orig.clone().unwrap_or_else(|| l.ty.clone());
         let entry = Local {
             ty,
             orig: Some(orig),
+            from_module: matches!(origin, VarOrigin::Module(_)),
             ..l
         };
         let m = self.cur_mod;
@@ -314,12 +318,17 @@ impl Checker {
                 } else {
                     LocalKind::Var
                 };
+                if matches!(var_ty, Ty::Nullable(_)) {
+                    let t = self.resolve(&var_ty);
+                    self.res.let_tys.insert(init.id, t);
+                }
                 self.declare(
                     name,
                     Local {
                         ty: var_ty,
                         kind,
                         orig: None,
+                        from_module: false,
                         span: name.span,
                     },
                 );
@@ -504,6 +513,7 @@ impl Checker {
                             ty: elem,
                             kind: LocalKind::Var,
                             orig: None,
+                            from_module: false,
                             span: var.span,
                         },
                     ),
@@ -517,6 +527,7 @@ impl Checker {
                                 ty: elem2,
                                 kind: LocalKind::Var,
                                 orig: None,
+                                from_module: false,
                                 span: v2.span,
                             },
                         ),
@@ -558,6 +569,7 @@ impl Checker {
                         ty,
                         kind,
                         orig: None,
+                        from_module: false,
                         span: n.span,
                     },
                 );
@@ -669,7 +681,14 @@ impl Checker {
                 }
                 t
             }
-            ExprKind::Map(items) => self.check_map(items, want),
+            ExprKind::Map(items) => {
+                let t = self.check_map(items, want);
+                let r = self.resolve(&t);
+                if register_ty(&r) {
+                    self.res.array_lits.insert(e.id, r);
+                }
+                t
+            }
             ExprKind::StructLit(lit) => self.check_struct_lit(e, lit, want),
             ExprKind::Unary(op, inner) => {
                 let t = self.expr(inner, &Want::Any);
@@ -830,16 +849,8 @@ impl Checker {
     /// Remembers the type of a use of a variable when a register of the typed machine can hold
     /// it: a number, a boolean, a text, a structure, or an array of those.
     fn note_ident_ty(&mut self, id: NodeId, ty: &Ty) {
-        fn fits(t: &Ty) -> bool {
-            match t {
-                Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
-                Ty::Struct(_, args) => args.is_empty(),
-                Ty::Array(e) => fits(e),
-                _ => false,
-            }
-        }
         let t = self.resolve(ty);
-        if fits(&t) {
+        if register_ty(&t) {
             self.res.ident_tys.insert(id, t);
         }
     }
@@ -851,7 +862,16 @@ impl Checker {
                 VarOrigin::Module(m) => PathRes::Global(m, name.to_string()),
             };
             self.res.paths.insert(e.id, res);
-            self.note_ident_ty(e.id, &local.ty);
+            match &local.orig {
+                Some(declared) if *declared != local.ty => {
+                    self.note_ident_ty(e.id, declared);
+                    let narrowed = self.resolve(&local.ty);
+                    if register_ty(&narrowed) {
+                        self.res.ident_narrow.insert(e.id, narrowed);
+                    }
+                }
+                _ => self.note_ident_ty(e.id, &local.ty),
+            }
             return local.ty;
         }
         match self.lookup_item(name) {
@@ -1605,6 +1625,7 @@ impl Checker {
                             ty,
                             kind: LocalKind::Var,
                             orig: None,
+                            from_module: false,
                             span: name.span,
                         },
                     );
@@ -1796,6 +1817,7 @@ impl Checker {
                     ty: t.clone(),
                     kind: LocalKind::Param,
                     orig: None,
+                    from_module: false,
                     span: p.name.span,
                 },
             );
@@ -2013,5 +2035,18 @@ impl Checker {
             return Ty::Error;
         }
         st
+    }
+}
+
+/// Whether a register of the typed machine can hold a value of this type: a number, a boolean,
+/// a text, a structure, `T?`, an array or a map of those.
+pub(crate) fn register_ty(t: &Ty) -> bool {
+    match t {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+        Ty::Struct(_, args) => args.is_empty(),
+        Ty::Array(e) => register_ty(e),
+        Ty::Nullable(e) => register_ty(e),
+        Ty::Map(k, v) => matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && register_ty(v),
+        _ => false,
     }
 }

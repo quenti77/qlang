@@ -2046,6 +2046,7 @@ pub(crate) fn register_ty(t: &Ty) -> bool {
         Ty::Struct(_, args) => args.is_empty(),
         Ty::Array(e) => register_ty(e),
         Ty::Nullable(e) => register_ty(e),
+        Ty::Enum(_, args) => args.iter().all(register_ty),
         Ty::Map(k, v) => matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && register_ty(v),
         _ => false,
     }

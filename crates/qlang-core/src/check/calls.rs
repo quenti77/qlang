@@ -273,6 +273,7 @@ impl Checker {
                         );
                         return Ty::Error;
                     }
+                    self.res.expr_tys.insert(e.id, ty.clone());
                     return ty.clone();
                 }
             }
@@ -621,7 +622,12 @@ impl Checker {
             ret: def.ret.clone(),
             param_names: fn_param_names(&def.decl),
         };
-        self.check_args(e, &sig, &explicit, HashMap::new(), args, want)
+        let generic = !sig.tparams.is_empty();
+        let out = self.check_args(e, &sig, &explicit, HashMap::new(), args, want);
+        if generic {
+            self.res.expr_tys.insert(e.id, out.clone());
+        }
+        out
     }
 
     /// Resolve `args` (possibly mixing positional and named arguments) into one value
@@ -1064,7 +1070,9 @@ impl Checker {
                 ret: ty.clone(),
                 param_names: Some(variant.fields.iter().map(|(n, _)| n.clone()).collect()),
             };
-            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            let out = self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            self.res.expr_tys.insert(e.id, ty.clone());
+            return out;
         }
         // what the host has to provide for the prelude's `fs`, `env`, `http` and `Db`
         if let TypeRef::Struct(sid) = tref {

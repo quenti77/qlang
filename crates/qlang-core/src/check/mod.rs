@@ -1909,5 +1909,6 @@ impl Checker {
             self.cur_mod = m;
             self.check_module_body(m);
         }
+        self.finish_expr_tys();
     }
 }

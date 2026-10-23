@@ -120,6 +120,7 @@ impl Checker {
                         ty: target,
                         kind: LocalKind::Param,
                         orig: None,
+                        from_module: false,
                         span: decl.span,
                     },
                 );
@@ -138,6 +139,7 @@ impl Checker {
                     ty: self_ty,
                     kind: LocalKind::Param,
                     orig: None,
+                    from_module: false,
                     span: decl.span,
                 },
             );
@@ -149,6 +151,7 @@ impl Checker {
                     ty: t.clone(),
                     kind: LocalKind::Param,
                     orig: None,
+                    from_module: false,
                     span: p.name.span,
                 },
             );

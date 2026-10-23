@@ -882,7 +882,18 @@ impl Checker {
                 ret,
                 param_names: None,
             };
-            return self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            let out = self.check_args(e, &sig, &[], HashMap::new(), args, want);
+            // the typed machine runs the built-in methods whose types it can hold
+            let params: Vec<Ty> = sig.params.iter().map(|p| self.resolve(p)).collect();
+            let ret = self.resolve(&sig.ret);
+            let recv = self.resolve(&rt);
+            if super::expr::register_ty(&recv)
+                && params.iter().all(super::expr::register_ty)
+                && (ret == Ty::Unit || super::expr::register_ty(&ret))
+            {
+                self.res.builtin_sigs.insert(e.id, (recv, params, ret));
+            }
+            return out;
         }
         if let Some(um) = self.find_user_method(&rt, &name.name) {
             let f = self.defs.fns[um.fid].clone();

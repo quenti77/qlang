@@ -592,10 +592,19 @@ pub struct Resolutions {
     /// The type of each use of a variable whose type is `int`, `float` or `bool` (the typed
     /// register machine needs it for the variables a loop shares with the code around it).
     pub ident_tys: FxHashMap<NodeId, Ty>,
+    /// For a use of a `T?` variable that a test narrowed to `T`: the narrowed type (the type
+    /// in `ident_tys` is then the declared one).
+    pub ident_narrow: FxHashMap<NodeId, Ty>,
     /// The annotations of each declaration, for `Reflect`.
     pub annotations: FxHashMap<AnnKey, Vec<AnnData>>,
-    /// The type of each array literal whose elements are `int`, `float` or `bool`.
+    /// The type of each array and map literal.
     pub array_lits: FxHashMap<NodeId, Ty>,
+    /// The type of the variable a `let` declares (keyed by the initializer), when it is a type
+    /// the typed machine cares about: `T?`.
+    pub let_tys: FxHashMap<NodeId, Ty>,
+    /// The signature of each call of a built-in method (keyed by the call): receiver,
+    /// parameters and result, once the types are known.
+    pub builtin_sigs: FxHashMap<NodeId, (Ty, Vec<Ty>, Ty)>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: FxHashSet<NodeId>,
     /// Method calls made through a trait (a generic bound or a trait-typed value): at

@@ -643,6 +643,218 @@ fn obj_array_program(rng: &mut Rng) -> String {
     src
 }
 
+/// Statements on the optional values `x`, `y` (int?), `w` (string?), `ns` (array<int?>), with
+/// `acc`, `n` (ints) to compute with.
+fn nullable_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        let v = rng.pick(&["x", "y"]);
+        match rng.below(if depth > 0 { 26 } else { 22 }) {
+            0 => {
+                out += &format!(
+                    "{v} = maybe({}, {})\n",
+                    bool_expr(rng, &vars, 1),
+                    int_expr(rng, &vars, 1)
+                )
+            }
+            1 => out += &format!("{v} = none\n"),
+            2 => out += &format!("{v} = {}\n", int_expr(rng, &vars, 2)),
+            3 => out += &format!("{v} = parse(\"{{{}}}\")\n", int_expr(rng, &vars, 1)),
+            4 => {
+                out += &format!(
+                    "{v} = parse({})\n",
+                    rng.pick(&["\"7\"", "\"x\"", "\"\"", "w2"])
+                )
+            }
+            5 => out += &format!("if {v} != none then acc += {v} * 2 end\n"),
+            6 => out += &format!("if {v} == none then n += 1 else acc += {v} end\n"),
+            7 => {
+                out += &format!(
+                    "if {v} != none and {v} > {} then acc += 1 end\n",
+                    rng.below(6)
+                )
+            }
+            8 => out += &format!("if {v} == none or {v} < {} then n += 1 end\n", rng.below(6)),
+            9 => out += &format!("acc += (if {v} == none then 100 else {v} end)\n"),
+            10 => out += &format!("w = pick({}, \"s{{n}}\")\n", bool_expr(rng, &vars, 1)),
+            11 => out += "if w != none then acc += w.len() else n += 2 end\n",
+            12 => out += &format!("let t{} = {v}\nif t{0} == none then n += 3 end\n", unique()),
+            13 => out += &format!("ns[] = {v}\n"),
+            14 => out += &format!("ns.push({})\n", rng.pick(&["none", "acc", "n", "x"])),
+            15 => {
+                out += "for e in ns do\n  if e != none then acc += e end\n  if acc > 400 then break end\nend\n"
+            }
+            16 => out += "acc += ns.len()\n",
+            17 => out += &format!("{v} = find_in(ns, {})\n", int_expr(rng, &vars, 1)),
+            18 => out += "if ns.len() > 6 then ns.clear() end\n",
+            19 => out += &format!("acc += {}\n", int_expr(rng, &vars, 2)),
+            20 => out += &format!("w = {}.to_string_opt()\n", v),
+            21 => out += &format!("{v} = ns.first()\n"),
+            22 | 23 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if ns.len() > 40 then break end\nend\n",
+                    rng.below(6),
+                    nullable_stmts(rng, depth - 1)
+                );
+            }
+            24 => {
+                let u = unique();
+                out += &format!(
+                    "let w{u} = 0\nwhile w{u} < {} do\n  w{u} += 1\n{}end\n",
+                    rng.below(5),
+                    nullable_stmts(rng, depth - 1)
+                );
+            }
+            _ => {
+                out += &format!(
+                    "if {v} != none then\n{}else\n{}end\n",
+                    nullable_stmts(rng, depth - 1),
+                    nullable_stmts(rng, depth - 1)
+                )
+            }
+        }
+    }
+    out
+}
+
+fn nullable_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += "fun parse(s: string) -> int?\n  s.to_int()\nend\n";
+    src += "fun maybe(flag: bool, v: int) -> int?\n  if flag then v else none end\nend\n";
+    src += "fun pick(flag: bool, s: string) -> string?\n  if flag then s else none end\nend\n";
+    src += "fun find_in(xs: array<int?>, k: int) -> int?\n  for e in xs do\n    if e != none and e > k then\n      return e\n    end\n  end\n  none\nend\n";
+    src += &format!(
+        "fun work(n: int, w2: string) -> int\n  let acc = 0\n  let n = n\n  let x: int? = none\n  let y: int? = {}\n  let w: string? = none\n  let ns: array<int?> = []\n{}  let r = 0\n  if x != none then r += x end\n  if y != none then r += y end\n  acc + n + r + ns.len()\nend\n",
+        rng.pick(&["none", "4", "-2"]),
+        nullable_stmts(rng, 2)
+    );
+    for _ in 0..3 {
+        src += &format!(
+            "print(work({}, {}))\n",
+            rng.below(6),
+            rng.pick(&["\"5\"", "\"q\"", "\"\""])
+        );
+    }
+    src += "print(parse(\"12\"))\nprint(parse(\"zz\"))\nprint(maybe(true, 3))\nprint(pick(false, \"s\"))\n";
+    src += "let acc = 0\nlet n = 1\nlet x: int? = 3\nlet y: int? = none\nlet w: string? = \"top\"\nlet w2 = \"9\"\nlet ns: array<int?> = [1, none]\n";
+    src += &nullable_stmts(rng, 2);
+    src += "print(acc)\nprint(n)\nprint(x)\nprint(y)\nprint(w)\nprint(ns)\n";
+    src
+}
+
+/// A key of the string map `m`.
+fn map_key(rng: &mut Rng) -> String {
+    match rng.below(4) {
+        0 => format!("\"k{}\"", rng.below(4)),
+        1 => "\"k{acc mod 4}\"".to_string(),
+        2 => "\"n{n mod 3}\"".to_string(),
+        _ => "s".to_string(),
+    }
+}
+
+/// Statements on `m` (map<string, int>), `ms` (map<int, string>), `s` (a string), with `acc`,
+/// `n` (ints) to compute with.
+fn map_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 24 } else { 20 }) {
+            0 => out += &format!("m[{}] = {}\n", map_key(rng), int_expr(rng, &vars, 2)),
+            1 => out += &format!("m[{}] += {}\n", map_key(rng), int_expr(rng, &vars, 1)),
+            2 => out += &format!("acc += m.get({}, 0)\n", map_key(rng)),
+            3 => out += "acc += m.len()\n",
+            4 => out += &format!("if m.has({}) then n += 1 end\n", map_key(rng)),
+            5 => {
+                let u = unique();
+                out += &format!(
+                    "let v{u} = m[{}]\nif v{u} != none then acc += v{u} else n += 2 end\n",
+                    map_key(rng)
+                );
+            }
+            6 => out += "for k in m.keys() do\n  acc += k.len()\nend\n",
+            7 => out += "for v in m.values() do\n  acc += v\n  if acc > 600 then break end\nend\n",
+            8 => {
+                let u = unique();
+                out += &format!(
+                    "let r{u} = m.remove({})\nif r{u} != none then acc += r{u} end\n",
+                    map_key(rng)
+                );
+            }
+            9 => out += &format!("ms[{}] = \"s{{acc}}\"\n", int_expr(rng, &["acc", "n"], 1)),
+            10 => out += &format!("s = ms.get({}, \"-\")\n", int_expr(rng, &["acc", "n"], 1)),
+            11 => out += "if m.len() > 6 then m.clear() end\n",
+            12 => {
+                out +=
+                    "for k, v in m do\n  acc += k.len() + v\n  if acc > 600 then break end\nend\n"
+            }
+            13 => {
+                out += "for k, v in ms do\n  s = v + s\n  if s.len() > 30 then s = \"\" end\n  acc += k\nend\n"
+            }
+            14 => {
+                let u = unique();
+                out += &format!(
+                    "let lit{u}: map<string, int> = {{ \"a\": acc, \"b\": n }}\nacc += lit{u}.len() + lit{u}.get(\"a\", 0)\n"
+                );
+            }
+            15 => out += &format!("acc += {}\n", int_expr(rng, &vars, 2)),
+            16 => out += "if ms.has(acc mod 3) then n += 1 end\n",
+            17 => out += &format!("let w{} = m.keys()\nacc += w{0}.len()\n", unique()),
+            18 => out += "if ms.len() > 5 then ms.clear() end\n",
+            19 => out += "n += m.get(\"k0\", 1) mod 3\n",
+            20 | 21 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if m.len() > 30 then break end\nend\n",
+                    rng.below(6),
+                    map_stmts(rng, depth - 1)
+                );
+            }
+            22 => {
+                let u = unique();
+                out += &format!(
+                    "let w{u} = 0\nwhile w{u} < {} do\n  w{u} += 1\n{}end\n",
+                    rng.below(5),
+                    map_stmts(rng, depth - 1)
+                );
+            }
+            _ => {
+                out += &format!(
+                    "if m.has({}) then\n{}else\n{}end\n",
+                    map_key(rng),
+                    map_stmts(rng, depth - 1),
+                    map_stmts(rng, depth - 1)
+                )
+            }
+        }
+    }
+    out
+}
+
+fn map_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += &format!(
+        "fun work(m: map<string, int>, ms: map<int, string>, s: string, n: int) -> int\n  let acc = 0\n  let n = n\n  let s = s\n{}  acc + n + m.len() + ms.len() + s.len()\nend\n",
+        map_stmts(rng, 2)
+    );
+    src += "fun counts(words: array<string>) -> map<string, int>\n  let c: map<string, int> = {}\n  for w in words do\n    c[w] = c.get(w, 0) + 1\n  end\n  c\nend\n";
+    src += "fun table(n: int) -> map<int, string>\n  let t: map<int, string> = {}\n  for i in 0..n do\n    t[i] = \"v{i}\"\n  end\n  t\nend\n";
+    for _ in 0..3 {
+        src += &format!(
+            "print(work(counts([\"a\", \"b\", \"a\", \"k0\"]), table({}), {}, {}))\n",
+            rng.below(5),
+            rng.pick(&["\"s\"", "\"\"", "\"k1\""]),
+            rng.below(5)
+        );
+    }
+    src += "print(counts([\"x\", \"y\", \"x\"]))\nprint(table(3))\n";
+    src += "let m = counts([\"p\", \"q\"])\nlet ms = table(2)\nlet s = \"top\"\nlet acc = 0\nlet n = 1\n";
+    src += &map_stmts(rng, 2);
+    src += "print(m)\nprint(ms)\nprint(acc)\nprint(s)\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
@@ -890,6 +1102,40 @@ fn the_machine_and_the_tree_walker_agree_on_arrays_of_objects_in_many_more_progr
             seed.wrapping_mul(0x8CB9_2BA7_2F3D_8DD7) | 1,
             500,
             obj_array_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_optional_values() {
+    sweep_with(0x0A7B_10A1_0000_0005, 300, nullable_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_optional_values_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xE703_7ED1_A0B4_28DB) | 1,
+            500,
+            nullable_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_maps() {
+    sweep_with(0x3A95_D1C7_0000_0006, 300, map_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_maps_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0x94D0_49BB_1331_11EB) | 1,
+            500,
+            map_program,
         );
     }
 }

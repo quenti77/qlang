@@ -1762,6 +1762,8 @@ pub(crate) struct Local {
     pub kind: LocalKind,
     /// Set when `ty` is a narrowed view (`x != none`) of this declared type.
     pub orig: Option<Ty>,
+    /// A narrowed view, kept in a local scope, of a variable of the module.
+    pub from_module: bool,
     pub span: Span,
 }
 

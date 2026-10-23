@@ -342,3 +342,30 @@ fn arrays_of_texts_structures_and_arrays() {
     let out = same_compiled(src, 3);
     assert!(out.starts_with("n0!,n1,n2\n"), "{out}");
 }
+
+#[test]
+fn optional_values_on_the_machine() {
+    let src = "fun parse(s: string) -> int?\n  s.to_int()\nend\nfun first_big(xs: array<int>, limit: int) -> int?\n  for x in xs do\n    if x > limit then\n      return x\n    end\n  end\n  none\nend\nfun total(words: array<string>) -> int\n  let t = 0\n  for w in words do\n    let n = parse(w)\n    if n != none then\n      t += n + 1\n    else\n      t -= 1\n    end\n  end\n  t\nend\nfun pick(flag: bool) -> string?\n  if flag then \"yes\" else none end\nend\nfun use_pick() -> int\n  let a = pick(true)\n  let b = pick(false)\n  let n = 0\n  if a != none then n += a.len() end\n  if b == none then n += 10 end\n  n\nend\nprint(total([\"1\", \"x\", \"22\", \"y\"]))\nprint(first_big([1, 5, 9], 4))\nprint(first_big([1, 2], 4))\nprint(use_pick())";
+    assert_eq!(same_compiled(src, 4), "23\n5\nnone\n13\n");
+}
+
+#[test]
+fn a_narrowed_variable_of_the_module_is_still_that_variable() {
+    // the test narrows `y` inside the loop; the loop must go on seeing the same variable
+    let src = "fun maybe(flag: bool, v: int) -> int?\n  if flag then v else none end\nend\nfun parse(s: string) -> int?\n  s.to_int()\nend\nlet acc = 0\nlet n = 1\nlet y: int? = none\ny = maybe(false, 1)\nfor i in 0..5 do\n  if y == none then n += 1 else acc += y end\n  y = parse(\"{n}\")\nend\nprint(acc)\nprint(n)\nprint(y)";
+    assert_eq!(same_compiled(src, 2), "8\n2\n2\n");
+}
+
+#[test]
+fn maps_on_the_machine() {
+    let src = "fun counts(words: array<string>) -> map<string, int>\n  let c: map<string, int> = {}\n  for w in words do\n    c[w] = c.get(w, 0) + 1\n  end\n  c\nend\nfun best(c: map<string, int>) -> int\n  let b = 0\n  for k, v in c do\n    if v > b then b = v end\n  end\n  let missing = c[\"zzz\"]\n  if missing == none then b + c.len() else b end\nend\nfun bump(c: map<string, int>, k: string)\n  c[k] += 10\nend\nlet c = counts([\"a\", \"b\", \"a\", \"c\", \"a\"])\nprint(best(c))\nbump(c, \"b\")\nprint(c)\nlet lit = {1: \"x\", 2: \"y\"}\nlet t = \"\"\nfor k, v in lit do\n  t += \"{k}{v}\"\nend\nprint(t)\nbump(c, \"nope\")";
+    let out = same_compiled(src, 3);
+    assert!(
+        out.starts_with("6\n{\"a\": 3, \"b\": 11, \"c\": 1}\n1x2y\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("R022") && out.contains("called from `bump`"),
+        "{out}"
+    );
+}

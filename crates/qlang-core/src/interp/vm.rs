@@ -188,6 +188,27 @@ enum Op {
     },
     /// A new empty array.
     NewArr(Reg),
+    /// Strings: a constant of `Code::strs`, concatenation, comparison.
+    ConstS(Reg, u32),
+    AddS(Reg, Reg, Reg),
+    CmpS {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        cmp: Cmp,
+    },
+    /// An interpolated string: the values of its `{}` parts are in the registers from `base`
+    /// (`Code::fmts` says how to put them together).
+    Format {
+        dst: Reg,
+        base: Reg,
+        fmt: u32,
+    },
+    /// A built-in function (`print`): its argument is in `base`.
+    Builtin {
+        base: Reg,
+        site: u32,
+    },
     /// `for x in array`: the element at `idx`, or leave the loop.
     ForArr {
         dst: Reg,
@@ -213,12 +234,21 @@ pub(super) struct Code {
     ret: Ty,
     sites: Vec<Site>,
     globals: Vec<GlobalRef>,
+    /// The text constants and the shapes of the interpolated strings.
+    strs: Vec<Value>,
+    fmts: Vec<Vec<FmtPart>>,
     /// For a compiled loop: the variables it shares with the code around it.
     frees: Vec<Free>,
     /// Whether this is a compiled loop (it shows no frame of its own in a trace).
     is_loop: bool,
     /// Whether it uses object registers (their frame must be emptied when it returns).
     uses_objs: bool,
+}
+
+/// A piece of an interpolated string: literal text, or the next value (of this type).
+enum FmtPart {
+    Lit(String),
+    Arg(Ty),
 }
 
 /// A variable of a module, read or written by a compiled function.
@@ -282,6 +312,26 @@ fn number_method(recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
         (Ty::Int, "clamp") => (vec![Ty::Int, Ty::Int], Ty::Int),
         (Ty::Float, "clamp") => (vec![Ty::Float, Ty::Float], Ty::Float),
         (Ty::Float, "is_nan" | "is_infinite") => (vec![], Ty::Bool),
+        (Ty::Int, "to_hex" | "to_oct" | "to_bin" | "char") => (vec![], Ty::Str),
+        (Ty::Float, "to_fixed") => (vec![Ty::Int], Ty::Str),
+        _ => return None,
+    })
+}
+
+/// The methods of a string the machine knows (those with a number, a boolean or a string for
+/// result): argument types and result type.
+fn string_method(name: &str) -> Option<(Vec<Ty>, Ty)> {
+    Some(match name {
+        "len" | "code" => (vec![], Ty::Int),
+        "is_empty" | "is_digit" | "is_alpha" | "is_blank" => (vec![], Ty::Bool),
+        "upper" | "lower" | "trim" | "trim_start" | "trim_end" | "capitalize" | "reverse"
+        | "snake_case" | "camel_case" | "kebab_case" | "title_case" => (vec![], Ty::Str),
+        "eq_ignore_case" | "contains" | "starts_with" | "ends_with" => (vec![Ty::Str], Ty::Bool),
+        "count" => (vec![Ty::Str], Ty::Int),
+        "pad_left" | "pad_right" => (vec![Ty::Int, Ty::Str], Ty::Str),
+        "replace" => (vec![Ty::Str, Ty::Str], Ty::Str),
+        "repeat" => (vec![Ty::Int], Ty::Str),
+        "substring" => (vec![Ty::Int, Ty::Int], Ty::Str),
         _ => return None,
     })
 }
@@ -305,16 +355,21 @@ fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
     })
 }
 
-/// What a register can hold: a number, a boolean, or an array of those (by handle).
+/// What a register can hold: a number, a boolean, a string, or an array of numbers.
 fn vty(t: &Ty) -> bool {
-    scalar(t) || matches!(t, Ty::Array(e) if scalar(e))
+    scalar(t) || *t == Ty::Str || matches!(t, Ty::Array(e) if scalar(e))
+}
+
+/// Whether a value of this type lives in the object registers.
+fn is_obj(t: &Ty) -> bool {
+    matches!(t, Ty::Array(_) | Ty::Str)
 }
 
 /// Whether code needs the object registers: it has an array operation, or an array among its
 /// parameters (or the variables a loop shares), the variables of the module it reads, or the
 /// arguments of a method it calls.
 fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -> bool {
-    let array = |t: &Ty| matches!(t, Ty::Array(_));
+    let array = is_obj;
     tys.iter().any(array)
         || globals.iter().any(|g| array(&g.ty))
         || sites
@@ -326,6 +381,11 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                 Op::MovO(..)
                     | Op::RetO(_)
                     | Op::NewArr(_)
+                    | Op::ConstS(..)
+                    | Op::AddS(..)
+                    | Op::CmpS { .. }
+                    | Op::Format { .. }
+                    | Op::Builtin { .. }
                     | Op::ALen(..)
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
@@ -351,6 +411,8 @@ struct Gen<'a> {
     callees: Vec<FnId>,
     sites: Vec<Site>,
     globals: Vec<GlobalRef>,
+    strs: Vec<Value>,
+    fmts: Vec<Vec<FmtPart>>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
     /// The free variables are known (second pass): no new one may appear.
@@ -397,7 +459,7 @@ impl Gen<'_> {
     /// Copies `src` to `dst`, in the bank of the type `ty`.
     fn mov(&mut self, dst: Reg, src: Reg, ty: &Ty, span: Span) {
         if dst != src {
-            let op = if matches!(ty, Ty::Array(_)) {
+            let op = if is_obj(ty) {
                 Op::MovO(dst, src)
             } else {
                 Op::Mov(dst, src)
@@ -653,6 +715,51 @@ impl Gen<'_> {
                 self.top = tmp as usize;
                 Some(ty)
             }
+            ExprKind::Str(parts) => {
+                if parts.iter().all(|p| matches!(p, StrPart::Lit(_))) {
+                    let text: String = parts
+                        .iter()
+                        .map(|p| match p {
+                            StrPart::Lit(t) => t.as_str(),
+                            StrPart::Expr(_) => "",
+                        })
+                        .collect();
+                    let idx = match self
+                        .strs
+                        .iter()
+                        .position(|v| matches!(v, Value::Str(x) if **x == *text))
+                    {
+                        Some(i) => i,
+                        None => {
+                            self.strs.push(Value::str(&text));
+                            self.strs.len() - 1
+                        }
+                    };
+                    self.emit(Op::ConstS(dst, u32::try_from(idx).ok()?), span);
+                } else {
+                    let mark = self.top;
+                    let base = self.top as Reg;
+                    let mut fmt = Vec::new();
+                    for p in parts {
+                        match p {
+                            StrPart::Lit(t) => fmt.push(FmtPart::Lit(t.clone())),
+                            StrPart::Expr(x) => {
+                                let r = self.alloc()?;
+                                let t = self.into(x, r)?;
+                                if !vty(&t) {
+                                    return None;
+                                }
+                                fmt.push(FmtPart::Arg(t));
+                            }
+                        }
+                    }
+                    self.fmts.push(fmt);
+                    let fmt = u32::try_from(self.fmts.len() - 1).ok()?;
+                    self.emit(Op::Format { dst, base, fmt }, span);
+                    self.top = mark;
+                }
+                Some(Ty::Str)
+            }
             ExprKind::Unary(op, inner) => {
                 let mark = self.top;
                 let (r, ty) = self.value(inner)?;
@@ -707,6 +814,26 @@ impl Gen<'_> {
                     let t = self.alloc()?;
                     self.emit(Op::ItoF(t, b), span);
                     (b, tb) = (t, Ty::Float);
+                }
+                if ta == Ty::Str && tb == Ty::Str {
+                    let cmp = |c| Op::CmpS { dst, a, b, cmp: c };
+                    let opc = match op {
+                        BinOp::Add => Op::AddS(dst, a, b),
+                        BinOp::Eq => cmp(Cmp::Eq),
+                        BinOp::NotEq => cmp(Cmp::Ne),
+                        BinOp::Lt => cmp(Cmp::Lt),
+                        BinOp::LtEq => cmp(Cmp::Le),
+                        BinOp::Gt => cmp(Cmp::Gt),
+                        BinOp::GtEq => cmp(Cmp::Ge),
+                        _ => return None,
+                    };
+                    self.emit(opc, span);
+                    self.top = mark;
+                    return Some(if matches!(op, BinOp::Add) {
+                        Ty::Str
+                    } else {
+                        Ty::Bool
+                    });
                 }
                 if ta != tb {
                     return None;
@@ -835,6 +962,30 @@ impl Gen<'_> {
                 {
                     return None;
                 }
+                if let Some(PathRes::BuiltinFn(name @ ("print" | "write"))) =
+                    self.prog.res.paths.get(&callee.id)
+                {
+                    if args.len() != 1 {
+                        return None;
+                    }
+                    let mark = self.top;
+                    let base = self.top as Reg;
+                    let r = self.alloc()?;
+                    let t = self.into(&args[0].value, r)?;
+                    if !vty(&t) {
+                        return None;
+                    }
+                    let site = self.sites.len() as u32;
+                    self.sites.push(Site {
+                        name: (*name).to_string(),
+                        tys: vec![t],
+                        ret: Ty::Unit,
+                        node: e.id,
+                    });
+                    self.emit(Op::Builtin { base, site }, span);
+                    self.top = mark;
+                    return Some(Ty::Unit);
+                }
                 let Some(PathRes::Fn(fid)) = self.prog.res.paths.get(&callee.id) else {
                     return None;
                 };
@@ -891,6 +1042,7 @@ impl Gen<'_> {
         let rt = self.into(obj, recv)?;
         let (want, ret) = match &rt {
             Ty::Array(el) => array_method(el, &name.name)?,
+            Ty::Str => string_method(&name.name)?,
             _ => number_method(&rt, &name.name)?,
         };
         if want.len() != args.len() {
@@ -1163,7 +1315,7 @@ impl Gen<'_> {
                         if ty != self.ret {
                             return None;
                         }
-                        let op = if matches!(self.ret, Ty::Array(_)) {
+                        let op = if is_obj(&self.ret) {
                             Op::RetO(r)
                         } else {
                             Op::Ret(r)
@@ -1396,6 +1548,7 @@ impl Gen<'_> {
                         let int = ty == Ty::Int;
                         let float = ty == Ty::Float;
                         let opc = match bop {
+                            BinOp::Add if ty == Ty::Str => Op::AddS(reg, reg, r),
                             BinOp::Add if int => Op::AddI(reg, reg, r),
                             BinOp::Sub if int => Op::SubI(reg, reg, r),
                             BinOp::Mul if int => Op::MulI(reg, reg, r),
@@ -1475,6 +1628,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
         callees: Vec::new(),
         sites: Vec::new(),
         globals: Vec::new(),
+        strs: Vec::new(),
+        fmts: Vec::new(),
         loop_mode,
         preset: false,
         frees: Vec::new(),
@@ -1521,7 +1676,7 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     if g.block(body, Some(res))? != def.ret {
                         return None;
                     }
-                    let op = if matches!(def.ret, Ty::Array(_)) {
+                    let op = if is_obj(&def.ret) {
                         Op::RetO(res)
                     } else {
                         Op::Ret(res)
@@ -1548,6 +1703,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     ret: def.ret.clone(),
                     sites: g.sites,
                     globals: g.globals,
+                    strs: g.strs,
+                    fmts: g.fmts,
                     frees: Vec::new(),
                     is_loop: false,
                     uses_objs,
@@ -1607,6 +1764,8 @@ fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
                     ret: Ty::Unit,
                     sites: g.sites,
                     globals: g.globals,
+                    strs: g.strs,
+                    fmts: g.fmts,
                     frees: g.frees,
                     is_loop: true,
                     uses_objs,
@@ -1629,7 +1788,7 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         (Value::Int(i), Ty::Int) => Some(Slot::N(*i)),
         (Value::Float(f), Ty::Float) => Some(Slot::N(f.to_bits() as i64)),
         (Value::Bool(b), Ty::Bool) => Some(Slot::N(i64::from(*b))),
-        (Value::Array(_), Ty::Array(_)) => Some(Slot::O(v.clone())),
+        (Value::Array(_), Ty::Array(_)) | (Value::Str(_), Ty::Str) => Some(Slot::O(v.clone())),
         _ => None,
     }
 }
@@ -1640,7 +1799,7 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         Ty::Int => Value::Int(stack[i]),
         Ty::Float => Value::Float(f64::from_bits(stack[i] as u64)),
         Ty::Bool => Value::Bool(stack[i] != 0),
-        Ty::Array(_) => ostack[i].clone(),
+        Ty::Array(_) | Ty::Str => ostack[i].clone(),
         _ => Value::Unit,
     }
 }
@@ -1704,7 +1863,7 @@ impl Interp<'_> {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
             Ty::Bool => Value::Bool(bits != 0),
-            Ty::Array(_) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            Ty::Array(_) | Ty::Str => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         });
         self.vm_release();
@@ -2100,6 +2259,59 @@ impl Interp<'_> {
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
                         }
                     }
+                }
+                Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
+                Op::AddS(d, a, b) => {
+                    let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
+                        fail!("R001", "a string was expected");
+                    };
+                    let n = x.len() + y.len();
+                    let span = code.spans[pc - 1];
+                    self.guard_alloc(n, span)?;
+                    self.charge_bytes(n, span)?;
+                    let mut text = String::with_capacity(n);
+                    text.push_str(x);
+                    text.push_str(y);
+                    o!(d) = Value::str(&text);
+                }
+                Op::CmpS { dst, a, b, cmp } => {
+                    let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
+                        fail!("R001", "a string was expected");
+                    };
+                    let ord = x.as_ref().cmp(y.as_ref());
+                    r!(dst) = i64::from(match cmp {
+                        Cmp::Eq => ord.is_eq(),
+                        Cmp::Ne => ord.is_ne(),
+                        Cmp::Lt => ord.is_lt(),
+                        Cmp::Le => ord.is_le(),
+                        Cmp::Gt => ord.is_gt(),
+                        Cmp::Ge => ord.is_ge(),
+                    });
+                }
+                Op::Format { dst, base: b, fmt } => {
+                    let span = code.spans[pc - 1];
+                    let mut text = String::new();
+                    let mut at = base + b as usize;
+                    for part in &code.fmts[fmt as usize] {
+                        match part {
+                            FmtPart::Lit(t) => text.push_str(t),
+                            FmtPart::Arg(t) => {
+                                let v = reg_value(stack, ostack, at, t);
+                                at += 1;
+                                text.push_str(&self.stringify(&v, span)?);
+                            }
+                        }
+                    }
+                    self.guard_alloc(text.len(), span)?;
+                    self.charge_bytes(text.len(), span)?;
+                    o!(dst) = Value::str(&text);
+                }
+                Op::Builtin { base: b, site } => {
+                    let span = code.spans[pc - 1];
+                    let st = &code.sites[site as usize];
+                    let v = reg_value(stack, ostack, base + b as usize, &st.tys[0]);
+                    let name = st.name.clone();
+                    self.builtin_fn(&name, vec![v], span)?;
                 }
                 Op::NewArr(dst) => {
                     o!(dst) = Value::Array(Rc::new(RefCell::new(Vec::new())));

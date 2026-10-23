@@ -304,6 +304,165 @@ fn array_stmts_top(rng: &mut Rng) -> String {
     out
 }
 
+/// A string expression over `s`, `t` (strings) and `acc`, `n` (ints).
+fn str_expr(rng: &mut Rng, depth: usize) -> String {
+    let lit = || -> &'static str { "ab" };
+    let _ = lit;
+    let vars = ["acc", "n"];
+    let atoms = [
+        "s",
+        "t",
+        "\"x\"",
+        "\"Ab \"",
+        "\"\"",
+        "\"{acc}\"",
+        "\"<{n}>\"",
+    ];
+    if depth == 0 {
+        return rng.pick(&atoms).to_string();
+    }
+    match rng.below(14) {
+        0 => format!(
+            "{} + {}",
+            str_expr(rng, depth - 1),
+            str_expr(rng, depth - 1)
+        ),
+        1 => format!(
+            "\"{{{}}}-{{{}}}\"",
+            int_expr(rng, &vars, 1),
+            rng.pick(&["s", "t"])
+        ),
+        2 => format!("{}.upper()", str_expr(rng, depth - 1)),
+        3 => format!("{}.lower()", str_expr(rng, depth - 1)),
+        4 => format!("{}.trim()", str_expr(rng, depth - 1)),
+        5 => format!(
+            "{}.replace(\"a\", \"{}\")",
+            str_expr(rng, depth - 1),
+            rng.pick(&["", "AA", "-"])
+        ),
+        6 => format!("{}.repeat({})", str_expr(rng, depth - 1), rng.below(4)),
+        7 => format!(
+            "{}.substring({}, {})",
+            str_expr(rng, depth - 1),
+            rng.below(3),
+            rng.below(6)
+        ),
+        8 => format!("{}.reverse()", str_expr(rng, depth - 1)),
+        9 => format!("({}).capitalize()", str_expr(rng, depth - 1)),
+        10 => format!(
+            "{}.pad_left({}, \"0\")",
+            str_expr(rng, depth - 1),
+            rng.below(8)
+        ),
+        11 => format!(
+            "\"{{{}}} {{{}}}\"",
+            int_expr(rng, &vars, 1),
+            float_expr(rng, &["1.5"], 1)
+        ),
+        _ => rng.pick(&atoms).to_string(),
+    }
+}
+
+fn str_bool(rng: &mut Rng) -> String {
+    let a = str_expr(rng, 1);
+    let b = str_expr(rng, 1);
+    match rng.below(9) {
+        0 => format!("{a} == {b}"),
+        1 => format!("{a} != {b}"),
+        2 => format!("{a} < {b}"),
+        3 => format!("{a} >= {b}"),
+        4 => format!("{a}.contains({b})"),
+        5 => format!("{a}.starts_with({b})"),
+        6 => format!("{a}.ends_with({b})"),
+        7 => format!("{a}.is_empty()"),
+        _ => format!("{a}.eq_ignore_case({b})"),
+    }
+}
+
+/// Statements on the strings `s` and `t`, with `acc` and `n` to compute with.
+fn str_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 14 } else { 10 }) {
+            0 => out += &format!("s = {}\n", str_expr(rng, 2)),
+            1 => out += &format!("s += {}\n", str_expr(rng, 1)),
+            2 => out += &format!("t = {}\n", str_expr(rng, 2)),
+            3 => out += "acc += s.len()\n",
+            4 => out += &format!("acc += {}\n", int_expr(rng, &vars, 2)),
+            5 => out += &format!("if {} then acc += 1 else n += 1 end\n", str_bool(rng)),
+            6 => out += "if s.len() > 40 then s = s.substring(0, 5) end\n",
+            7 => out += "print(\"{s}|{t}|{acc}\")\n",
+            8 => out += &format!("print({})\n", str_expr(rng, 2)),
+            9 => out += "acc += t.count(\"a\") + t.code()\n",
+            10 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if s.len() > 60 then break end\nend\n",
+                    rng.below(7),
+                    str_stmts(rng, depth - 1)
+                );
+            }
+            11 => {
+                let u = unique();
+                out += &format!(
+                    "let w{u} = 0\nwhile w{u} < {} do\n  w{u} += 1\n{}end\n",
+                    rng.below(6),
+                    str_stmts(rng, depth - 1)
+                );
+            }
+            12 => {
+                out += &format!(
+                    "if {} then\n{}else\n{}end\n",
+                    str_bool(rng),
+                    str_stmts(rng, depth - 1),
+                    str_stmts(rng, depth - 1)
+                )
+            }
+            _ => {
+                let u = unique();
+                out +=
+                    &format!("let tmp{u} = [acc, n]\ntmp{u}.push(s.len())\nacc += tmp{u}.sum()\n");
+            }
+        }
+    }
+    out
+}
+
+fn string_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += &format!(
+        "fun work(s: string, t: string, n: int) -> string\n  let acc = 0\n  let n = n\n  let s = s\n  let t = t\n{}  \"{{s}}/{{t}}/{{acc}}/{{n}}\"\nend\n",
+        str_stmts(rng, 2)
+    );
+    src += &format!(
+        "fun count(s: string, t: string) -> int\n  let acc = 0\n  let n = 0\n  let s = s\n  let t = t\n{}  acc + n + s.len()\nend\n",
+        str_stmts(rng, 2)
+    );
+    src += "fun join(n: int, sep: string) -> string\n  let out = \"\"\n  for i in 0..n do\n    if i > 0 then out += sep end\n    out += \"{i}\"\n  end\n  out\nend\n";
+    src +=
+        "fun pick(flag: bool, a: string, b: string) -> string\n  if flag then a else b end\nend\n";
+    src += "let gs = \"g\"\nfun bumpg(k: int) -> int\n  gs += \"{k}\"\n  gs.len()\nend\n";
+    for _ in 0..3 {
+        src += &format!(
+            "print(work({}, {}, {}))\n",
+            rng.pick(&["\"abc\"", "\"\"", "\"Banana\"", "\" pad \""]),
+            rng.pick(&["\"x\"", "\"aaa\"", "\"\""]),
+            rng.below(5)
+        );
+    }
+    src += &format!(
+        "print(count(\"hello\", \"world\"))\nprint(join({}, \", \"))\n",
+        rng.below(6)
+    );
+    src += "print(pick(true, \"yes\", \"no\"))\nprint(pick(false, \"yes\", \"no\"))\nprint(bumpg(3))\nprint(gs)\n";
+    // loops of the top level over strings
+    src += "let acc = 0\nlet n = 1\nlet s = \"top\"\nlet t = \"T\"\n";
+    src += &str_stmts(rng, 2);
+    src += "print(s)\nprint(t)\nprint(acc)\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
@@ -498,6 +657,23 @@ fn the_machine_and_the_tree_walker_agree_on_arrays_in_many_more_programs() {
             seed.wrapping_mul(0xD6E8_FEB8_6659_FD93) | 1,
             500,
             array_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_strings() {
+    sweep_with(0x57A1_C0DE_FEED_0001, 300, string_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_strings_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xA24B_AED4_963E_E407) | 1,
+            500,
+            string_program,
         );
     }
 }

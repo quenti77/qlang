@@ -282,3 +282,34 @@ fn arrays_made_in_loops_are_dropped_with_each_turn() {
     // the sum over i < 200000 of (i + i + 4), then 20000 turns of 0 + 0 + 1 + 5 + 14
     assert_eq!(same_compiled(src, 3), "40000600000\n400000\n");
 }
+
+#[test]
+fn strings_on_the_machine() {
+    let src = "fun word(i: int) -> string\n  \"w{i}\" + (if i mod 2 == 0 then \"e\" else \"o\" end)\nend\nfun longest(n: int) -> string\n  let best = \"\"\n  for i in 0..n do\n    let w = word(i * 7 mod 13)\n    if w.len() > best.len() or (w.len() == best.len() and w > best) then\n      best = w\n    end\n  end\n  best\nend\nlet text = \"\"\nfun add(t: string, k: int) -> string\n  t + \"[{k}:{k * 0.5}:{k > 1}]\"\nend\nfor k in 0..4 do\n  text = add(text, k)\nend\nprint(text)\nprint(longest(30))\nprint(\"\".is_empty())\nprint(\"Caf\u{e9}\".upper() + \"Caf\u{e9}\".len().to_hex())";
+    let out = same_compiled(src, 3);
+    assert_eq!(
+        out,
+        "[0:0.0:false][1:0.5:false][2:1.0:true][3:1.5:true]\nw12e\ntrue\nCAF\u{c9}4\n"
+    );
+}
+
+#[test]
+fn string_errors_and_limits_are_the_same() {
+    // an index out of range inside a function the machine runs: same message, same trace
+    let out = same_compiled(
+        "fun cut(s: string, k: int) -> string\n  s.substring(0, k)\nend\nprint(cut(\"abc\", 2))\nprint(cut(\"abc\", 9))",
+        1,
+    );
+    assert!(out.starts_with("ab\n") && out.contains("error[R"), "{out}");
+    assert!(out.contains("called from"), "{out}");
+    // a string that grows past the limit
+    let (vm, walker, _) = both(
+        "fun grow(n: int) -> int\n  let s = \"x\"\n  for i in 0..n do\n    s = s + s\n  end\n  s.len()\nend\nprint(grow(40))",
+        Limits {
+            max_alloc: 1000,
+            ..Limits::default()
+        },
+    );
+    assert!(vm.contains("R903") && walker.contains("R903"), "{vm}");
+    assert_eq!(vm, walker);
+}

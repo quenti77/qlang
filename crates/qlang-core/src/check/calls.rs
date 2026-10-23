@@ -110,6 +110,7 @@ impl Checker {
                             "uuid" => (Ty::Uuid, "uuid"),
                             "ulid" => (Ty::Ulid, "ulid"),
                             "datetime" => (Ty::DateTime, "datetime"),
+                            "bytes" => (Ty::Bytes, "bytes"),
                             "Any" => (Ty::Any, "Any"),
                             // namespaces: they only hold functions
                             "time" => (Ty::Unit, "time"),
@@ -1151,9 +1152,27 @@ impl Checker {
                     ("Db", "connect") => Some(("sql_connect", "there is no database access")),
                     ("fs", "read") => Some(("fs_read", "there is no disk access")),
                     ("fs", "write") => Some(("fs_write", "there is no disk access")),
+                    ("fs", "read_bytes") => Some(("fs_read_bytes", "there is no disk access")),
+                    ("fs", "write_bytes") => Some(("fs_write_bytes", "there is no disk access")),
                     ("env", "get") => Some(("env_get", "there is no process environment")),
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),
+                    ("Password", "hash") => Some((
+                        "password_hash",
+                        "password hashing is only offered by the `qlang` command",
+                    )),
+                    ("Password", "verify") => Some((
+                        "password_verify",
+                        "password hashing is only offered by the `qlang` command",
+                    )),
+                    ("Password", "needs_rehash") => Some((
+                        "password_needs_rehash",
+                        "password hashing is only offered by the `qlang` command",
+                    )),
+                    ("Crypto", "random_bytes" | "token") => Some((
+                        "secure_random_bytes",
+                        "there is no source of secure randomness",
+                    )),
                     ("Process", "run" | "run_with_input") => Some((
                         "process_run",
                         "starting programs is not allowed here; the terminal needs `--allow-process`",
@@ -1660,6 +1679,17 @@ impl Checker {
             (Ty::Float, "clamp") => (vec![Ty::Float, Ty::Float], Ty::Float),
             (Ty::Float, "trunc") => (vec![], Ty::Int),
             (Ty::Float, "is_nan" | "is_infinite") => (vec![], Ty::Bool),
+            (Ty::Str, "to_bytes") => (vec![], Ty::Bytes),
+            (Ty::Bytes, "len") => (vec![], Ty::Int),
+            (Ty::Bytes, "is_empty") => (vec![], Ty::Bool),
+            (Ty::Bytes, "at") => (vec![Ty::Int], Ty::nullable(Ty::Int)),
+            (Ty::Bytes, "slice") => (vec![Ty::Int, Ty::Int], Ty::Bytes),
+            (Ty::Bytes, "concat") => (vec![Ty::Bytes], Ty::Bytes),
+            (Ty::Bytes, "to_string") => (vec![], Ty::nullable(Ty::Str)),
+            (Ty::Bytes, "to_array") => (vec![], arr(&Ty::Int)),
+            (Ty::Bytes, "hex" | "base64") => (vec![], Ty::Str),
+            (Ty::Bytes, "find") => (vec![Ty::Bytes], Ty::nullable(Ty::Int)),
+            (Ty::Bytes, "contains" | "starts_with" | "ends_with") => (vec![Ty::Bytes], Ty::Bool),
             _ => return None,
         })
     }
@@ -1720,6 +1750,43 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
         ("time", "sleep") => ("sleep", vec![Ty::Int], Ty::Unit, Needs::Time),
         ("random", "int") => ("int", vec![Ty::Int, Ty::Int], Ty::Int, Needs::Random),
         ("random", "float") => ("float", vec![], Ty::Float, Needs::Random),
+        ("random", "bytes") => ("bytes", vec![Ty::Int], Ty::Bytes, Needs::Random),
+        ("bytes", "empty") => ("empty", vec![], Ty::Bytes, Needs::Nothing),
+        ("bytes", "from_array") => (
+            "from_array",
+            vec![Ty::Array(Box::new(Ty::Int))],
+            Ty::nullable(Ty::Bytes),
+            Needs::Nothing,
+        ),
+        ("Base64", "encode_bytes") => ("encode_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing),
+        ("Base64", "encode_url_bytes") => {
+            ("encode_url_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing)
+        }
+        ("Base64" | "Hex" | "Url", "decode_bytes") => (
+            "decode_bytes",
+            vec![Ty::Str],
+            Ty::nullable(Ty::Bytes),
+            Needs::Nothing,
+        ),
+        ("Hex" | "Url", "encode_bytes") => {
+            ("encode_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing)
+        }
+        ("Hash", "sha256_bytes") => ("sha256_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing),
+        ("Hash", "sha1_bytes") => ("sha1_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing),
+        ("Hash", "md5_bytes") => ("md5_bytes", vec![Ty::Bytes], Ty::Str, Needs::Nothing),
+        ("Hash", "sha256_raw") => ("sha256_raw", vec![Ty::Bytes], Ty::Bytes, Needs::Nothing),
+        ("Hash", "hmac_sha256_bytes") => (
+            "hmac_sha256_bytes",
+            vec![Ty::Bytes, Ty::Bytes],
+            Ty::Str,
+            Needs::Nothing,
+        ),
+        ("Hash", "hmac_sha256_raw") => (
+            "hmac_sha256_raw",
+            vec![Ty::Bytes, Ty::Bytes],
+            Ty::Bytes,
+            Needs::Nothing,
+        ),
         ("regex", "matches") => ("matches", vec![Ty::Str, Ty::Str], Ty::Bool, Needs::Nothing),
         ("regex", "find") => (
             "find",

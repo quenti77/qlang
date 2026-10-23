@@ -6,9 +6,11 @@ mod docgen;
 mod init;
 mod install;
 mod json;
+mod logging;
 mod lsp;
 mod mem;
 mod packages;
+mod password;
 mod process;
 mod providers;
 mod serve;
@@ -78,6 +80,10 @@ static ALLOCATOR: mem::Counting = mem::Counting;
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = mem::configure(&mut args) {
+        eprintln!("{e}");
+        return ExitCode::from(64);
+    }
+    if let Err(e) = logging::configure(&mut args) {
         eprintln!("{e}");
         return ExitCode::from(64);
     }
@@ -333,7 +339,25 @@ impl Host for TerminalHost {
         }
     }
 
+    fn log(&mut self, level: &str, message: &str, fields: &[(String, String)]) {
+        let now = self.now_ms().ok();
+        logging::write(now, level, message, fields);
+    }
+
+    fn secure_random(&mut self, n: usize) -> Result<Vec<u8>, HostError> {
+        let mut out = vec![0u8; n];
+        getrandom::getrandom(&mut out)
+            .map_err(|e| HostError::Other(format!("no source of randomness: {e}")))?;
+        Ok(out)
+    }
+
     fn read_file(&mut self, path: &str) -> Result<String, HostError> {
+        let bytes = self.read_file_bytes(path)?;
+        String::from_utf8(bytes)
+            .map_err(|_| HostError::Other("stream did not contain valid UTF-8".to_string()))
+    }
+
+    fn read_file_bytes(&mut self, path: &str) -> Result<Vec<u8>, HostError> {
         let full = Path::new(path)
             .canonicalize()
             .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
@@ -352,10 +376,14 @@ impl Host for TerminalHost {
                 MAX_FS_READ >> 20
             )));
         }
-        std::fs::read_to_string(&full).map_err(|e| HostError::Other(e.to_string()))
+        std::fs::read(&full).map_err(|e| HostError::Other(e.to_string()))
     }
 
     fn write_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
+        self.write_file_bytes(path, content.as_bytes())
+    }
+
+    fn write_file_bytes(&mut self, path: &str, content: &[u8]) -> Result<(), HostError> {
         let p = Path::new(path);
         let parent = p
             .parent()
@@ -394,6 +422,7 @@ impl Host for TerminalHost {
         self.assume_externs
             || SQL_EXTERNS.contains(&name)
             || (self.allow_process && name == "process_run")
+            || PASSWORD_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -408,6 +437,9 @@ impl Host for TerminalHost {
         if SQL_EXTERNS.contains(&name) {
             return sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")));
         }
+        if PASSWORD_EXTERNS.contains(&name) {
+            return password_call(name, &args);
+        }
         qlang_core::host::std_call(self, name, args)
             .unwrap_or(Err(HostError::Unsupported("extern")))
     }
@@ -418,38 +450,76 @@ impl Host for TerminalHost {
         for (name, value) in &req.headers {
             r = r.set(name, value);
         }
-        let result = match &req.body {
-            Some(body) => r.send_string(body),
-            None => r.call(),
+        let result = match (&req.body_bytes, &req.body) {
+            (Some(bytes), _) => r.send_bytes(bytes),
+            (None, Some(body)) => r.send_string(body),
+            (None, None) => r.call(),
         };
         match result {
             Ok(resp) => {
                 let status = resp.status() as i64;
                 let headers = response_headers(&resp);
-                let body = resp
-                    .into_string()
-                    .map_err(|e| HostError::Other(e.to_string()))?;
+                let (body, raw) = read_body(resp)?;
                 Ok(HttpResponse {
                     status,
                     headers,
                     body,
+                    raw,
                 })
             }
             // a non-2xx/3xx status is still a response, not a failure
             Err(ureq::Error::Status(status, resp)) => {
                 let headers = response_headers(&resp);
-                let body = resp
-                    .into_string()
-                    .map_err(|e| HostError::Other(e.to_string()))?;
+                let (body, raw) = read_body(resp)?;
                 Ok(HttpResponse {
                     status: status as i64,
                     headers,
                     body,
+                    raw,
                 })
             }
             Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
         }
     }
+}
+
+/// The `extern fun` the prelude's `Password` is built on.
+const PASSWORD_EXTERNS: [&str; 3] = ["password_hash", "password_verify", "password_needs_rehash"];
+
+fn password_call(name: &str, args: &[HostValue]) -> Result<HostValue, HostError> {
+    let wrong = || HostError::Other(format!("`{name}` was called with the wrong arguments"));
+    match (name, args) {
+        ("password_hash", [HostValue::Str(plain)]) => password::hash(plain)
+            .map(HostValue::Str)
+            .map_err(HostError::Other),
+        ("password_verify", [HostValue::Str(plain), HostValue::Str(hash)]) => {
+            password::verify(plain, hash)
+                .map(HostValue::Bool)
+                .map_err(HostError::Other)
+        }
+        ("password_needs_rehash", [HostValue::Str(hash)]) => password::needs_rehash(hash)
+            .map(HostValue::Bool)
+            .map_err(HostError::Other),
+        _ => Err(wrong()),
+    }
+}
+
+/// The body of a response as text, and as bytes when it is not valid text. At most 16 MiB.
+#[allow(clippy::type_complexity)]
+fn read_body(resp: ureq::Response) -> Result<(String, Option<Vec<u8>>), HostError> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    resp.into_reader()
+        .take(16 << 20)
+        .read_to_end(&mut data)
+        .map_err(|e| HostError::Other(e.to_string()))?;
+    Ok(match String::from_utf8(data) {
+        Ok(text) => (text, None),
+        Err(e) => {
+            let bytes = e.into_bytes();
+            (String::from_utf8_lossy(&bytes).into_owned(), Some(bytes))
+        }
+    })
 }
 
 /// The headers of a response, with lower-case names.

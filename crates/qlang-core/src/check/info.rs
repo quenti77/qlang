@@ -468,6 +468,7 @@ impl Checker {
             Ty::Uuid => builtin(self, "uuid", &mut out),
             Ty::Ulid => builtin(self, "ulid", &mut out),
             Ty::DateTime => builtin(self, "datetime", &mut out),
+            Ty::Bytes => builtin(self, "bytes", &mut out),
             Ty::Int => builtin(self, "int", &mut out),
             Ty::Float => builtin(self, "float", &mut out),
             Ty::Struct(sid, args) => {

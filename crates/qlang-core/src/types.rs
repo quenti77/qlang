@@ -29,6 +29,8 @@ pub enum Ty {
     Ulid,
     /// An instant, in UTC.
     DateTime,
+    /// A sequence of bytes that never changes (a file, a body, a hash).
+    Bytes,
     /// Any value together with its type: `Any.of(v)`, read back with `a.as<T>()`.
     Any,
     /// The type of expressions without a value.
@@ -130,6 +132,7 @@ impl Ty {
             Ty::Uuid => "uuid".into(),
             Ty::Ulid => "ulid".into(),
             Ty::DateTime => "datetime".into(),
+            Ty::Bytes => "bytes".into(),
             Ty::Any => "Any".into(),
             Ty::Unit => "no value".into(),
             Ty::NoneT => "none".into(),

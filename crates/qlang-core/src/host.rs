@@ -80,8 +80,11 @@ pub trait SqlBackend {
 /// and `http.send` (`http_send`). Whether a host has them follows its [`Capabilities`].
 pub fn std_has(caps: Capabilities, name: &str) -> bool {
     match name {
-        "fs_read" | "fs_write" => caps.fs,
+        "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" => caps.fs,
         "env_get" | "env_args" => caps.env,
+        "secure_random_bytes" => caps.random,
+        // pure functions, and the log: every host has them
+        "constant_time_eq" | "log_write" => true,
         "http_send" => caps.http,
         _ => false,
     }
@@ -100,6 +103,47 @@ pub fn std_call<H: Host + ?Sized>(
         ("fs_write", [HostValue::Str(path), HostValue::Str(content)]) => host
             .write_file(path, content)
             .map(|()| HostValue::Bool(true)),
+        ("fs_read_bytes", [HostValue::Str(path)]) => {
+            host.read_file_bytes(path).map(HostValue::Bytes)
+        }
+        ("fs_write_bytes", [HostValue::Str(path), HostValue::Bytes(content)]) => host
+            .write_file_bytes(path, content)
+            .map(|()| HostValue::Bool(true)),
+        ("secure_random_bytes", [HostValue::Int(n)]) => {
+            if !(0..=1_048_576).contains(n) {
+                return Some(Err(HostError::Other(
+                    "secure random bytes: from 0 to 1048576".to_string(),
+                )));
+            }
+            host.secure_random(*n as usize).map(HostValue::Bytes)
+        }
+        (
+            "log_write",
+            [
+                HostValue::Str(level),
+                HostValue::Str(message),
+                HostValue::Map(fields),
+            ],
+        ) => {
+            let fields: Vec<(String, String)> = fields
+                .iter()
+                .filter_map(|(k, v)| match (k, v) {
+                    (HostValue::Str(k), HostValue::Str(v)) => Some((k.clone(), v.clone())),
+                    _ => None,
+                })
+                .collect();
+            host.log(level, message, &fields);
+            Ok(HostValue::Bool(true))
+        }
+        ("constant_time_eq", [HostValue::Bytes(a), HostValue::Bytes(b)]) => {
+            // every byte is looked at, whatever the first difference
+            let mut diff = a.len() ^ b.len();
+            for i in 0..a.len().max(b.len()) {
+                diff |=
+                    usize::from(a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0));
+            }
+            Ok(HostValue::Bool(diff == 0))
+        }
         ("env_get", [HostValue::Str(name)]) => host
             .env_var(name)
             .map(|v| v.map_or(HostValue::Null, HostValue::Str)),
@@ -133,6 +177,10 @@ pub fn std_call<H: Host + ?Sized>(
                 url: text("url").unwrap_or_default(),
                 headers,
                 body: text("body"),
+                body_bytes: fields.iter().find_map(|(k, v)| match (k, v) {
+                    (HostValue::Str(k), HostValue::Bytes(b)) if k == "raw" => Some(b.clone()),
+                    _ => None,
+                }),
             };
             host.http_send(request).map(|r| {
                 HostValue::Map(vec![
@@ -147,10 +195,26 @@ pub fn std_call<H: Host + ?Sized>(
                         ),
                     ),
                     (HostValue::Str("body".into()), HostValue::Str(r.body)),
+                    (
+                        HostValue::Str("raw".into()),
+                        r.raw.map_or(HostValue::Null, HostValue::Bytes),
+                    ),
                 ])
             })
         }
-        ("fs_read" | "fs_write" | "env_get" | "env_args" | "http_send", _) => Err(wrong(name)),
+        (
+            "fs_read"
+            | "fs_write"
+            | "fs_read_bytes"
+            | "fs_write_bytes"
+            | "env_get"
+            | "env_args"
+            | "http_send"
+            | "secure_random_bytes"
+            | "constant_time_eq"
+            | "log_write",
+            _,
+        ) => Err(wrong(name)),
         _ => return None,
     })
 }
@@ -232,6 +296,8 @@ pub struct HttpRequest {
     /// `(name, value)` pairs, in the order given.
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// A body that is not text (`Request.raw`); it wins over `body`.
+    pub body_bytes: Option<Vec<u8>>,
 }
 
 /// What a host returns on success: the fields of the prelude's `Response` struct.
@@ -241,6 +307,8 @@ pub struct HttpResponse {
     /// `(name, value)` pairs. Names are in lower case.
     pub headers: Vec<(String, String)>,
     pub body: String,
+    /// The exact bytes of the body, when they are not valid text (`body` is then lossy).
+    pub raw: Option<Vec<u8>>,
 }
 
 /// A value crossing the boundary with an `extern fun`: plain data, always copied.
@@ -254,6 +322,8 @@ pub enum HostValue {
     Int(i64),
     Float(f64),
     Str(String),
+    /// Bytes. To an external command they are a base64 string.
+    Bytes(Vec<u8>),
     Array(Vec<HostValue>),
     /// Entries in insertion order.
     Map(Vec<(HostValue, HostValue)>),
@@ -283,6 +353,17 @@ pub trait Host {
         Err(HostError::Unsupported("random"))
     }
 
+    /// Bytes that nobody can predict (tokens, salts, keys), from the operating system.
+    /// Unlike `random_u64` they never follow a seed. A host for tests may answer from its
+    /// seed; one that has no such source says so.
+    fn secure_random(&mut self, _n: usize) -> Result<Vec<u8>, HostError> {
+        Err(HostError::Unsupported("random"))
+    }
+
+    /// One line of the program's log (`Log.info(...)`): `level` is `debug`, `info`, `warn` or
+    /// `error`. A host with no place to write it drops the line.
+    fn log(&mut self, _level: &str, _message: &str, _fields: &[(String, String)]) {}
+
     /// Source text of a module, for `import`. `path` is already normalised.
     fn load_module(&mut self, _path: &str) -> Result<String, String> {
         Err("modules are not available in this environment".to_string())
@@ -304,6 +385,21 @@ pub trait Host {
     /// Write `content` to a file, replacing it entirely (creating it if needed).
     fn write_file(&mut self, _path: &str, _content: &str) -> Result<(), HostError> {
         Err(HostError::Unsupported("fs"))
+    }
+
+    /// Read a file's whole content as bytes. By default, the text of `read_file`.
+    fn read_file_bytes(&mut self, path: &str) -> Result<Vec<u8>, HostError> {
+        self.read_file(path).map(String::into_bytes)
+    }
+
+    /// Write bytes to a file, replacing it entirely. By default only text can be written.
+    fn write_file_bytes(&mut self, path: &str, content: &[u8]) -> Result<(), HostError> {
+        match std::str::from_utf8(content) {
+            Ok(text) => self.write_file(path, text),
+            Err(_) => Err(HostError::Other(
+                "this environment can only write text files".to_string(),
+            )),
+        }
     }
 
     /// The value of an environment variable, or `Ok(None)` if it is not set.
@@ -392,6 +488,8 @@ pub fn memory_exceeded() -> bool {
 #[derive(Default)]
 pub struct MemoryHost {
     pub output: String,
+    /// The lines of the program's log: `level message name=value...`.
+    pub logs: Vec<String>,
     pub input: std::collections::VecDeque<String>,
     pub files: std::collections::HashMap<String, String>,
     pub allow_read: bool,
@@ -484,6 +582,22 @@ impl Host for MemoryHost {
             return sql_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")));
         }
         std_call(self, name, args).unwrap_or(Err(HostError::Unsupported("extern")))
+    }
+
+    fn log(&mut self, level: &str, message: &str, fields: &[(String, String)]) {
+        let mut line = format!("{level} {message}");
+        for (k, v) in fields {
+            line.push_str(&format!(" {k}={v}"));
+        }
+        self.logs.push(line);
+    }
+
+    fn secure_random(&mut self, n: usize) -> Result<Vec<u8>, HostError> {
+        // a host for tests: the bytes follow the seed (never use this for real secrets)
+        let mut state = self.seed.ok_or(HostError::Unsupported("random"))?;
+        let out = (0..n).map(|_| splitmix64(&mut state) as u8).collect();
+        self.seed = Some(state);
+        Ok(out)
     }
 
     fn capabilities(&self) -> Capabilities {

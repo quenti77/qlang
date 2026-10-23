@@ -68,6 +68,12 @@ fn exchange(server: &Server, request: &str) -> String {
 
 fn exchange_port(port: u16, request: &str) -> String {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    // the server keeps a connection open for the next request: this one is the last
+    let request = if request.to_ascii_lowercase().contains("connection:") {
+        request.to_string()
+    } else {
+        request.replacen("\r\n", "\r\nConnection: close\r\n", 1)
+    };
     s.write_all(request.as_bytes()).unwrap();
     let mut out = String::new();
     s.read_to_string(&mut out).unwrap();
@@ -156,7 +162,7 @@ fn bad_requests_are_refused() {
     assert!(
         exchange(
             &server,
-            "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n"
+            "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: gzip\r\n\r\n"
         )
         .starts_with("HTTP/1.1 501")
     );
@@ -694,4 +700,222 @@ fn dev_mode_shows_the_error_and_production_does_not() {
     let prod = start("prod", WEB, &[]);
     let r = exchange(&prod, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(!r.contains("secret detail"), "{r}");
+}
+
+// ----------------------------------------------------------------- the server itself
+
+/// Reads one response with a `Content-Length` from a connection that stays open.
+fn read_one(s: &mut TcpStream) -> (String, Vec<u8>) {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut byte = [0u8; 1];
+    while !buf.ends_with(b"\r\n\r\n") {
+        s.read_exact(&mut byte).unwrap();
+        buf.push(byte[0]);
+    }
+    let head = String::from_utf8_lossy(&buf).to_string();
+    let len: usize = head
+        .lines()
+        .find_map(|l| {
+            l.to_ascii_lowercase()
+                .strip_prefix("content-length: ")
+                .map(|v| v.trim().parse().unwrap())
+        })
+        .unwrap_or(0);
+    let mut body = vec![0u8; len];
+    s.read_exact(&mut body).unwrap();
+    (head, body)
+}
+
+const SERVER: &str = r#"
+let n = 0
+
+fun handle(req: Request) -> Response
+  n += 1
+  if req.path == "/bytes" then
+    let raw = req.raw
+    if raw == none then
+      return Response.text("none")
+    end
+    let tail = bytes.from_array([0, 255])
+    if tail == none then
+      return Response.text("unreachable")
+    end
+    return Response.bytes(raw.concat(tail), "application/octet-stream")
+  end
+  if req.path == "/big" then
+    let line = "hello hello hello hello hello hello hello hello\n"
+    return Response.text(line.repeat(200))
+  end
+  if req.path == "/upload" then
+    let parts = req.multipart()
+    if parts.is_err() then
+      return Response.text(parts.unwrap_err().message).with_status(400)
+    end
+    let out = ""
+    for p in parts.unwrap() do
+      out += "{p.name}:{p.data.len()};"
+    end
+    return Response.text(out)
+  end
+  if req.path == "/events" then
+    let i = 0
+    return Response.sse(fun() -> SseEvent?
+      i += 1
+      if i > 3 then
+        return none
+      end
+      SseEvent { data: "tick {i}", event: "t" }
+    end)
+  end
+  if req.path == "/stream" then
+    let i = 0
+    return Response.stream("text/plain", fun() -> string?
+      i += 1
+      if i > 2 then none else "part{i}\n" end
+    end)
+  end
+  Response.text("n={n} body={req.body}")
+end
+"#;
+
+#[test]
+fn a_connection_stays_open_for_several_requests() {
+    let server = start("keepalive", SERVER, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    for expected in ["n=1", "n=2", "n=3"] {
+        s.write_all(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+        let (head, body) = read_one(&mut s);
+        assert!(head.contains("Connection: keep-alive"), "{head}");
+        assert!(String::from_utf8_lossy(&body).starts_with(expected));
+    }
+    // two requests sent at once are both answered, in order
+    s.write_all(b"GET /a HTTP/1.1\r\nHost: t\r\n\r\nGET /b HTTP/1.1\r\nHost: t\r\n\r\n")
+        .unwrap();
+    assert!(String::from_utf8_lossy(&read_one(&mut s).1).starts_with("n=4"));
+    assert!(String::from_utf8_lossy(&read_one(&mut s).1).starts_with("n=5"));
+    // `Connection: close` ends it
+    s.write_all(b"GET /c HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let (head, _) = read_one(&mut s);
+    assert!(head.contains("Connection: close"), "{head}");
+    let mut rest = Vec::new();
+    s.read_to_end(&mut rest).unwrap();
+    assert!(rest.is_empty());
+}
+
+#[test]
+fn a_chunked_body_is_decoded_and_100_continue_is_answered() {
+    let server = start("chunked", SERVER, &[]);
+    let r = exchange(
+        &server,
+        "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nTrailer: x\r\n\r\n",
+    );
+    assert!(r.ends_with("body=hello world"), "{r}");
+    // both framings at once are refused
+    let r = exchange(
+        &server,
+        "POST /x HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\nConnection: close\r\n\r\n0\r\n\r\n",
+    );
+    assert!(r.starts_with("HTTP/1.1 400"), "{r}");
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(
+        b"POST /x HTTP/1.1\r\nHost: t\r\nExpect: 100-continue\r\nContent-Length: 2\r\nConnection: close\r\n\r\n",
+    )
+    .unwrap();
+    let mut first = [0u8; 25];
+    s.read_exact(&mut first).unwrap();
+    assert!(String::from_utf8_lossy(&first).starts_with("HTTP/1.1 100 Continue"));
+    s.write_all(b"ok").unwrap();
+    let mut rest = String::new();
+    s.read_to_string(&mut rest).unwrap();
+    assert!(rest.ends_with("body=ok"), "{rest}");
+}
+
+#[test]
+fn bytes_go_in_and_out_unchanged() {
+    let server = start("binary", SERVER, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    let payload: Vec<u8> = vec![0xff, 0xfe, 0x00, b'a'];
+    let mut req = format!(
+        "POST /bytes HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        payload.len()
+    )
+    .into_bytes();
+    req.extend_from_slice(&payload);
+    s.write_all(&req).unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).unwrap();
+    assert!(
+        out.ends_with(&[0xff, 0xfe, 0x00, b'a', 0x00, 0xff]),
+        "{out:?}"
+    );
+    assert!(String::from_utf8_lossy(&out).contains("application/octet-stream"));
+}
+
+#[test]
+fn a_multipart_form_is_split_into_parts() {
+    let server = start("multipart", SERVER, &[]);
+    let body = "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n12345\r\n--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.bin\"\r\n\r\nabc\r\n--B--\r\n";
+    let r = exchange(
+        &server,
+        &format!(
+            "POST /upload HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Type: multipart/form-data; boundary=B\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(r.ends_with("a:5;f:3;"), "{r}");
+    let r = exchange(
+        &server,
+        "POST /upload HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx",
+    );
+    assert!(r.starts_with("HTTP/1.1 400"), "{r}");
+}
+
+#[test]
+fn an_answer_can_be_streamed_and_events_are_framed() {
+    let server = start("stream", SERVER, &[]);
+    let r = exchange(&server, "GET /stream HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("Transfer-Encoding: chunked"), "{r}");
+    assert!(
+        r.contains("6\r\npart1\n\r\n6\r\npart2\n\r\n0\r\n\r\n"),
+        "{r}"
+    );
+    let r = exchange(&server, "GET /events HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.contains("Content-Type: text/event-stream"), "{r}");
+    assert!(r.contains("event: t\ndata: tick 1\n\n"), "{r}");
+    assert!(r.contains("data: tick 3\n\n"), "{r}");
+    assert!(!r.contains("tick 4"), "{r}");
+    // the server goes on afterwards
+    let r = exchange(
+        &server,
+        "GET /x HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+}
+
+#[test]
+fn text_answers_are_compressed_only_when_asked_for_and_wanted() {
+    let plain = start("nogzip", SERVER, &[]);
+    let r = exchange(
+        &plain,
+        "GET /big HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n",
+    );
+    assert!(!r.contains("Content-Encoding"), "off by default");
+    let server = start("gzip", SERVER, &["--compress"]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(
+        b"GET /big HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip, br\r\nConnection: close\r\n\r\n",
+    )
+    .unwrap();
+    let (head, body) = read_one(&mut s);
+    assert!(head.contains("Content-Encoding: gzip"), "{head}");
+    assert!(head.contains("Vary: Accept-Encoding"), "{head}");
+    assert_eq!(&body[..2], &[0x1f, 0x8b], "gzip magic");
+    assert!(body.len() < 9600 / 4, "{} bytes", body.len());
+    // not asked: not compressed
+    let r = exchange(
+        &server,
+        "GET /big HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(!r.contains("Content-Encoding"), "{r}");
 }

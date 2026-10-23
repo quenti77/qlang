@@ -890,6 +890,9 @@ struct Request
     public url: string
     public headers: map<string, string> = {}
     public body: string? = none
+    --" The body as bytes, for a body that is not text (an upload, an image). For a received
+    request it is the exact body; for `http.send` it wins over `body`. --"
+    public raw: bytes? = none
     public path: string = ""
     public query: map<string, string> = {}
     public params: map<string, string> = {}
@@ -904,7 +907,113 @@ struct Request
     public attrs: map<string, Any> = {}
 end
 
+--" One part of a `multipart/form-data` body: a field of the form or a file. --"
+struct Part
+    public name: string
+    --" The name of the uploaded file, or `none` for an ordinary field. --"
+    public filename: string? = none
+    public content_type: string? = none
+    public data: bytes
+end
+
+impl Part
+    --" The content as text, or `none` if it is not valid text. --"
+    public fun text(self) -> string?
+        self.data.to_string()
+    end
+end
+
+fun multipart_param(header: string, key: string) -> string?
+    let found = regex.captures(header, "(?i)(?:^|[;\\s])" + key + "=\"([^\"]*)\"")
+    if found == none then
+        return none
+    end
+    found[1]
+end
+
+fun multipart_boundary(content_type: string) -> string?
+    let found = regex.captures(content_type, "(?i)boundary=(?:\"([^\"]+)\"|([^;\\s]+))")
+    if found == none then
+        return none
+    end
+    let quoted = found[1]
+    if quoted != none then
+        return quoted
+    end
+    found[2]
+end
+
+fun multipart_error(message: string) -> Result<array<Part>, Error>
+    Result<array<Part>, Error>.Err(Error { message: message })
+end
+
 impl Request
+    --" The parts of a `multipart/form-data` body (an HTML form with files): `err` when the request
+    is not one or its body is malformed. The files are in `Part.data`. --"
+    public fun multipart(self) -> Result<array<Part>, Error>
+        let kind = self.header("content-type")
+        if kind == none or not kind.lower().starts_with("multipart/form-data") then
+            return multipart_error("the body is not multipart/form-data")
+        end
+        let boundary = multipart_boundary(kind)
+        let raw = self.raw
+        if boundary == none or raw == none then
+            return multipart_error("the multipart body has no boundary or no content")
+        end
+        let delim = "--{boundary}".to_bytes()
+        let crlf = "\r\n".to_bytes()
+        let blank = "\r\n\r\n".to_bytes()
+        let after = "\r\n--{boundary}".to_bytes()
+        let first = raw.find(delim)
+        if first == none then
+            return multipart_error("the multipart body does not start with its boundary")
+        end
+        let parts: array<Part> = []
+        let pos = first + delim.len()
+        let total = raw.len()
+        while true do
+            let rest = raw.slice(pos, total)
+            if rest.starts_with("--".to_bytes()) then
+                break
+            end
+            if not rest.starts_with(crlf) then
+                return multipart_error("a multipart boundary is not followed by a line break")
+            end
+            let body = rest.slice(2, rest.len())
+            let head_end = body.find(blank)
+            if head_end == none then
+                return multipart_error("a multipart part has no end of headers")
+            end
+            let head_text = body.slice(0, head_end).to_string()
+            if head_text == none then
+                return multipart_error("the headers of a multipart part are not text")
+            end
+            let content = body.slice(head_end + 4, body.len())
+            let stop = content.find(after)
+            if stop == none then
+                return multipart_error("a multipart part is not closed by a boundary")
+            end
+            let disposition = ""
+            let content_type: string? = none
+            for line in head_text.split("\r\n") do
+                let lowered = line.lower()
+                if lowered.starts_with("content-disposition:") then
+                    disposition = line
+                end
+                if lowered.starts_with("content-type:") then
+                    content_type = line.substring(13, line.len()).trim()
+                end
+            end
+            let name = multipart_param(disposition, "name")
+            if name == none then
+                return multipart_error("a multipart part has no name")
+            end
+            parts.push(Part { name: name, filename: multipart_param(disposition, "filename"), content_type: content_type, data: content.slice(0, stop) })
+            pos = total - content.len() + stop + 2 + delim.len()
+        end
+        Result<array<Part>, Error>.Ok(parts)
+    end
+
     --" The values of the header `name` (whatever the case of `name`); empty when there is none. --"
     public fun header_all(self, name: string) -> array<string>
         let found = self.headers_all[name.lower()]
@@ -951,8 +1060,43 @@ struct Response
     public status: int
     public headers: map<string, string> = {}
     public body: string
+    --" The exact bytes of the body when it is not text; `body` is then a lossy text. A
+    program that answers with `raw` set sends these bytes instead of `body`. --"
+    public raw: bytes? = none
     --" The cookies to set: one `Set-Cookie` header each. --"
     public cookies: array<Cookie> = []
+    --" A body produced piece by piece: the server calls this function again and again and sends
+    each text it gives, until it gives `none`. The worker that answers is busy until then. --"
+    public stream: (fun() -> string?)? = none
+end
+
+--" One event of a server-sent events stream (`Response.sse`). --"
+struct SseEvent
+    public data: string
+    public event: string? = none
+    public id: string? = none
+    public retry: int? = none
+end
+
+impl SseEvent
+    --" The event as the browser reads it: `event:`, `id:`, `retry:` and a `data:` line for each
+    line of `data`, then an empty line. --"
+    public fun to_text(self) -> string
+        let out = ""
+        if self.event != none then
+            out += "event: {self.event}\n"
+        end
+        if self.id != none then
+            out += "id: {self.id}\n"
+        end
+        if self.retry != none then
+            out += "retry: {self.retry}\n"
+        end
+        for line in self.data.split("\n") do
+            out += "data: {line}\n"
+        end
+        out + "\n"
+    end
 end
 
 --" A cookie to send with a `Response`. `value` is sent percent-encoded (`Request.cookies` decodes
@@ -996,6 +1140,28 @@ impl Response
     --" A JSON response (status 200) with the JSON text `body`. --"
     public fun json(body: string) -> Response
         Response { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body }
+    end
+
+    --" A response whose body is produced piece by piece: the server calls `next` again and again,
+    sends each text it gives (right away) and ends when it gives `none`. For long answers and
+    events. While it runs, the worker that answers serves only this connection (give
+    `--workers` enough). --"
+    public fun stream(content_type: string, next: fun() -> string?) -> Response
+        Response { status: 200, headers: { "Content-Type": content_type, "Cache-Control": "no-cache", "X-Accel-Buffering": "no" }, body: "", stream: next }
+    end
+
+    --" A server-sent events response (`text/event-stream`): `next` gives the events one after the
+    other, waiting (`time.sleep`) between them if it wants; `none` ends the stream. --"
+    public fun sse(next: fun() -> SseEvent?) -> Response
+        Response.stream("text/event-stream", fun() -> string?
+            let e = next()
+            if e == none then none else e.to_text() end
+        end)
+    end
+
+    --" A response (status 200) with these bytes as its body and this `Content-Type`. --"
+    public fun bytes(data: bytes, content_type: string) -> Response
+        Response { status: 200, headers: { "Content-Type": content_type }, body: "", raw: data }
     end
 
     --" A redirection (status 302) to `location`. --"
@@ -1174,6 +1340,8 @@ end
 -- The host provides the disk, the process environment and the network too.
 extern fun fs_read(path: string) -> Result<string, Error>
 extern fun fs_write(path: string, content: string) -> Result<bool, Error>
+extern fun fs_read_bytes(path: string) -> Result<bytes, Error>
+extern fun fs_write_bytes(path: string, content: bytes) -> Result<bool, Error>
 extern fun env_get(name: string) -> string?
 extern fun env_args() -> array<string>
 extern fun http_send(req: Request) -> Result<Response, Error>
@@ -1191,6 +1359,119 @@ impl fs
     --" Writes `content` to a file, replacing it entirely (creating it if needed). Needs disk access. --"
     public fun write(path: string, content: string) -> Result<bool, Error>
         fs_write(path, content)
+    end
+
+    --" Reads a file's whole content as bytes (an image, an archive). Needs disk access. --"
+    public fun read_bytes(path: string) -> Result<bytes, Error>
+        fs_read_bytes(path)
+    end
+
+    --" Writes bytes to a file, replacing it entirely (creating it if needed). Needs disk access. --"
+    public fun write_bytes(path: string, content: bytes) -> Result<bool, Error>
+        fs_write_bytes(path, content)
+    end
+end
+
+-- The host provides secure randomness and password hashing.
+extern fun secure_random_bytes(n: int) -> Result<bytes, Error>
+extern fun constant_time_eq(a: bytes, b: bytes) -> bool
+extern fun password_hash(plain: string) -> Result<string, Error>
+extern fun password_verify(plain: string, hash: string) -> Result<bool, Error>
+extern fun password_needs_rehash(hash: string) -> Result<bool, Error>
+
+-- The host writes the program's log (every host has this one).
+extern fun log_write(level: string, message: string, fields: map<string, string>) -> bool
+
+--" The program's log: `Log.info("started")`, with the levels `debug`, `info`, `warn` and
+`error`. The `qlang` command writes each line on its standard error (`--log-level warn` hides the
+lower ones, `--log-format json` writes JSON); another host may keep the lines or drop them. --"
+struct Log
+end
+
+impl Log
+    --" Writes `message` at the level `level` with extra `name: value` pairs (`"debug"`, `"info"`,
+    `"warn"` or `"error"`; any other level is written as `info`). --"
+    public fun write(level: string, message: string, fields: map<string, string>)
+        let known = level == "debug" or level == "info" or level == "warn" or level == "error"
+        log_write(if known then level else "info" end, message, fields)
+    end
+
+    --" A detail for whoever looks for a problem. --"
+    public fun debug(message: string)
+        log_write("debug", message, {})
+    end
+
+    --" Something that happened and is worth knowing. --"
+    public fun info(message: string)
+        log_write("info", message, {})
+    end
+
+    --" Something odd that the program survives. --"
+    public fun warn(message: string)
+        log_write("warn", message, {})
+    end
+
+    --" Something that failed. --"
+    public fun error(message: string)
+        log_write("error", message, {})
+    end
+end
+
+--" Secrets: random bytes nobody can guess, and a comparison that does not leak where two
+secrets differ. Needs a source of secure randomness (the `qlang` command has one). --"
+struct Crypto
+end
+
+impl Crypto
+    --" `n` bytes (0 to 1048576) from the operating system's secure source: never the seeded
+    generator of `random`. --"
+    public fun random_bytes(n: int) -> Result<bytes, Error>
+        secure_random_bytes(n)
+    end
+
+    --" A token for a session, a reset link or an API key: `n` secure random bytes written in
+    URL-safe base64 (32 bytes give 43 characters). --"
+    public fun token(n: int) -> Result<string, Error>
+        let r = secure_random_bytes(n)
+        if r.is_err() then
+            return Result<string, Error>.Err(r.unwrap_err())
+        end
+        Result<string, Error>.Ok(Base64.encode_url_bytes(r.unwrap()))
+    end
+
+    --" `true` if the two texts are equal. It takes the same time wherever they differ, so it is the
+    way to compare a token, a signature or a hash with one received. --"
+    public fun equal(a: string, b: string) -> bool
+        constant_time_eq(a.to_bytes(), b.to_bytes())
+    end
+
+    --" Like `equal` for bytes. --"
+    public fun equal_bytes(a: bytes, b: bytes) -> bool
+        constant_time_eq(a, b)
+    end
+end
+
+--" Passwords: `Password.hash` makes a text to store (Argon2id, with its own random salt and
+settings inside), `Password.verify` checks a password against it. Never store the password
+itself. Only the `qlang` command offers it. --"
+struct Password
+end
+
+impl Password
+    --" The hash of `plain`, to keep in the database. Slow on purpose (tens of milliseconds). --"
+    public fun hash(plain: string) -> Result<string, Error>
+        password_hash(plain)
+    end
+
+    --" `true` if `plain` is the password `hash` was made from; `err` if `hash` is not a hash. --"
+    public fun verify(plain: string, hash: string) -> Result<bool, Error>
+        password_verify(plain, hash)
+    end
+
+    --" `true` if `hash` was made with weaker settings than today's: hash the password again, after
+    a successful `verify`, and store the new one. --"
+    public fun needs_rehash(hash: string) -> Result<bool, Error>
+        password_needs_rehash(hash)
     end
 end
 

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 const MAX_BODY: usize = 1 << 20;
-const MAX_CONNECTIONS: usize = 16;
+const MAX_CONNECTIONS: usize = 64;
 
 pub fn serve(args: &[&str]) -> ExitCode {
     let mut port: u16 = 8080;
@@ -46,6 +46,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                 }
             }
             "--watch" => app.watch = true,
+            "--compress" => app.compress = true,
             "--dev" => DEV.store(true, Ordering::SeqCst),
             "--trust-externs" => app.trust_externs = true,
             "--allow-process" => app.allow_process = true,
@@ -261,8 +262,9 @@ fn respond(stream: TcpStream, status: u16, body: &str) -> std::io::Result<()> {
     )
 }
 
-/// Writes a response. Header names and values with line breaks are dropped (a program could
-/// otherwise split the response), and the ones this server decides itself are ignored.
+/// Writes a response and closes the connection. Header names and values with line breaks are
+/// dropped (a program could otherwise split the response), and the ones this server decides
+/// itself are ignored.
 fn write_response(
     mut stream: TcpStream,
     status: u16,
@@ -270,6 +272,11 @@ fn write_response(
     body: &[u8],
     head_only: bool,
 ) -> std::io::Result<()> {
+    write_to(&mut stream, status, headers, body, head_only, false)
+}
+
+/// The head of a response: the status line and the headers a program may set.
+fn response_head(status: u16, headers: &[(String, String)]) -> String {
     let mut head = format!("HTTP/1.1 {status} {}\r\n", reason(status));
     for (name, value) in headers {
         let fixed = ["content-length", "connection", "transfer-encoding"]
@@ -281,9 +288,23 @@ fn write_response(
             head.push_str(&format!("{name}: {value}\r\n"));
         }
     }
+    head
+}
+
+/// Writes a response on a connection that stays open when `keep_alive` is true.
+fn write_to(
+    stream: &mut TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    body: &[u8],
+    head_only: bool,
+    keep_alive: bool,
+) -> std::io::Result<()> {
+    let mut head = response_head(status, headers);
     head.push_str(&format!(
-        "Content-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
+        "Content-Length: {}\r\nConnection: {}\r\n\r\n",
+        body.len(),
+        if keep_alive { "keep-alive" } else { "close" }
     ));
     stream.write_all(head.as_bytes())?;
     if !head_only {
@@ -296,8 +317,30 @@ fn write_response(
 struct Parsed {
     method: String,
     target: String,
+    /// `HTTP/1.1`
+    version: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+}
+
+impl Parsed {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Whether the client wants the connection kept for another request.
+    fn keeps_alive(&self) -> bool {
+        let tokens = self.header("connection").unwrap_or("").to_ascii_lowercase();
+        let has = |t: &str| tokens.split(',').any(|x| x.trim() == t);
+        if self.version == "HTTP/1.0" {
+            has("keep-alive")
+        } else {
+            !has("close")
+        }
+    }
 }
 
 /// How long a client has to send its whole request.
@@ -313,16 +356,20 @@ fn wait_for_data(stream: &TcpStream, deadline: Instant) -> bool {
     true
 }
 
-/// Reads one request. On failure, the status and message to answer with (`None`: the client
-/// went away, nothing to answer).
+/// Reads one request. `carry` holds what an earlier read took beyond its own request (the start
+/// of the next one on a connection kept open) and is given the same way back. With `idle`, a
+/// connection that stays silent before the first byte just ends (`Err(None)`). On failure, the
+/// status and message to answer with (`None`: the client went away, nothing to answer).
 fn read_request(
     stream: &mut TcpStream,
+    carry: &mut Vec<u8>,
     max_body: usize,
+    idle: Option<Duration>,
 ) -> Result<Parsed, Option<(u16, &'static str)>> {
     // the whole request must arrive in time, not just every piece of it: a client sending a
     // byte every few seconds would otherwise hold one of the few connections for ever
-    let deadline = Instant::now() + READ_DEADLINE;
-    let mut buf: Vec<u8> = Vec::new();
+    let mut deadline = Instant::now() + READ_DEADLINE;
+    let mut buf: Vec<u8> = std::mem::take(carry);
     let mut chunk = [0u8; 8192];
     let header_end = loop {
         if let Some(p) = find(&buf, b"\r\n\r\n") {
@@ -330,6 +377,18 @@ fn read_request(
         }
         if buf.len() > 64 * 1024 {
             return Err(Some((400, "headers too large")));
+        }
+        if let (true, Some(wait)) = (buf.is_empty(), idle) {
+            // a connection kept open: waiting for the next request is not an error
+            let _ = stream.set_read_timeout(Some(wait));
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => return Err(None),
+                Ok(n) => {
+                    buf.extend_from_slice(&chunk[..n]);
+                    deadline = Instant::now() + READ_DEADLINE;
+                }
+            }
+            continue;
         }
         if !wait_for_data(stream, deadline) {
             return Err(Some((408, "request timeout")));
@@ -343,9 +402,10 @@ fn read_request(
     let mut lines = head.lines();
     let request_line = lines.next().unwrap_or("");
     let mut parts = request_line.split_whitespace();
-    let (method, target) = (
+    let (method, target, version) = (
         parts.next().unwrap_or("").to_string(),
         parts.next().unwrap_or("").to_string(),
+        parts.next().unwrap_or("HTTP/1.0").to_string(),
     );
     if method.is_empty() || target.is_empty() {
         return Err(Some((400, "malformed request")));
@@ -360,8 +420,14 @@ fn read_request(
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.as_str())
     };
-    if header("transfer-encoding").is_some() {
-        return Err(Some((501, "chunked requests are not supported")));
+    let chunked = match header("transfer-encoding") {
+        None => false,
+        Some(v) if v.eq_ignore_ascii_case("chunked") => true,
+        Some(_) => return Err(Some((501, "this transfer encoding is not supported"))),
+    };
+    // both at once is how requests get smuggled past a proxy: refuse it
+    if chunked && header("content-length").is_some() {
+        return Err(Some((400, "both Content-Length and Transfer-Encoding")));
     }
     let content_length = header("content-length")
         .and_then(|v| v.parse::<usize>().ok())
@@ -369,23 +435,111 @@ fn read_request(
     if content_length > max_body {
         return Err(Some((413, "request too large")));
     }
-    let mut body: Vec<u8> = buf[header_end + 4..].to_vec();
-    while body.len() < content_length {
-        if !wait_for_data(stream, deadline) {
-            return Err(Some((408, "request timeout")));
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => body.extend_from_slice(&chunk[..n]),
-        }
+    let mut rest: Vec<u8> = buf[header_end + 4..].to_vec();
+    // a client waiting for permission before it sends a big body
+    if header("expect").is_some_and(|v| v.eq_ignore_ascii_case("100-continue"))
+        && (chunked || rest.len() < content_length)
+    {
+        let _ = stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n");
     }
-    body.truncate(content_length);
+    let body = if chunked {
+        read_chunked(stream, &mut rest, max_body, deadline)?
+    } else {
+        while rest.len() < content_length {
+            if !wait_for_data(stream, deadline) {
+                return Err(Some((408, "request timeout")));
+            }
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => rest.extend_from_slice(&chunk[..n]),
+            }
+        }
+        // what comes after the body is the start of the next request
+        let extra = rest.split_off(content_length.min(rest.len()));
+        *carry = extra;
+        std::mem::take(&mut rest)
+    };
+    if chunked {
+        // `rest` was left holding what followed the last chunk
+        *carry = rest;
+    }
     Ok(Parsed {
         method,
         target,
+        version,
         headers,
         body,
     })
+}
+
+/// Decodes a body sent in chunks (`Transfer-Encoding: chunked`). `rest` holds what was already
+/// read after the headers and is left with what follows the last chunk.
+fn read_chunked(
+    stream: &mut TcpStream,
+    rest: &mut Vec<u8>,
+    max_body: usize,
+    deadline: Instant,
+) -> Result<Vec<u8>, Option<(u16, &'static str)>> {
+    let mut body: Vec<u8> = Vec::new();
+    let mut tmp = [0u8; 8192];
+    // makes sure `rest` has a line (up to CRLF) or enough bytes
+    let mut more = |rest: &mut Vec<u8>| -> Result<(), Option<(u16, &'static str)>> {
+        if !wait_for_data(stream, deadline) {
+            return Err(Some((408, "request timeout")));
+        }
+        match stream.read(&mut tmp) {
+            Ok(0) | Err(_) => Err(None),
+            Ok(n) => {
+                rest.extend_from_slice(&tmp[..n]);
+                Ok(())
+            }
+        }
+    };
+    loop {
+        // the size line
+        let line_end = loop {
+            if let Some(p) = find(rest, b"\r\n") {
+                break p;
+            }
+            if rest.len() > 1024 {
+                return Err(Some((400, "malformed chunk")));
+            }
+            more(rest)?;
+        };
+        let line = String::from_utf8_lossy(&rest[..line_end]).to_string();
+        let size_text = line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .map_err(|_| Some((400, "malformed chunk size")))?;
+        rest.drain(..line_end + 2);
+        if size == 0 {
+            // trailers, up to the empty line that ends the message
+            loop {
+                if let Some(p) = find(rest, b"\r\n") {
+                    let empty = p == 0;
+                    rest.drain(..p + 2);
+                    if empty {
+                        return Ok(body);
+                    }
+                    continue;
+                }
+                if rest.len() > 8192 {
+                    return Err(Some((400, "trailers too large")));
+                }
+                more(rest)?;
+            }
+        }
+        if body.len() + size > max_body {
+            return Err(Some((413, "request too large")));
+        }
+        while rest.len() < size + 2 {
+            more(rest)?;
+        }
+        body.extend_from_slice(&rest[..size]);
+        if &rest[size..size + 2] != b"\r\n" {
+            return Err(Some((400, "malformed chunk")));
+        }
+        rest.drain(..size + 2);
+    }
 }
 
 /// Whether the server listens on this machine only.
@@ -430,7 +584,7 @@ fn refuse_browser(request: &Parsed, loopback: bool) -> Option<&'static str> {
 }
 
 fn handle_connection(mut stream: TcpStream, loopback: bool) {
-    let request = match read_request(&mut stream, MAX_BODY) {
+    let request = match read_request(&mut stream, &mut Vec::new(), MAX_BODY, None) {
         Ok(r) => r,
         Err(Some((status, message))) => {
             let _ = respond(stream, status, &format!("{{\"error\":\"{message}\"}}"));
@@ -479,6 +633,8 @@ struct AppOptions {
     allow_process: bool,
     /// Reload the program when one of its files changes (`--watch`).
     watch: bool,
+    /// Compress text answers for clients that accept gzip (`--compress`).
+    compress: bool,
     providers: Vec<crate::providers::Spec>,
     packages: crate::packages::Packages,
 }
@@ -487,6 +643,8 @@ struct AppOptions {
 struct Job {
     request: AppRequest,
     reply: mpsc::Sender<Result<AppResponse, String>>,
+    /// The pieces of an answer that is streamed (see `AppResponse::stream`).
+    chunks: mpsc::Sender<Vec<u8>>,
 }
 
 enum Msg {
@@ -599,7 +757,7 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
                     let (jobs, opts) = (jobs.clone(), opts.clone());
                     let _ = std::thread::Builder::new().spawn(move || {
                         let _slot = slot;
-                        serve_connection(stream, &jobs, opts.static_dir.as_deref());
+                        serve_connection(stream, &jobs, &opts);
                     });
                 }
             });
@@ -812,7 +970,25 @@ fn worker(
                     let answer = app
                         .handle(job.request)
                         .map_err(|d| d.render(&program.sources));
+                    let streaming = matches!(&answer, Ok(r) if r.stream);
                     let _ = job.reply.send(answer);
+                    if streaming {
+                        // this worker serves the stream until it ends or the client leaves
+                        loop {
+                            match app.next_chunk() {
+                                Ok(Some(text)) => {
+                                    if job.chunks.send(text.into_bytes()).is_err() {
+                                        break;
+                                    }
+                                }
+                                Ok(None) => break,
+                                Err(d) => {
+                                    log(&d.render(&program.sources));
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(Msg::Stop) | Err(_) => return Ok(()),
             }
@@ -912,23 +1088,51 @@ fn static_file(dir: &Path, path: &str) -> Option<PathBuf> {
 /// Biggest file served with `--static` (bigger ones would be read whole into memory).
 const MAX_STATIC: u64 = 50 << 20;
 
-fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir: Option<&Path>) {
+/// How many requests one connection may carry, and how long it may stay quiet between two.
+const KEEP_ALIVE_REQUESTS: usize = 100;
+const KEEP_ALIVE_IDLE: Duration = Duration::from_secs(5);
+
+/// Answers the requests of one connection, one after the other while the client wants it.
+fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, opts: &AppOptions) {
+    let mut carry: Vec<u8> = Vec::new();
+    for n in 0..KEEP_ALIVE_REQUESTS {
+        let idle = (n > 0).then_some(KEEP_ALIVE_IDLE);
+        let more = serve_one(&mut stream, &mut carry, jobs, opts, idle);
+        if !more || STOPPING.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+}
+
+/// Reads and answers one request; `true` when the connection can serve another.
+fn serve_one(
+    stream: &mut TcpStream,
+    carry: &mut Vec<u8>,
+    jobs: &mpsc::Sender<Msg>,
+    opts: &AppOptions,
+    idle: Option<Duration>,
+) -> bool {
     let started = Instant::now();
-    let request = match read_request(&mut stream, MAX_BODY) {
+    let request = match read_request(stream, carry, MAX_BODY, idle) {
         Ok(r) => r,
         Err(Some((status, message))) => {
-            let _ = write_response(stream, status, &[], message.as_bytes(), false);
-            return;
+            let _ = write_to(stream, status, &[], message.as_bytes(), false, false);
+            return false;
         }
-        Err(None) => return,
+        Err(None) => return false,
     };
+    let keep = request.keeps_alive() && !STOPPING.load(Ordering::SeqCst);
     let head_only = request.method == "HEAD";
     let line = format!("{} {}", request.method, request.target);
+    let accepts_gzip = opts.compress
+        && request
+            .header("accept-encoding")
+            .is_some_and(|v| v.to_ascii_lowercase().contains("gzip"));
     let (path, query) = split_target(&request.target);
 
     // files first, like a web server in front of the program
     if let (Some(dir), true) = (
-        static_dir,
+        opts.static_dir.as_deref(),
         matches!(request.method.as_str(), "GET" | "HEAD"),
     ) && let Some(file) = static_file(dir, &path)
         && std::fs::metadata(&file)
@@ -936,16 +1140,17 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
             .unwrap_or(false)
         && let Ok(bytes) = std::fs::read(&file)
     {
-        let headers = [
+        let mut headers = vec![
             ("Content-Type".to_string(), content_type(&file).to_string()),
             ("X-Content-Type-Options".to_string(), "nosniff".to_string()),
         ];
-        let _ = write_response(stream, 200, &headers, &bytes, head_only);
+        let body = compressed(&mut headers, bytes, accepts_gzip);
+        let sent = write_to(stream, 200, &headers, &body, head_only, keep).is_ok();
         log(&format!(
             "{line} -> 200 static ({} ms)\n",
             started.elapsed().as_millis()
         ));
-        return;
+        return keep && sent;
     }
 
     let body = if request.body.is_empty() {
@@ -954,11 +1159,17 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
         Some(String::from_utf8_lossy(&request.body).to_string())
     };
     let (reply, answer) = mpsc::channel();
+    let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
     let app_request = AppRequest {
         method: request.method,
         url: request.target,
         headers: request.headers,
         body,
+        raw: if request.body.is_empty() {
+            None
+        } else {
+            Some(request.body)
+        },
         path,
         query,
     };
@@ -967,17 +1178,49 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
             .send(Msg::Job(Job {
                 request: app_request,
                 reply,
+                chunks: chunk_tx,
             }))
             .is_err()
     {
-        let _ = write_response(stream, 503, &[], b"server stopping", false);
-        return;
+        let _ = write_to(stream, 503, &[], b"server stopping", false, false);
+        return false;
     }
     let text_plain = [(
         "Content-Type".to_string(),
         "text/plain; charset=utf-8".to_string(),
     )];
+    let mut keep = keep;
     let status = match answer.recv_timeout(ANSWER_TIMEOUT) {
+        Ok(Ok(r)) if r.stream => {
+            // an answer written as the program produces it: chunked, and the connection ends
+            let mut head = response_head(u16::try_from(r.status).unwrap_or(500), &r.headers);
+            if !r
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
+                head.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+            }
+            head.push_str("Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+            keep = false;
+            if stream.write_all(head.as_bytes()).is_ok() && stream.flush().is_ok() {
+                if !head_only {
+                    while let Ok(chunk) = chunk_rx.recv_timeout(STREAM_IDLE) {
+                        if chunk.is_empty() {
+                            continue;
+                        }
+                        let framed =
+                            [format!("{:x}\r\n", chunk.len()).as_bytes(), &chunk, b"\r\n"].concat();
+                        if stream.write_all(&framed).is_err() || stream.flush().is_err() {
+                            // the client left: dropping `chunk_rx` stops the program's stream
+                            break;
+                        }
+                    }
+                }
+                let _ = stream.write_all(b"0\r\n\r\n");
+            }
+            r.status as u16
+        }
         Ok(Ok(r)) => {
             let mut headers = r.headers;
             if !headers
@@ -991,7 +1234,14 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
                 .ok()
                 .filter(|s| (100..=599).contains(s))
                 .unwrap_or(500);
-            let _ = write_response(stream, status, &headers, r.body.as_bytes(), head_only);
+            let payload = match r.raw {
+                Some(raw) => raw,
+                None => r.body.into_bytes(),
+            };
+            let payload = compressed(&mut headers, payload, accepts_gzip);
+            if write_to(stream, status, &headers, &payload, head_only, keep).is_err() {
+                keep = false;
+            }
             status
         }
         Ok(Err(diagnostic)) => {
@@ -1002,17 +1252,21 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
             } else {
                 "Internal Server Error".to_string()
             };
-            let _ = write_response(stream, 500, &text_plain, shown.as_bytes(), head_only);
+            if write_to(stream, 500, &text_plain, shown.as_bytes(), head_only, keep).is_err() {
+                keep = false;
+            }
             500
         }
         Err(_) => {
-            let _ = write_response(
+            let _ = write_to(
                 stream,
                 504,
                 &[],
                 b"the program took too long to answer",
                 false,
+                false,
             );
+            keep = false;
             504
         }
     };
@@ -1020,6 +1274,54 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
         "{line} -> {status} ({} ms)\n",
         started.elapsed().as_millis()
     ));
+    keep
+}
+
+/// How long a stream may stay without a new piece before the connection gives up.
+const STREAM_IDLE: Duration = Duration::from_secs(3600);
+
+/// The smallest body worth compressing, and the kinds of content that compress well.
+const MIN_COMPRESS: usize = 1024;
+
+fn compressible(content_type: &str) -> bool {
+    let t = content_type.to_ascii_lowercase();
+    t.starts_with("text/")
+        || t.contains("json")
+        || t.contains("javascript")
+        || t.contains("xml")
+        || t.contains("svg")
+}
+
+/// The body gzip-compressed (and the headers saying so), when the client accepts it, the
+/// content is the kind that shrinks and the program did not choose an encoding itself.
+fn compressed(headers: &mut Vec<(String, String)>, body: Vec<u8>, accepted: bool) -> Vec<u8> {
+    let has = |name: &str, headers: &[(String, String)]| {
+        headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+    };
+    let kind = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| "text/plain".to_string());
+    if !accepted
+        || body.len() < MIN_COMPRESS
+        || !compressible(&kind)
+        || has("content-encoding", headers)
+    {
+        return body;
+    }
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    if enc.write_all(&body).is_err() {
+        return body;
+    }
+    match enc.finish() {
+        Ok(out) if out.len() < body.len() => {
+            headers.push(("Content-Encoding".to_string(), "gzip".to_string()));
+            headers.push(("Vary".to_string(), "Accept-Encoding".to_string()));
+            out
+        }
+        _ => body,
+    }
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {

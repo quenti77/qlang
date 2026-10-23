@@ -437,7 +437,8 @@ impl Checker {
             | (Ty::Str, Ty::Str)
             | (Ty::Uuid, Ty::Uuid)
             | (Ty::Ulid, Ty::Ulid)
-            | (Ty::DateTime, Ty::DateTime) => true,
+            | (Ty::DateTime, Ty::DateTime)
+            | (Ty::Bytes, Ty::Bytes) => true,
             (Ty::Enum(x, xa), Ty::Enum(y, ya)) => {
                 // variants with data are compared field by field, so those must be comparable
                 x == y

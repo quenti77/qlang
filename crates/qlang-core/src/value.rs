@@ -34,6 +34,8 @@ pub enum Value {
     Ulid(Id),
     /// Milliseconds since 1970 (UTC).
     DateTime(i64),
+    /// Bytes: never changed, so a copy is just another handle.
+    Bytes(Rc<[u8]>),
     /// Arrays and structs are shared: copying a value copies the reference.
     Array(Rc<RefCell<Vec<Value>>>),
     /// Keys keep their insertion order.

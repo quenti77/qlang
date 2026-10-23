@@ -304,6 +304,55 @@ pub const STRING: &[Entry] = &[
         "other",
         "`true` if the strings are equal, ignoring upper/lower case.",
     ),
+    ("to_bytes", "", "The UTF-8 bytes of the string."),
+];
+
+pub const BYTES: &[Entry] = &[
+    ("len", "", "Number of bytes."),
+    ("is_empty", "", "`true` if there is no byte."),
+    (
+        "at",
+        "index",
+        "The byte (0 to 255) at `index`, or `none` outside the bytes.",
+    ),
+    (
+        "slice",
+        "start, end",
+        "The bytes from `start` (included) to `end` (excluded); both are kept inside the bytes.",
+    ),
+    ("concat", "other", "These bytes followed by `other`."),
+    (
+        "to_string",
+        "",
+        "The text these bytes spell in UTF-8, or `none` if they are not valid text.",
+    ),
+    (
+        "to_array",
+        "",
+        "The bytes as an array of integers from 0 to 255.",
+    ),
+    ("hex", "", "The bytes in lower-case hexadecimal."),
+    ("base64", "", "The bytes in base64 (with `=` padding)."),
+    (
+        "find",
+        "needle",
+        "Index of the first `needle` inside the bytes, or `none`.",
+    ),
+    (
+        "contains",
+        "needle",
+        "`true` if `needle` is inside the bytes.",
+    ),
+    (
+        "starts_with",
+        "prefix",
+        "`true` if the bytes begin with `prefix`.",
+    ),
+    (
+        "ends_with",
+        "suffix",
+        "`true` if the bytes end with `suffix`.",
+    ),
 ];
 
 pub const UUID: &[Entry] = &[(
@@ -770,6 +819,118 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
         "hmac_sha256(key: string, message: string) -> string",
         "The HMAC-SHA-256 of `message` under `key`, as 64 hexadecimal characters.",
     ),
+    (
+        "bytes",
+        "function",
+        "empty",
+        "empty() -> bytes",
+        "No byte at all.",
+    ),
+    (
+        "bytes",
+        "function",
+        "from_array",
+        "from_array(values: array<int>) -> bytes?",
+        "The bytes whose values are listed, or `none` if one is not from 0 to 255.",
+    ),
+    (
+        "random",
+        "function",
+        "bytes",
+        "bytes(n: int) -> bytes",
+        "`n` random bytes (0 to 1048576). Needs randomness; for secrets (tokens, salts) the host must give real randomness, not a seeded generator.",
+    ),
+    (
+        "Base64",
+        "function",
+        "encode_bytes",
+        "encode_bytes(data: bytes) -> string",
+        "The base64 text (with `=` padding) of `data`.",
+    ),
+    (
+        "Base64",
+        "function",
+        "encode_url_bytes",
+        "encode_url_bytes(data: bytes) -> string",
+        "Like `encode_bytes` with the URL-safe alphabet and no padding.",
+    ),
+    (
+        "Base64",
+        "function",
+        "decode_bytes",
+        "decode_bytes(text: string) -> bytes?",
+        "The bytes a base64 string stands for (either alphabet), or `none` if it is not base64.",
+    ),
+    (
+        "Hex",
+        "function",
+        "encode_bytes",
+        "encode_bytes(data: bytes) -> string",
+        "`data` in lower-case hexadecimal.",
+    ),
+    (
+        "Hex",
+        "function",
+        "decode_bytes",
+        "decode_bytes(text: string) -> bytes?",
+        "The bytes a hexadecimal string stands for, or `none`.",
+    ),
+    (
+        "Url",
+        "function",
+        "encode_bytes",
+        "encode_bytes(data: bytes) -> string",
+        "`data` percent-encoded.",
+    ),
+    (
+        "Url",
+        "function",
+        "decode_bytes",
+        "decode_bytes(text: string) -> bytes?",
+        "The bytes a percent-encoded string stands for, or `none` if a `%` is malformed.",
+    ),
+    (
+        "Hash",
+        "function",
+        "sha256_bytes",
+        "sha256_bytes(data: bytes) -> string",
+        "The SHA-256 of `data` in hexadecimal.",
+    ),
+    (
+        "Hash",
+        "function",
+        "sha1_bytes",
+        "sha1_bytes(data: bytes) -> string",
+        "The SHA-1 of `data` in hexadecimal (not for security).",
+    ),
+    (
+        "Hash",
+        "function",
+        "md5_bytes",
+        "md5_bytes(data: bytes) -> string",
+        "The MD5 of `data` in hexadecimal (not for security).",
+    ),
+    (
+        "Hash",
+        "function",
+        "sha256_raw",
+        "sha256_raw(data: bytes) -> bytes",
+        "The 32 bytes of the SHA-256 of `data`.",
+    ),
+    (
+        "Hash",
+        "function",
+        "hmac_sha256_bytes",
+        "hmac_sha256_bytes(key: bytes, message: bytes) -> string",
+        "The HMAC-SHA-256 of `message` under `key`, in hexadecimal.",
+    ),
+    (
+        "Hash",
+        "function",
+        "hmac_sha256_raw",
+        "hmac_sha256_raw(key: bytes, message: bytes) -> bytes",
+        "The 32 bytes of the HMAC-SHA-256 of `message` under `key`.",
+    ),
 ];
 
 /// Built-in functions: (name, signature, explanation).
@@ -815,6 +976,7 @@ pub fn methods(owner: &str) -> &'static [Entry] {
         "uuid" => UUID,
         "ulid" => ULID,
         "datetime" => DATETIME,
+        "bytes" => BYTES,
         "int" => INT,
         "float" => FLOAT,
         _ => &[],

@@ -3,6 +3,7 @@
 //! Everything that reaches outside goes through the [`Host`]. Execution is
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
+mod bytes;
 mod dynamic;
 mod externs;
 mod reflect;
@@ -94,6 +95,8 @@ pub struct AppRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// The exact bytes of the body (`Request.raw`).
+    pub raw: Option<Vec<u8>>,
     /// The decoded path of the target (`/items`).
     pub path: String,
     /// The decoded query parameters, in order (a repeated name: the last value wins).
@@ -106,6 +109,11 @@ pub struct AppResponse {
     pub status: i64,
     pub headers: Vec<(String, String)>,
     pub body: String,
+    /// When set, these bytes are the body (`Response.raw`).
+    pub raw: Option<Vec<u8>>,
+    /// The answer is written piece by piece: the caller asks [`App::next_chunk`] until it
+    /// gives `None` (`body` is not used).
+    pub stream: bool,
 }
 
 /// A program that serves requests: its top-level code ran once (it keeps its variables, like
@@ -223,6 +231,56 @@ impl App<'_> {
     }
 }
 
+impl App<'_> {
+    /// The next piece of a streamed answer (`Response.stream`): `None` when it is over. Each
+    /// call has a fresh step budget; an error ends the stream.
+    pub fn next_chunk(&mut self) -> Result<Option<String>, Box<Diagnostic>> {
+        let it = &mut self.it;
+        let Some(f) = it.stream_fn.clone() else {
+            return Ok(None);
+        };
+        it.steps = 0;
+        it.depth = 0;
+        it.out_bytes = 0;
+        it.frames.clear();
+        it.fmt_depth = 0;
+        it.fmt_nodes = 0;
+        let prog = it.prog;
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            it.call_value(&f, Vec::new(), Default::default())
+        }));
+        let done = |it: &mut Interp<'_>| it.stream_fn = None;
+        match outcome {
+            Ok(Ok(Value::Str(ref s))) => Ok(Some(s.to_string())),
+            Ok(Ok(Value::None)) => {
+                done(&mut self.it);
+                Ok(None)
+            }
+            Ok(Ok(_)) => {
+                done(&mut self.it);
+                Err(Box::new(Diagnostic::error(
+                    "R071",
+                    "the function of `Response.stream` must give a string, or `none` to end",
+                    Default::default(),
+                )))
+            }
+            Ok(Err(Ctrl::Error(mut d))) => {
+                done(&mut self.it);
+                d.resolve(&prog.sources);
+                Err(d)
+            }
+            Ok(Err(_)) => {
+                done(&mut self.it);
+                Ok(None)
+            }
+            Err(payload) => {
+                done(&mut self.it);
+                Err(Box::new(crate::check::internal_error(&payload)))
+            }
+        }
+    }
+}
+
 impl Program {
     /// The tests of the entry file: its top-level functions `fun test_...()` without
     /// parameters, in the order written.
@@ -295,6 +353,12 @@ impl Interp<'_> {
                 ("url", Value::str(&req.url)),
                 ("headers", Self::string_map(&req.headers)),
                 ("body", body),
+                (
+                    "raw",
+                    req.raw
+                        .as_ref()
+                        .map_or(Value::None, |b| Value::Bytes(Rc::from(b.clone()))),
+                ),
                 ("path", Value::str(&req.path)),
                 ("query", Self::string_map(&req.query)),
                 ("params", Self::string_map(&[])),
@@ -396,7 +460,7 @@ impl Interp<'_> {
     }
 
     /// Reads the fields of the `Response` the handler returned.
-    fn response_of(&self, v: &Value) -> R<AppResponse> {
+    fn response_of(&mut self, v: &Value) -> R<AppResponse> {
         let bad = |msg: &str| self.fail("R071", msg, Default::default());
         let Value::Struct(o) = v else {
             return bad("`handle` must return a `Response`");
@@ -434,10 +498,23 @@ impl Interp<'_> {
                 }
             }
         }
+        let raw = match fields.get("raw") {
+            Some(Value::Bytes(b)) => Some(b.to_vec()),
+            _ => None,
+        };
+        let stream = match fields.get("stream") {
+            Some(f @ Value::Func(_)) => Some(f.clone()),
+            _ => None,
+        };
+        drop(fields);
+        let streaming = stream.is_some();
+        self.stream_fn = stream;
         Ok(AppResponse {
             status,
             headers,
             body,
+            raw,
+            stream: streaming,
         })
     }
 }
@@ -481,6 +558,8 @@ struct Interp<'a> {
     tenv: Vec<HashMap<ParamId, Ty>>,
     /// The type arguments of the call about to start (taken by `call_fid`).
     pending_targs: Option<HashMap<ParamId, Ty>>,
+    /// The function of the streamed answer being produced (`Response.stream`).
+    stream_fn: Option<Value>,
     /// Nesting and size of the value being converted to text (cycles, huge values).
     fmt_depth: usize,
     fmt_nodes: usize,
@@ -527,6 +606,7 @@ impl<'a> Interp<'a> {
             cur_call: 0,
             tenv: Vec::new(),
             pending_targs: None,
+            stream_fn: None,
             fmt_depth: 0,
             fmt_nodes: 0,
             last_ulid: 0,
@@ -1618,7 +1698,8 @@ impl<'a> Interp<'a> {
             (Value::Str(_), Ty::Str) | (Value::Range(..) | Value::RangeIncl(..), Ty::Range) => true,
             (Value::Uuid(_), Ty::Uuid)
             | (Value::Ulid(_), Ty::Ulid)
-            | (Value::DateTime(_), Ty::DateTime) => true,
+            | (Value::DateTime(_), Ty::DateTime)
+            | (Value::Bytes(_), Ty::Bytes) => true,
             (Value::None, Ty::NoneT | Ty::Nullable(_)) => true,
             (_, Ty::Nullable(inner)) => self.value_matches_ty(v, inner),
             (Value::Array(_), Ty::Array(_)) => true,
@@ -1789,6 +1870,11 @@ impl<'a> Interp<'a> {
             Value::Uuid(u) => ids::format_uuid(u.get()),
             Value::Ulid(u) => ids::format_ulid(u.get()),
             Value::DateTime(t) => datetime::to_iso(*t),
+            Value::Bytes(b) => {
+                let shown: Vec<String> = b.iter().take(32).map(|x| format!("{x:02x}")).collect();
+                let more = if b.len() > 32 { " …" } else { "" };
+                format!("bytes[{}{more}]", shown.join(" "))
+            }
             Value::None => "none".to_string(),
             Value::Unit => String::new(),
             Value::Array(a) => {
@@ -2065,6 +2151,7 @@ impl<'a> Interp<'a> {
             (Value::Str(x), Value::Str(y)) => x == y,
             (Value::Uuid(x), Value::Uuid(y)) | (Value::Ulid(x), Value::Ulid(y)) => x == y,
             (Value::DateTime(x), Value::DateTime(y)) => x == y,
+            (Value::Bytes(x), Value::Bytes(y)) => x == y,
             (Value::Tuple(xs), Value::Tuple(ys)) => {
                 if xs.len() != ys.len() {
                     return Ok(false);
@@ -2816,7 +2903,30 @@ impl<'a> Interp<'a> {
                 Value::Int((*lo as i128 + draw as i128) as i64)
             }
             ("Base64" | "Hex" | "Url" | "Hash", _) => {
+                if let Some(v) = self.codec_bytes_call(ty, name, &args, span)? {
+                    return Ok(v);
+                }
                 return self.codec_call(ty, name, &args, span);
+            }
+            ("bytes", _) => return self.bytes_static(name, &args, span),
+            ("random", "bytes") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) => *n,
+                    _ => 0,
+                };
+                if !(0..=1_048_576).contains(&n) {
+                    return self.fail(
+                        "R017",
+                        format!("`random.bytes` gives from 0 to 1048576 bytes (found {n})"),
+                        span,
+                    );
+                }
+                let mut out = Vec::with_capacity(n as usize);
+                while (out.len() as i64) < n {
+                    out.extend_from_slice(&self.random(span)?.to_le_bytes());
+                }
+                out.truncate(n as usize);
+                self.new_bytes(out, span)?
             }
             ("regex", "matches") => Value::Bool(
                 self.compile_regex(&text(&args[1]), span)?
@@ -3214,6 +3324,11 @@ impl<'a> Interp<'a> {
                 Some(v) => v,
                 None => return Ok(None),
             },
+            (Value::Bytes(b), _) => match self.bytes_method(b, name, args, span)? {
+                Some(v) => v,
+                None => return Ok(None),
+            },
+            (Value::Str(s), "to_bytes") => self.new_bytes(s.as_bytes().to_vec(), span)?,
             (Value::Uuid(u), "version") => Value::Int(ids::uuid_version(u.get())),
             (Value::Ulid(u), "time") => Value::Int(ids::ulid_time(u.get())),
             (Value::Str(s), "len") => Value::Int(s.chars().count() as i64),

@@ -4,7 +4,8 @@ use super::*;
 use crate::ast::{Ident, ImportKind, StmtKind, TypeExpr, TypeExprKind, TypeParam, Visibility};
 
 /// Names of types that cannot be redefined. `map` is deliberately absent: it names a
-/// type only in type positions, and `map`/`filter`/`reduce` are common function names.
+/// type only in type positions, and `map`/`filter`/`reduce` are common function names. `bytes`
+/// is absent for the same reason: it is a common variable name.
 const BUILTIN_TYPES: [&str; 9] = [
     "int", "float", "bool", "string", "uuid", "ulid", "datetime", "array", "range",
 ];
@@ -411,6 +412,7 @@ impl Checker {
                 "uuid" => Some(Ty::Uuid),
                 "ulid" => Some(Ty::Ulid),
                 "datetime" => Some(Ty::DateTime),
+                "bytes" => Some(Ty::Bytes),
                 "range" => Some(Ty::Range),
                 _ => None,
             };
@@ -939,7 +941,7 @@ impl Checker {
     pub(crate) fn boundary_problem(&self, ty: &Ty, path: &mut Vec<StructId>) -> Option<String> {
         match ty {
             // an `Any` (the `attrs` of a `Request`) leaves as `null` and cannot come back
-            Ty::Error | Ty::Any | Ty::Int | Ty::Float | Ty::Bool | Ty::Str => None,
+            Ty::Error | Ty::Any | Ty::Bytes | Ty::Int | Ty::Float | Ty::Bool | Ty::Str => None,
             // an enumeration crosses as the name of its variant, if none carries data
             Ty::Enum(id, _) => (!self.defs.enums[*id].is_plain()).then(|| {
                 format!(
@@ -978,12 +980,17 @@ impl Checker {
                     .fields
                     .iter()
                     .filter(|f| !f.is_static)
+                    // the function a `Response` may carry to stream its body stays here
+                    .filter(|f| {
+                        !(s.module == PRELUDE_MOD
+                            && matches!(&f.ty, Ty::Nullable(t) if matches!(**t, Ty::Fn(..))))
+                    })
                     .find_map(|f| self.boundary_problem(&f.ty, path));
                 path.pop();
                 r
             }
             other => Some(format!(
-                "`{}` cannot cross to the host (only int, float, bool, string, enums, tuples, arrays, maps, `Json` and plain structs can)",
+                "`{}` cannot cross to the host (only int, float, bool, string, bytes, enums, tuples, arrays, maps, `Json` and plain structs can)",
                 self.show(other)
             )),
         }

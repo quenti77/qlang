@@ -49,10 +49,11 @@ USAGE:
     qlang serve [--port 8080] [--bind 127.0.0.1]
                                          serve the JSON protocol over HTTP (POST /run)
     qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--static DIR] [--workers N]
-                        [--max-steps N] [--root DIR] [--seed N] [--watch]
+                        [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
-                                         (--watch: reload when a file of the program changes)
+                                         (--watch: reload when a file of the program changes;
+                                         --dev: show the error of the program in the 500 response)
     qlang lsp                            language server (Language Server Protocol, on standard
                                          input and output): errors, hovers, completion, go to
                                          definition, references, rename, symbols

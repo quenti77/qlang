@@ -280,6 +280,7 @@ impl Checker {
             ItemRef::Struct(s) => Some(self.defs.structs[*s].span),
             ItemRef::Enum(e) => Some(self.defs.enums[*e].span),
             ItemRef::Trait(t) => Some(self.defs.traits[*t].span),
+            ItemRef::Alias(a) => Some(self.defs.aliases[*a].span),
             ItemRef::Var(m, n) => self.mscopes[*m].vars.get(n).map(|l| l.span),
             ItemRef::Module(_) => None,
         }
@@ -379,6 +380,19 @@ impl Checker {
                 None,
                 self.docs.of(self.defs.traits[*t].span),
             ),
+            ItemRef::Alias(a) => {
+                let def = &self.defs.aliases[*a];
+                let target = match &def.state {
+                    AliasState::Done(t) => format!(" = {}", self.show(t)),
+                    _ => String::new(),
+                };
+                (
+                    "type",
+                    format!("type {}{target}", def.name),
+                    None,
+                    self.docs.of(def.span),
+                )
+            }
             ItemRef::Var(m, n) => {
                 let local = self.mscopes[*m].vars.get(n);
                 let t = local.map(|l| self.show(&l.ty)).unwrap_or_default();

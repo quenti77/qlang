@@ -251,6 +251,12 @@ impl ToJson for bool
     end
 end
 
+impl ToJson for Json
+    public fun to_json(self) -> string
+        self.to_text()
+    end
+end
+
 impl ToJson for string
     public fun to_json(self) -> string
         json_escape(self)
@@ -293,11 +299,53 @@ struct AnnotationInfo
     public args: map<string, Json>
 end
 
+impl AnnotationInfo
+    --" The text argument `field`, or `none` (no such argument, or not a string). --"
+    public fun get_string(self, field: string) -> string?
+        let j = self.args[field]
+        if j == none or not j.is_string() then none else j.as_string() end
+    end
+
+    --" The integer argument `field`, or `none`. --"
+    public fun get_int(self, field: string) -> int?
+        let j = self.args[field]
+        if j == none or not j.is_number() then none else j.as_number() as int end
+    end
+
+    --" The number argument `field`, or `none`. --"
+    public fun get_float(self, field: string) -> float?
+        let j = self.args[field]
+        if j == none or not j.is_number() then none else j.as_number() end
+    end
+
+    --" The bool argument `field`, or `none`. --"
+    public fun get_bool(self, field: string) -> bool?
+        let j = self.args[field]
+        if j == none or not j.is_bool() then none else j.as_bool() end
+    end
+end
+
 --" A parameter of a function or a variant, as reflection describes it. --"
 struct ParamInfo
     public name: string
     public type_name: string
     public annotations: array<AnnotationInfo>
+    ty: Any
+end
+
+impl ParamInfo
+    --" Reads `json` as the type of this parameter (`Json.to<T>` when `T` is only known by
+    reflection). The `Any` holds a value of that type. --"
+    public fun decode(self, json: Json) -> Result<Any, Error>
+        Reflect.decode(self.ty, json)
+    end
+
+    --" Reads `text` (a path segment, a query parameter) as the type of this parameter: `int`,
+    `float`, `bool`, `string`, `uuid`, `ulid`, `datetime`, or one of them followed by `?` (empty
+    text is then `none`). --"
+    public fun parse(self, text: string) -> Result<Any, Error>
+        Reflect.parse_text(self.ty, text)
+    end
 end
 
 --" A field of a struct, as reflection describes it. --"
@@ -389,6 +437,39 @@ impl FunctionInfo
     end
 end
 
+--" A function found by `Reflect.callable(name)` (or `Reflect.callable(module, name)`), to call with
+`Any` values: `call` checks their number and types against `params`. --"
+struct Callable
+    public name: string
+    public params: array<ParamInfo>
+    public return_type: string
+    public annotations: array<AnnotationInfo>
+    target: Any
+end
+
+impl Callable
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
+
+    --" Calls the function. `err` when the number of arguments or one type is wrong. --"
+    public fun call(self, args: array<Any>) -> Result<Any, Error>
+        Reflect.invoke(self.target, args)
+    end
+end
+
+--" Names a field differently in `Json.of` and `Json.to`: `#[JsonName("user_id")]`. --"
+#[annotation]
+struct JsonName
+    name: string
+end
+
+--" Leaves a field out of `Json.of`. --"
+#[annotation]
+struct JsonSkip
+end
+
 --" Reflection: `Reflect.struct_info<T>()`, `Reflect.enum_info<T>()`, `Reflect.functions()` (the functions
 of this file) and `Reflect.find<fun(A) -> B>("name")` (a function of this file, if its type is
 that one); `Reflect.methods<T>()` and `Reflect.find_method<T, F>(value, "name")` do the same
@@ -411,6 +492,11 @@ struct Json
 end
 
 impl Json
+    --" The JSON text of this value: `{"a":1,"b":[true,null]}`. --"
+    public fun to_text(self) -> string
+        Reflect.json_text(self)
+    end
+
     public fun null() -> Json
         Json { kind: "null", str: none, num: none, bool_: none, arr: none, obj: none }
     end
@@ -807,9 +893,51 @@ struct Request
     public path: string = ""
     public query: map<string, string> = {}
     public params: map<string, string> = {}
+    --" Every value of each query parameter, in order (`?a=1&a=2` gives `{"a": ["1", "2"]}`). --"
+    public query_all: map<string, array<string>> = {}
+    --" Every value of each header (lower-case names): a header sent twice has two values. --"
+    public headers_all: map<string, array<string>> = {}
+    --" The cookies of the `Cookie` header, with their values decoded. --"
+    public cookies: map<string, string> = {}
+    --" What the program attaches to this request while it handles it (the user an
+    authentication step found, for example); read back with `as<T>()`. --"
+    public attrs: map<string, Any> = {}
 end
 
 impl Request
+    --" The values of the header `name` (whatever the case of `name`); empty when there is none. --"
+    public fun header_all(self, name: string) -> array<string>
+        let found = self.headers_all[name.lower()]
+        if found == none then [] else found end
+    end
+
+    --" The fields of a body sent as `application/x-www-form-urlencoded`, decoded. `err` when
+    the request is not a form. --"
+    public fun form(self) -> Result<map<string, string>, Error>
+        let kind = self.header("content-type")
+        if kind == none or not kind.lower().starts_with("application/x-www-form-urlencoded") then
+            return Result<map<string, string>, Error>.Err(Error { message: "the body is not a form (application/x-www-form-urlencoded)" })
+        end
+        let out: map<string, string> = {}
+        let body = self.body
+        if body == none then
+            return Result<map<string, string>, Error>.Ok(out)
+        end
+        for pair in body.split("&") do
+            if pair == "" then
+                continue
+            end
+            let parts = pair.split("=")
+            let key = Url.decode(parts[0])
+            let value = Url.decode(parts.slice(1, parts.len()).join("="))
+            if key == none or value == none then
+                return Result<map<string, string>, Error>.Err(Error { message: "the form has a badly encoded field" })
+            end
+            out[key] = value
+        end
+        Result<map<string, string>, Error>.Ok(out)
+    end
+
     --" The value of the header `name` of a received request (whatever the case of `name`),
     or `none`. --"
     public fun header(self, name: string) -> string?
@@ -823,6 +951,35 @@ struct Response
     public status: int
     public headers: map<string, string> = {}
     public body: string
+    --" The cookies to set: one `Set-Cookie` header each. --"
+    public cookies: array<Cookie> = []
+end
+
+--" A cookie to send with a `Response`. `value` is sent percent-encoded (`Request.cookies` decodes
+it); `max_age` is in seconds (`none`: a cookie for the session); `same_site` is `"Lax"`,
+`"Strict"` or `"None"`. --"
+struct Cookie
+    public name: string
+    public value: string
+    public path: string = "/"
+    public domain: string? = none
+    public max_age: int? = none
+    public secure: bool = false
+    public http_only: bool = true
+    public same_site: string = "Lax"
+end
+
+--" An error that has an HTTP status: what a handler gives back when it wants more than a 500. --"
+struct HttpError
+    public status: int
+    public message: string
+end
+
+impl HttpError
+    --" The response for this error: its message, as text, with its status. --"
+    public fun to_response(self) -> Response
+        Response { status: self.status, headers: { "Content-Type": "text/plain; charset=utf-8" }, body: self.message }
+    end
 end
 
 impl Response
@@ -854,6 +1011,12 @@ impl Response
     --" This response with another status (returns the response itself). --"
     public fun with_status(self, code: int) -> Response
         self.status = code
+        self
+    end
+
+    --" This response with a cookie more (returns the response itself). --"
+    public fun with_cookie(self, cookie: Cookie) -> Response
+        self.cookies.push(cookie)
         self
     end
 
@@ -1745,6 +1908,7 @@ pub(crate) enum ItemRef {
     Struct(StructId),
     Enum(EnumId),
     Trait(TraitId),
+    Alias(usize),
     Var(ModId, String),
     Module(ModId),
 }
@@ -1803,6 +1967,8 @@ pub(crate) struct Checker {
     pub cur_self: Option<Ty>,
     /// The method being checked (for `super`).
     pub cur_fn: Option<FnId>,
+    /// The function the next `check_args` call is about (to record its type arguments).
+    pub callee_hint: Option<FnId>,
     pub subst: Vec<Option<Ty>>,
     /// Set when an editor asked for [`Info`].
     pub collect: Option<info::Collector>,
@@ -1830,6 +1996,7 @@ impl Checker {
             cur_impl_struct: None,
             cur_self: None,
             cur_fn: None,
+            callee_hint: None,
             subst: Vec::new(),
             collect: None,
             docs: info::Docs::default(),
@@ -1898,6 +2065,19 @@ impl Checker {
         for m in 0..n {
             self.cur_mod = m;
             self.resolve_impls(m);
+        }
+        // an alias nobody uses is still checked
+        for id in 0..self.defs.aliases.len() {
+            let a = &self.defs.aliases[id];
+            let (path, span) = (
+                vec![crate::ast::Ident {
+                    name: a.name.clone(),
+                    span: a.span,
+                }],
+                a.span,
+            );
+            self.cur_mod = self.defs.aliases[id].module;
+            self.item_to_type(ItemRef::Alias(id), &path, &[], span);
         }
         self.validate_structs();
         self.validate_overrides();

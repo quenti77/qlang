@@ -1,6 +1,6 @@
 //! Types and definitions shared by the checker and the interpreter.
 
-use crate::ast::{Expr, FunDecl, NodeId, Visibility};
+use crate::ast::{Expr, FunDecl, NodeId, TypeExpr, Visibility};
 use crate::fx::{FxHashMap, FxHashSet, NodeMap};
 use crate::span::Span;
 use std::collections::HashMap;
@@ -29,6 +29,8 @@ pub enum Ty {
     Ulid,
     /// An instant, in UTC.
     DateTime,
+    /// Any value together with its type: `Any.of(v)`, read back with `a.as<T>()`.
+    Any,
     /// The type of expressions without a value.
     Unit,
     /// The type of the `none` literal.
@@ -128,6 +130,7 @@ impl Ty {
             Ty::Uuid => "uuid".into(),
             Ty::Ulid => "ulid".into(),
             Ty::DateTime => "datetime".into(),
+            Ty::Any => "Any".into(),
             Ty::Unit => "no value".into(),
             Ty::NoneT => "none".into(),
             Ty::Never => "never".into(),
@@ -315,6 +318,23 @@ impl Lang {
     }
 }
 
+/// `type Name = ...`: resolved the first time it is used, in its own module.
+#[derive(Clone, Debug)]
+pub struct AliasDef {
+    pub name: String,
+    pub module: ModId,
+    pub span: Span,
+    pub ty: Rc<TypeExpr>,
+    pub state: AliasState,
+}
+
+#[derive(Clone, Debug)]
+pub enum AliasState {
+    Unresolved,
+    Resolving,
+    Done(Ty),
+}
+
 #[derive(Clone, Debug)]
 pub struct TraitDef {
     pub name: String,
@@ -364,6 +384,7 @@ pub struct Defs {
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub traits: Vec<TraitDef>,
+    pub aliases: Vec<AliasDef>,
     pub fns: Vec<FnDef>,
     pub impls: Vec<ImplDef>,
     pub params: Vec<ParamDef>,
@@ -376,6 +397,7 @@ impl Defs {
             structs: Vec::new(),
             enums: Vec::new(),
             traits: Vec::new(),
+            aliases: Vec::new(),
             fns: Vec::new(),
             impls: Vec::new(),
             params: Vec::new(),
@@ -532,6 +554,15 @@ pub enum PathRes {
     Reflect(ReflectOp),
 }
 
+/// The instantiation of a generic function at one call.
+#[derive(Clone, Debug)]
+pub struct TypeArgs {
+    pub callee: FnId,
+    /// The function the call is in (it needs its own type arguments to pass them on).
+    pub caller: Option<FnId>,
+    pub args: Vec<(ParamId, Ty)>,
+}
+
 /// What a call of `Reflect` asks for (see `docs/language.md`, « Réflexion »).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReflectOp {
@@ -547,6 +578,43 @@ pub enum ReflectOp {
     Methods(Ty),
     /// `Reflect.find_method<T, F>(value, name)`: a method of `T`, bound to `value`, of type `F`.
     FindMethod(Ty, Ty),
+    /// `Reflect.structs(module)`: the structs of a module.
+    Structs(ModId),
+    /// `Reflect.callable(module, name)`: a function of that module, as a `Callable`.
+    Callable(ModId),
+    /// `Reflect.callables(module)`: every function of that module, as a `Callable`.
+    Callables(ModId),
+    /// `Reflect.decode(ty, json)`: a `Json` read as the type held by an `Any`.
+    Decode,
+    /// `Reflect.parse_text(ty, text)`: a text read as the (scalar) type held by an `Any`.
+    ParseText,
+    /// `Reflect.invoke(callable_target, args)`.
+    Invoke,
+    /// `Reflect.get(value, name)`: a field of a struct, as an `Any`.
+    Get,
+    /// `Reflect.construct<T>(fields)`: a struct built from its fields.
+    Construct(Ty),
+    /// `Reflect.type_name<T>()`.
+    TypeName(Ty),
+    /// `Any.of(value)`, with the static type of `value`.
+    AnyOf(Ty),
+    /// `a.as<T>()`: the receiver is the first argument.
+    AnyAs(Ty),
+    /// `a.type_name()`: the receiver is the first argument.
+    AnyTypeName,
+    /// `Json.of(value)`.
+    JsonOf,
+    /// `Reflect.json_text(json)`: the JSON text of a `Json`.
+    JsonText,
+    /// `Json.to<T>(json)`.
+    JsonTo(Ty),
+}
+
+impl ReflectOp {
+    /// Whether the receiver of a method call is the first argument.
+    pub fn takes_receiver(&self) -> bool {
+        matches!(self, ReflectOp::AnyAs(_) | ReflectOp::AnyTypeName)
+    }
 }
 
 /// A declaration an annotation is put on.
@@ -581,6 +649,11 @@ pub struct AnnData {
 #[derive(Default)]
 pub struct Resolutions {
     pub paths: NodeMap<PathRes>,
+    /// The type arguments of the calls of functions that look at their own type parameters
+    /// while they run (`Reflect.type_name<T>()`, `a.as<T>()`, `Json.to<T>(j)` with a generic `T`).
+    pub type_args: FxHashMap<NodeId, TypeArgs>,
+    /// The functions whose body looks at its type parameters.
+    pub reified: FxHashSet<FnId>,
     /// Target type of each `as` cast.
     pub casts: FxHashMap<NodeId, Ty>,
     pub struct_lits: FxHashMap<NodeId, StructId>,

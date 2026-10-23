@@ -226,3 +226,14 @@ fn json_requests_use_the_same_import_rules_without_touching_the_disk() {
         "{r}"
     );
 }
+
+#[test]
+fn the_container_example_builds_its_services_from_providers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = run_in(&root, &["run", "examples/container/main.q"]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "[app] building a greeter\n[app] Bonjour !\nBonjour\ntrue\nno provider for ConsoleLogger\n"
+    );
+}

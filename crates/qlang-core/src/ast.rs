@@ -21,7 +21,16 @@ pub enum Item {
     Impl(ImplDecl),
     Trait(TraitDecl),
     Enum(EnumDecl),
+    /// `type Handler = fun(Request) -> Response`
+    Alias(AliasDecl),
     Stmt(Stmt),
+}
+
+#[derive(Debug)]
+pub struct AliasDecl {
+    pub span: Span,
+    pub name: Ident,
+    pub ty: Rc<TypeExpr>,
 }
 
 #[derive(Debug)]

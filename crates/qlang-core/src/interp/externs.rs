@@ -420,6 +420,8 @@ impl Interp<'_> {
                     let v = match found {
                         Some((_, hv)) => self.host_to_value(hv, &f.ty, depth + 1, work, span)?,
                         None if matches!(f.ty, Ty::Nullable(_)) => Value::None,
+                        // what the host does not know about (the `cookies` of a `Response`)
+                        None if matches!(f.ty, Ty::Array(_)) => Value::array(Vec::new()),
                         None => {
                             return self.fail(
                                 "R083",

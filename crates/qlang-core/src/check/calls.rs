@@ -110,6 +110,7 @@ impl Checker {
                             "uuid" => (Ty::Uuid, "uuid"),
                             "ulid" => (Ty::Ulid, "ulid"),
                             "datetime" => (Ty::DateTime, "datetime"),
+                            "Any" => (Ty::Any, "Any"),
                             // namespaces: they only hold functions
                             "time" => (Ty::Unit, "time"),
                             "random" => (Ty::Unit, "random"),
@@ -518,6 +519,16 @@ impl Checker {
                         {
                             return self.call_reflect(callee, name, targs, args);
                         }
+                        if ty == Ty::Any {
+                            return self.call_any_static(callee, name, targs, args);
+                        }
+                        if let Ty::Struct(sid, _) = &ty
+                            && self.defs.structs[*sid].module == PRELUDE_MOD
+                            && self.defs.structs[*sid].name == "Json"
+                            && matches!(name.name.as_str(), "of" | "to")
+                        {
+                            return self.call_json_convert(callee, name, targs, args);
+                        }
                         return self.call_static(e, callee, &ty, &tref, name, targs, args, want);
                     }
                     None => {
@@ -655,6 +666,7 @@ impl Checker {
             param_names: fn_param_names(&def.decl),
         };
         let generic = !sig.tparams.is_empty();
+        self.callee_hint = Some(fid);
         let out = self.check_args(e, &sig, &explicit, HashMap::new(), args, want);
         if generic {
             self.res.expr_tys.insert(e.id, out.clone());
@@ -777,6 +789,7 @@ impl Checker {
         args: &[CallArg],
         want: &Want,
     ) -> Ty {
+        let hint = self.callee_hint.take();
         if !explicit.is_empty() {
             if explicit.len() != sig.tparams.len() {
                 self.err(
@@ -800,6 +813,22 @@ impl Checker {
                 let f = self.fresh();
                 map.insert(*p, f);
             }
+        }
+        if let Some(fid) = hint
+            && !sig.tparams.is_empty()
+        {
+            self.res.type_args.insert(
+                e.id,
+                TypeArgs {
+                    callee: fid,
+                    caller: self.cur_fn,
+                    args: sig
+                        .tparams
+                        .iter()
+                        .filter_map(|p| map.get(p).map(|t| (*p, t.clone())))
+                        .collect(),
+                },
+            );
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.subst(&map)).collect();
         let ret = sig.ret.subst(&map);
@@ -869,6 +898,9 @@ impl Checker {
         want: &Want,
     ) -> Ty {
         let rt = self.resolve(rt);
+        if rt == Ty::Any {
+            return self.call_any_method(callee, name, targs, args);
+        }
         let explicit: Vec<Ty> = targs.iter().map(|t| self.resolve_type(t)).collect();
         match &rt {
             Ty::Error => {
@@ -972,6 +1004,7 @@ impl Checker {
                 ret: f.ret.clone(),
                 param_names: fn_param_names(&f.decl),
             };
+            self.callee_hint = Some(um.fid);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // trait methods through a generic bound or a trait-typed value
@@ -1209,6 +1242,7 @@ impl Checker {
                 ret: f.ret.clone(),
                 param_names: fn_param_names(&f.decl),
             };
+            self.callee_hint = Some(um.fid);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // otherwise a static field/variant: evaluate as a value and call it
@@ -1767,6 +1801,245 @@ fn callee_name(callee: &Expr) -> String {
 }
 
 impl Checker {
+    /// A function that names one of its own type parameters in an operation that looks at the
+    /// type while the program runs needs the type arguments of its calls.
+    fn note_reified(&mut self, op: &ReflectOp) {
+        let ty = match op {
+            ReflectOp::TypeName(t)
+            | ReflectOp::AnyOf(t)
+            | ReflectOp::AnyAs(t)
+            | ReflectOp::Construct(t)
+            | ReflectOp::JsonTo(t) => t,
+            _ => return,
+        };
+        if ty.contains_param()
+            && let Some(f) = self.cur_fn
+        {
+            self.res.reified.insert(f);
+        }
+    }
+
+    /// `Result<t, Error>`.
+    fn result_of(&self, t: Ty) -> Ty {
+        let eid = self
+            .defs
+            .enums
+            .iter()
+            .position(|e| e.module == PRELUDE_MOD && e.name == "Result")
+            .expect("prelude Result");
+        Ty::Enum(eid, vec![t, self.prelude_ty("Error")])
+    }
+
+    /// The module an optional first argument of a `Reflect` call names (`import "x" as m`,
+    /// then `Reflect.functions(m)`); the current module without it. `rest` is the number of
+    /// arguments after it.
+    fn module_arg(
+        &mut self,
+        callee: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+        rest: usize,
+    ) -> Option<ModId> {
+        if !targs.is_empty() || args.len() < rest || args.len() > rest + 1 {
+            self.err(
+                "T300",
+                format!(
+                    "`Reflect.{}` takes {rest} argument(s) after an optional module",
+                    name.name
+                ),
+                callee.span,
+            );
+            self.check_args_loose(args);
+            return None;
+        }
+        if args.len() == rest {
+            return Some(self.cur_mod);
+        }
+        match self.try_head(&args[0].value) {
+            Some(Head::Module(m)) => Some(m),
+            _ => {
+                self.err(
+                    "T301",
+                    format!(
+                        "the first argument of `Reflect.{}` must be a module (`import \"x.q\" as m`)",
+                        name.name
+                    ),
+                    args[0].value.span,
+                );
+                self.check_args_loose(&args[1..]);
+                None
+            }
+        }
+    }
+
+    /// `Any.of(value)`.
+    fn call_any_static(
+        &mut self,
+        callee: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+    ) -> Ty {
+        if name.name != "of" || !targs.is_empty() || args.len() != 1 {
+            self.err(
+                "T300",
+                "`Any` has one function: `Any.of(value)`",
+                callee.span,
+            );
+            self.check_args_loose(args);
+            return Ty::Error;
+        }
+        let t = self.expr(&args[0].value, &Want::Any);
+        let t = self.resolve(&t);
+        if t == Ty::Error {
+            return Ty::Error;
+        }
+        if t == Ty::Unit || t == Ty::Never {
+            self.err(
+                "T303",
+                "this expression has no value to put in an `Any`",
+                args[0].value.span,
+            );
+            return Ty::Error;
+        }
+        if self.has_unknown(&t) {
+            self.err(
+                "T303",
+                "the type of this value is not known yet: give it a type (`let xs: array<int> = []`)",
+                args[0].value.span,
+            );
+            return Ty::Error;
+        }
+        self.res
+            .paths
+            .insert(callee.id, PathRes::Reflect(ReflectOp::AnyOf(t.clone())));
+        self.note_reified(&ReflectOp::AnyOf(t));
+        Ty::Any
+    }
+
+    /// Whether an inference variable is left in `t`.
+    fn has_unknown(&mut self, t: &Ty) -> bool {
+        let t = self.resolve(t);
+        match &t {
+            Ty::Infer(_) | Ty::Never => true,
+            Ty::NoneT => false,
+            Ty::Nullable(x) | Ty::Array(x) => self.has_unknown(x),
+            Ty::Map(k, v) => self.has_unknown(k) || self.has_unknown(v),
+            Ty::Tuple(ts) => ts.iter().any(|x| self.has_unknown(x)),
+            Ty::Fn(ps, r) => ps.iter().any(|x| self.has_unknown(x)) || self.has_unknown(r),
+            Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) => {
+                a.iter().any(|x| self.has_unknown(x))
+            }
+            _ => false,
+        }
+    }
+
+    /// `a.as<T>()` and `a.type_name()` on an `Any`.
+    fn call_any_method(
+        &mut self,
+        callee: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+    ) -> Ty {
+        match name.name.as_str() {
+            "as" if targs.len() == 1 && args.is_empty() => {
+                let t = self.resolve_type(&targs[0]);
+                match &t {
+                    Ty::Error => return Ty::Error,
+                    Ty::Nullable(_) | Ty::Unit | Ty::Never | Ty::NoneT | Ty::Any => {
+                        self.err(
+                            "T304",
+                            "`as<T>` needs a type that is not `none`-able and not `Any`",
+                            targs[0].span,
+                        );
+                        return Ty::Error;
+                    }
+                    _ => {}
+                }
+                self.note_reified(&ReflectOp::AnyAs(t.clone()));
+                self.res
+                    .paths
+                    .insert(callee.id, PathRes::Reflect(ReflectOp::AnyAs(t.clone())));
+                Ty::nullable(t)
+            }
+            "type_name" if targs.is_empty() && args.is_empty() => {
+                self.res
+                    .paths
+                    .insert(callee.id, PathRes::Reflect(ReflectOp::AnyTypeName));
+                Ty::Str
+            }
+            _ => {
+                self.err(
+                    "T304",
+                    "an `Any` has `as<T>()` (the value, or `none`) and `type_name()`",
+                    callee.span,
+                );
+                self.check_args_loose(args);
+                Ty::Error
+            }
+        }
+    }
+
+    /// `Json.of(value)` and `Json.to<T>(json)`.
+    fn call_json_convert(
+        &mut self,
+        callee: &Expr,
+        name: &Ident,
+        targs: &[TypeExpr],
+        args: &[CallArg],
+    ) -> Ty {
+        let json = self.prelude_ty("Json");
+        if name.name == "of" {
+            if !targs.is_empty() || args.len() != 1 {
+                self.err("T300", "`Json.of` takes one value", callee.span);
+                self.check_args_loose(args);
+                return Ty::Error;
+            }
+            let t = self.expr(&args[0].value, &Want::Any);
+            let t = self.resolve(&t);
+            if t == Ty::Error {
+                return Ty::Error;
+            }
+            self.res
+                .paths
+                .insert(callee.id, PathRes::Reflect(ReflectOp::JsonOf));
+            return json;
+        }
+        if targs.len() != 1 || args.len() != 1 {
+            self.err(
+                "T300",
+                "`Json.to` takes a type between `<>` and one `Json`: `Json.to<User>(json)`",
+                callee.span,
+            );
+            self.check_args_loose(args);
+            return Ty::Error;
+        }
+        let t = self.resolve_type(&targs[0]);
+        let at = self.expr(&args[0].value, &Want::Exp(json.clone()));
+        if !self.assignable(&at, &json) {
+            self.mismatch(args[0].value.span, &json, &at);
+        }
+        if t == Ty::Error {
+            return Ty::Error;
+        }
+        if matches!(t, Ty::Fn(..) | Ty::Any | Ty::Unit | Ty::Never | Ty::Range) {
+            let shown = self.show(&t);
+            self.err(
+                "T305",
+                format!("a `Json` cannot be turned into `{shown}`"),
+                targs[0].span,
+            );
+            return Ty::Error;
+        }
+        self.note_reified(&ReflectOp::JsonTo(t.clone()));
+        self.res
+            .paths
+            .insert(callee.id, PathRes::Reflect(ReflectOp::JsonTo(t.clone())));
+        self.result_of(t)
+    }
+
     fn prelude_ty(&self, name: &str) -> Ty {
         let sid = self
             .defs
@@ -1836,14 +2109,148 @@ impl Checker {
                     }
                 }
             }
-            "functions" => {
-                if !arity(self, 0, 0) {
+            "functions" | "structs" => {
+                let Some(m) = self.module_arg(callee, name, targs, args, 0) else {
                     return Ty::Error;
+                };
+                if name.name == "functions" {
+                    (
+                        ReflectOp::Functions(m),
+                        Ty::Array(Box::new(self.prelude_ty("FunctionInfo"))),
+                    )
+                } else {
+                    (
+                        ReflectOp::Structs(m),
+                        Ty::Array(Box::new(self.prelude_ty("StructInfo"))),
+                    )
+                }
+            }
+            "callables" => {
+                let Some(m) = self.module_arg(callee, name, targs, args, 0) else {
+                    return Ty::Error;
+                };
+                (
+                    ReflectOp::Callables(m),
+                    Ty::Array(Box::new(self.prelude_ty("Callable"))),
+                )
+            }
+            "callable" => {
+                let Some(m) = self.module_arg(callee, name, targs, args, 1) else {
+                    return Ty::Error;
+                };
+                let last = &args[args.len() - 1];
+                let t = self.expr(&last.value, &Want::Exp(Ty::Str));
+                if !self.assignable(&t, &Ty::Str) {
+                    self.mismatch(last.value.span, &Ty::Str, &t);
                 }
                 (
-                    ReflectOp::Functions(self.cur_mod),
-                    Ty::Array(Box::new(self.prelude_ty("FunctionInfo"))),
+                    ReflectOp::Callable(m),
+                    Ty::nullable(self.prelude_ty("Callable")),
                 )
+            }
+            "type_name" => {
+                if !arity(self, 1, 0) {
+                    return Ty::Error;
+                }
+                let t = self.resolve_type(&targs[0]);
+                if t == Ty::Error {
+                    return Ty::Error;
+                }
+                (ReflectOp::TypeName(t), Ty::Str)
+            }
+            "json_text" => {
+                if !arity(self, 0, 1) {
+                    return Ty::Error;
+                }
+                let json = self.prelude_ty("Json");
+                let t = self.expr(&args[0].value, &Want::Exp(json.clone()));
+                if !self.assignable(&t, &json) {
+                    self.mismatch(args[0].value.span, &json, &t);
+                }
+                (ReflectOp::JsonText, Ty::Str)
+            }
+            "decode" | "parse_text" => {
+                if !arity(self, 0, 2) {
+                    return Ty::Error;
+                }
+                let second = if name.name == "decode" {
+                    self.prelude_ty("Json")
+                } else {
+                    Ty::Str
+                };
+                let want = [Ty::Any, second];
+                for (a, w) in args.iter().zip(want.iter()) {
+                    let t = self.expr(&a.value, &Want::Exp(w.clone()));
+                    if !self.assignable(&t, w) {
+                        self.mismatch(a.value.span, w, &t);
+                    }
+                }
+                let op = if name.name == "decode" {
+                    ReflectOp::Decode
+                } else {
+                    ReflectOp::ParseText
+                };
+                (op, self.result_of(Ty::Any))
+            }
+            "invoke" => {
+                if !arity(self, 0, 2) {
+                    return Ty::Error;
+                }
+                let want = [Ty::Any, Ty::Array(Box::new(Ty::Any))];
+                for (a, w) in args.iter().zip(want.iter()) {
+                    let t = self.expr(&a.value, &Want::Exp(w.clone()));
+                    if !self.assignable(&t, w) {
+                        self.mismatch(a.value.span, w, &t);
+                    }
+                }
+                (ReflectOp::Invoke, self.result_of(Ty::Any))
+            }
+            "get" => {
+                if !arity(self, 0, 2) {
+                    return Ty::Error;
+                }
+                let vt = self.expr(&args[0].value, &Want::Any);
+                let vt = self.resolve(&vt);
+                if !matches!(vt, Ty::Struct(..) | Ty::Any | Ty::Error) {
+                    self.err(
+                        "T301",
+                        "`Reflect.get` needs a struct value (or an `Any` holding one)",
+                        args[0].value.span,
+                    );
+                }
+                let nt = self.expr(&args[1].value, &Want::Exp(Ty::Str));
+                if !self.assignable(&nt, &Ty::Str) {
+                    self.mismatch(args[1].value.span, &Ty::Str, &nt);
+                }
+                (ReflectOp::Get, Ty::nullable(Ty::Any))
+            }
+            "construct" => {
+                if !arity(self, 1, 1) {
+                    return Ty::Error;
+                }
+                let t = self.resolve_type(&targs[0]);
+                match &t {
+                    Ty::Struct(..) | Ty::Param(_) => {}
+                    Ty::Error => {
+                        self.check_args_loose(args);
+                        return Ty::Error;
+                    }
+                    _ => {
+                        self.err(
+                            "T301",
+                            "`Reflect.construct` needs a struct type",
+                            targs[0].span,
+                        );
+                        self.check_args_loose(args);
+                        return Ty::Error;
+                    }
+                }
+                let want = Ty::Map(Box::new(Ty::Str), Box::new(Ty::Any));
+                let at = self.expr(&args[0].value, &Want::Exp(want.clone()));
+                if !self.assignable(&at, &want) {
+                    self.mismatch(args[0].value.span, &want, &at);
+                }
+                (ReflectOp::Construct(t.clone()), self.result_of(t))
             }
             "methods" => {
                 if !arity(self, 1, 0) {
@@ -1920,7 +2327,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `find`, `methods` and `find_method`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `get`, `construct`, `type_name`, `find`, `methods` and `find_method`)"),
                     name.span,
                 );
                 self.check_args_loose(args);
@@ -1928,6 +2335,7 @@ impl Checker {
             }
         };
         let (op, ty) = op_ty;
+        self.note_reified(&op);
         self.res.paths.insert(callee.id, PathRes::Reflect(op));
         ty
     }

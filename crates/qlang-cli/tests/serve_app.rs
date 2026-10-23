@@ -590,3 +590,108 @@ fn the_routes_example_finds_its_handlers_by_reflection() {
     );
     assert!(r.ends_with("ping"), "{r}");
 }
+
+const WEB: &str = r#"
+fun handle(req: Request) -> Response
+  if req.path == "/cookies" then
+    let who = req.cookies.get("who", "nobody")
+    let res = Response.text("hi {who}")
+    res.with_cookie(Cookie { name: "a", value: "x y", max_age: 60 })
+    res.with_cookie(Cookie { name: "b", value: "2", http_only: false, secure: true, same_site: "Strict" })
+    return res
+  end
+  if req.path == "/query" then
+    let all = req.query_all.get("t", [])
+    let joined = all.join(",")
+    let last = req.query.get("t", "?")
+    return Response.text("{all.len()} {joined} last={last}")
+  end
+  if req.path == "/form" then
+    let form = req.form()
+    if form.is_err() then
+      return Response.text(form.unwrap_err().message).with_status(400)
+    end
+    let f = form.unwrap()
+    let name = f.get("name", "?")
+    let note = f.get("note", "?")
+    return Response.text("{name}|{note}")
+  end
+  if req.path == "/dup" then
+    let tags = req.header_all("X-Tag")
+    return Response.text(tags.join("+"))
+  end
+  if req.path == "/bad-cookie" then
+    return Response.text("x").with_cookie(Cookie { name: "bad name", value: "1" })
+  end
+  if req.path == "/boom" then
+    panic("secret detail")
+  end
+  Response.not_found()
+end
+"#;
+
+#[test]
+fn cookies_come_in_and_go_out_one_header_each() {
+    let server = start("cookies", WEB, &[]);
+    let r = exchange(
+        &server,
+        "GET /cookies HTTP/1.1\r\nHost: t\r\nCookie: who=Ada%20L; other=1\r\n\r\n",
+    );
+    assert!(r.ends_with("hi Ada L"), "{r}");
+    assert!(
+        r.contains("Set-Cookie: a=x%20y; Path=/; Max-Age=60; HttpOnly; SameSite=Lax\r\n"),
+        "{r}"
+    );
+    assert!(
+        r.contains("Set-Cookie: b=2; Path=/; Secure; SameSite=Strict\r\n"),
+        "{r}"
+    );
+    // a cookie that cannot be sent is the program's mistake
+    let r = exchange(&server, "GET /bad-cookie HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.starts_with("HTTP/1.1 500"), "{r}");
+}
+
+#[test]
+fn repeated_query_parameters_and_headers_are_kept() {
+    let server = start("repeats", WEB, &[]);
+    let r = exchange(
+        &server,
+        "GET /query?t=1&t=2&u=3 HTTP/1.1\r\nHost: t\r\n\r\n",
+    );
+    assert!(r.ends_with("2 1,2 last=2"), "{r}");
+    let r = exchange(
+        &server,
+        "GET /dup HTTP/1.1\r\nHost: t\r\nX-Tag: a\r\nx-tag: b\r\n\r\n",
+    );
+    assert!(r.ends_with("a+b"), "{r}");
+}
+
+#[test]
+fn a_form_body_is_decoded() {
+    let server = start("form", WEB, &[]);
+    let body = "name=Ada+L&note=a%26b%3Dc";
+    let r = exchange(
+        &server,
+        &format!(
+            "POST /form HTTP/1.1\r\nHost: t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(r.ends_with("Ada L|a&b=c"), "{r}");
+    let r = exchange(
+        &server,
+        "POST /form HTTP/1.1\r\nHost: t\r\nContent-Length: 1\r\n\r\nx",
+    );
+    assert!(r.starts_with("HTTP/1.1 400"), "{r}");
+}
+
+#[test]
+fn dev_mode_shows_the_error_and_production_does_not() {
+    let dev = start("dev", WEB, &["--dev"]);
+    let r = exchange(&dev, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.starts_with("HTTP/1.1 500"), "{r}");
+    assert!(r.contains("secret detail"), "{r}");
+    let prod = start("prod", WEB, &[]);
+    let r = exchange(&prod, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(!r.contains("secret detail"), "{r}");
+}

@@ -1,5 +1,19 @@
 # Journal des changements
 
+## 0.47.0
+
+Premier pas vers des frameworks web écrits en qlang (voir `docs/design/web-0.47.md`).
+
+- **Alias de type** : `type Handler = fun(Request) -> Response`. Ce n'est pas un mot réservé (`let type = 3` marche toujours) ; l'alias s'exporte et s'importe, un alias qui se désigne lui-même est refusé (`T122`).
+- **`Any`** : une valeur avec son type. `Any.of(v)`, `a.as<T>()` (un `T?` : exactement `T`, une structure fille ou un trait implémenté), `a.type_name()`. Pour un conteneur de services ou une liste d'arguments.
+- **Réflexion étendue** : `Reflect.functions(m)` et `Reflect.structs(m)` sur un module importé, `Reflect.callable(m, "nom")` (un `Callable` qui s'appelle avec des `Any` et vérifie leur nombre et leurs types), `Reflect.get(valeur, "champ")`, `Reflect.construct<T>(champs)`, `Reflect.type_name<T>()`.
+- **Types à l'exécution dans les fonctions génériques** : une fonction qui nomme son paramètre `T` dans `Reflect.type_name<T>()`, `a.as<T>()`, `Json.to<T>(j)`, `Reflect.construct<T>(...)` ou `Any.of(x)` reçoit le type choisi à chaque appel (`app.get<Logger>()`, `fun body<T>(...)`), y compris par une autre fonction générique qui lui passe son `T`, et pour les paramètres de type d'une méthode.
+- **Gestionnaires à paramètres injectés** : `Reflect.callables(m)` rend toutes les fonctions d'un module en `Callable` ; `p.parse(texte)` et `p.decode(json)` d'un `ParamInfo` lisent un texte ou un `Json` selon le type du paramètre ; `AnnotationInfo` a `get_string`, `get_int`, `get_float`, `get_bool`. Exemple : `examples/container/` (un conteneur d'injection de dépendances de 60 lignes).
+- **`Json.of(valeur)` et `Json.to<T>(json)`** : conversion selon la forme du type, sans `to_json` ni `from_json` à la main. Seuls les champs `public` sortent et se lisent ; `#[JsonName]` et `#[JsonSkip]` ; les erreurs disent où (`address.city: missing`). `Json` a `to_text()` et implémente `ToJson`.
+- **Requêtes et réponses HTTP** (champs ajoutés, rien ne casse) : `req.cookies`, `req.query_all`, `req.headers_all` et `req.header_all(nom)`, `req.form()`, `req.attrs` (un `map<string, Any>` propre à la requête) ; `Cookie` et `res.with_cookie(...)` (un `Set-Cookie` chacun) ; `HttpError`.
+- `qlang serve --dev` met le détail d'une erreur du programme dans la réponse 500.
+- `a.as<T>()` : `as` est accepté comme nom de méthode après un point.
+
 ## 0.46.1
 
 - `editors/vscode/intel.js` et `lib.js` reviennent dans le dépôt (retirés par erreur en 0.46.0) : l'éditeur du site d'apprentissage en dépend. Ils ne sont pas dans l'extension.

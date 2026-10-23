@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                 }
             }
             "--watch" => app.watch = true,
+            "--dev" => DEV.store(true, Ordering::SeqCst),
             "--trust-externs" => app.trust_externs = true,
             "--allow-process" => app.allow_process = true,
             "--extern" => {
@@ -622,6 +623,9 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
     }
 }
 
+/// `--dev`: an error of the program is shown in the 500 response (never in production).
+static DEV: AtomicBool = AtomicBool::new(false);
+
 /// Bumped by the watcher each time a file of the program changes (`--watch`).
 static RELOAD: AtomicU64 = AtomicU64::new(0);
 /// The last version of `RELOAD` whose outcome was announced (once, not once per worker).
@@ -993,13 +997,12 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, static_dir:
         Ok(Err(diagnostic)) => {
             // the details stay in the server's log: they are not for the client
             log(&diagnostic);
-            let _ = write_response(
-                stream,
-                500,
-                &text_plain,
-                b"Internal Server Error",
-                head_only,
-            );
+            let shown = if DEV.load(Ordering::SeqCst) {
+                format!("Internal Server Error\n\n{diagnostic}")
+            } else {
+                "Internal Server Error".to_string()
+            };
+            let _ = write_response(stream, 500, &text_plain, shown.as_bytes(), head_only);
             500
         }
         Err(_) => {

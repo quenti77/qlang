@@ -49,6 +49,8 @@ pub enum Value {
     /// `start..=end`
     RangeIncl(i64, i64),
     Func(Rc<FuncVal>),
+    /// `Any.of(v)`: a value with the type it had where it was boxed.
+    Any(Rc<AnyVal>),
 }
 
 /// A map key: only types compared by value can be keys.
@@ -176,6 +178,11 @@ impl MapObj {
 pub struct StructObj {
     pub def: StructId,
     pub fields: RefCell<SmallMap<Value>>,
+}
+
+pub struct AnyVal {
+    pub value: Value,
+    pub ty: Ty,
 }
 
 pub struct FuncVal {

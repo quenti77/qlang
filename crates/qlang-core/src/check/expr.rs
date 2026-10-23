@@ -907,7 +907,7 @@ impl Checker {
                 );
                 Ty::Error
             }
-            Some(ItemRef::Enum(_)) | Some(ItemRef::Trait(_)) => {
+            Some(ItemRef::Enum(_)) | Some(ItemRef::Trait(_)) | Some(ItemRef::Alias(_)) => {
                 self.record_head(e);
                 self.err("T154", format!("`{name}` is a type, not a value"), e.span);
                 Ty::Error

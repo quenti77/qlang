@@ -165,9 +165,44 @@ impl Checker {
 }
 
 impl Checker {
+    /// Keeps the type arguments of the calls that a function reading its own type parameters
+    /// needs (itself, or through the functions that pass theirs on).
+    fn finish_type_args(&mut self) {
+        let all: Vec<(crate::ast::NodeId, TypeArgs)> = self.res.type_args.drain().collect();
+        let mut all: Vec<(crate::ast::NodeId, TypeArgs)> = all
+            .into_iter()
+            .filter_map(|(id, mut ta)| {
+                for (_, t) in &mut ta.args {
+                    *t = self.resolve(t);
+                    if t.contains_infer() {
+                        return None;
+                    }
+                }
+                Some((id, ta))
+            })
+            .collect();
+        loop {
+            let mut changed = false;
+            for (_, ta) in &all {
+                if self.res.reified.contains(&ta.callee)
+                    && ta.args.iter().any(|(_, t)| t.contains_param())
+                    && let Some(c) = ta.caller
+                {
+                    changed |= self.res.reified.insert(c);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        all.retain(|(_, ta)| self.res.reified.contains(&ta.callee));
+        self.res.type_args.extend(all);
+    }
+
     /// The types recorded for the typed machine are resolved now that inference is over; a
     /// type that is still open is dropped (the machine does not compile that expression).
     pub(crate) fn finish_expr_tys(&mut self) {
+        self.finish_type_args();
         let tys: Vec<(crate::ast::NodeId, Ty)> = self.res.expr_tys.drain().collect();
         for (id, t) in tys {
             let t = self.resolve(&t);

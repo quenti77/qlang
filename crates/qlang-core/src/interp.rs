@@ -3,6 +3,7 @@
 //! Everything that reaches outside goes through the [`Host`]. Execution is
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
+mod dynamic;
 mod externs;
 mod reflect;
 mod vm;
@@ -296,8 +297,102 @@ impl Interp<'_> {
                 ("body", body),
                 ("path", Value::str(&req.path)),
                 ("query", Self::string_map(&req.query)),
+                ("params", Self::string_map(&[])),
+                ("query_all", Self::list_map(&req.query)),
+                ("headers_all", Self::list_map(&req.headers)),
+                ("cookies", Self::string_map(&Self::cookies_of(&req.headers))),
+                (
+                    "attrs",
+                    Value::Map(Rc::new(RefCell::new(MapObj::default()))),
+                ),
             ],
         )
+    }
+
+    /// The `Set-Cookie` line of a `Cookie`, or `None` if something in it could not be sent.
+    fn set_cookie(c: &Value) -> Option<String> {
+        let Value::Struct(o) = c else { return None };
+        let f = o.fields.borrow();
+        let text = |name: &str| match f.get(name) {
+            Some(Value::Str(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        let name = text("name")?;
+        let token = |s: &str| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c))
+        };
+        let plain = |s: &str| s.chars().all(|c| !c.is_control() && c != ';');
+        if !token(&name) {
+            return None;
+        }
+        let mut line = format!(
+            "{name}={}",
+            crate::codec::url_encode(text("value")?.as_bytes())
+        );
+        let path = text("path")?;
+        if !plain(&path) {
+            return None;
+        }
+        line.push_str(&format!("; Path={path}"));
+        if let Some(Value::Str(d)) = f.get("domain") {
+            if !plain(d) {
+                return None;
+            }
+            line.push_str(&format!("; Domain={d}"));
+        }
+        if let Some(Value::Int(n)) = f.get("max_age") {
+            line.push_str(&format!("; Max-Age={n}"));
+        }
+        if matches!(f.get("secure"), Some(Value::Bool(true))) {
+            line.push_str("; Secure");
+        }
+        if matches!(f.get("http_only"), Some(Value::Bool(true))) {
+            line.push_str("; HttpOnly");
+        }
+        let same_site = text("same_site")?;
+        if !["Lax", "Strict", "None"].contains(&same_site.as_str()) {
+            return None;
+        }
+        line.push_str(&format!("; SameSite={same_site}"));
+        Some(line)
+    }
+
+    /// Every value of each name, in order.
+    fn list_map(pairs: &[(String, String)]) -> Value {
+        let mut m = MapObj::default();
+        let mut names: Vec<&String> = Vec::new();
+        for (k, _) in pairs {
+            if !names.contains(&k) {
+                names.push(k);
+            }
+        }
+        for name in names {
+            let values = pairs
+                .iter()
+                .filter(|(k, _)| k == name)
+                .map(|(_, v)| Value::str(v))
+                .collect();
+            m.insert(Value::str(name), Value::array(values));
+        }
+        Value::Map(Rc::new(RefCell::new(m)))
+    }
+
+    /// The cookies of the `cookie` headers: `a=1; b=2`, values percent-decoded.
+    fn cookies_of(headers: &[(String, String)]) -> Vec<(String, String)> {
+        headers
+            .iter()
+            .filter(|(k, _)| k == "cookie")
+            .flat_map(|(_, v)| v.split(';'))
+            .filter_map(|part| {
+                let (k, v) = part.split_once('=')?;
+                let value = crate::codec::url_decode(v.trim())
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .unwrap_or_else(|| v.trim().to_string());
+                Some((k.trim().to_string(), value))
+            })
+            .collect()
     }
 
     /// Reads the fields of the `Response` the handler returned.
@@ -315,7 +410,7 @@ impl Interp<'_> {
             Some(Value::Str(s)) => s.to_string(),
             _ => return bad("the `body` of the `Response` must be a string"),
         };
-        let headers = match fields.get("headers") {
+        let mut headers: Vec<(String, String)> = match fields.get("headers") {
             Some(Value::Map(m)) => m
                 .borrow()
                 .entries
@@ -327,6 +422,18 @@ impl Interp<'_> {
                 .collect(),
             _ => Vec::new(),
         };
+        if let Some(Value::Array(cookies)) = fields.get("cookies") {
+            for c in cookies.borrow().iter() {
+                match Self::set_cookie(c) {
+                    Some(line) => headers.push(("Set-Cookie".to_string(), line)),
+                    None => {
+                        return bad(
+                            "a `Cookie` of the `Response` has a name or an attribute that cannot be sent",
+                        );
+                    }
+                }
+            }
+        }
         Ok(AppResponse {
             status,
             headers,
@@ -370,6 +477,10 @@ struct Interp<'a> {
     frames: Vec<(Name, Span)>,
     /// The call expression being evaluated (for `sum()` on empty float arrays).
     cur_call: NodeId,
+    /// The type arguments of the generic functions being run that read their type parameters.
+    tenv: Vec<HashMap<ParamId, Ty>>,
+    /// The type arguments of the call about to start (taken by `call_fid`).
+    pending_targs: Option<HashMap<ParamId, Ty>>,
     /// Nesting and size of the value being converted to text (cycles, huge values).
     fmt_depth: usize,
     fmt_nodes: usize,
@@ -414,6 +525,8 @@ impl<'a> Interp<'a> {
             statics: HashMap::new(),
             frames: Vec::new(),
             cur_call: 0,
+            tenv: Vec::new(),
+            pending_targs: None,
             fmt_depth: 0,
             fmt_nodes: 0,
             last_ulid: 0,
@@ -1272,6 +1385,7 @@ impl<'a> Interp<'a> {
                 match prog.res.paths.get(&callee.id) {
                     Some(PathRes::Fn(fid)) => {
                         let argv = self.eval_args(e.id, args, env)?;
+                        self.stage_type_args(e.id);
                         return self.call_fid(*fid, None, argv, e.span);
                     }
                     Some(PathRes::BuiltinFn(name)) => {
@@ -1288,8 +1402,28 @@ impl<'a> Interp<'a> {
                         return self.static_call(ty, name, argv, e.span);
                     }
                     Some(PathRes::Reflect(op)) => {
-                        let argv = self.eval_args(e.id, args, env)?;
-                        return Ok(self.reflect(op, &argv));
+                        let mut argv = Vec::new();
+                        if op.takes_receiver()
+                            && let ExprKind::Field(obj, ..) = &callee.kind
+                        {
+                            argv.push(self.eval(obj, env)?);
+                        }
+                        // `Reflect.functions(module)`: the module is not a value
+                        let module_arg = match op {
+                            ReflectOp::Functions(_)
+                            | ReflectOp::Structs(_)
+                            | ReflectOp::Callables(_) => args.len() == 1,
+                            ReflectOp::Callable(_) => args.len() == 2,
+                            _ => false,
+                        };
+                        if module_arg {
+                            for a in &args[1..] {
+                                argv.push(self.eval(&a.value, env)?);
+                            }
+                        } else {
+                            argv.extend(self.eval_args(e.id, args, env)?);
+                        }
+                        return self.reflect(op, &argv, e.span);
                     }
                     _ => {}
                 }
@@ -1307,6 +1441,7 @@ impl<'a> Interp<'a> {
                         let recv = self.eval(obj, env)?;
                         let argv = self.eval_args(e.id, args, env)?;
                         self.cur_call = e.id;
+                        self.stage_type_args(e.id);
                         return self.call_method(recv, name, argv, e.span);
                     }
                 }
@@ -1335,6 +1470,7 @@ impl<'a> Interp<'a> {
         args: Vec<Value>,
         span: Span,
     ) -> R<Value> {
+        let targs = self.pending_targs.take();
         if let Some(r) = self.try_vm(fid, &this, &args, span) {
             return r;
         }
@@ -1342,7 +1478,44 @@ impl<'a> Interp<'a> {
         let def = &prog.defs.fns[fid];
         let decl = def.decl.clone().expect("function without body");
         let env = self.envs[def.module].clone();
-        self.call_function(&decl, &env, this, args, &def.name, span)
+        let reified = targs.is_some();
+        if let Some(t) = targs {
+            self.tenv.push(t);
+        }
+        let r = self.call_function(&decl, &env, this, args, &def.name, span);
+        if reified {
+            self.tenv.pop();
+        }
+        r
+    }
+
+    /// Readies the type arguments of the call `id`, if the function it calls looks at them.
+    #[inline]
+    fn stage_type_args(&mut self, id: NodeId) {
+        if self.prog.res.type_args.is_empty() {
+            return;
+        }
+        self.pending_targs = self.prog.res.type_args.get(&id).map(|ta| {
+            let outer = self.tenv.last();
+            ta.args
+                .iter()
+                .map(|(p, t)| {
+                    let t = match outer {
+                        Some(env) if t.contains_param() => t.subst(env),
+                        _ => t.clone(),
+                    };
+                    (*p, t)
+                })
+                .collect()
+        });
+    }
+
+    /// `t` with the type arguments of the generic function being run put in.
+    fn runtime_ty(&self, t: &Ty) -> Ty {
+        match self.tenv.last() {
+            Some(env) if t.contains_param() => t.subst(env),
+            _ => t.clone(),
+        }
     }
 
     fn call_function(
@@ -1464,6 +1637,7 @@ impl<'a> Interp<'a> {
             }
             (Value::Enum(e, ..), Ty::Enum(x, _)) => *e as usize == *x,
             (Value::Func(_), Ty::Fn(..)) => true,
+            (Value::Any(_), Ty::Any) => true,
             _ => false,
         }
     }
@@ -1659,6 +1833,10 @@ impl<'a> Interp<'a> {
             Value::Range(a, b) => format!("{a}..{b}"),
             Value::RangeIncl(a, b) => format!("{a}..={b}"),
             Value::Func(_) => "<function>".to_string(),
+            Value::Any(a) => {
+                let inner = a.value.clone();
+                self.stringify_inner(&inner, span)?
+            }
             Value::Struct(o) => match self.find_cast_impl(v, &Ty::Str) {
                 Some(fid) => match self.call_fid(fid, Some(v.clone()), vec![], span)? {
                     Value::Str(ref s) => s.to_string(),
@@ -2485,7 +2663,7 @@ impl<'a> Interp<'a> {
             ("Base64", "encode") => codec::base64_encode(input.as_bytes(), false),
             ("Base64", "encode_url") => codec::base64_encode(input.as_bytes(), true),
             ("Hex", "encode") => codec::hex_encode(input.as_bytes()),
-            ("Url", "encode") => codec::url_encode(input.as_bytes()),
+            ("Url", "encode") => crate::codec::url_encode(input.as_bytes()),
             ("Hash", "sha256") => codec::hex_encode(&codec::sha256(input.as_bytes())),
             ("Hash", "sha1") => codec::hex_encode(&codec::sha1(input.as_bytes())),
             ("Hash", "md5") => codec::hex_encode(&codec::md5(input.as_bytes())),

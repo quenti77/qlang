@@ -109,11 +109,16 @@ déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
   nombres, de booléens, de textes et de tableaux), `print`, et les méthodes courantes
   (`len`, `upper`, `trim`, `contains`, `replace`, `substring`, `repeat`...), qui passent par
   l'implémentation de l'interpréteur d'arbre pour avoir les mêmes résultats et les mêmes erreurs ;
+- les **structures** non génériques, dont les champs sont des nombres, des textes ou des tableaux de
+  nombres : `s.champ`, `s.champ = v`, `s.champ += v`, `Point { x: 1, y: 2 }` (les valeurs par
+  défaut sont celles de l'interpréteur) et les **méthodes** : le corps d'une méthode est compilé (avec
+  `self` en premier paramètre), et un appel `p.avance(k)` est envoyé par l'interpréteur comme
+  d'habitude, ce qui garde l'héritage, `override` et les traits tels quels ;
 - `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
 - les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
   de la portée à chaque accès, avec le même cache que l'interpréteur).
 
-Tout le reste (tableaux de textes, structures, fermetures, `match`...) tourne sur
+Tout le reste (tableaux de textes ou de structures, dictionnaires, fermetures, `match`...) tourne sur
 l'interpréteur d'arbre, qui appelle la machine et en reçoit les appels sans difficulté. Une
 boucle qui contient un appel à une fonction lit et écrit alors les variables du fichier à leur
 place, et non dans des registres (l'appelée pourrait les changer) : un peu plus lent, mais
@@ -128,7 +133,8 @@ toujours compilée.
 | 400 000 ajouts et lectures de tableau (`array.q`) | 0,12 s | 0,03 s | ×4,5 |
 | 3 millions d'appels d'une fonction qui fait un petit tableau (`smallarray.q`) | 1,7 s | 0,65 s | ×2,6 |
 | boucle de texte : voyelles de 20 000 mots (`textloop.q`) | 0,50 s | 0,12 s | ×4 |
-| dictionnaires, structures | | | ×1,0 |
+| 600 000 appels d'une méthode qui change des champs (`struct.q`) | 0,58 s | 0,25 s | ×2,3 |
+| dictionnaires | | | ×1,0 |
 
 **Les instructions elles-mêmes.** Trois réglages sur la boucle d'exécution de la machine (environ
 ×1,5 de plus sur les boucles) : les constantes qui servent d'opérandes sont chargées une fois dans
@@ -145,8 +151,8 @@ programmes numériques aléatoires (`Program::run_tree_walker` sert de référen
 complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées.
 
-**Ce qui reste.** Les structures, les dictionnaires, les tableaux de tableaux ou de textes ne
-profitent de rien. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
+**Ce qui reste.** Les dictionnaires, les énumérations, les tableaux de tableaux, de textes ou de
+structures ne profitent de rien, ni les structures génériques. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
 instructions (un JIT natif).
 
 ## Ce qui reste (avant la machine à registres)

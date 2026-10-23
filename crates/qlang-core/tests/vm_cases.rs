@@ -313,3 +313,12 @@ fn string_errors_and_limits_are_the_same() {
     assert!(vm.contains("R903") && walker.contains("R903"), "{vm}");
     assert_eq!(vm, walker);
 }
+
+#[test]
+fn structures_and_their_methods_on_the_machine() {
+    let src = "struct Acc\n  public total: int\n  public log: string = \"\"\nend\nimpl Acc\n  public fun add(self, k: int) -> int\n    self.total += k\n    self.log += \"+{k}\"\n    self.total\n  end\n  public fun boom(self) -> int\n    self.total div (self.total - self.total)\n  end\nend\nstruct Big extends Acc\n  public extra: float = 0.5\nend\nimpl Big\n  public override fun add(self, k: int) -> int\n    self.extra = self.extra * 2.0\n    self.total += k * 10\n    self.total\n  end\nend\nfun run(a: Acc, n: int) -> int\n  let t = 0\n  for i in 0..n do\n    t += a.add(i)\n  end\n  t\nend\nlet a = Acc { total: 0 }\nlet b = Big { total: 0 }\nprint(run(a, 4))\nprint(a.log)\nprint(run(b, 4))\nprint(b.extra)\nprint(a.boom())";
+    let out = same_compiled(src, 2);
+    assert!(out.starts_with("10\n+0+1+2+3\n"), "{out}");
+    assert!(out.contains("R011"), "{out}");
+    assert!(out.contains("called from `boom`"), "{out}");
+}

@@ -1,5 +1,17 @@
 # Journal des changements
 
+## 0.48.0
+
+Deuxième version du cycle « frameworks web en qlang » : de quoi recevoir des fichiers, garder des secrets, tenir la charge et parler à MySQL.
+
+- **`bytes`** : une suite d'octets qui ne change jamais. `"texte".to_bytes()`, `b.to_string()`, `slice`, `concat`, `at`, `find`, `hex`, `base64`, `bytes.from_array`, `==`. Variantes `*_bytes` et `*_raw` de `Base64`, `Hex`, `Url` et `Hash`, `random.bytes(n)`, `fs.read_bytes` / `fs.write_bytes`. Dans un `Json`, des octets sont du base64. `bytes` reste utilisable comme nom de variable.
+- **`Crypto`** : `random_bytes(n)` et `token(n)` depuis la source sécurisée du système (jamais la graine de `random`), `equal(a, b)` en temps constant pour comparer jetons et signatures.
+- **`Password`** : `hash`, `verify`, `needs_rehash` en Argon2id (sel au hasard et réglages dans le texte rangé).
+- **Journal** : `Log.debug/info/warn/error(message)` et `Log.write(niveau, message, champs)` sur la sortie d'erreur ; `--log-level`, `--log-format json`.
+- **`qlang serve`** : connexions persistantes (100 requêtes, 5 s de silence), corps `chunked` et `Expect: 100-continue`, 64 connexions, `req.raw` / `Response.bytes` / `Response.raw` pour les octets, `req.multipart()` (formulaires avec fichiers), `Response.stream` et `Response.sse` (réponses envoyées au fil de l'eau, événements serveur), `--compress` (gzip des textes).
+- **MySQL et MariaDB** : `Db.connect("mysql://utilisateur:mot_de_passe@hôte/base")`, colonnes typées, transactions, TLS avec `?sslmode=`. Essayé contre MySQL 8.0 et 9.5.
+- `http.send` rend le corps exact dans `Response.raw` quand ce n'est pas du texte, et accepte `Request.raw`.
+
 ## 0.47.0
 
 Premier pas vers des frameworks web écrits en qlang (voir `docs/design/web-0.47.md`).

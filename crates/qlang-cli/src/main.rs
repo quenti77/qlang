@@ -51,11 +51,12 @@ USAGE:
     qlang serve [--port 8080] [--bind 127.0.0.1]
                                          serve the JSON protocol over HTTP (POST /run)
     qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--static DIR] [--workers N]
-                        [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev]
+                        [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev] [--compress]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
                                          (--watch: reload when a file of the program changes;
-                                         --dev: show the error of the program in the 500 response)
+                                         --dev: show the error of the program in the 500 response;
+                                         --compress: gzip text answers)
     qlang lsp                            language server (Language Server Protocol, on standard
                                          input and output): errors, hovers, completion, go to
                                          definition, references, rename, symbols
@@ -72,6 +73,10 @@ USAGE:
 OPTIONS FOR EVERY COMMAND:
     --max-memory MB                      stop a program that holds more than MB megabytes (R904;
                                          default 1024, or $QLANG_MAX_MEMORY; 0: no limit)
+    --log-level LEVEL                    hide `Log` lines below debug|info|warn|error (default info,
+                                         or $QLANG_LOG)
+    --log-format text|json               how `Log` lines are written on the error output (or
+                                         $QLANG_LOG_FORMAT)
 ";
 
 #[global_allocator]

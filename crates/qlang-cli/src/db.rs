@@ -6,7 +6,8 @@
 //!
 //! qlang code always writes `?` placeholders, whichever database it targets: SQLite
 //! already wants that syntax, and [`rewrite_placeholders`] turns them into Postgres's
-//! `$1, $2...` before the query reaches it.
+//! `$1, $2...` before the query reaches it. MySQL and MariaDB (`mysql://...`, via the
+//! synchronous `mysql` crate) take `?` as they are.
 
 use qlang_core::host::{HostError, SqlRow, SqlValue};
 use std::collections::HashMap;
@@ -349,6 +350,180 @@ fn pg_connect(url: &str) -> Result<postgres::Client, HostError> {
     postgres::Client::connect(url, tls).map_err(|e| HostError::Other(e.to_string()))
 }
 
+// --------------------------------------------------------------------- MySQL
+
+struct MysqlConn(mysql::Conn);
+
+fn to_mysql_value(v: &SqlValue) -> mysql::Value {
+    match v {
+        SqlValue::Null => mysql::Value::NULL,
+        SqlValue::Int(i) => mysql::Value::Int(*i),
+        SqlValue::Float(f) => mysql::Value::Double(*f),
+        SqlValue::Text(s) => mysql::Value::Bytes(s.clone().into_bytes()),
+        SqlValue::Bool(b) => mysql::Value::Int(i64::from(*b)),
+    }
+}
+
+fn from_mysql_value(v: mysql::Value) -> SqlValue {
+    use mysql::Value;
+    match v {
+        Value::NULL => SqlValue::Null,
+        // text, or bytes that are not text (a BLOB, which has no `Json` form: null, like SQLite)
+        Value::Bytes(b) => String::from_utf8(b).map_or(SqlValue::Null, SqlValue::Text),
+        Value::Int(i) => SqlValue::Int(i),
+        Value::UInt(u) => i64::try_from(u).map_or(SqlValue::Float(u as f64), SqlValue::Int),
+        Value::Float(f) => SqlValue::Float(f64::from(f)),
+        Value::Double(f) => SqlValue::Float(f),
+        Value::Date(y, mo, d, h, mi, s, us) => {
+            let day = format!("{y:04}-{mo:02}-{d:02}");
+            if (h, mi, s, us) == (0, 0, 0, 0) {
+                SqlValue::Text(day)
+            } else if us == 0 {
+                SqlValue::Text(format!("{day} {h:02}:{mi:02}:{s:02}"))
+            } else {
+                SqlValue::Text(format!("{day} {h:02}:{mi:02}:{s:02}.{us:06}"))
+            }
+        }
+        Value::Time(neg, days, h, mi, s, us) => {
+            let hours = u32::from(h) + days * 24;
+            let sign = if neg { "-" } else { "" };
+            if us == 0 {
+                SqlValue::Text(format!("{sign}{hours:02}:{mi:02}:{s:02}"))
+            } else {
+                SqlValue::Text(format!("{sign}{hours:02}:{mi:02}:{s:02}.{us:06}"))
+            }
+        }
+    }
+}
+
+impl SqlConn for MysqlConn {
+    fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
+        use mysql::prelude::Queryable;
+        // prepared statements bring the columns back with their types (the text protocol
+        // gives everything as text); the few statements that cannot be prepared (error 1295)
+        // fall back to it
+        let bound: Vec<mysql::Value> = params.iter().map(to_mysql_value).collect();
+        let first: Result<Vec<mysql::Row>, mysql::Error> = if bound.is_empty() {
+            self.0.exec(sql, mysql::Params::Empty)
+        } else {
+            self.0.exec(sql, mysql::Params::Positional(bound))
+        };
+        let rows = match first {
+            Ok(rows) => rows,
+            Err(mysql::Error::MySqlError(ref e)) if e.code == 1295 && params.is_empty() => {
+                self.0.query(sql).map_err(|e| e.to_string())?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let names: Vec<String> = row
+                    .columns_ref()
+                    .iter()
+                    .map(|c| c.name_str().into_owned())
+                    .collect();
+                let columns = names
+                    .into_iter()
+                    .zip(row.unwrap())
+                    .map(|(n, v)| (n, from_mysql_value(v)))
+                    .collect();
+                SqlRow { columns }
+            })
+            .collect())
+    }
+
+    fn execute(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64, String> {
+        use mysql::prelude::Queryable;
+        if params.is_empty() {
+            self.0.query_drop(sql)
+        } else {
+            let bound: Vec<mysql::Value> = params.iter().map(to_mysql_value).collect();
+            self.0.exec_drop(sql, mysql::Params::Positional(bound))
+        }
+        .map_err(|e| e.to_string())?;
+        Ok(self.0.affected_rows())
+    }
+}
+
+/// Opens a MySQL or MariaDB connection from `mysql://user:password@host:3306/database`. As for
+/// Postgres, a server on another machine needs a `?sslmode=` in the URL (`require` asks for TLS,
+/// checked against the public authorities; `disable` confirms a connection in the clear).
+fn mysql_connect(url: &str) -> Result<mysql::Conn, HostError> {
+    if !has_sslmode(url) && !is_local(url) {
+        return Err(HostError::Other(
+            "this MySQL server is not on this machine: add ?sslmode=require to use TLS, or ?sslmode=disable to confirm that you want an unencrypted connection".to_string(),
+        ));
+    }
+    let tls = wants_tls(url);
+    // the driver does not know `sslmode`: take it out of the URL
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|p| !p.is_empty() && !p.starts_with("sslmode="))
+        .collect();
+    let clean = if kept.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", kept.join("&"))
+    };
+    let opts = mysql::Opts::from_url(&clean).map_err(|e| HostError::Other(e.to_string()))?;
+    let mut builder = mysql::OptsBuilder::from_opts(opts);
+    if tls {
+        builder = builder.ssl_opts(Some(mysql::SslOpts::default()));
+    }
+    mysql::Conn::new(builder).map_err(|e| HostError::Other(e.to_string()))
+}
+
+#[cfg(test)]
+mod mysql_tests {
+    use super::*;
+
+    #[test]
+    fn values_come_back_as_json_friendly_columns() {
+        assert!(matches!(
+            from_mysql_value(mysql::Value::NULL),
+            SqlValue::Null
+        ));
+        assert!(matches!(
+            from_mysql_value(mysql::Value::Int(-3)),
+            SqlValue::Int(-3)
+        ));
+        assert!(matches!(
+            from_mysql_value(mysql::Value::UInt(7)),
+            SqlValue::Int(7)
+        ));
+        assert!(matches!(
+            from_mysql_value(mysql::Value::UInt(u64::MAX)),
+            SqlValue::Float(_)
+        ));
+        match from_mysql_value(mysql::Value::Date(2026, 10, 23, 14, 5, 9, 0)) {
+            SqlValue::Text(t) => assert_eq!(t, "2026-10-23 14:05:09"),
+            _ => panic!("a date is text"),
+        }
+        match from_mysql_value(mysql::Value::Date(2026, 10, 23, 0, 0, 0, 0)) {
+            SqlValue::Text(t) => assert_eq!(t, "2026-10-23"),
+            _ => panic!("a date is text"),
+        }
+        match from_mysql_value(mysql::Value::Time(true, 1, 2, 3, 4, 0)) {
+            SqlValue::Text(t) => assert_eq!(t, "-26:03:04"),
+            _ => panic!("a time is text"),
+        }
+        assert!(matches!(
+            from_mysql_value(mysql::Value::Bytes(vec![0xff, 0xfe])),
+            SqlValue::Null
+        ));
+    }
+
+    #[test]
+    fn a_remote_server_needs_an_explicit_choice() {
+        let e = mysql_connect("mysql://u:p@db.example.com/app")
+            .err()
+            .unwrap();
+        assert!(format!("{e:?}").contains("sslmode"));
+    }
+}
+
 // --------------------------------------------------------------------- table
 
 /// Open connections, keyed by the handle given to qlang as `Db.conn`.
@@ -366,9 +541,12 @@ impl SqlConns {
             ))
         } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
             Box::new(PostgresConn(pg_connect(url)?))
+        } else if url.starts_with("mysql://") || url.starts_with("mariadb://") {
+            let url = url.replacen("mariadb://", "mysql://", 1);
+            Box::new(MysqlConn(mysql_connect(&url)?))
         } else {
             return Err(HostError::Other(format!(
-                "unknown database URL \"{url}\" (use sqlite://... or postgres://...)"
+                "unknown database URL \"{url}\" (use sqlite://..., postgres://... or mysql://...)"
             )));
         };
         let id = self.next_id;

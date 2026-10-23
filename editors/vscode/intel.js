@@ -187,7 +187,7 @@ function nameCompletions(info, file, line, col) {
   for (const k of Object.keys(KEYWORDS)) {
     add({ label: k, kind: 'keyword', detail: 'keyword', doc: KEYWORDS[k], sort: '3' + k });
   }
-  for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'datetime', 'array', 'map']) {
+  for (const t of ['int', 'float', 'bool', 'string', 'uuid', 'ulid', 'datetime', 'bytes', 'array', 'map']) {
     add({ label: t, kind: 'type', detail: 'type', sort: '4' + t });
   }
   // `time.now()`, `random.int(1, 6)` and `http.send(req)`: namespaces of the language

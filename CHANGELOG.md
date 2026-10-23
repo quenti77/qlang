@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.46.1
+
+- `editors/vscode/intel.js` et `lib.js` reviennent dans le dépôt (retirés par erreur en 0.46.0) : l'éditeur du site d'apprentissage en dépend. Ils ne sont pas dans l'extension.
+
 ## 0.46.0
 
 - **Serveur de langage** : `qlang lsp` parle le Language Server Protocol sur l'entrée et la sortie standard. Pour tout éditeur : erreurs pendant la frappe (y compris dans les fichiers importés), infobulles, autocomplétion, aide à la saisie des paramètres, **aller à la définition**, **références**, **renommage** dans tout le projet (variables, paramètres, fonctions, méthodes, types, champs, variantes ; il refuse le raccourci `Point { x }` qui nomme deux choses à la fois), plan du fichier et recherche de symboles. Le texte non enregistré est pris en compte.

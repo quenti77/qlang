@@ -3,3 +3,5 @@ test/**
 .vscodeignore
 package-lock.json
 *.vsix
+intel.js
+lib.js

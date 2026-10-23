@@ -369,3 +369,21 @@ fn maps_on_the_machine() {
         "{out}"
     );
 }
+
+#[test]
+fn enumerations_and_match_on_the_machine() {
+    let src = "enum Shape\n  Circle(r: float)\n  Rect(w: float, h: float)\n  Empty\nend\nfun area(s: Shape) -> float\n  match s\n    case Circle(r) then 3.0 * r * r\n    case Rect(w, h) then w * h\n    case Empty then 0.0\n  end\nend\nfun describe(n: int) -> string\n  match n\n    case 0 then \"zero\"\n    case 1..5 then \"small\"\n    case 5..=10 then \"medium\"\n    case x if x < 0 then \"negative\"\n    else \"large\"\n  end\nend\nfun name(s: string) -> int\n  match s\n    case \"a\" then 1\n    case \"b\" then 2\n    else 0\n  end\nend\nfun total(n: int) -> float\n  let t = 0.0\n  for i in 0..n do\n    let k = i mod 3\n    let s = match k\n      case 0 then Shape.Circle(1.0 * i)\n      case 1 then Shape.Rect(1.0 * i, 2.0)\n      else Shape.Empty\n    end\n    t += area(s)\n  end\n  t\nend\nprint(total(10))\nprint(describe(0))\nprint(describe(3))\nprint(describe(7))\nprint(describe(-4))\nprint(describe(100))\nprint(name(\"b\") + name(\"zz\"))\nprint(Shape.Empty == Shape.Empty)\nprint(Shape.Circle(1.0) == Shape.Rect(1.0, 1.0))";
+    assert_eq!(
+        same_compiled(src, 4),
+        "402.0\nzero\nsmall\nmedium\nnegative\nlarge\n2\ntrue\nfalse\n"
+    );
+}
+
+#[test]
+fn results_and_the_question_mark_on_the_machine() {
+    let src = "fun half(n: int) -> Result<int, Error>\n  if n mod 2 == 1 then\n    return Err(Error { message: \"odd {n}\" })\n  end\n  Ok(n div 2)\nend\nfun twice(n: int) -> Result<int, Error>\n  let a = half(n)?\n  let b = half(a)?\n  Ok(a + b)\nend\nfun opt(n: int) -> int?\n  if n mod 3 == 0 then none else n end\nend\nfun both(n: int) -> int?\n  let a = opt(n)?\n  let b = opt(a + 1)?\n  a + b\nend\nfun run(n: int) -> int\n  let s = 0\n  for i in 0..n do\n    match twice(i * 4)\n      case Ok(v) then s += v\n      case Err(e) then s -= 1\n    end\n    match twice(i)\n      case Ok(v) then s += v\n      case Err(e) then s -= e.message.len()\n    end\n    let b = both(i)\n    if b != none then s += b end\n  end\n  s\nend\nprint(run(10))\nprint(twice(3))\nprint(both(3))";
+    assert_eq!(
+        same_compiled(src, 5),
+        "136\nResult.Err(Error { message: \"odd 3\" })\nnone\n"
+    );
+}

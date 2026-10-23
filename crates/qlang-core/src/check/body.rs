@@ -163,3 +163,17 @@ impl Checker {
         self.scopes.pop();
     }
 }
+
+impl Checker {
+    /// The types recorded for the typed machine are resolved now that inference is over; a
+    /// type that is still open is dropped (the machine does not compile that expression).
+    pub(crate) fn finish_expr_tys(&mut self) {
+        let tys: Vec<(crate::ast::NodeId, Ty)> = self.res.expr_tys.drain().collect();
+        for (id, t) in tys {
+            let t = self.resolve(&t);
+            if !t.contains_infer() && !t.contains_param() {
+                self.res.expr_tys.insert(id, t);
+            }
+        }
+    }
+}

@@ -215,6 +215,35 @@ enum Op {
     NewArr(Reg),
     /// A new empty map.
     NewMap(Reg),
+    /// Jump unless the enumeration value in `obj` is the variant `vi` of the enumeration `eid`.
+    JnEnum {
+        obj: Reg,
+        eid: u16,
+        vi: u16,
+        t: u32,
+    },
+    /// The `idx`-th value a variant carries (`Code::fields[fld]` has its type).
+    EnumField {
+        dst: Reg,
+        src: Reg,
+        idx: u16,
+        fld: u32,
+    },
+    /// A variant: the values it carries are in the registers from `base` (`Code::enums[site]`).
+    NewEnum {
+        dst: Reg,
+        base: Reg,
+        site: u32,
+    },
+    /// Equality of two values of the same type, as the interpreter does it.
+    EqG {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        site: u32,
+    },
+    /// No case of a `match` fits.
+    NoMatch,
     /// The keys and the values of a map, as two arrays (`for k, v in map`).
     MapSnap {
         keys: Reg,
@@ -340,6 +369,8 @@ pub(super) struct Code {
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
+    enums: Vec<(u32, u32, usize)>,
+    enum_tys: Vec<Vec<Ty>>,
     /// For a compiled loop: the variables it shares with the code around it.
     frees: Vec<Free>,
     /// Whether this is a compiled loop (it shows no frame of its own in a trace).
@@ -429,13 +460,14 @@ fn vty(t: &Ty) -> bool {
         || matches!(t, Ty::Array(e) | Ty::Nullable(e) if vty(e))
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
         || matches!(t, Ty::Map(k, v) if matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && vty(v))
+        || matches!(t, Ty::Enum(_, args) if args.iter().all(vty))
 }
 
 /// Whether a value of this type lives in the object registers.
 fn is_obj(t: &Ty) -> bool {
     matches!(
         t,
-        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..)
+        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) | Ty::Enum(..)
     )
 }
 
@@ -456,6 +488,10 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::RetO(_)
                     | Op::NewArr(_)
                     | Op::NewMap(_)
+                    | Op::EnumField { .. }
+                    | Op::NewEnum { .. }
+                    | Op::EqG { .. }
+                    | Op::JnEnum { .. }
                     | Op::MapSnap { .. }
                     | Op::ConstNone(_)
                     | Op::Box { .. }
@@ -509,6 +545,9 @@ struct Gen<'a> {
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
+    /// The variants built: enumeration, variant, number of values carried.
+    enums: Vec<(u32, u32, usize)>,
+    enum_tys: Vec<Vec<Ty>>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
     /// The free variables are known (second pass): no new one may appear.
@@ -796,6 +835,356 @@ impl Gen<'_> {
         found
     }
 
+    /// The types of the values the variant `vi` of the enumeration type `ty` carries.
+    fn variant_field_tys(&self, ty: &Ty, vi: usize) -> Option<Vec<Ty>> {
+        let Ty::Enum(eid, args) = ty else {
+            return None;
+        };
+        let def = &self.prog.defs.enums[*eid];
+        let map: HashMap<ParamId, Ty> = def
+            .tparams
+            .iter()
+            .copied()
+            .zip(args.iter().cloned())
+            .collect();
+        let tys: Vec<Ty> = def
+            .variants
+            .get(vi)?
+            .fields
+            .iter()
+            .map(|(_, t)| t.subst(&map))
+            .collect();
+        tys.iter().all(vty).then_some(tys)
+    }
+
+    /// Builds the variant `vi` of the enumeration type `ty` from `args`.
+    fn variant(&mut self, ty: Ty, vi: usize, args: &[&Expr], dst: Reg, span: Span) -> Option<Ty> {
+        let Ty::Enum(eid, _) = &ty else {
+            return None;
+        };
+        let eid = *eid;
+        let ftys = self.variant_field_tys(&ty, vi)?;
+        if ftys.len() != args.len() {
+            return None;
+        }
+        let mark = self.top;
+        let base = self.top as Reg;
+        for (a, t) in args.iter().zip(&ftys) {
+            let r = self.alloc()?;
+            self.compile_as(a, r, t)?;
+        }
+        self.enums.push((eid as u32, vi as u32, ftys.len()));
+        self.enum_tys.push(ftys);
+        let site = u32::try_from(self.enums.len() - 1).ok()?;
+        self.emit(Op::NewEnum { dst, base, site }, span);
+        self.top = mark;
+        Some(ty)
+    }
+
+    /// The type of the enumeration value an expression builds (see `Resolutions::expr_tys`).
+    fn enum_expr_ty(&self, e: &Expr, eid: EnumId) -> Option<Ty> {
+        match self.prog.res.expr_tys.get(&e.id) {
+            Some(t) => Some(t.clone()),
+            None if self.prog.defs.enums[eid].tparams.is_empty() => Some(Ty::Enum(eid, Vec::new())),
+            None => None,
+        }
+    }
+
+    fn str_const(&mut self, text: &str) -> Option<u32> {
+        let idx = match self
+            .strs
+            .iter()
+            .position(|v| matches!(v, Value::Str(x) if **x == *text))
+        {
+            Some(i) => i,
+            None => {
+                self.strs.push(Value::str(text));
+                self.strs.len() - 1
+            }
+        };
+        u32::try_from(idx).ok()
+    }
+
+    /// A jump (to patch) taken unless `reg`, an enumeration value, is the variant `vi` of `eid`.
+    fn test_variant(
+        &mut self,
+        reg: Reg,
+        ty: &Ty,
+        eid: EnumId,
+        vi: usize,
+        fails: &mut Vec<usize>,
+        span: Span,
+    ) -> Option<()> {
+        let Ty::Enum(e2, _) = ty else {
+            return None;
+        };
+        if *e2 != eid {
+            return None;
+        }
+        let at = self.emit(
+            Op::JnEnum {
+                obj: reg,
+                eid: u16::try_from(eid).ok()?,
+                vi: u16::try_from(vi).ok()?,
+                t: 0,
+            },
+            span,
+        );
+        fails.push(at);
+        Some(())
+    }
+
+    /// Tests the value in `reg` (of type `ty`) against the pattern: jumps to be patched go in
+    /// `fails`, and the names it binds are added to the innermost scope.
+    fn pattern(
+        &mut self,
+        p: &Pattern,
+        reg: Reg,
+        ty: &Ty,
+        fails: &mut Vec<usize>,
+        span: Span,
+    ) -> Option<()> {
+        let prog = self.prog;
+        match p {
+            Pattern::Bind { name, id } => {
+                if let Some(&(eid, vi)) = prog.res.patterns.get(id) {
+                    return self.test_variant(reg, ty, eid, vi, fails, span);
+                }
+                if name.name != "_" {
+                    let r = self.alloc()?;
+                    self.mov(r, reg, ty, span);
+                    self.scopes
+                        .last_mut()?
+                        .push((name.name.clone(), r, ty.clone()));
+                }
+                Some(())
+            }
+            Pattern::Path { id, .. } => {
+                let &(eid, vi) = prog.res.patterns.get(id)?;
+                self.test_variant(reg, ty, eid, vi, fails, span)
+            }
+            Pattern::Variant { fields, id, .. } => {
+                let &(eid, vi) = prog.res.patterns.get(id)?;
+                self.test_variant(reg, ty, eid, vi, fails, span)?;
+                let ftys = self.variant_field_tys(ty, vi)?;
+                for (k, fp) in fields.iter().enumerate() {
+                    if matches!(fp, Pattern::Bind { name, id } if name.name == "_" && !prog.res.patterns.contains_key(id))
+                    {
+                        continue;
+                    }
+                    let ft = ftys.get(k)?.clone();
+                    let r = self.alloc()?;
+                    let fld = self.field_site("", &ft)?;
+                    self.emit(
+                        Op::EnumField {
+                            dst: r,
+                            src: reg,
+                            idx: u16::try_from(k).ok()?,
+                            fld,
+                        },
+                        span,
+                    );
+                    self.pattern(fp, r, &ft, fails, span)?;
+                }
+                Some(())
+            }
+            Pattern::None => {
+                if !matches!(ty, Ty::Nullable(_)) {
+                    return None;
+                }
+                let c = self.alloc()?;
+                self.emit(Op::IsNone(c, reg), span);
+                fails.push(self.emit(Op::JmpF(c, 0), span));
+                Some(())
+            }
+            Pattern::Bool(b) => {
+                if *ty != Ty::Bool {
+                    return None;
+                }
+                let k = self.alloc()?;
+                self.emit(Op::ConstI(k, i64::from(*b)), span);
+                fails.push(self.emit(Op::JnEqI(reg, k, 0), span));
+                Some(())
+            }
+            Pattern::Int(n) => {
+                let k = self.alloc()?;
+                match ty {
+                    Ty::Int => {
+                        self.emit(Op::ConstI(k, *n), span);
+                        fails.push(self.emit(Op::JnEqI(reg, k, 0), span));
+                    }
+                    Ty::Float => {
+                        self.emit(Op::ConstI(k, (*n as f64).to_bits() as i64), span);
+                        fails.push(self.emit(
+                            Op::JnF {
+                                a: reg,
+                                b: k,
+                                t: 0,
+                                cmp: Cmp::Eq,
+                            },
+                            span,
+                        ));
+                    }
+                    _ => return None,
+                }
+                Some(())
+            }
+            Pattern::Float(f) => {
+                let (x, k) = (self.as_float(reg, ty, span)?, self.alloc()?);
+                self.emit(Op::ConstI(k, f.to_bits() as i64), span);
+                fails.push(self.emit(
+                    Op::JnF {
+                        a: x,
+                        b: k,
+                        t: 0,
+                        cmp: Cmp::Eq,
+                    },
+                    span,
+                ));
+                Some(())
+            }
+            Pattern::Str(text) => {
+                if *ty != Ty::Str {
+                    return None;
+                }
+                let k = self.alloc()?;
+                let idx = self.str_const(text)?;
+                self.emit(Op::ConstS(k, idx), span);
+                let c = self.alloc()?;
+                self.emit(
+                    Op::CmpS {
+                        dst: c,
+                        a: reg,
+                        b: k,
+                        cmp: Cmp::Eq,
+                    },
+                    span,
+                );
+                fails.push(self.emit(Op::JmpF(c, 0), span));
+                Some(())
+            }
+            Pattern::Range { lo, hi, inclusive } => {
+                let bound = |p: &Pattern| match p {
+                    Pattern::Int(n) => Some(*n as f64),
+                    Pattern::Float(f) => Some(*f),
+                    _ => None,
+                };
+                let (l, h) = (bound(lo)?, bound(hi)?);
+                let x = self.as_float(reg, ty, span)?;
+                let (kl, kh) = (self.alloc()?, self.alloc()?);
+                self.emit(Op::ConstI(kl, l.to_bits() as i64), span);
+                self.emit(Op::ConstI(kh, h.to_bits() as i64), span);
+                fails.push(self.emit(
+                    Op::JnF {
+                        a: x,
+                        b: kl,
+                        t: 0,
+                        cmp: Cmp::Ge,
+                    },
+                    span,
+                ));
+                fails.push(self.emit(
+                    Op::JnF {
+                        a: x,
+                        b: kh,
+                        t: 0,
+                        cmp: if *inclusive { Cmp::Le } else { Cmp::Lt },
+                    },
+                    span,
+                ));
+                Some(())
+            }
+            Pattern::Tuple(_) => None,
+        }
+    }
+
+    /// The register holding a number (an `int` or a `float`) as a `float`.
+    fn as_float(&mut self, reg: Reg, ty: &Ty, span: Span) -> Option<Reg> {
+        match ty {
+            Ty::Float => Some(reg),
+            Ty::Int => {
+                let t = self.alloc()?;
+                self.emit(Op::ItoF(t, reg), span);
+                Some(t)
+            }
+            _ => None,
+        }
+    }
+
+    /// `match`: as a value in `dst` (every case gives the same type, or `want`), or as a
+    /// statement without `dst`.
+    fn match_expr(
+        &mut self,
+        e: &Expr,
+        scrutinee: &Expr,
+        cases: &[MatchCase],
+        else_block: Option<&Block>,
+        dst: Option<Reg>,
+        want: Option<&Ty>,
+    ) -> Option<Ty> {
+        let span = e.span;
+        let mark = self.top;
+        // the value is matched as it was when the `match` began
+        let tmp = self.alloc()?;
+        let st = self.into(scrutinee, tmp)?;
+        if !vty(&st) {
+            return None;
+        }
+        let mut ends = Vec::new();
+        let mut ty: Option<Ty> = None;
+        for case in cases {
+            self.scopes.push(Vec::new());
+            let case_mark = self.top;
+            let mut fails = Vec::new();
+            self.pattern(&case.pattern, tmp, &st, &mut fails, case.pattern_span)?;
+            if let Some(g) = &case.guard {
+                fails.push(self.jump_if_false(g)?);
+            }
+            match dst {
+                Some(d) => {
+                    let t = self.block_as(&case.body, Some(d), want)?;
+                    if *ty.get_or_insert(t.clone()) != t {
+                        return None;
+                    }
+                }
+                None => {
+                    self.block(&case.body, None)?;
+                }
+            }
+            ends.push(self.emit(Op::Jmp(0), span));
+            let next = self.here();
+            for j in fails {
+                self.patch(j, next);
+            }
+            self.top = case_mark;
+            self.scopes.pop();
+        }
+        match (else_block, dst) {
+            (Some(b), Some(d)) => {
+                let t = self.block_as(b, Some(d), want)?;
+                if *ty.get_or_insert(t.clone()) != t {
+                    return None;
+                }
+            }
+            (Some(b), None) => {
+                self.block(b, None)?;
+            }
+            (None, Some(_)) => {
+                self.emit(Op::NoMatch, span);
+            }
+            (None, None) => {}
+        }
+        let end = self.here();
+        for j in ends {
+            self.patch(j, end);
+        }
+        self.top = mark;
+        match dst {
+            Some(_) => ty,
+            None => Some(Ty::Unit),
+        }
+    }
+
     fn here(&self) -> u32 {
         self.ops.len() as u32
     }
@@ -812,6 +1201,7 @@ impl Gen<'_> {
             | Op::JnEqI(_, _, t)
             | Op::JnNeI(_, _, t)
             | Op::JnF { t, .. }
+            | Op::JnEnum { t, .. }
             | Op::ForCheck { exit: t, .. } => *t = target,
             _ => {}
         }
@@ -956,6 +1346,23 @@ impl Gen<'_> {
         {
             return self
                 .if_expr(e, branches, else_block.as_ref(), dst, Some(want))
+                .map(|_| ());
+        }
+        if let ExprKind::Match {
+            scrutinee,
+            cases,
+            else_block,
+        } = &e.kind
+        {
+            return self
+                .match_expr(
+                    e,
+                    scrutinee,
+                    cases,
+                    else_block.as_ref(),
+                    Some(dst),
+                    Some(want),
+                )
                 .map(|_| ());
         }
         let mark = self.top;
@@ -1180,6 +1587,88 @@ impl Gen<'_> {
                 self.mov(dst, r, &t, span);
                 Some(t)
             }
+            ExprKind::Field(..)
+                if matches!(
+                    self.prog.res.paths.get(&e.id),
+                    Some(PathRes::EnumVariant(..))
+                ) =>
+            {
+                let Some(PathRes::EnumVariant(eid, vi)) = self.prog.res.paths.get(&e.id) else {
+                    return None;
+                };
+                let (eid, vi) = (*eid, *vi);
+                let ty = self.enum_expr_ty(e, eid)?;
+                self.variant(ty, vi, &[], dst, span)
+            }
+            ExprKind::Match {
+                scrutinee,
+                cases,
+                else_block,
+            } => self.match_expr(e, scrutinee, cases, else_block.as_ref(), Some(dst), None),
+            ExprKind::Try(inner) => {
+                if self.loop_mode {
+                    return None;
+                }
+                let mark = self.top;
+                let tmp = self.alloc()?;
+                let t = self.into(inner, tmp)?;
+                let out = if self.prog.res.result_tries.contains(&e.id) {
+                    // `Ok(x)` gives x; an error leaves the function with that same value
+                    let Ty::Enum(eid, _) = &t else {
+                        return None;
+                    };
+                    let defs = &self.prog.defs;
+                    let err_vi = defs.enums[*eid].variant_index("Err")?;
+                    let ok_vi = defs.enums[*eid].variant_index("Ok")?;
+                    let skip = self.emit(
+                        Op::JnEnum {
+                            obj: tmp,
+                            eid: u16::try_from(*eid).ok()?,
+                            vi: u16::try_from(err_vi).ok()?,
+                            t: 0,
+                        },
+                        span,
+                    );
+                    self.emit(Op::RetO(tmp), span);
+                    let here = self.here();
+                    self.patch(skip, here);
+                    let ft = self.variant_field_tys(&t, ok_vi)?.first()?.clone();
+                    let fld = self.field_site("", &ft)?;
+                    self.emit(
+                        Op::EnumField {
+                            dst,
+                            src: tmp,
+                            idx: 0,
+                            fld,
+                        },
+                        span,
+                    );
+                    ft
+                } else {
+                    // `x?` on a `T?`: `none` leaves the function with `none`
+                    let Ty::Nullable(inner_ty) = &t else {
+                        return None;
+                    };
+                    let inner_ty = (**inner_ty).clone();
+                    let c = self.alloc()?;
+                    self.emit(Op::IsNone(c, tmp), span);
+                    let skip = self.emit(Op::JmpF(c, 0), span);
+                    self.emit(Op::RetO(tmp), span);
+                    let here = self.here();
+                    self.patch(skip, here);
+                    match scalar_ety(&inner_ty) {
+                        Some(ety) => {
+                            self.emit(Op::Unbox { dst, src: tmp, ety }, span);
+                        }
+                        None => {
+                            self.emit(Op::MovO(dst, tmp), span);
+                        }
+                    }
+                    inner_ty
+                };
+                self.top = mark;
+                Some(out)
+            }
             ExprKind::Field(obj, name, targs)
                 if targs.is_empty() && self.prog.res.paths.get(&e.id).is_none() =>
             {
@@ -1358,6 +1847,20 @@ impl Gen<'_> {
                         Ty::Bool
                     });
                 }
+                if ta == tb
+                    && matches!(op, BinOp::Eq | BinOp::NotEq)
+                    && is_obj(&ta)
+                    && ta != Ty::Str
+                {
+                    // two values of a type the machine has no comparison for: the interpreter's
+                    let site = self.new_site(vec![ta.clone()], Ty::Bool, e.id);
+                    self.emit(Op::EqG { dst, a, b, site }, span);
+                    if matches!(op, BinOp::NotEq) {
+                        self.emit(Op::Not(dst, dst), span);
+                    }
+                    self.top = mark;
+                    return Some(Ty::Bool);
+                }
                 if ta != tb {
                     return None;
                 }
@@ -1470,6 +1973,26 @@ impl Gen<'_> {
                 branches,
                 else_block,
             } => self.if_expr(e, branches, else_block.as_ref(), dst, None),
+            ExprKind::Call { callee, args }
+                if matches!(
+                    self.prog.res.paths.get(&callee.id),
+                    Some(PathRes::EnumVariant(..))
+                ) =>
+            {
+                let Some(PathRes::EnumVariant(eid, vi)) = self.prog.res.paths.get(&callee.id)
+                else {
+                    return None;
+                };
+                let (eid, vi) = (*eid, *vi);
+                if self.prog.res.arg_order.contains_key(&e.id)
+                    || args.iter().any(|a| a.name.is_some())
+                {
+                    return None;
+                }
+                let ty = self.enum_expr_ty(e, eid)?;
+                let vals: Vec<&Expr> = args.iter().map(|a| &a.value).collect();
+                self.variant(ty, vi, &vals, dst, span)
+            }
             ExprKind::Call { callee, args } if matches!(callee.kind, ExprKind::Field(..)) => {
                 self.method_call(e, callee, args, dst)
             }
@@ -1510,18 +2033,68 @@ impl Gen<'_> {
                     return None;
                 };
                 let fid = *fid;
-                let def = &self.prog.defs.fns[fid];
+                let prog = self.prog;
+                let def = &prog.defs.fns[fid];
                 let decl = def.decl.as_ref()?;
+                // the prelude's `Ok(x)` and `Err(e)` build a variant of `Result`
+                if def.module == crate::check::PRELUDE_MOD
+                    && matches!(def.name.as_str(), "Ok" | "Err")
+                    && args.len() == 1
+                {
+                    let ty = self.prog.res.expr_tys.get(&e.id)?.clone();
+                    let Ty::Enum(eid, _) = &ty else {
+                        return None;
+                    };
+                    let vi = prog.defs.enums[*eid].variant_index(&def.name)?;
+                    return self.variant(ty, vi, &[&args[0].value], dst, span);
+                }
+                if def.has_self || def.impl_id.is_some() {
+                    return None;
+                }
                 if decl.external
                     || decl.body.is_none()
                     || !decl.tparams.is_empty()
-                    || def.has_self
-                    || def.impl_id.is_some()
                     || def.params.len() != args.len()
                     || !def.params.iter().all(vty)
                     || !(vty(&def.ret) || def.ret == Ty::Unit)
                 {
-                    return None;
+                    // a generic function, an extern one...: called through the interpreter, the
+                    // arguments with their own types
+                    if def.params.len() != args.len() {
+                        return None;
+                    }
+                    let ret = if def.ret == Ty::Unit || vty(&def.ret) {
+                        def.ret.clone()
+                    } else {
+                        self.prog.res.expr_tys.get(&e.id)?.clone()
+                    };
+                    if !(vty(&ret) || ret == Ty::Unit) {
+                        return None;
+                    }
+                    let mark = self.top;
+                    let base = self.top as Reg;
+                    let mut tys = Vec::new();
+                    for a in args {
+                        let r = self.alloc()?;
+                        let t = self.into(&a.value, r)?;
+                        if !vty(&t) {
+                            return None;
+                        }
+                        tys.push(t);
+                    }
+                    self.has_call = true;
+                    let site = self.sites.len() as u32;
+                    self.sites.push(Site {
+                        name: def.name.clone(),
+                        tys,
+                        ret: ret.clone(),
+                        node: e.id,
+                        ident: None,
+                        fid: Some(fid),
+                    });
+                    self.emit(Op::CallFn { dst, base, site }, span);
+                    self.top = mark;
+                    return Some(ret);
                 }
                 let mark = self.top;
                 let base = self.top as Reg;
@@ -2250,6 +2823,13 @@ impl Gen<'_> {
                     self.patch(j, end);
                 }
             }
+            ExprKind::Match {
+                scrutinee,
+                cases,
+                else_block,
+            } => {
+                self.match_expr(e, scrutinee, cases, else_block.as_ref(), None, None)?;
+            }
             ExprKind::Call { .. } => {
                 let dst = self.alloc()?;
                 self.into(e, dst)?;
@@ -2296,6 +2876,8 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         fmts: Vec::new(),
         fields: Vec::new(),
         lits: Vec::new(),
+        enums: Vec::new(),
+        enum_tys: Vec::new(),
         loop_mode,
         preset: false,
         frees: Vec::new(),
@@ -2388,6 +2970,8 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
+                    enums: g.enums,
+                    enum_tys: g.enum_tys,
                     frees: Vec::new(),
                     is_loop: false,
                     uses_objs,
@@ -2451,6 +3035,8 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
+                    enums: g.enums,
+                    enum_tys: g.enum_tys,
                     frees: g.frees,
                     is_loop: true,
                     uses_objs,
@@ -2476,7 +3062,8 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         (Value::Array(_), Ty::Array(_))
         | (Value::Str(_), Ty::Str)
         | (Value::Struct(_), Ty::Struct(..))
-        | (Value::Map(_), Ty::Map(..)) => Some(Slot::O(v.clone())),
+        | (Value::Map(_), Ty::Map(..))
+        | (Value::Enum(..), Ty::Enum(..)) => Some(Slot::O(v.clone())),
         // `T?`: `none`, or a `T` (always in an object register, a number too)
         (Value::None, Ty::Nullable(_)) => Some(Slot::O(Value::None)),
         (_, Ty::Nullable(inner)) => slot_of(v, inner).map(|_| Slot::O(v.clone())),
@@ -2490,7 +3077,7 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         Ty::Int => Value::Int(stack[i]),
         Ty::Float => Value::Float(f64::from_bits(stack[i] as u64)),
         Ty::Bool => Value::Bool(stack[i] != 0),
-        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) => {
+        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) | Ty::Enum(..) => {
             ostack[i].clone()
         }
         _ => Value::Unit,
@@ -2563,9 +3150,12 @@ impl Interp<'_> {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
             Ty::Bool => Value::Bool(bits != 0),
-            Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) => {
-                std::mem::replace(&mut self.vm_result, Value::Unit)
-            }
+            Ty::Array(_)
+            | Ty::Str
+            | Ty::Struct(..)
+            | Ty::Nullable(_)
+            | Ty::Map(..)
+            | Ty::Enum(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         });
         self.vm_release();
@@ -2932,7 +3522,27 @@ impl Interp<'_> {
                 | Op::IndexG { .. }
                 | Op::MapReq { .. }
                 | Op::MapSet { .. }
-                | Op::MapSnap { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                | Op::MapSnap { .. }
+                | Op::NewEnum { .. }
+                | Op::EqG { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
+                    Value::Enum(e, v, _) if *e == u32::from(eid) && *v == u32::from(vi) => {}
+                    _ => pc = t as usize,
+                },
+                Op::EnumField { dst, src, idx, fld } => {
+                    let site = &code.fields[fld as usize];
+                    let v = match &o!(src) {
+                        Value::Enum(_, _, Some(d)) => d.get(idx as usize).cloned(),
+                        _ => None,
+                    };
+                    let Some(v) = v else {
+                        fail!("R001", "a variant without the value expected");
+                    };
+                    if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
+                        fail!("R001", "a value of an unexpected type in a variant");
+                    }
+                }
+                Op::NoMatch => fail!("R001", "no case of the `match` fits"),
                 Op::NewMap(dst) => o!(dst) = Value::Map(Rc::new(RefCell::new(MapObj::default()))),
                 Op::ConstNone(dst) => o!(dst) = Value::None,
                 Op::Box { dst, src, ety } => o!(dst) = elem_value(r!(src), ety),
@@ -3543,6 +4153,31 @@ impl Interp<'_> {
                 if !set_reg(stack, ostack, base + dst as usize, &v, &st.ret) {
                     fail!("R001", "unexpected value in a map");
                 }
+            }
+            Op::NewEnum { dst, base: b, site } => {
+                let (eid, vi, n) = code.enums[site as usize];
+                let data = if n == 0 {
+                    None
+                } else {
+                    let at = base + b as usize;
+                    let tys = &code.enum_tys[site as usize];
+                    Some(Rc::new(
+                        (0..n)
+                            .map(|k| reg_value(stack, ostack, at + k, &tys[k]))
+                            .collect::<Vec<Value>>(),
+                    ))
+                };
+                o!(dst) = Value::Enum(eid, vi, data);
+            }
+            Op::EqG { dst, a, b, site } => {
+                let span = code.spans[pc - 1];
+                let t = &code.sites[site as usize].tys[0];
+                let (x, y) = (
+                    reg_value(stack, ostack, base + a as usize, t),
+                    reg_value(stack, ostack, base + b as usize, t),
+                );
+                let eq = self.values_equal(&x, &y, span)?;
+                r!(dst) = i64::from(eq);
             }
             Op::MapSnap { keys, vals, map } => {
                 let span = code.spans[pc - 1];

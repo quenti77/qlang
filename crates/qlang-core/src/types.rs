@@ -602,6 +602,9 @@ pub struct Resolutions {
     /// The type of the variable a `let` declares (keyed by the initializer), when it is a type
     /// the typed machine cares about: `T?`.
     pub let_tys: FxHashMap<NodeId, Ty>,
+    /// The type of an expression whose type the typed machine cannot recompute: a call of a
+    /// generic function (`Ok(1)`) and a variant of an enumeration. Resolved when the checking ends.
+    pub expr_tys: FxHashMap<NodeId, Ty>,
     /// The signature of each call of a built-in method (keyed by the call): receiver,
     /// parameters and result, once the types are known.
     pub builtin_sigs: FxHashMap<NodeId, (Ty, Vec<Ty>, Ty)>,

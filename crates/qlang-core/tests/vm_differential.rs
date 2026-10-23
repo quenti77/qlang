@@ -855,6 +855,121 @@ fn map_program(rng: &mut Rng) -> String {
     src
 }
 
+/// Statements on `s` (a `Shape`), `c` (a `Color`), `r` (a `Result<int, Error>`), `o` (an
+/// `int?`) and `lab` (a string), with `acc`, `n` (ints) to compute with.
+fn enum_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 26 } else { 22 }) {
+            0 => out += &format!("s = mk({})\n", int_expr(rng, &vars, 2)),
+            1 => out += &format!("s = Shape.Circle({})\n", int_expr(rng, &vars, 1)),
+            2 => out += "s = Shape.Empty\n",
+            3 => out += "s = Shape.Named(\"x{n}\", acc)\n",
+            4 => out += "acc += area(s)\n",
+            5 => {
+                out += &format!(
+                    "match s\n  case Circle(r{0}) then acc += r{0}\n  case Rect(w, h) then acc += w * h\n  case Named(nm, k) then acc += nm.len() + k\n  else n += 1\nend\n",
+                    unique()
+                )
+            }
+            6 => {
+                let u = unique();
+                out += &format!(
+                    "match s\n  case Circle(r{u}) if r{u} > {} then acc += 100\n  case Circle(r{u}) then acc += r{u}\n  case Empty then n += 5\n  else acc += 1\nend\n",
+                    rng.below(8)
+                );
+            }
+            7 => out += &format!("c = color({})\n", int_expr(rng, &vars, 1)),
+            8 => {
+                out += "match c\n  case Red then acc += 1\n  case Green then acc += 2\n  case Blue then acc += 3\nend\n"
+            }
+            9 => out += "if c == Color.Red then n += 1 end\n",
+            10 => out += "if s == Shape.Empty then n += 2 end\n",
+            11 => out += &format!("r = chain({})\n", int_expr(rng, &vars, 1)),
+            12 => {
+                out += &format!(
+                    "match r\n  case Ok(v{0}) then acc += v{0}\n  case Err(e{0}) then n += e{0}.message.len()\nend\n",
+                    unique()
+                )
+            }
+            13 => {
+                let u = unique();
+                out += &format!(
+                    "let v{u} = match n mod 5\n  case 0 then 1\n  case 1..3 then acc mod 7\n  case x if x > 3 then 9\n  else 4\nend\nacc += v{u}\n"
+                );
+            }
+            14 => out += &format!("o = optchain({})\n", int_expr(rng, &vars, 1)),
+            15 => out += "match o\n  case none then n += 1\n  else acc += 2\nend\n",
+            16 => {
+                out += &format!(
+                    "lab = {}\n",
+                    rng.pick(&["\"a\"", "\"b\"", "\"zz\"", "\"\""])
+                )
+            }
+            17 => {
+                out += "match lab\n  case \"a\" then acc += 1\n  case \"b\" then acc += 2\n  else n += 3\nend\n"
+            }
+            18 => out += &format!("acc += {}\n", int_expr(rng, &vars, 2)),
+            19 => out += "if r == chain(2) then n += 1 end\n",
+            20 => out += &format!("acc += total_shapes({})\n", rng.below(6)),
+            21 => out += "s = Shape.Rect(acc mod 5, n mod 4)\n",
+            22 | 23 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if acc > 100000 then break end\nend\n",
+                    rng.below(6),
+                    enum_stmts(rng, depth - 1)
+                );
+            }
+            24 => {
+                let u = unique();
+                out += &format!(
+                    "let w{u} = 0\nwhile w{u} < {} do\n  w{u} += 1\n{}end\n",
+                    rng.below(5),
+                    enum_stmts(rng, depth - 1)
+                );
+            }
+            _ => {
+                out += &format!(
+                    "match s\n  case Empty then\n{}  else\n{}end\n",
+                    enum_stmts(rng, depth - 1),
+                    enum_stmts(rng, depth - 1)
+                )
+            }
+        }
+    }
+    out
+}
+
+fn enum_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += "enum Shape\n  Circle(r: int)\n  Rect(w: int, h: int)\n  Empty\n  Named(name: string, n: int)\nend\n";
+    src += "enum Color\n  Red\n  Green\n  Blue\nend\n";
+    src += "fun helper(a: int, b: int) -> int\n  if a > b then a - b else b - a end\nend\n";
+    src += "fun mk(k: int) -> Shape\n  match k mod 4\n    case 0 then Shape.Circle(k)\n    case 1 then Shape.Rect(k mod 5, 2)\n    case 2 then Shape.Named(\"m{k}\", 1)\n    else Shape.Empty\n  end\nend\n";
+    src += "fun area(s: Shape) -> int\n  match s\n    case Circle(r) then r * 3\n    case Rect(w, h) then w * h\n    case Empty then 0\n    case Named(name, k) then name.len() + k\n  end\nend\n";
+    src += "fun color(k: int) -> Color\n  match k mod 3\n    case 0 then Color.Red\n    case 1 then Color.Green\n    else Color.Blue\n  end\nend\n";
+    src += "fun halve(n: int) -> Result<int, Error>\n  if n mod 2 == 1 then\n    return Err(Error { message: \"odd {n}\" })\n  end\n  Ok(n div 2)\nend\n";
+    src += "fun chain(n: int) -> Result<int, Error>\n  let a = halve(n)?\n  let b = halve(a)?\n  Ok(a + b)\nend\n";
+    src += "fun opt(n: int) -> int?\n  if n mod 3 == 0 then none else n end\nend\n";
+    src += "fun optchain(n: int) -> int?\n  let a = opt(n)?\n  let b = opt(a + 1)?\n  a + b\nend\n";
+    src += "fun total_shapes(k: int) -> int\n  let t = 0\n  for i in 0..k do\n    t += area(mk(i))\n  end\n  t\nend\n";
+    src += &format!(
+        "fun work(n: int) -> int\n  let acc = 0\n  let n = n\n  let s = Shape.Empty\n  let c = Color.Red\n  let r: Result<int, Error> = Ok(0)\n  let o: int? = none\n  let lab = \"a\"\n{}  acc + n\nend\n",
+        enum_stmts(rng, 2)
+    );
+    for _ in 0..3 {
+        src += &format!("print(work({}))\n", rng.below(7));
+    }
+    src +=
+        "print(mk(5))\nprint(chain(8))\nprint(chain(3))\nprint(optchain(4))\nprint(optchain(3))\n";
+    src += "let acc = 0\nlet n = 1\nlet s = Shape.Circle(2)\nlet c = Color.Blue\nlet r: Result<int, Error> = chain(4)\nlet o: int? = opt(4)\nlet lab = \"b\"\n";
+    src += &enum_stmts(rng, 2);
+    src += "print(acc)\nprint(n)\nprint(s)\nprint(c)\nprint(r)\nprint(o)\nprint(lab)\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
@@ -1136,6 +1251,23 @@ fn the_machine_and_the_tree_walker_agree_on_maps_in_many_more_programs() {
             seed.wrapping_mul(0x94D0_49BB_1331_11EB) | 1,
             500,
             map_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_enumerations() {
+    sweep_with(0xE70E_5EED_0000_0007, 300, enum_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_enumerations_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xA076_1D64_78BD_642F) | 1,
+            500,
+            enum_program,
         );
     }
 }

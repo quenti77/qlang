@@ -125,13 +125,18 @@ déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
   `V?`), `m[k] = v`, `m[k] += v`, `for k, v in m`, et toutes les méthodes (`get`, `has`, `keys`,
   `values`, `len`, `remove`...). Les méthodes prédéfinies sont désormais toutes celles dont le
   vérificateur a donné la signature, sans table à tenir à jour ;
-- l'appel d'une fonction que la machine ne sait pas compiler (elle utilise un dictionnaire, un `match`...) :
+- les **énumérations** et **`match`** : variantes avec ou sans valeurs (`Shape.Circle(2.0)`, `Ok(x)`,
+  `Err(e)`), motifs sur les variantes (avec valeurs et gardes `case Circle(r) if r > 3`), sur les
+  nombres (`0`, `1..5`, `5..=10`), les textes, les booléens et `none`, `match` comme valeur ou comme
+  instruction, l'opérateur `?` (sur un `Result` comme sur un `T?`) et `==` entre deux valeurs. Les
+  motifs de tuples ne le sont pas ;
+- l'appel d'une fonction que la machine ne sait pas compiler (elle utilise une fermeture, un tuple...) :
   la fonction reste sur l'interpréteur d'arbre, mais celle qui l'appelle est compilée quand même ;
 - `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
 - les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
   de la portée à chaque accès, avec le même cache que l'interpréteur).
 
-Tout le reste (énumérations, fermetures, `match`...) tourne sur
+Tout le reste (fermetures, tuples, structures génériques...) tourne sur
 l'interpréteur d'arbre, qui appelle la machine et en reçoit les appels sans difficulté. Une
 boucle qui contient un appel à une fonction lit et écrit alors les variables du fichier à leur
 place, et non dans des registres (l'appelée pourrait les changer) : un peu plus lent, mais
@@ -147,10 +152,11 @@ toujours compilée.
 | 3 millions d'appels d'une fonction qui fait un petit tableau (`smallarray.q`) | 1,7 s | 0,65 s | ×2,6 |
 | boucle de texte : voyelles de 20 000 mots (`textloop.q`) | 0,50 s | 0,12 s | ×4 |
 | 600 000 appels d'une méthode qui change des champs (`struct.q`) | 0,58 s | 0,13 s | ×4,4 |
-| `Result` et `?` : appels en chaîne (`result.q`) | 1,14 s | 0,60 s | ×1,9 |
+| `Result` et `?` : appels en chaîne (`result.q`) | 1,20 s | 0,20 s | ×5,9 |
 | textes et tableaux de textes (`strings.q`) | 0,13 s | 0,05 s | ×2,6 |
 | dictionnaires : comptage de mots (`map.q`) | 0,27 s | 0,11 s | ×2,4 |
 | ensembles (`set.q`) | 0,27 s | 0,19 s | ×1,4 |
+| énumérations et `match` : aires de formes, classement (`enum.q`) | 0,62 s | 0,12 s | ×5,3 |
 
 **Les instructions elles-mêmes.** Trois réglages sur la boucle d'exécution de la machine (environ
 ×1,5 de plus sur les boucles) : les constantes qui servent d'opérandes sont chargées une fois dans
@@ -167,8 +173,8 @@ programmes numériques aléatoires (`Program::run_tree_walker` sert de référen
 complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées. Avec `QLANG_VM_DUMP=1`, le programme affiche sur la sortie d'erreur les instructions de chaque fonction et boucle compilée.
 
-**Ce qui reste.** Les énumérations, `match`, les fermetures, les structures génériques et les
-valeurs de types plus rares (identifiants, dates, tuples) ne sont pas compilés. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
+**Ce qui reste.** Les fermetures, les structures génériques et les valeurs de types plus rares
+(identifiants, dates, tuples) ne sont pas compilés. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
 instructions (un JIT natif).
 
 ## Ce qui reste (avant la machine à registres)

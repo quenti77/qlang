@@ -1,5 +1,9 @@
 # Journal des changements
 
+## Prochaine version
+
+- Réflexion : `Reflect.methods<T>()` liste les méthodes d'un type avec leurs annotations (`FunctionInfo.has_self` est nouveau) et `Reflect.find_method<T, F>(valeur, "nom")` rend la méthode liée à la valeur, appelable. Les annotations des méthodes sont maintenant lisibles.
+
 ## 0.40.0
 
 - **Annotations** `#[Route("/users", method: "GET")]` sur les fonctions, méthodes, structures, champs, énumérations, variantes, traits et paramètres. Une annotation est une structure déclarée avec `#[annotation]` ; ses arguments sont des littéraux, vérifiés à la compilation (`T290`–`T295`, `P051`). 

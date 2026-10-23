@@ -1017,6 +1017,8 @@ on lit des descriptions (`StructInfo`, `EnumInfo`, `FunctionInfo`...), des valeu
 | `Reflect.enum_info<Color>()` | `EnumInfo` : `name`, `variants` (`VariantInfo` : `name`, `fields`, `annotations`), `annotations` |
 | `Reflect.functions()` | `array<FunctionInfo>` des fonctions déclarées dans **ce fichier** : `name`, `params` (`ParamInfo` : `name`, `type_name`, `annotations`), `return_type`, `annotations` |
 | `Reflect.find<fun(Request) -> Response>("home")` | la fonction `home` de ce fichier si son type est exactement celui-là, sinon `none` |
+| `Reflect.methods<Users>()` | `array<FunctionInfo>` des méthodes des `impl` de `Users` (`has_self` dit si elle prend `self`) |
+| `Reflect.find_method<Users, fun(Request) -> Response>(valeur, "list")` | la méthode `list` de `valeur`, déjà liée à elle, si son type (sans `self`) est celui-là, sinon `none` |
 
 Une annotation lue est une `AnnotationInfo` : `name` (celui de sa structure) et `args`, les
 arguments par nom de champ, en `Json` (les valeurs par défaut sont remplies ; les nombres sont des
@@ -1040,11 +1042,12 @@ end
 ```
 
 `Reflect.find` rend une vraie valeur de fonction, appelable : avec `Reflect.functions()`, c'est ce
-qui permet de router des requêtes d'après des annotations (voir `examples/routes.q`). Seules les
-fonctions de premier niveau du fichier, sans paramètre de type, sont concernées (pas les
-méthodes). Les erreurs de forme : `T300` (mauvais nombre d'arguments ou de types), `T301` (le type
-n'est pas celui attendu), `T302` (nom inconnu : `struct_info`, `enum_info`, `functions` et `find`
-existent).
+qui permet de router des requêtes d'après des annotations (voir `examples/routes.q`). Pour les fonctions, seules
+celles de premier niveau du fichier, sans paramètre de type, sont concernées ; pour les méthodes, `Reflect.methods`
+et `Reflect.find_method` (par exemple un contrôleur : une structure dont les méthodes portent
+`#[Route(...)]`). La réflexion ignore la visibilité : une méthode privée peut être trouvée et appelée. Les erreurs de forme : `T300` (mauvais nombre d'arguments ou de types), `T301` (le type
+n'est pas celui attendu), `T302` (nom inconnu : `struct_info`, `enum_info`, `functions`, `find`,
+`methods` et `find_method` existent).
 
 ---
 

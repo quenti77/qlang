@@ -1730,13 +1730,11 @@ impl Checker {
     ) -> Ty {
         let arity = |ck: &mut Checker, targs_wanted: usize, args_wanted: usize| -> bool {
             if targs.len() != targs_wanted || args.len() != args_wanted {
-                let t = if targs_wanted == 1 { "<Type>" } else { "" };
                 ck.err(
                     "T300",
                     format!(
-                        "`Reflect.{0}` is called as `Reflect.{0}{t}({1})`",
-                        name.name,
-                        if args_wanted == 1 { "name" } else { "" }
+                        "`Reflect.{}` takes {targs_wanted} type(s) between `<>` and {args_wanted} argument(s)",
+                        name.name
                     ),
                     callee.span,
                 );
@@ -1789,6 +1787,55 @@ impl Checker {
                     Ty::Array(Box::new(self.prelude_ty("FunctionInfo"))),
                 )
             }
+            "methods" => {
+                if !arity(self, 1, 0) {
+                    return Ty::Error;
+                }
+                match self.resolve_type(&targs[0]) {
+                    t @ (Ty::Struct(..) | Ty::Enum(..)) => (
+                        ReflectOp::Methods(t),
+                        Ty::Array(Box::new(self.prelude_ty("FunctionInfo"))),
+                    ),
+                    Ty::Error => return Ty::Error,
+                    _ => {
+                        self.err(
+                            "T301",
+                            "`Reflect.methods` needs a struct or an enum type",
+                            targs[0].span,
+                        );
+                        return Ty::Error;
+                    }
+                }
+            }
+            "find_method" => {
+                if !arity(self, 2, 2) {
+                    return Ty::Error;
+                }
+                let t = self.resolve_type(&targs[0]);
+                let f = self.resolve_type(&targs[1]);
+                if t == Ty::Error || f == Ty::Error {
+                    self.check_args_loose(args);
+                    return Ty::Error;
+                }
+                if !matches!(t, Ty::Struct(..) | Ty::Enum(..)) || !matches!(f, Ty::Fn(..)) {
+                    self.err(
+                        "T301",
+                        "`Reflect.find_method` needs a struct or enum type, then a function type (without `self`)",
+                        callee.span,
+                    );
+                    self.check_args_loose(args);
+                    return Ty::Error;
+                }
+                let vt = self.expr(&args[0].value, &Want::Exp(t.clone()));
+                if !self.assignable(&vt, &t) {
+                    self.mismatch(args[0].value.span, &t, &vt);
+                }
+                let nt = self.expr(&args[1].value, &Want::Exp(Ty::Str));
+                if !self.assignable(&nt, &Ty::Str) {
+                    self.mismatch(args[1].value.span, &Ty::Str, &nt);
+                }
+                (ReflectOp::FindMethod(t, f.clone()), Ty::nullable(f))
+            }
             "find" => {
                 if !arity(self, 1, 1) {
                     return Ty::Error;
@@ -1815,7 +1862,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions` and `find`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `find`, `methods` and `find_method`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

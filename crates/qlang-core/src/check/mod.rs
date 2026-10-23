@@ -331,6 +331,7 @@ end
 --" A function, as `Reflect.functions()` describes it. --"
 struct FunctionInfo
     public name: string
+    public has_self: bool
     public params: array<ParamInfo>
     public return_type: string
     public annotations: array<AnnotationInfo>
@@ -390,7 +391,8 @@ end
 
 --" Reflection: `Reflect.struct_info<T>()`, `Reflect.enum_info<T>()`, `Reflect.functions()` (the functions
 of this file) and `Reflect.find<fun(A) -> B>("name")` (a function of this file, if its type is
-that one). --"
+that one); `Reflect.methods<T>()` and `Reflect.find_method<T, F>(value, "name")` do the same
+for the methods of a type. --"
 struct Reflect
 end
 

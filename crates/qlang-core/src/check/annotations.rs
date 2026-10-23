@@ -45,8 +45,17 @@ impl Checker {
                     }
                 }
                 Item::Impl(i) => {
+                    let impl_id = self.mscopes[m].decl_ids.get(&idx).copied();
                     for md in &i.methods {
-                        self.check_fun_annotations(&md.fun, None);
+                        let fid = impl_id.and_then(|iid| {
+                            let name = md.fun.name.as_ref()?;
+                            let methods = &self.defs.impls[iid].methods;
+                            methods
+                                .iter()
+                                .find(|(n, _)| *n == name.name)
+                                .map(|(_, f)| *f)
+                        });
+                        self.check_fun_annotations(&md.fun, fid);
                     }
                 }
                 _ => {}

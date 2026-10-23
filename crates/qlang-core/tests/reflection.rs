@@ -164,3 +164,65 @@ fn mistakes_are_reported() {
     assert_eq!(run("let x = Reflect.find<int>(\"a\")\n"), "T301");
     assert_eq!(run("let x = Reflect.nothing()\n"), "T302");
 }
+
+#[test]
+fn describes_and_binds_the_methods_of_a_type() {
+    let src = with(
+        "struct Users
+  public prefix: string
+end
+
+impl Users
+  #[Route(\"/list\")]
+  fun list(self, n: int) -> string
+    \"{self.prefix}:{n}\"
+  end
+
+  fun make(prefix: string) -> Users
+    Users { prefix }
+  end
+end
+
+enum Dir
+  Up
+end
+
+impl Dir
+  fun name(self) -> string
+    \"up\"
+  end
+end
+
+let u = Users { prefix: \"u\" }
+for m in Reflect.methods<Users>() do
+  print(\"{m.name} {m.has_self} {m.params.len()} {m.annotations.len()}\")
+end
+print(Reflect.methods<Dir>().len())
+let f = Reflect.find_method<Users, fun(int) -> string>(u, \"list\")
+if f != none then
+  print(f(7))
+end
+let other = Users { prefix: \"o\" }
+let g = Reflect.find_method<Users, fun(int) -> string>(other, \"list\")
+if g != none and f != none then
+  print(\"{g(1)} {f(2)}\")
+end
+print(Reflect.find_method<Users, fun(int) -> string>(u, \"make\") == none)
+print(Reflect.find_method<Users, fun(string) -> string>(u, \"list\") == none)
+print(Reflect.find_method<Users, fun(int) -> string>(u, \"nope\") == none)
+",
+    );
+    assert_eq!(
+        run(&src),
+        "list true 1 1\nmake false 1 0\n1\nu:7\no:1 u:2\ntrue\ntrue\ntrue\n"
+    );
+    assert_eq!(run("let x = Reflect.methods<int>()\n"), "T301");
+    assert_eq!(
+        run("struct S\nend\nlet x = Reflect.find_method<S, int>(S {}, \"a\")\n"),
+        "T301"
+    );
+    assert_eq!(
+        run("struct S\nend\nlet x = Reflect.methods<S>(1)\n"),
+        "T300"
+    );
+}

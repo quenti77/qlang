@@ -15,6 +15,30 @@ impl Interp<'_> {
                     .collect();
                 Value::array(infos)
             }
+            ReflectOp::Methods(ty) => {
+                let infos = self
+                    .methods_of(ty)
+                    .into_iter()
+                    .map(|fid| self.function_info(fid))
+                    .collect();
+                Value::array(infos)
+            }
+            ReflectOp::FindMethod(ty, f) => {
+                let (Ty::Fn(params, ret), Some(obj), Some(Value::Str(name))) =
+                    (f, args.first(), args.get(1))
+                else {
+                    return Value::None;
+                };
+                let found = self.methods_of(ty).into_iter().find(|&fid| {
+                    let def = &self.prog.defs.fns[fid];
+                    def.name == **name
+                        && def.has_self
+                        && def.params == *params
+                        && def.ret == **ret
+                        && def.decl.as_ref().is_some_and(|d| d.tparams.is_empty())
+                });
+                found.map_or(Value::None, |fid| self.bound_method(fid, obj.clone()))
+            }
             ReflectOp::Find(m, ty) => {
                 let (Ty::Fn(params, ret), Some(Value::Str(name))) = (ty, args.first()) else {
                     return Value::None;
@@ -48,6 +72,41 @@ impl Interp<'_> {
                         .is_some_and(|d| d.body.is_some() && !d.external)
             })
             .map(|(fid, _)| fid)
+    }
+
+    /// The methods of the impls whose target is the struct or enum `ty` (whatever its type
+    /// arguments).
+    fn methods_of(&self, ty: &Ty) -> Vec<FnId> {
+        let same = |a: &Ty| match (a, ty) {
+            (Ty::Struct(x, _), Ty::Struct(y, _)) => x == y,
+            (Ty::Enum(x, _), Ty::Enum(y, _)) => x == y,
+            _ => false,
+        };
+        self.prog
+            .defs
+            .impls
+            .iter()
+            .filter(|i| same(&i.target))
+            .flat_map(|i| i.methods.iter().map(|(_, fid)| *fid))
+            .filter(|&fid| {
+                let def = &self.prog.defs.fns[fid];
+                def.decl
+                    .as_ref()
+                    .is_some_and(|d| d.body.is_some() && !d.external)
+            })
+            .collect()
+    }
+
+    /// A method as a function value: `self` is `obj` in the scope it runs in.
+    fn bound_method(&self, fid: FnId, obj: Value) -> Value {
+        let def = &self.prog.defs.fns[fid];
+        let scope = Scope::with_capacity(Some(self.envs[def.module].clone()), 1);
+        scope.define_new("self", obj);
+        Value::Func(Rc::new(FuncVal {
+            decl: def.decl.clone().expect("method without declaration"),
+            env: scope,
+            name: def.name.clone(),
+        }))
     }
 
     fn info(&self, ty: &str, fields: &[(&str, Value)]) -> Value {
@@ -212,6 +271,7 @@ impl Interp<'_> {
             "FunctionInfo",
             &[
                 ("name", Value::str(&def.name)),
+                ("has_self", Value::Bool(def.has_self)),
                 ("params", Value::array(params)),
                 ("return_type", self.type_name(&def.ret)),
                 ("annotations", self.annotation_infos(AnnKey::Fn(fid))),

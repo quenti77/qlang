@@ -543,6 +543,10 @@ pub enum ReflectOp {
     Functions(ModId),
     /// `Reflect.find<F>(name)`: a function of this module whose type is `F`.
     Find(ModId, Ty),
+    /// `Reflect.methods<T>()`: the methods of the impls of the type `T`.
+    Methods(Ty),
+    /// `Reflect.find_method<T, F>(value, name)`: a method of `T`, bound to `value`, of type `F`.
+    FindMethod(Ty, Ty),
 }
 
 /// A declaration an annotation is put on.

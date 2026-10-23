@@ -24,6 +24,15 @@ pub struct Info {
     pub members: BTreeMap<String, Vec<Member>>,
     /// `Type.member` and `module.member`, by the key found in [`ExprInfo::statics`].
     pub statics: BTreeMap<String, Vec<Member>>,
+    /// Every use of a name that stands for a definition (variable, function, type, field,
+    /// method, variant), with the name where it is defined.
+    pub refs: Vec<RefInfo>,
+}
+
+#[derive(Serialize)]
+pub struct RefInfo {
+    pub loc: Location,
+    pub def: Location,
 }
 
 #[derive(Serialize)]
@@ -112,6 +121,7 @@ pub(crate) struct Collector {
     exprs: Vec<RawExpr>,
     locals: Vec<RawLocal>,
     statics: BTreeMap<String, StaticKey>,
+    refs: Vec<(Span, Span)>,
 }
 
 impl Collector {
@@ -250,6 +260,34 @@ fn plain(vis: Visibility) -> bool {
 impl Checker {
     pub(crate) fn collecting(&self) -> bool {
         self.collect.is_some()
+    }
+
+    /// The name at `at` stands for the definition whose name is at `def`.
+    pub(crate) fn note_ref(&mut self, at: Span, def: Span) {
+        if let Some(c) = &mut self.collect {
+            c.refs.push((at, def));
+        }
+    }
+
+    /// The name span where an item is defined.
+    pub(crate) fn item_def_span(&self, item: &ItemRef) -> Option<Span> {
+        match item {
+            ItemRef::Fn(f) => self.defs.fns[*f]
+                .decl
+                .as_ref()
+                .and_then(|d| d.name.as_ref())
+                .map(|n| n.span),
+            ItemRef::Struct(s) => Some(self.defs.structs[*s].span),
+            ItemRef::Enum(e) => Some(self.defs.enums[*e].span),
+            ItemRef::Trait(t) => Some(self.defs.traits[*t].span),
+            ItemRef::Var(m, n) => self.mscopes[*m].vars.get(n).map(|l| l.span),
+            ItemRef::Module(_) => None,
+        }
+    }
+
+    /// The name span of a function's declaration.
+    pub(crate) fn fn_def_span(&self, fid: FnId) -> Option<Span> {
+        self.item_def_span(&ItemRef::Fn(fid))
     }
 
     fn loc(&self, span: Span) -> Location {
@@ -791,6 +829,17 @@ impl Checker {
             });
         }
         info.items = self.definition_sites();
+        let mut refs = collected.refs;
+        refs.sort_by_key(|(at, def)| (at.file, at.start, at.end, def.file, def.start));
+        refs.dedup();
+        info.refs = refs
+            .into_iter()
+            .filter(|(at, def)| at.end > at.start && def.end > def.start)
+            .map(|(at, def)| RefInfo {
+                loc: self.loc(at),
+                def: self.loc(def),
+            })
+            .collect();
         info.functions = catalog::FUNCTIONS
             .iter()
             .map(|(name, detail, doc)| Member {
@@ -1092,5 +1141,34 @@ mod tests {
         let info = info_of("let a = [1, 2]\nlet b: string = a.len()\n");
         assert!(info.exprs.iter().any(|e| e.ty == "array<int>"));
         assert!(info.members.contains_key("array<int>"));
+    }
+
+    #[test]
+    fn references_point_to_their_definitions() {
+        let src = "struct P\n  x: int\nend\nimpl P\n  fun get(self) -> int\n    self.x\n  end\nend\nenum E\n  A\n  B(n: int)\nend\nfun add(a: int) -> int\n  a + 1\nend\nlet p = P { x: 1 }\nlet v = add(p.get())\nlet e = E.A\nmatch e\n  case A then print(v)\n  case B(n) then print(n)\nend\nlet q: P = p\nq.x = 2\n";
+        let info = info_of(src);
+        let refs: Vec<(u32, u32, u32)> = info
+            .refs
+            .iter()
+            .filter(|r| r.loc.file == "main.q")
+            .map(|r| (r.loc.line, r.loc.col, r.def.line))
+            .collect();
+        for expected in [
+            (4, 6, 1),    // impl P
+            (6, 10, 2),   // self.x
+            (14, 3, 13),  // a, the parameter
+            (16, 9, 1),   // P in the literal
+            (16, 13, 2),  // field x of the literal
+            (17, 9, 13),  // add
+            (17, 13, 16), // p
+            (17, 15, 5),  // .get
+            (18, 11, 10), // A in E.A
+            (20, 8, 10),  // case A
+            (21, 8, 11),  // case B
+            (23, 8, 1),   // type P
+            (24, 3, 2),   // q.x
+        ] {
+            assert!(refs.contains(&expected), "missing {expected:?}");
+        }
     }
 }

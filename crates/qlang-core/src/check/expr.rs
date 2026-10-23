@@ -857,6 +857,7 @@ impl Checker {
 
     fn check_ident(&mut self, e: &Expr, name: &str, targs: &[TypeExpr]) -> Ty {
         if let Some((local, origin)) = self.lookup_var(name) {
+            self.note_ref(e.span, local.span);
             let res = match origin {
                 VarOrigin::Local => PathRes::Local,
                 VarOrigin::Module(m) => PathRes::Global(m, name.to_string()),
@@ -875,9 +876,15 @@ impl Checker {
             return local.ty;
         }
         match self.lookup_item(name) {
-            Some(ItemRef::Fn(fid)) => self.fn_value(e, fid, targs),
+            Some(ItemRef::Fn(fid)) => {
+                if let Some(d) = self.fn_def_span(fid) {
+                    self.note_ref(e.span, d);
+                }
+                self.fn_value(e, fid, targs)
+            }
             Some(ItemRef::Var(m, vname)) => match self.mscopes[m].vars.get(&vname).cloned() {
                 Some(l) => {
+                    self.note_ref(e.span, l.span);
                     self.res.paths.insert(e.id, PathRes::Global(m, vname));
                     self.note_ident_ty(e.id, &l.ty);
                     l.ty
@@ -1177,6 +1184,7 @@ impl Checker {
             ExprKind::Ident(name, _) => {
                 match self.lookup_var(name) {
                     Some((l, origin)) => {
+                        self.note_ref(target.span, l.span);
                         self.res.paths.insert(
                             target.id,
                             match origin {
@@ -1201,6 +1209,7 @@ impl Checker {
                     None => {
                         if let Some(ItemRef::Var(m, vname)) = self.lookup_item(name) {
                             if let Some(l) = self.mscopes[m].vars.get(&vname).cloned() {
+                                self.note_ref(target.span, l.span);
                                 if m != self.cur_mod {
                                     self.err("T211", format!("cannot assign to `{name}`: it belongs to another module"), target.span);
                                 }
@@ -1605,6 +1614,8 @@ impl Checker {
                     && let Some(vi) = self.defs.enums[*eid].variant_index(&name.name)
                 {
                     self.res.patterns.insert(*id, (*eid, vi));
+                    let vspan = self.defs.enums[*eid].variants[vi].span;
+                    self.note_ref(name.span, vspan);
                     if !self.defs.enums[*eid].variants[vi].fields.is_empty() {
                         let msg =
                             format!("`{0}` carries data: write `{0}(...)` to take it", name.name);
@@ -1716,6 +1727,8 @@ impl Checker {
             );
             return None;
         };
+        let vspan = self.defs.enums[eid].variants[vi].span;
+        self.note_ref(last.span, vspan);
         let args = match matched {
             Ty::Enum(m, args) if *m == eid => args.clone(),
             _ => (0..self.defs.enums[eid].tparams.len())
@@ -1909,6 +1922,7 @@ impl Checker {
             vis: Visibility,
             owner: StructId,
             has_default: bool,
+            span: Span,
         }
         let mut fields: Vec<(String, F)> = Vec::new();
         for (asid, aargs) in self.defs.ancestry(sid, &args) {
@@ -1930,6 +1944,7 @@ impl Checker {
                         vis: f.vis,
                         owner: asid,
                         has_default: f.default.is_some(),
+                        span: f.span,
                     },
                 ));
             }
@@ -1988,6 +2003,7 @@ impl Checker {
                 self.expr(&item.value, &Want::Any);
                 continue;
             };
+            self.note_ref(item.name.span, f.span);
             let (fty, fvis, fowner) = (f.ty.clone(), f.vis, f.owner);
             if !given.insert(item.name.name.clone()) {
                 self.err(

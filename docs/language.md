@@ -1424,8 +1424,8 @@ récupéré par git ne peut dépendre que d'autres paquets git, pas d'un dossier
   nomment les fichiers `@mail/send.q`.
 - Un fichier dont le nom commence par `@` s'importe en écrivant `./@x.q`.
 - Les paquets ne sont pas limités par `--root` : c'est le projet qui les choisit.
-- L'extension VS Code suit les imports `@nom` (elle interroge `qlang packages`, qui ne fait
-  que lire les `qlang.toml`).
+- Le serveur de langage (`qlang lsp`, donc VS Code) suit les imports `@nom` (il lit les
+  `qlang.toml`, comme `qlang packages`).
 - Un projet sans `qlang.toml` n'a pas de paquets ; les environnements sans disque (JSON,
   HTTP, navigateur) les voient comme des fichiers de la requête nommés `@mail/send.q`.
 

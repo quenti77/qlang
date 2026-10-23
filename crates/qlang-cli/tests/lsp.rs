@@ -1,0 +1,344 @@
+//! `qlang lsp`: the language server, spoken to like an editor would.
+
+use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
+use std::time::Duration;
+
+struct Client {
+    child: Child,
+    stdin: ChildStdin,
+    rx: Receiver<Value>,
+    notes: Vec<Value>,
+    next: i64,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn uri(path: &Path) -> String {
+    let s = path.to_string_lossy().replace('\\', "/");
+    // `C:/dir` on Windows
+    let slash = if s.starts_with('/') { "" } else { "/" };
+    format!("file://{slash}{s}")
+}
+
+impl Client {
+    fn start(root: &Path) -> Client {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .arg("lsp")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut n = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if out.read_line(&mut line).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    let line = line.trim_end();
+                    if line.is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.strip_prefix("Content-Length:") {
+                        n = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0u8; n];
+                if out.read_exact(&mut body).is_err() {
+                    return;
+                }
+                if tx.send(serde_json::from_slice(&body).unwrap()).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut c = Client {
+            child,
+            stdin,
+            rx,
+            notes: Vec::new(),
+            next: 1,
+        };
+        let init = c.request(
+            "initialize",
+            json!({ "rootUri": uri(root), "capabilities": {} }),
+        );
+        assert_eq!(init["capabilities"]["hoverProvider"], json!(true));
+        c.notify("initialized", json!({}));
+        c
+    }
+
+    fn write(&mut self, msg: Value) {
+        let body = msg.to_string();
+        write!(self.stdin, "Content-Length: {}\r\n\r\n{}", body.len(), body).unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn notify(&mut self, method: &str, params: Value) {
+        self.write(json!({ "jsonrpc": "2.0", "method": method, "params": params }));
+    }
+
+    /// The whole response (`result` or `error`).
+    fn call(&mut self, method: &str, params: Value) -> Value {
+        let id = self.next;
+        self.next += 1;
+        self.write(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+        loop {
+            let m = self
+                .rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("no answer from the server");
+            if m["id"] == json!(id) {
+                return m;
+            }
+            self.notes.push(m);
+        }
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        let r = self.call(method, params);
+        assert!(r.get("error").is_none(), "{method}: {r}");
+        r["result"].clone()
+    }
+
+    /// The diagnostics last published for `file`, waiting for them if needed.
+    fn diagnostics(&mut self, file: &str) -> Vec<Value> {
+        loop {
+            let found = self
+                .notes
+                .iter()
+                .rposition(|n| {
+                    n["method"] == "textDocument/publishDiagnostics"
+                        && n["params"]["uri"].as_str().unwrap().ends_with(file)
+                })
+                .map(|i| self.notes.remove(i));
+            if let Some(n) = found {
+                self.notes.retain(|m| {
+                    !(m["method"] == "textDocument/publishDiagnostics"
+                        && m["params"]["uri"] == n["params"]["uri"])
+                });
+                return n["params"]["diagnostics"].as_array().unwrap().clone();
+            }
+            let m = self
+                .rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("no diagnostics");
+            self.notes.push(m);
+        }
+    }
+
+    fn open(&mut self, path: &Path, text: &str) {
+        self.notify(
+            "textDocument/didOpen",
+            json!({ "textDocument": {
+                "uri": uri(path), "languageId": "qlang", "version": 1, "text": text,
+            } }),
+        );
+    }
+
+    fn at(&self, path: &Path, line: u64, character: u64) -> Value {
+        json!({ "textDocument": { "uri": uri(path) }, "position": { "line": line, "character": character } })
+    }
+}
+
+fn project(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("qlang-lsp-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+const MAIN: &str = "--\" Adds one. --\"\nfun add(a: int) -> int\n  a + 1\nend\nstruct P\n  public x: int\nend\nlet p = P { x: 1 }\nlet v = add(p.x)\nprint(add(v))\n";
+
+#[test]
+fn hover_definition_references_and_rename() {
+    let dir = project("nav");
+    let main = dir.join("main.q");
+    std::fs::write(&main, MAIN).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, MAIN);
+    assert!(c.diagnostics("main.q").is_empty());
+
+    // hover on a call: the signature and the documentation comment
+    let h = c.request("textDocument/hover", c.at(&main, 8, 9));
+    let text = h["contents"]["value"].as_str().unwrap();
+    assert!(text.contains("fun add(a: int) -> int"), "{text}");
+    assert!(text.contains("Adds one."), "{text}");
+
+    // go to the definition of `add`
+    let d = c.request("textDocument/definition", c.at(&main, 8, 9));
+    assert_eq!(d["range"]["start"], json!({ "line": 1, "character": 4 }));
+
+    // and of the field `x`
+    let d = c.request("textDocument/definition", c.at(&main, 8, 15));
+    assert_eq!(d["range"]["start"], json!({ "line": 5, "character": 9 }));
+
+    // every use of `add`, the declaration included
+    let mut params = c.at(&main, 1, 5);
+    params["context"] = json!({ "includeDeclaration": true });
+    let refs = c.request("textDocument/references", params);
+    assert_eq!(refs.as_array().unwrap().len(), 3, "{refs}");
+
+    // renaming it changes the three places
+    let mut params = c.at(&main, 8, 9);
+    params["newName"] = json!("plus");
+    let edit = c.request("textDocument/rename", params);
+    let edits = edit["changes"][uri(&main)].as_array().unwrap().clone();
+    assert_eq!(edits.len(), 3, "{edit}");
+    assert!(edits.iter().all(|e| e["newText"] == "plus"));
+
+    // a keyword is not a name
+    let mut params = c.at(&main, 8, 9);
+    params["newName"] = json!("end");
+    assert!(c.call("textDocument/rename", params).get("error").is_some());
+
+    // the symbols of the file
+    let syms = c.request(
+        "textDocument/documentSymbol",
+        json!({ "textDocument": { "uri": uri(&main) } }),
+    );
+    let names: Vec<&str> = syms
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"add") && names.contains(&"P"), "{names:?}");
+}
+
+#[test]
+fn errors_follow_the_text_and_completion_knows_members() {
+    let dir = project("edit");
+    let main = dir.join("main.q");
+    std::fs::write(&main, MAIN).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, MAIN);
+    assert!(c.diagnostics("main.q").is_empty());
+
+    let broken = MAIN.replace("add(p.x)", "add(\"no\")");
+    c.notify(
+        "textDocument/didChange",
+        json!({ "textDocument": { "uri": uri(&main), "version": 2 },
+                "contentChanges": [{ "text": broken }] }),
+    );
+    let diags = c.diagnostics("main.q");
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0]["severity"], json!(1));
+    assert_eq!(diags[0]["range"]["start"]["line"], json!(8));
+
+    // `p.` offers the fields of `P`
+    let typing = MAIN.replace("add(p.x)", "add(p.)");
+    c.notify(
+        "textDocument/didChange",
+        json!({ "textDocument": { "uri": uri(&main), "version": 3 },
+                "contentChanges": [{ "text": typing }] }),
+    );
+    let items = c.request("textDocument/completion", c.at(&main, 8, 14));
+    let labels: Vec<&str> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["label"].as_str().unwrap())
+        .collect();
+    assert!(labels.contains(&"x"), "{items}");
+
+    // and a call shows its parameters
+    let call = MAIN.replace("add(p.x)", "add(");
+    c.notify(
+        "textDocument/didChange",
+        json!({ "textDocument": { "uri": uri(&main), "version": 4 },
+                "contentChanges": [{ "text": call }] }),
+    );
+    let sig = c.request("textDocument/signatureHelp", c.at(&main, 8, 12));
+    assert_eq!(sig["signatures"][0]["label"], json!("add(a: int) -> int"));
+    assert_eq!(
+        sig["signatures"][0]["parameters"][0]["label"],
+        json!("a: int")
+    );
+}
+
+#[test]
+fn names_are_followed_across_files() {
+    let dir = project("files");
+    let lib = dir.join("lib.q");
+    let main = dir.join("main.q");
+    let lib_src = "fun double(n: int) -> int\n  n * 2\nend\nexport double\n";
+    let main_src = "import double from \"lib.q\"\nprint(double(4))\n";
+    std::fs::write(&lib, lib_src).unwrap();
+    std::fs::write(&main, main_src).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, main_src);
+    assert!(c.diagnostics("main.q").is_empty());
+
+    let d = c.request("textDocument/definition", c.at(&main, 1, 8));
+    assert_eq!(d["uri"], json!(uri(&lib)));
+    assert_eq!(d["range"]["start"], json!({ "line": 0, "character": 4 }));
+
+    // renaming from the definition reaches the other file (not open in the editor)
+    let mut params = c.at(&lib, 0, 5);
+    params["newName"] = json!("twice");
+    let edit = c.request("textDocument/rename", params);
+    let changes = edit["changes"].as_object().unwrap();
+    assert!(changes.contains_key(&uri(&lib)), "{edit}");
+    assert!(changes.contains_key(&uri(&main)), "{edit}");
+
+    c.request("shutdown", Value::Null);
+}
+
+#[test]
+fn rename_reaches_every_kind_of_use() {
+    let dir = project("kinds");
+    let main = dir.join("main.q");
+    let src = "struct Point\n  public x: int\n  public y: int\nend\nimpl Point\n  public fun len(self) -> int\n    self.x + self.y\n  end\nend\nenum Color\n  Red\n  Green(n: int)\nend\nfun show(c: Color, p: Point) -> int\n  let total = p.len()\n  match c\n    case Red then total\n    case Green(n) then total + n\n  end\nend\nlet q: Point = Point { x: 1, y: 2 }\nprint(show(Color.Green(3), q))\nprint(show(Color.Red, q))\n";
+    std::fs::write(&main, src).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, src);
+    let d = c.diagnostics("main.q");
+    assert!(d.is_empty(), "{d:?}");
+    let count = |c: &mut Client, line: u64, col: u64| {
+        let mut params = c.at(&main, line, col);
+        params["newName"] = json!("renamed");
+        let r = c.request("textDocument/rename", params);
+        r["changes"][uri(&main)].as_array().map_or(0, |v| v.len())
+    };
+    assert_eq!(count(&mut c, 0, 8), 5, "the struct");
+    assert_eq!(count(&mut c, 1, 10), 3, "the field");
+    assert_eq!(count(&mut c, 5, 14), 2, "the method");
+    assert_eq!(count(&mut c, 10, 3), 3, "the variant");
+    assert_eq!(count(&mut c, 14, 7), 3, "the variable");
+    assert_eq!(count(&mut c, 13, 9), 2, "the parameter");
+    assert_eq!(count(&mut c, 9, 6), 4, "the enumeration");
+}
+
+#[test]
+fn rename_refuses_the_shorthand_that_means_two_things() {
+    let dir = project("shorthand");
+    let main = dir.join("main.q");
+    let src = "struct P\n  public x: int\nend\nlet x = 1\nlet p = P { x }\nprint(p.x + x)\n";
+    std::fs::write(&main, src).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, src);
+    let d = c.diagnostics("main.q");
+    assert!(d.is_empty(), "{d:?}");
+    for (line, col) in [(1, 10), (3, 4)] {
+        let mut params = c.at(&main, line, col);
+        params["newName"] = json!("z");
+        let r = c.call("textDocument/rename", params);
+        let msg = r["error"]["message"].as_str().unwrap_or("");
+        assert!(msg.contains("shorthand"), "{r}");
+    }
+}

@@ -437,11 +437,26 @@ chaque release avec son enveloppe JavaScript `qlang.mjs`). Même protocole JSON 
 sans serveur : de quoi faire tourner du qlang dans une page web, dans un Web Worker. Voir
 [`crates/qlang-wasm`](crates/qlang-wasm/README.md).
 
-## Éditeur : VS Code
+## Éditeurs : `qlang lsp` et VS Code
 
-Une extension (coloration, erreurs soulignées pendant la frappe grâce au vrai compilateur,
-infobulles avec types et documentation, autocomplétion, aide à la saisie des paramètres,
-bouton ▶ pour exécuter, snippets) est dans [`editors/vscode`](editors/vscode) :
+`qlang lsp` est un serveur de langage ([LSP](https://microsoft.github.io/language-server-protocol/),
+sur l'entrée et la sortie standard) : n'importe quel éditeur qui sait en parler (Neovim, Helix,
+Emacs, Zed, Sublime…) a, grâce au vrai compilateur :
+
+- les **erreurs** pendant la frappe, y compris dans les fichiers importés ;
+- les **infobulles** (types, signatures, commentaires `--" … --"`) ;
+- l'**autocomplétion** (membres après un `.`, champs d'un littéral de structure, noms visibles,
+  mots-clés) et l'**aide à la saisie des paramètres** ;
+- **aller à la définition**, **trouver les références** et **renommer** (variables, paramètres,
+  fonctions, méthodes, types, champs, variantes, dans tout le projet ; le renommage refuse ce
+  qui serait ambigu, comme `Point { x }` où `x` est à la fois un champ et une variable) ;
+- le **plan du fichier** et la **recherche de symboles** du projet.
+
+Le texte non enregistré des fichiers ouverts est pris en compte ; les imports sont relatifs au
+dossier ouvert dans l'éditeur, et les paquets `@nom` sont suivis.
+
+L'extension VS Code (coloration, serveur de langage, bouton ▶ pour exécuter, snippets) est dans
+[`editors/vscode`](editors/vscode) :
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode
@@ -449,6 +464,9 @@ curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
 
 (le programme `qlang` et l'extension ; ou, depuis les sources : `cargo install --path crates/qlang-cli`,
 puis `cd editors/vscode && npm install && npm run package` et `code --install-extension qlang-*.vsix`).
+
+Pour un autre éditeur, il suffit de lancer `qlang lsp` pour les fichiers `.q` (Neovim :
+`vim.lsp.start({ name = "qlang", cmd = { "qlang", "lsp" }, root_dir = vim.fn.getcwd() })`).
 
 Pour les éditeurs, `qlang packages` affiche en JSON les paquets du projet courant (nom,
 dossier, fichier principal) ; une requête JSON peut ensuite contenir leurs fichiers sous
@@ -459,12 +477,12 @@ même chose avec `run --json`.
 
 Avec `"info": true` dans la requête, la réponse contient aussi ce que le compilateur a appris du
 programme, pour les éditeurs : le type de chaque expression (`exprs`), les variables et leur portée
-(`locals`), les définitions (`items`), les noms visibles de chaque fichier (`globals`) et les membres
+(`locals`), les définitions (`items`), les usages de chaque nom avec sa définition (`refs`), les noms visibles de chaque fichier (`globals`) et les membres
 de chaque type rencontré (`members` pour `valeur.`, `statics` pour `Type.` et `module.`). Les
 informations sont fournies même si le programme contient des erreurs de types ; elles manquent
 seulement si le fichier ne peut pas être analysé (erreur de syntaxe) ou si les déclarations sont
 fausses. La documentation des méthodes prédéfinies vient du compilateur ; celle de vos fonctions,
-structures et méthodes est lue par l'extension dans les commentaires `--" … --"` qui les précèdent.
+structures et méthodes est lue dans les commentaires `--" … --"` qui les précèdent.
 
 ## Développement
 

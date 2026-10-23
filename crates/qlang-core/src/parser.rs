@@ -2169,6 +2169,11 @@ impl<'a> Parser<'a> {
                                 }
                             }
                             b'\\' => j += 1,
+                            // a string inside the braces: its quotes and braces are its own
+                            b'"' => match crate::lexer::scan_string_end(rb, j + 1) {
+                                Some(end) => j = end,
+                                None => j = rb.len(),
+                            },
                             _ => {}
                         }
                         j += 1;

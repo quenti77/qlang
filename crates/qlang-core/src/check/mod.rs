@@ -437,6 +437,14 @@ impl FunctionInfo
     end
 end
 
+--" The inside of an enumeration value, as `Reflect.parts` gives it: the name of the enum, of its
+variant and the data it carries (each as an `Any` with its own type). --"
+struct EnumParts
+    public enum_name: string
+    public variant: string
+    public values: array<Any>
+end
+
 --" A function found by `Reflect.callable(name)` (or `Reflect.callable(module, name)`), to call with
 `Any` values: `call` checks their number and types against `params`. --"
 struct Callable

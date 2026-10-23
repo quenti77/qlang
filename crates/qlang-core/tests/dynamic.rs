@@ -481,3 +481,71 @@ print(Reflect.callables()[1].params[0].decode(parse(\"[]\")).unwrap_err().messag
          `x` is not a valid int\nexpected an object for CreateUser, found array\n"
     );
 }
+
+#[test]
+fn parts_info_of_and_items_open_a_value_known_only_by_its_type() {
+    let out = with(
+        "fun get() -> Result<User, Error>
+  Result<User, Error>.Ok(User { id: 3, name: \"C\" })
+end
+let c = Reflect.callable(\"get\")
+if c != none then
+  let out = c.call([]).unwrap()
+  let p = Reflect.parts(out)
+  if p != none then
+    print(\"{p.enum_name} {p.variant} {p.values.len()}\")
+    let inner = p.values[0]
+    let info = Reflect.info_of(inner)
+    if info != none then
+      print(info.name)
+    end
+    print(inner.type_name())
+  end
+end
+print(Reflect.parts(Any.of(5)) == none)
+let xs: array<User> = [User { id: 1, name: \"a\" }, User { id: 2, name: \"b\" }]
+let items = Reflect.items(Any.of(xs))
+if items != none then
+  print(items.len())
+  print(items[1].type_name())
+end
+print(Reflect.items(Any.of(5)) == none)
+print(Reflect.info_of(Any.of(5)) == none)
+",
+    );
+    assert_eq!(out, "Result Ok 1\nUser\nUser\ntrue\n2\nUser\ntrue\ntrue\n");
+}
+
+#[test]
+fn a_string_inside_an_interpolation_is_a_string() {
+    let out = run("let names = [\"a\", \"b\"]
+print(\"list: {names.join(\", \")} done\")
+print(\"{\"x\" + \"\\{\"}\")
+let n = 3
+print(\"{n + 1} and {\"in\" + \"ner\"} and \\{n\\}\")
+");
+    assert_eq!(out, "list: a, b done\nx{\n4 and inner and {n}\n");
+}
+
+#[test]
+fn a_whole_number_fits_a_float_annotation() {
+    let out = run("#[annotation]
+struct Min
+  value: float
+end
+struct F
+  #[Min(1)]
+  public a: int
+  #[Min(-2)]
+  public b: int
+end
+let info = Reflect.struct_info<F>()
+for f in info.fields do
+  let m = f.annotation(\"Min\")
+  if m != none then
+    print(m.get_float(\"value\"))
+  end
+end
+");
+    assert_eq!(out, "1.0\n-2.0\n");
+}

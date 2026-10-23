@@ -401,17 +401,16 @@ pub fn lex_with_docs(
                 let start = i;
                 i += 1;
                 let content_start = i;
-                let mut closed = false;
-                while i < b.len() {
-                    match b[i] {
-                        b'\\' => i += 2,
-                        b'"' => {
-                            closed = true;
-                            break;
-                        }
-                        _ => i += 1,
+                let closed = match scan_string_end(b, i) {
+                    Some(end) => {
+                        i = end;
+                        true
                     }
-                }
+                    None => {
+                        i = b.len();
+                        false
+                    }
+                };
                 let content_end = i.min(b.len());
                 if closed {
                     push!(
@@ -682,4 +681,27 @@ fn lex_number(
         }
     }
     i
+}
+
+/// The index of the quote that closes a string whose content starts at `i`. A `{...}` inside
+/// the string is code, and may hold strings of its own: `"{names.join(", ")}"`.
+pub(crate) fn scan_string_end(b: &[u8], mut i: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'"' if depth == 0 => return Some(i),
+            b'"' => i = scan_string_end(b, i + 1)? + 1,
+            _ => i += 1,
+        }
+    }
+    None
 }

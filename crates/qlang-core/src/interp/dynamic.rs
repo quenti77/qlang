@@ -100,6 +100,24 @@ impl Interp<'_> {
             }
             ReflectOp::Invoke => self.invoke(&args[0], &args[1], span)?,
             ReflectOp::Get => self.reflect_get(&args[0], &args[1]),
+            ReflectOp::Parts => self.enum_parts(&args[0]),
+            ReflectOp::InfoOf => match &args[0] {
+                Value::Any(a) => match &a.value {
+                    Value::Struct(o) => self.struct_info(o.def),
+                    _ => Value::None,
+                },
+                _ => Value::None,
+            },
+            ReflectOp::Items => match &args[0] {
+                Value::Any(a) => match (&a.value, &a.ty) {
+                    (Value::Array(items), Ty::Array(elem)) => {
+                        let items: Vec<Value> = items.borrow().clone();
+                        Value::array(items.into_iter().map(|v| self.any_box(v, elem)).collect())
+                    }
+                    _ => Value::None,
+                },
+                _ => Value::None,
+            },
             ReflectOp::Construct(t) => self.construct(t, &args[0])?,
             ReflectOp::JsonOf => self.json_from_value(&args[0], 0, span)?,
             ReflectOp::JsonText => {
@@ -233,6 +251,49 @@ impl Interp<'_> {
             Value::Any(a) => a.ty.clone(),
             _ => Ty::Error,
         }
+    }
+
+    /// `Reflect.parts`: the variant of an enumeration value in an `Any`, and its data.
+    fn enum_parts(&self, target: &Value) -> Value {
+        let Value::Any(a) = target else {
+            return Value::None;
+        };
+        let (Value::Enum(eid, vi, data), Ty::Enum(_, targs)) = (&a.value, &a.ty) else {
+            return Value::None;
+        };
+        let def = &self.prog.defs.enums[*eid as usize];
+        let variant = &def.variants[*vi as usize];
+        let map: HashMap<ParamId, Ty> = def
+            .tparams
+            .iter()
+            .cloned()
+            .zip(targs.iter().cloned())
+            .collect();
+        let values: Vec<Value> = match data {
+            Some(items) => variant
+                .fields
+                .iter()
+                .zip(items.iter())
+                .map(|((_, fty), item)| {
+                    let ty = fty.subst(&map);
+                    let ty = if ty.contains_param() {
+                        self.ty_of_value(item)
+                    } else {
+                        ty
+                    };
+                    self.any_box(item.clone(), &ty)
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        self.info(
+            "EnumParts",
+            &[
+                ("enum_name", Value::str(&def.name)),
+                ("variant", Value::str(&variant.name)),
+                ("values", Value::array(values)),
+            ],
+        )
     }
 
     fn reflect_get(&self, target: &Value, name: &Value) -> Value {

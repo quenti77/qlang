@@ -3,7 +3,6 @@
 ## 0.42.0
 
 - Dépendances : `ctutils` 0.4.5 (avis RUSTSEC-2026-0385, utilisé par le client Postgres).
-
 - Performance : la machine à registres compile aussi les **textes** (littéraux, `+`, comparaisons, interpolation, `print`, méthodes courantes) et peut créer des tableaux dans une boucle : une boucle de traitement de texte va 4 fois plus vite. Deux banques de registres (nombres, valeurs) remplacent la table de tableaux.
 - Performance : et les **structures** (champs, littéraux) avec leurs **méthodes** (le corps est compilé ; l'appel est direct quand aucune structure fille ne redéfinit la méthode, sinon il passe par l'interpréteur, donc héritage, `override` et traits inchangés) : jusqu'à ×4 sur du code orienté objet. Les **tableaux de textes, de structures et de tableaux** sont compilés, et une fonction qui ne l'est pas (dictionnaire, `match`) n'empêche plus sa voisine de l'être. 40 000 programmes aléatoires (nombres, tableaux, textes, structures) donnent les mêmes résultats sur les deux moteurs.
 

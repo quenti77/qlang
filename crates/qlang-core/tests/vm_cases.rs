@@ -322,3 +322,23 @@ fn structures_and_their_methods_on_the_machine() {
     assert!(out.contains("R011"), "{out}");
     assert!(out.contains("called from `boom`"), "{out}");
 }
+
+#[test]
+fn a_function_the_machine_cannot_run_is_called_through_the_interpreter() {
+    // `lookup` uses a map: it stays on the tree walker, but the loop that calls it is compiled
+    let src = "fun lookup(k: int) -> int\n  let m = {1: 10, 2: 20}\n  let v = m.get(k, 0)\n  v + 1\nend\nfun hot(n: int) -> int\n  let t = 0\n  for i in 0..n do\n    t += lookup(i mod 4)\n  end\n  t\nend\nprint(hot(1000))\nprint(lookup(2))";
+    assert_eq!(same_compiled(src, 1), "8500\n21\n");
+}
+
+#[test]
+fn a_method_nobody_overrides_is_called_directly() {
+    let src = "struct A\n  public n: int\nend\nimpl A\n  public fun inc(self, k: int) -> int\n    self.n += k\n    self.n\n  end\nend\nstruct B extends A\n  public m: int = 1\nend\nfun run(a: A) -> int\n  let t = 0\n  for i in 0..100 do\n    t += a.inc(i)\n  end\n  t\nend\nprint(run(A { n: 0 }))\nprint(run(B { n: 5 }))";
+    assert_eq!(same_compiled(src, 2), "166650\n167150\n");
+}
+
+#[test]
+fn arrays_of_texts_structures_and_arrays() {
+    let src = "struct P\n  public v: int\nend\nfun names(n: int) -> string\n  let xs: array<string> = []\n  for i in 0..n do\n    xs[] = \"n{i}\"\n  end\n  xs[0] += \"!\"\n  xs.join(\",\")\nend\nfun grid(n: int) -> int\n  let rows: array<array<int>> = []\n  for i in 0..n do\n    rows[] = [i, i * 2]\n  end\n  rows[1][1] = 50\n  let s = 0\n  for r in rows do\n    s += r[0] + r[1]\n  end\n  s\nend\nfun ps(n: int) -> int\n  let a: array<P> = []\n  for i in 0..n do\n    a.push(P { v: i })\n  end\n  let t = 0\n  for p in a do\n    p.v += 1\n    t += p.v\n  end\n  t + a[2].v\nend\nprint(names(3))\nprint(grid(4))\nprint(ps(5))\nprint(\"a b  c\".words().len())\nprint(names(2)[0])";
+    let out = same_compiled(src, 3);
+    assert!(out.starts_with("n0!,n1,n2\n"), "{out}");
+}

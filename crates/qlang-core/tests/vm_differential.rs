@@ -154,6 +154,7 @@ fn stmts(rng: &mut Rng, vars: &[&str], depth: usize, loops: bool) -> String {
                     stmts(rng, vars, depth - 1, false)
                 );
             }
+            7 if depth > 1 => out += &format!("{target} += weird({})\n", int_expr(rng, vars, 1)),
             _ => {
                 let t = format!("t{}", unique());
                 out += &format!("let {t} = {}\n{target} += {t}\n", int_expr(rng, vars, 2));
@@ -521,6 +522,7 @@ fn struct_stmts(rng: &mut Rng, depth: usize) -> String {
                     struct_stmts(rng, depth - 1)
                 )
             }
+            19 => out += &format!("acc += {}.odd()\n", who(rng)),
             _ => out += "n += p.a mod 3\n",
         }
     }
@@ -532,7 +534,7 @@ fn struct_program(rng: &mut Rng) -> String {
     src += "struct P\n  public a: int\n  public b: float\n  public s: string\n  public ok: bool = true\nend\n";
     src += "struct Q extends P\n  public c: int = 5\nend\n";
     src += &format!(
-        "impl P\n  public fun bump(self, k: int) -> int\n    self.a += k\n    self.a mod {}\n  end\n  public fun label(self) -> string\n    \"{{self.a}}:{{self.s}}:{{self.b}}\"\n  end\n  public fun scale(self, f: float)\n    self.b = self.b * f\n  end\n  public fun combine(self, o: P) -> int\n    self.a + o.a * 2\n  end\n  public fun make(k: int) -> P\n    P {{ a: k, b: 0.5, s: \"m\" }}\n  end\nend\n",
+        "impl P\n  public fun bump(self, k: int) -> int\n    self.a += k\n    self.a mod {}\n  end\n  public fun label(self) -> string\n    \"{{self.a}}:{{self.s}}:{{self.b}}\"\n  end\n  public fun scale(self, f: float)\n    self.b = self.b * f\n  end\n  public fun combine(self, o: P) -> int\n    self.a + o.a * 2\n  end\n  public fun make(k: int) -> P\n    P {{ a: k, b: 0.5, s: \"m\" }}\n  end\n  public fun odd(self) -> int\n    let m = {{\"k\": self.a mod 4}}\n    let v = m[\"k\"]\n    if v == none then 0 else v end\n  end\nend\n",
         rng.pick(&["7", "3", "11"])
     );
     src += "impl Q\n  public override fun bump(self, k: int) -> int\n    self.c += 1\n    self.a - k\n  end\n  public override fun label(self) -> string\n    \"Q{self.c}\" + \"{self.a}\"\n  end\nend\n";
@@ -553,10 +555,100 @@ fn struct_program(rng: &mut Rng) -> String {
     src
 }
 
+/// Statements on `xs` (array<string>), `g` (array<array<int>>), the strings `s`, `t` and the
+/// ints `acc`, `n`.
+fn obj_array_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let ix = |rng: &mut Rng, name: &str| -> String {
+        match rng.below(5) {
+            0 => format!("{}", rng.below(6)),
+            1 => format!("-{}", 1 + rng.below(2)),
+            _ => format!(
+                "({}) mod ({name}.len() + 1)",
+                int_expr(rng, &["acc", "n"], 1)
+            ),
+        }
+    };
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 22 } else { 18 }) {
+            0 => out += &format!("xs[] = {}\n", str_expr(rng, 1)),
+            1 => out += &format!("xs.push({})\n", str_expr(rng, 1)),
+            2 => out += &format!("xs[{}] = {}\n", ix(rng, "xs"), str_expr(rng, 1)),
+            3 => out += &format!("xs[{}] += \"q{{n}}\"\n", ix(rng, "xs")),
+            4 => out += &format!("acc += xs[{}].len()\n", ix(rng, "xs")),
+            5 => out += "s = xs.join(\"-\")\n",
+            6 => out += "for w in xs do\n  acc += w.len()\n  if acc > 500 then break end\nend\n",
+            7 => {
+                out += "for i, w in xs do\n  t = w + t\n  if t.len() > 30 then t = \"\" end\n  acc += i\nend\n"
+            }
+            8 => out += "acc += xs.len()\n",
+            9 => out += "xs.sort()\n",
+            10 => out += "xs.reverse()\n",
+            11 => out += &format!("if xs.contains({}) then n += 1 end\n", str_expr(rng, 1)),
+            12 => out += &format!("g[] = [{}, n]\n", int_expr(rng, &vars, 1)),
+            13 => out += &format!("acc += g[{}][0]\n", ix(rng, "g")),
+            14 => out += &format!("g[{}][1] += 1\n", ix(rng, "g")),
+            15 => out += "acc += g.len()\n",
+            16 => out += "xs = s.words()\n",
+            17 => {
+                out += &format!(
+                    "if {} then xs.clear() end\n",
+                    rng.pick(&["n > 3", "acc > 40", "xs.len() > 6"])
+                )
+            }
+            18 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n{}if xs.len() > 30 then break end\nend\n",
+                    rng.below(6),
+                    obj_array_stmts(rng, depth - 1)
+                );
+            }
+            19 => {
+                let u = unique();
+                out += &format!(
+                    "let tmp{u}: array<string> = []\nfor i{u} in 0..{} do\n  tmp{u}[] = \"{{i{u}}}\"\n{}end\nxs = tmp{u}\n",
+                    rng.below(5),
+                    obj_array_stmts(rng, depth - 1)
+                );
+            }
+            _ => out += "for row in g do\n  row[0] += 1\n  acc += row.len()\nend\n",
+        }
+    }
+    out
+}
+
+fn obj_array_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += &format!(
+        "fun work(xs: array<string>, g: array<array<int>>, s: string, n: int) -> int\n  let acc = 0\n  let n = n\n  let s = s\n  let t = \"\"\n  let xs = xs\n{}  acc + n + xs.len() + s.len() + t.len()\nend\n",
+        obj_array_stmts(rng, 2)
+    );
+    src += "fun make(n: int) -> array<string>\n  let out: array<string> = []\n  for i in 0..n do\n    out[] = \"w{i}\"\n  end\n  out\nend\n";
+    src += "fun table(n: int) -> array<array<int>>\n  let rows: array<array<int>> = []\n  for i in 0..n do\n    rows[] = [i, i * 2]\n  end\n  rows\nend\n";
+    for _ in 0..3 {
+        src += &format!(
+            "print(work(make({}), table({}), {}, {}))\n",
+            rng.below(6),
+            rng.below(5),
+            rng.pick(&["\"a b c\"", "\"\"", "\"hello\""]),
+            rng.below(5)
+        );
+    }
+    src += "print(make(3))\nprint(table(2))\n";
+    src += "let xs = make(2)\nlet g = table(2)\nlet s = \"x y\"\nlet t = \"T\"\nlet acc = 0\nlet n = 1\n";
+    src += &obj_array_stmts(rng, 2);
+    src += "print(xs)\nprint(g)\nprint(acc)\nprint(s)\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
     src += "fun helper(a: int, b: int) -> int\n  if a > b then a - b else b - a end\nend\n";
+    // a function the machine cannot compile (a map): it is called through the interpreter
+    src += "fun weird(x: int) -> int\n  let m = {\"k\": x mod 5}\n  let v = m[\"k\"]\n  if v == none then 0 else v + 1 end\nend\n";
     src += &format!(
         "fun rec(n: int, acc: int) -> int\n  if n <= 0 then return acc end\n  rec(n - 1, acc + {})\nend\n",
         int_expr(rng, &["n", "acc"], 2)
@@ -781,6 +873,23 @@ fn the_machine_and_the_tree_walker_agree_on_structures_in_many_more_programs() {
             seed.wrapping_mul(0xC13F_A9A9_02A6_328F) | 1,
             500,
             struct_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_arrays_of_objects() {
+    sweep_with(0x0B1E_C75A_77A9_0004, 300, obj_array_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_arrays_of_objects_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0x8CB9_2BA7_2F3D_8DD7) | 1,
+            500,
+            obj_array_program,
         );
     }
 }

@@ -31,6 +31,8 @@ enum Ety {
     I,
     F,
     B,
+    /// An object (a text, a structure, an array): the element is an object register.
+    O,
 }
 
 fn ety_of(t: &Ty) -> Option<Ety> {
@@ -38,6 +40,7 @@ fn ety_of(t: &Ty) -> Option<Ety> {
         Ty::Int => Some(Ety::I),
         Ty::Float => Some(Ety::F),
         Ty::Bool => Some(Ety::B),
+        _ if vty(t) => Some(Ety::O),
         _ => None,
     }
 }
@@ -57,6 +60,7 @@ fn elem_value(bits: i64, ety: Ety) -> Value {
         Ety::I => Value::Int(bits),
         Ety::F => Value::Float(f64::from_bits(bits as u64)),
         Ety::B => Value::Bool(bits != 0),
+        Ety::O => Value::Unit,
     }
 }
 
@@ -222,6 +226,13 @@ enum Op {
         base: Reg,
         lit: u32,
     },
+    /// A call of a function the machine cannot run, through the interpreter: arguments from
+    /// `base`.
+    CallFn {
+        dst: Reg,
+        base: Reg,
+        site: u32,
+    },
     /// A call of a method of a structure, dispatched by the interpreter as usual: receiver
     /// and arguments from `base`.
     CallMethod {
@@ -321,6 +332,8 @@ struct Site {
     node: NodeId,
     /// The method name as the interpreter's dispatch wants it (user methods).
     ident: Option<Ident>,
+    /// For `CallFn`: the function.
+    fid: Option<FnId>,
 }
 
 #[derive(Clone)]
@@ -373,6 +386,8 @@ fn string_method(name: &str) -> Option<(Vec<Ty>, Ty)> {
         "replace" => (vec![Ty::Str, Ty::Str], Ty::Str),
         "repeat" => (vec![Ty::Int], Ty::Str),
         "substring" => (vec![Ty::Int, Ty::Int], Ty::Str),
+        "lines" | "words" | "chars" => (vec![], Ty::Array(Box::new(Ty::Str))),
+        "split" => (vec![Ty::Str], Ty::Array(Box::new(Ty::Str))),
         _ => return None,
     })
 }
@@ -389,7 +404,8 @@ fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
         "is_empty" => (vec![], Ty::Bool),
         "push" | "contains" => (vec![el], if name == "push" { Ty::Unit } else { Ty::Bool }),
         "reverse" | "sort" | "clear" => (vec![], Ty::Unit),
-        "sum" if el != Ty::Bool => (vec![], el),
+        "sum" if scalar(&el) && el != Ty::Bool => (vec![], el),
+        "join" if el == Ty::Str => (vec![Ty::Str], Ty::Str),
         "insert" => (vec![Ty::Int, el], Ty::Unit),
         "remove" => (vec![Ty::Int], el),
         _ => return None,
@@ -400,7 +416,7 @@ fn array_method(el: &Ty, name: &str) -> Option<(Vec<Ty>, Ty)> {
 fn vty(t: &Ty) -> bool {
     scalar(t)
         || *t == Ty::Str
-        || matches!(t, Ty::Array(e) if scalar(e))
+        || matches!(t, Ty::Array(e) if vty(e))
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
 }
 
@@ -434,6 +450,7 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::SetField { .. }
                     | Op::NewStruct { .. }
                     | Op::CallMethod { .. }
+                    | Op::CallFn { .. }
                     | Op::ALen(..)
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
@@ -446,6 +463,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
 
 struct Gen<'a> {
     prog: &'a Program,
+    /// Functions that cannot be compiled: they are called through the interpreter.
+    deny: &'a [FnId],
     ops: Vec<Op>,
     spans: Vec<Span>,
     scopes: Vec<Vec<(String, Reg, Ty)>>,
@@ -629,6 +648,47 @@ impl Gen<'_> {
             }
         }
         Some(())
+    }
+
+    /// The method `name` as the structure `x` (or a parent) defines it: the structure and the
+    /// function; `None` when there is none, or several.
+    fn resolve_method(&self, x: StructId, name: &str) -> Option<(StructId, FnId)> {
+        let defs = &self.prog.defs;
+        for (a, _) in defs.ancestry(x, &[]) {
+            let mut found: Option<FnId> = None;
+            for imp in &defs.impls {
+                if !matches!(&imp.target, Ty::Struct(s, args) if *s == a && args.is_empty()) {
+                    continue;
+                }
+                for (n, fid) in &imp.methods {
+                    if n == name {
+                        if found.is_some_and(|f| f != *fid) {
+                            return None;
+                        }
+                        found = Some(*fid);
+                    }
+                }
+            }
+            if let Some(fid) = found {
+                return Some((a, fid));
+            }
+        }
+        None
+    }
+
+    /// The function a call of the method `name` on a `sid` always reaches: every structure
+    /// that is a `sid` or extends it must resolve the name to the same function (no override).
+    fn static_method(&self, sid: StructId, name: &str) -> Option<FnId> {
+        let (_, fid) = self.resolve_method(sid, name)?;
+        let defs = &self.prog.defs;
+        for x in 0..defs.structs.len() {
+            if defs.ancestry(x, &[]).iter().any(|(a, _)| *a == sid)
+                && self.resolve_method(x, name).map(|r| r.1) != Some(fid)
+            {
+                return None;
+            }
+        }
+        Some(fid)
     }
 
     /// The method `name` of the structure `sid` (or of a parent) with a `self`: parameter
@@ -1240,6 +1300,7 @@ impl Gen<'_> {
                         ret: Ty::Unit,
                         node: e.id,
                         ident: None,
+                        fid: None,
                     });
                     self.emit(Op::Builtin { base, site }, span);
                     self.top = mark;
@@ -1270,9 +1331,23 @@ impl Gen<'_> {
                         return None;
                     }
                 }
-                let code = self.callee_index(fid)?;
                 self.has_call = true;
-                self.emit(Op::Call { code, base, dst }, span);
+                if self.deny.contains(&fid) {
+                    // not compilable: the interpreter runs it
+                    let site = self.sites.len() as u32;
+                    self.sites.push(Site {
+                        name: def.name.clone(),
+                        tys: def.params.clone(),
+                        ret: def.ret.clone(),
+                        node: e.id,
+                        ident: None,
+                        fid: Some(fid),
+                    });
+                    self.emit(Op::CallFn { dst, base, site }, span);
+                } else {
+                    let code = self.callee_index(fid)?;
+                    self.emit(Op::Call { code, base, dst }, span);
+                }
                 self.top = mark;
                 Some(def.ret.clone())
             }
@@ -1340,20 +1415,34 @@ impl Gen<'_> {
                 self.emit(op, span);
             }
             None => {
-                let site = self.sites.len() as u32;
-                self.sites.push(Site {
-                    name: name.name.clone(),
-                    tys,
-                    ret: ret.clone(),
-                    node: e.id,
-                    ident: user.then(|| name.clone()),
-                });
-                if user {
-                    // the method could change a variable of the module
+                // a method nobody overrides is called directly
+                let direct = match &rt {
+                    Ty::Struct(sid, _) => self
+                        .static_method(*sid, &name.name)
+                        .filter(|f| !self.deny.contains(f)),
+                    _ => None,
+                };
+                if let Some(fid) = direct {
                     self.has_call = true;
-                    self.emit(Op::CallMethod { dst, base, site }, span);
+                    let code = self.callee_index(fid)?;
+                    self.emit(Op::Call { code, base, dst }, span);
                 } else {
-                    self.emit(Op::Method { dst, base, site }, span);
+                    let site = self.sites.len() as u32;
+                    self.sites.push(Site {
+                        name: name.name.clone(),
+                        tys,
+                        ret: ret.clone(),
+                        node: e.id,
+                        ident: user.then(|| name.clone()),
+                        fid: None,
+                    });
+                    if user {
+                        // the method could change a variable of the module
+                        self.has_call = true;
+                        self.emit(Op::CallMethod { dst, base, site }, span);
+                    } else {
+                        self.emit(Op::Method { dst, base, site }, span);
+                    }
                 }
             }
         }
@@ -1430,20 +1519,7 @@ impl Gen<'_> {
                         if t != el {
                             return None;
                         }
-                        let int = el == Ty::Int;
-                        let float = el == Ty::Float;
-                        let opc = match bop {
-                            BinOp::Add if int => Op::AddI(cur, cur, r),
-                            BinOp::Sub if int => Op::SubI(cur, cur, r),
-                            BinOp::Mul if int => Op::MulI(cur, cur, r),
-                            BinOp::IntDiv if int => Op::IntDivI(cur, cur, r),
-                            BinOp::Mod if int => Op::ModI(cur, cur, r),
-                            BinOp::Add if float => Op::AddF(cur, cur, r),
-                            BinOp::Sub if float => Op::SubF(cur, cur, r),
-                            BinOp::Mul if float => Op::MulF(cur, cur, r),
-                            BinOp::Div if float => Op::DivF(cur, cur, r),
-                            _ => return None,
-                        };
+                        let opc = Self::compound(bop, &el, cur, cur, r)?;
                         self.emit(opc, e.span);
                         self.emit(
                             Op::AStore {
@@ -1889,9 +1965,10 @@ pub(super) enum Unit<'a> {
 }
 
 /// Compiles one unit; also the functions it calls.
-fn gen_unit(prog: &Program, unit: Unit) -> Option<(Code, Vec<FnId>)> {
+fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId>)> {
     let new_gen = |ret: Ty, loop_mode: bool| Gen {
         prog,
+        deny,
         ops: Vec::new(),
         spans: Vec::new(),
         scopes: vec![Vec::new()],
@@ -2189,27 +2266,54 @@ impl Interp<'_> {
     /// is not plain numeric code makes the whole group fall back to the tree walker).
     fn vm_compile_unit(&mut self, root: Unit) -> Option<u32> {
         let prog = self.prog;
-        let mut batch: Vec<(Option<FnId>, Code)> = Vec::new();
-        let mut pending: Vec<Unit> = vec![root];
-        let mut seen: Vec<FnId> = Vec::new();
-        if let Unit::Fn(f) = root {
-            seen.push(f);
-        }
-        while let Some(unit) = pending.pop() {
-            let (code, callees) = gen_unit(prog, unit)?;
-            for c in &callees {
-                if !seen.contains(c) && !matches!(self.vm_state.get(*c), Some(VmState::Yes(_))) {
-                    seen.push(*c);
-                    pending.push(Unit::Fn(*c));
-                }
+        // functions known not to compile are called through the interpreter
+        let mut deny: Vec<FnId> = self
+            .vm_state
+            .iter()
+            .enumerate()
+            .filter(|(_, st)| matches!(st, VmState::No))
+            .map(|(f, _)| f)
+            .collect();
+        let mut batch: Vec<(Option<FnId>, Code)>;
+        'retry: loop {
+            batch = Vec::new();
+            let mut pending: Vec<Unit> = vec![root];
+            let mut seen: Vec<FnId> = Vec::new();
+            if let Unit::Fn(f) = root {
+                seen.push(f);
             }
-            batch.push((
-                match unit {
-                    Unit::Fn(f) => Some(f),
-                    Unit::Loop(_) => None,
-                },
-                code,
-            ));
+            while let Some(unit) = pending.pop() {
+                let Some((code, callees)) = gen_unit(prog, unit, &deny) else {
+                    match unit {
+                        // a function the root calls cannot be compiled: the root calls it
+                        // through the interpreter instead
+                        Unit::Fn(f) if !matches!(root, Unit::Fn(r) if r == f) => {
+                            if self.vm_state.len() <= f {
+                                self.vm_state.resize(f + 1, VmState::Unknown);
+                            }
+                            self.vm_state[f] = VmState::No;
+                            deny.push(f);
+                            continue 'retry;
+                        }
+                        _ => return None,
+                    }
+                };
+                for c in &callees {
+                    if !seen.contains(c) && !matches!(self.vm_state.get(*c), Some(VmState::Yes(_)))
+                    {
+                        seen.push(*c);
+                        pending.push(Unit::Fn(*c));
+                    }
+                }
+                batch.push((
+                    match unit {
+                        Unit::Fn(f) => Some(f),
+                        Unit::Loop(_) => None,
+                    },
+                    code,
+                ));
+            }
+            break;
         }
         // number the group, then point every call at its target
         let first = self.vm_codes.len() as u32;
@@ -2490,27 +2594,14 @@ impl Interp<'_> {
                         fail!("R002", format!("`{}` has no value yet", gr.name));
                     }
                 }
-                Op::Method { dst, base: b, site } => {
-                    let span = code.spans[pc - 1];
-                    let st = &code.sites[site as usize];
-                    let at = base + b as usize;
-                    let recv = reg_value(stack, ostack, at, &st.tys[0]);
-                    let argv: Vec<Value> = st.tys[1..]
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| reg_value(stack, ostack, at + 1 + i, t))
-                        .collect();
-                    let name = st.name.clone();
-                    let ret = st.ret.clone();
-                    self.cur_call = st.node;
-                    let out = match self.builtin_method(&recv, &name, &argv, span)? {
-                        Some(v) => v,
-                        None => return self.fail("R008", "this value has no such method", span),
-                    };
-                    if ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &ret) {
-                        return self.fail("R001", "unexpected result of a method", span);
-                    }
-                }
+                Op::Method { .. }
+                | Op::NewStruct { .. }
+                | Op::CallFn { .. }
+                | Op::CallMethod { .. }
+                | Op::AddS(..)
+                | Op::CmpS { .. }
+                | Op::Format { .. }
+                | Op::Builtin { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
                 Op::ALen(d, a) => {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");
@@ -2519,6 +2610,25 @@ impl Interp<'_> {
                 }
                 Op::ALoad { dst, arr, idx, ety } => {
                     let i = r!(idx);
+                    if ety == Ety::O {
+                        let got = {
+                            let Value::Array(rc) = &o!(arr) else {
+                                fail!("R001", "an array was expected");
+                            };
+                            let a = rc.borrow();
+                            match usize::try_from(i).ok().and_then(|u| a.get(u)) {
+                                Some(v) => Ok(v.clone()),
+                                None => Err(a.len()),
+                            }
+                        };
+                        match got {
+                            Ok(v) => o!(dst) = v,
+                            Err(len) => {
+                                fail!("R020", format!("index {i} is out of bounds (length {len})"))
+                            }
+                        }
+                        continue;
+                    }
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2552,7 +2662,12 @@ impl Interp<'_> {
                     }
                 }
                 Op::AStore { arr, idx, src, ety } => {
-                    let (i, v) = (r!(idx), elem_value(r!(src), ety));
+                    let v = if ety == Ety::O {
+                        o!(src).clone()
+                    } else {
+                        elem_value(r!(src), ety)
+                    };
+                    let i = r!(idx);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2590,109 +2705,15 @@ impl Interp<'_> {
                         _ => fail!("R005", format!("this value has no field `{}`", site.name)),
                     }
                 }
-                Op::NewStruct { dst, base: b, lit } => {
-                    let site = &code.lits[lit as usize];
-                    let prog = self.prog;
-                    let mut fields = SmallMap::default();
-                    for (k, (name, t)) in site.names.iter().enumerate() {
-                        fields.insert(name, reg_value(stack, ostack, base + b as usize + k, t));
-                    }
-                    for (asid, _) in prog.defs.ancestry(site.sid, &[]) {
-                        let sd = &prog.defs.structs[asid];
-                        for f in &sd.fields {
-                            if f.is_static || fields.contains_key(&f.name) {
-                                continue;
-                            }
-                            if let Some(d) = &f.default {
-                                let scope = Scope::new(Some(self.envs[sd.module].clone()));
-                                let v = self.eval(d, &scope)?;
-                                fields.insert(&f.name, v);
-                            }
-                        }
-                    }
-                    o!(dst) = Value::Struct(Rc::new(StructObj {
-                        def: site.sid,
-                        fields: RefCell::new(fields),
-                    }));
-                }
-                Op::CallMethod { dst, base: b, site } => {
-                    let span = code.spans[pc - 1];
-                    let st = &code.sites[site as usize];
-                    let at = base + b as usize;
-                    let recv = reg_value(stack, ostack, at, &st.tys[0]);
-                    let argv: Vec<Value> = st.tys[1..]
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| reg_value(stack, ostack, at + 1 + i, t))
-                        .collect();
-                    self.cur_call = st.node;
-                    let Some(ident) = st.ident.as_ref() else {
-                        fail!("R001", "a method call without a name");
-                    };
-                    let out = self.call_method(recv, ident, argv, span)?;
-                    if st.ret != Ty::Unit
-                        && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
-                    {
-                        fail!("R001", "unexpected result of a method");
-                    }
-                }
-                Op::AddS(d, a, b) => {
-                    let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
-                        fail!("R001", "a string was expected");
-                    };
-                    let n = x.len() + y.len();
-                    let span = code.spans[pc - 1];
-                    self.guard_alloc(n, span)?;
-                    self.charge_bytes(n, span)?;
-                    let mut text = String::with_capacity(n);
-                    text.push_str(x);
-                    text.push_str(y);
-                    o!(d) = Value::str(&text);
-                }
-                Op::CmpS { dst, a, b, cmp } => {
-                    let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
-                        fail!("R001", "a string was expected");
-                    };
-                    let ord = x.as_ref().cmp(y.as_ref());
-                    r!(dst) = i64::from(match cmp {
-                        Cmp::Eq => ord.is_eq(),
-                        Cmp::Ne => ord.is_ne(),
-                        Cmp::Lt => ord.is_lt(),
-                        Cmp::Le => ord.is_le(),
-                        Cmp::Gt => ord.is_gt(),
-                        Cmp::Ge => ord.is_ge(),
-                    });
-                }
-                Op::Format { dst, base: b, fmt } => {
-                    let span = code.spans[pc - 1];
-                    let mut text = String::new();
-                    let mut at = base + b as usize;
-                    for part in &code.fmts[fmt as usize] {
-                        match part {
-                            FmtPart::Lit(t) => text.push_str(t),
-                            FmtPart::Arg(t) => {
-                                let v = reg_value(stack, ostack, at, t);
-                                at += 1;
-                                text.push_str(&self.stringify(&v, span)?);
-                            }
-                        }
-                    }
-                    self.guard_alloc(text.len(), span)?;
-                    self.charge_bytes(text.len(), span)?;
-                    o!(dst) = Value::str(&text);
-                }
-                Op::Builtin { base: b, site } => {
-                    let span = code.spans[pc - 1];
-                    let st = &code.sites[site as usize];
-                    let v = reg_value(stack, ostack, base + b as usize, &st.tys[0]);
-                    let name = st.name.clone();
-                    self.builtin_fn(&name, vec![v], span)?;
-                }
                 Op::NewArr(dst) => {
                     o!(dst) = Value::Array(Rc::new(RefCell::new(Vec::new())));
                 }
                 Op::APush { arr, src, ety } => {
-                    let v = elem_value(r!(src), ety);
+                    let v = if ety == Ety::O {
+                        o!(src).clone()
+                    } else {
+                        elem_value(r!(src), ety)
+                    };
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2711,6 +2732,19 @@ impl Interp<'_> {
                     ety,
                 } => {
                     let i = r!(idx);
+                    if ety == Ety::O {
+                        let got = {
+                            let Value::Array(rc) = &o!(arr) else {
+                                fail!("R001", "an array was expected");
+                            };
+                            rc.borrow().get(i as usize).cloned()
+                        };
+                        match got {
+                            Some(v) => o!(dst) = v,
+                            None => pc = exit as usize,
+                        }
+                        continue;
+                    }
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
@@ -2939,6 +2973,177 @@ impl Interp<'_> {
                 }
             }
         }
+    }
+}
+
+impl Interp<'_> {
+    /// The instructions that are rare or heavy, out of the dispatch loop so that it stays small.
+    #[inline(never)]
+    fn vm_rare(
+        &mut self,
+        op: Op,
+        code: &Code,
+        pc: usize,
+        base: usize,
+        stack: &mut [i64],
+        ostack: &mut [Value],
+    ) -> R<()> {
+        macro_rules! r {
+            ($x:expr) => {
+                stack[base + $x as usize]
+            };
+        }
+        macro_rules! o {
+            ($x:expr) => {
+                ostack[base + $x as usize]
+            };
+        }
+        macro_rules! fail {
+            ($c:expr, $m:expr) => {
+                return self.fail($c, $m, code.spans[pc - 1])
+            };
+        }
+        match op {
+            Op::Method { dst, base: b, site } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let at = base + b as usize;
+                let recv = reg_value(stack, ostack, at, &st.tys[0]);
+                let argv: Vec<Value> = st.tys[1..]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| reg_value(stack, ostack, at + 1 + i, t))
+                    .collect();
+                let name = st.name.clone();
+                let ret = st.ret.clone();
+                self.cur_call = st.node;
+                let out = match self.builtin_method(&recv, &name, &argv, span)? {
+                    Some(v) => v,
+                    None => return self.fail("R008", "this value has no such method", span),
+                };
+                if ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &ret) {
+                    return self.fail("R001", "unexpected result of a method", span);
+                }
+            }
+            Op::NewStruct { dst, base: b, lit } => {
+                let site = &code.lits[lit as usize];
+                let prog = self.prog;
+                let mut fields = SmallMap::default();
+                for (k, (name, t)) in site.names.iter().enumerate() {
+                    fields.insert(name, reg_value(stack, ostack, base + b as usize + k, t));
+                }
+                for (asid, _) in prog.defs.ancestry(site.sid, &[]) {
+                    let sd = &prog.defs.structs[asid];
+                    for f in &sd.fields {
+                        if f.is_static || fields.contains_key(&f.name) {
+                            continue;
+                        }
+                        if let Some(d) = &f.default {
+                            let scope = Scope::new(Some(self.envs[sd.module].clone()));
+                            let v = self.eval(d, &scope)?;
+                            fields.insert(&f.name, v);
+                        }
+                    }
+                }
+                o!(dst) = Value::Struct(Rc::new(StructObj {
+                    def: site.sid,
+                    fields: RefCell::new(fields),
+                }));
+            }
+            Op::CallFn { dst, base: b, site } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let at = base + b as usize;
+                let argv: Vec<Value> = st
+                    .tys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| reg_value(stack, ostack, at + i, t))
+                    .collect();
+                let Some(fid) = st.fid else {
+                    fail!("R001", "a call without a function");
+                };
+                let out = self.call_fid(fid, None, argv, span)?;
+                if st.ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
+                {
+                    fail!("R001", "unexpected result of a function");
+                }
+            }
+            Op::CallMethod { dst, base: b, site } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let at = base + b as usize;
+                let recv = reg_value(stack, ostack, at, &st.tys[0]);
+                let argv: Vec<Value> = st.tys[1..]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| reg_value(stack, ostack, at + 1 + i, t))
+                    .collect();
+                self.cur_call = st.node;
+                let Some(ident) = st.ident.as_ref() else {
+                    fail!("R001", "a method call without a name");
+                };
+                let out = self.call_method(recv, ident, argv, span)?;
+                if st.ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
+                {
+                    fail!("R001", "unexpected result of a method");
+                }
+            }
+            Op::AddS(d, a, b) => {
+                let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
+                    fail!("R001", "a string was expected");
+                };
+                let n = x.len() + y.len();
+                let span = code.spans[pc - 1];
+                self.guard_alloc(n, span)?;
+                self.charge_bytes(n, span)?;
+                let mut text = String::with_capacity(n);
+                text.push_str(x);
+                text.push_str(y);
+                o!(d) = Value::str(&text);
+            }
+            Op::CmpS { dst, a, b, cmp } => {
+                let (Value::Str(x), Value::Str(y)) = (&o!(a), &o!(b)) else {
+                    fail!("R001", "a string was expected");
+                };
+                let ord = x.as_ref().cmp(y.as_ref());
+                r!(dst) = i64::from(match cmp {
+                    Cmp::Eq => ord.is_eq(),
+                    Cmp::Ne => ord.is_ne(),
+                    Cmp::Lt => ord.is_lt(),
+                    Cmp::Le => ord.is_le(),
+                    Cmp::Gt => ord.is_gt(),
+                    Cmp::Ge => ord.is_ge(),
+                });
+            }
+            Op::Format { dst, base: b, fmt } => {
+                let span = code.spans[pc - 1];
+                let mut text = String::new();
+                let mut at = base + b as usize;
+                for part in &code.fmts[fmt as usize] {
+                    match part {
+                        FmtPart::Lit(t) => text.push_str(t),
+                        FmtPart::Arg(t) => {
+                            let v = reg_value(stack, ostack, at, t);
+                            at += 1;
+                            text.push_str(&self.stringify(&v, span)?);
+                        }
+                    }
+                }
+                self.guard_alloc(text.len(), span)?;
+                self.charge_bytes(text.len(), span)?;
+                o!(dst) = Value::str(&text);
+            }
+            Op::Builtin { base: b, site } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let v = reg_value(stack, ostack, base + b as usize, &st.tys[0]);
+                let name = st.name.clone();
+                self.builtin_fn(&name, vec![v], span)?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 

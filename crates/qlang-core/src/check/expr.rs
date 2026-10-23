@@ -664,7 +664,7 @@ impl Checker {
             ExprKind::Array(items) => {
                 let t = self.check_array(items, want);
                 let r = self.resolve(&t);
-                if matches!(&r, Ty::Array(el) if matches!(**el, Ty::Int | Ty::Float | Ty::Bool)) {
+                if matches!(&r, Ty::Array(_)) {
                     self.res.array_lits.insert(e.id, r);
                 }
                 t
@@ -827,15 +827,19 @@ impl Checker {
         }
     }
 
-    /// Remembers the type of a use of a variable when it is `int`, `float` or `bool`.
+    /// Remembers the type of a use of a variable when a register of the typed machine can hold
+    /// it: a number, a boolean, a text, a structure, or an array of those.
     fn note_ident_ty(&mut self, id: NodeId, ty: &Ty) {
+        fn fits(t: &Ty) -> bool {
+            match t {
+                Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+                Ty::Struct(_, args) => args.is_empty(),
+                Ty::Array(e) => fits(e),
+                _ => false,
+            }
+        }
         let t = self.resolve(ty);
-        let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
-        if scalar(&t)
-            || t == Ty::Str
-            || matches!(&t, Ty::Struct(_, args) if args.is_empty())
-            || matches!(&t, Ty::Array(e) if scalar(&self.resolve(e)))
-        {
+        if fits(&t) {
             self.res.ident_tys.insert(id, t);
         }
     }

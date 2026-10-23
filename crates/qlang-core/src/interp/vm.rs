@@ -229,6 +229,27 @@ enum Op {
         idx: u16,
         fld: u32,
     },
+    /// A tuple: its values are in the registers from `base` (`Code::tuples[site]` has the types).
+    NewTuple {
+        dst: Reg,
+        base: Reg,
+        site: u32,
+    },
+    /// A call of a function value (a closure) held in `f`: arguments from `base`
+    /// (`Code::sites[site]` has their types and the result's).
+    CallValue {
+        dst: Reg,
+        f: Reg,
+        base: Reg,
+        site: u32,
+    },
+    /// The `idx`-th value of the tuple in `src` (`Code::fields[fld]` has its type).
+    TupleGet {
+        dst: Reg,
+        src: Reg,
+        idx: u16,
+        fld: u32,
+    },
     /// A variant: the values it carries are in the registers from `base` (`Code::enums[site]`).
     NewEnum {
         dst: Reg,
@@ -370,6 +391,7 @@ pub(super) struct Code {
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
     enums: Vec<(u32, u32, usize)>,
+    tuples: Vec<Vec<Ty>>,
     enum_tys: Vec<Vec<Ty>>,
     /// For a compiled loop: the variables it shares with the code around it.
     frees: Vec<Free>,
@@ -461,13 +483,22 @@ fn vty(t: &Ty) -> bool {
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
         || matches!(t, Ty::Map(k, v) if matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && vty(v))
         || matches!(t, Ty::Enum(_, args) if args.iter().all(vty))
+        || matches!(t, Ty::Tuple(items) if items.iter().all(vty))
+        || matches!(t, Ty::Fn(ps, r) if ps.iter().all(vty) && (vty(r) || **r == Ty::Unit))
 }
 
 /// Whether a value of this type lives in the object registers.
 fn is_obj(t: &Ty) -> bool {
     matches!(
         t,
-        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) | Ty::Enum(..)
+        Ty::Array(_)
+            | Ty::Str
+            | Ty::Struct(..)
+            | Ty::Nullable(_)
+            | Ty::Map(..)
+            | Ty::Enum(..)
+            | Ty::Tuple(_)
+            | Ty::Fn(..)
     )
 }
 
@@ -490,6 +521,9 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::NewMap(_)
                     | Op::EnumField { .. }
                     | Op::NewEnum { .. }
+                    | Op::NewTuple { .. }
+                    | Op::TupleGet { .. }
+                    | Op::CallValue { .. }
                     | Op::EqG { .. }
                     | Op::JnEnum { .. }
                     | Op::MapSnap { .. }
@@ -547,6 +581,7 @@ struct Gen<'a> {
     lits: Vec<LitSite>,
     /// The variants built: enumeration, variant, number of values carried.
     enums: Vec<(u32, u32, usize)>,
+    tuple_tys: Vec<Vec<Ty>>,
     enum_tys: Vec<Vec<Ty>>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
@@ -1094,7 +1129,29 @@ impl Gen<'_> {
                 ));
                 Some(())
             }
-            Pattern::Tuple(_) => None,
+            Pattern::Tuple(items) => {
+                let Ty::Tuple(tys) = ty else {
+                    return None;
+                };
+                if tys.len() != items.len() {
+                    return None;
+                }
+                for (k, (ip, it)) in items.iter().zip(tys).enumerate() {
+                    let r = self.alloc()?;
+                    let fld = self.field_site("", it)?;
+                    self.emit(
+                        Op::TupleGet {
+                            dst: r,
+                            src: reg,
+                            idx: u16::try_from(k).ok()?,
+                            fld,
+                        },
+                        span,
+                    );
+                    self.pattern(ip, r, it, fails, span)?;
+                }
+                Some(())
+            }
         }
     }
 
@@ -1940,13 +1997,49 @@ impl Gen<'_> {
                 Some(el)
             }
             ExprKind::TupleField(inner, idx) => {
-                let ExprKind::Ident(name, _) = &inner.kind else {
+                if let ExprKind::Ident(name, _) = &inner.kind
+                    && let Some((_, regs)) = self.tuples.iter().rev().find(|(n, _)| n == name)
+                {
+                    let (r, t) = regs.get(*idx)?.clone();
+                    self.emit(Op::Mov(dst, r), span);
+                    return Some(t);
+                }
+                let mark = self.top;
+                let (o, ot) = self.value(inner)?;
+                let Ty::Tuple(tys) = &ot else {
                     return None;
                 };
-                let (_, regs) = self.tuples.iter().rev().find(|(n, _)| n == name)?;
-                let (r, t) = regs.get(*idx)?.clone();
-                self.emit(Op::Mov(dst, r), span);
+                let t = tys.get(*idx)?.clone();
+                let fld = self.field_site("", &t)?;
+                self.emit(
+                    Op::TupleGet {
+                        dst,
+                        src: o,
+                        idx: u16::try_from(*idx).ok()?,
+                        fld,
+                    },
+                    span,
+                );
+                self.top = mark;
                 Some(t)
+            }
+            ExprKind::Tuple(items) => {
+                let mark = self.top;
+                let base = self.top as Reg;
+                let mut tys = Vec::new();
+                for it in items {
+                    let r = self.alloc()?;
+                    let t = self.into(it, r)?;
+                    if !vty(&t) {
+                        return None;
+                    }
+                    tys.push(t);
+                }
+                self.tuple_tys.push(tys.clone());
+                let site = u32::try_from(self.tuple_tys.len() - 1).ok()?;
+                self.emit(Op::NewTuple { dst, base, site }, span);
+                self.top = mark;
+                Some(Ty::Tuple(tys))
             }
             ExprKind::Cast(inner, _) => {
                 let target = self.prog.res.casts.get(&e.id)?.clone();
@@ -2028,6 +2121,12 @@ impl Gen<'_> {
                     self.emit(Op::Builtin { base, site }, span);
                     self.top = mark;
                     return Some(Ty::Unit);
+                }
+                if matches!(
+                    self.prog.res.paths.get(&callee.id),
+                    None | Some(PathRes::Local | PathRes::Global(..))
+                ) {
+                    return self.call_closure(e, callee, args, dst);
                 }
                 let Some(PathRes::Fn(fid)) = self.prog.res.paths.get(&callee.id) else {
                     return None;
@@ -2124,6 +2223,36 @@ impl Gen<'_> {
             }
             _ => None,
         }
+    }
+
+    /// `f(x)` where `f` is a variable holding a function value: called through the interpreter.
+    fn call_closure(&mut self, e: &Expr, callee: &Expr, args: &[CallArg], dst: Reg) -> Option<Ty> {
+        let mark = self.top;
+        let (f, ft) = self.value(callee)?;
+        let Ty::Fn(ps, ret) = &ft else {
+            return None;
+        };
+        if ps.len() != args.len() {
+            return None;
+        }
+        let base = self.top as Reg;
+        for (a, want) in args.iter().zip(ps) {
+            let r = self.alloc()?;
+            self.compile_as(&a.value, r, want)?;
+        }
+        self.has_call = true;
+        let site = self.sites.len() as u32;
+        self.sites.push(Site {
+            name: "<function>".to_string(),
+            tys: ps.clone(),
+            ret: (**ret).clone(),
+            node: e.id,
+            ident: None,
+            fid: None,
+        });
+        self.emit(Op::CallValue { dst, f, base, site }, e.span);
+        self.top = mark;
+        Some((**ret).clone())
     }
 
     /// `x.abs()`, `n.sqrt()`, `a.max(b)`...: the methods of numbers.
@@ -2430,6 +2559,48 @@ impl Gen<'_> {
         Some(ty)
     }
 
+    /// Names the values of the tuple in `reg` (of type `ty`) as `pattern` says.
+    fn tuple_names(&mut self, pattern: &TuplePattern, reg: Reg, ty: &Ty, span: Span) -> Option<()> {
+        match pattern {
+            TuplePattern::Wild(_) => Some(()),
+            TuplePattern::Name(id) => {
+                if !vty(ty) {
+                    return None;
+                }
+                self.scopes
+                    .last_mut()?
+                    .push((id.name.clone(), reg, ty.clone()));
+                Some(())
+            }
+            TuplePattern::Tuple(items, _) => {
+                let Ty::Tuple(tys) = ty else {
+                    return None;
+                };
+                if tys.len() != items.len() {
+                    return None;
+                }
+                for (k, (ip, it)) in items.iter().zip(tys).enumerate() {
+                    if matches!(ip, TuplePattern::Wild(_)) {
+                        continue;
+                    }
+                    let r = self.alloc()?;
+                    let fld = self.field_site("", it)?;
+                    self.emit(
+                        Op::TupleGet {
+                            dst: r,
+                            src: reg,
+                            idx: u16::try_from(k).ok()?,
+                            fld,
+                        },
+                        span,
+                    );
+                    self.tuple_names(ip, r, it, span)?;
+                }
+                Some(())
+            }
+        }
+    }
+
     fn stmt(&mut self, s: &Stmt) -> Option<()> {
         let span = s.span;
         match &s.kind {
@@ -2489,6 +2660,13 @@ impl Gen<'_> {
                         self.scopes.last_mut()?.push((id.name.clone(), r, t));
                     }
                 }
+                Some(())
+            }
+            StmtKind::LetTuple { pattern, init, .. } => {
+                // `let (q, r) = divmod(a, b)`: the tuple is taken apart by name
+                let r = self.alloc()?;
+                let ty = self.into(init, r)?;
+                self.tuple_names(pattern, r, &ty, s.span)?;
                 Some(())
             }
             StmtKind::Let { name, init, .. } => {
@@ -2877,6 +3055,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         fields: Vec::new(),
         lits: Vec::new(),
         enums: Vec::new(),
+        tuple_tys: Vec::new(),
         enum_tys: Vec::new(),
         loop_mode,
         preset: false,
@@ -2971,6 +3150,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     fields: g.fields,
                     lits: g.lits,
                     enums: g.enums,
+                    tuples: g.tuple_tys,
                     enum_tys: g.enum_tys,
                     frees: Vec::new(),
                     is_loop: false,
@@ -3036,6 +3216,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     fields: g.fields,
                     lits: g.lits,
                     enums: g.enums,
+                    tuples: g.tuple_tys,
                     enum_tys: g.enum_tys,
                     frees: g.frees,
                     is_loop: true,
@@ -3063,7 +3244,9 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         | (Value::Str(_), Ty::Str)
         | (Value::Struct(_), Ty::Struct(..))
         | (Value::Map(_), Ty::Map(..))
-        | (Value::Enum(..), Ty::Enum(..)) => Some(Slot::O(v.clone())),
+        | (Value::Enum(..), Ty::Enum(..))
+        | (Value::Tuple(_), Ty::Tuple(_))
+        | (Value::Func(_), Ty::Fn(..)) => Some(Slot::O(v.clone())),
         // `T?`: `none`, or a `T` (always in an object register, a number too)
         (Value::None, Ty::Nullable(_)) => Some(Slot::O(Value::None)),
         (_, Ty::Nullable(inner)) => slot_of(v, inner).map(|_| Slot::O(v.clone())),
@@ -3077,9 +3260,14 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         Ty::Int => Value::Int(stack[i]),
         Ty::Float => Value::Float(f64::from_bits(stack[i] as u64)),
         Ty::Bool => Value::Bool(stack[i] != 0),
-        Ty::Array(_) | Ty::Str | Ty::Struct(..) | Ty::Nullable(_) | Ty::Map(..) | Ty::Enum(..) => {
-            ostack[i].clone()
-        }
+        Ty::Array(_)
+        | Ty::Str
+        | Ty::Struct(..)
+        | Ty::Nullable(_)
+        | Ty::Map(..)
+        | Ty::Enum(..)
+        | Ty::Tuple(_)
+        | Ty::Fn(..) => ostack[i].clone(),
         _ => Value::Unit,
     }
 }
@@ -3155,7 +3343,9 @@ impl Interp<'_> {
             | Ty::Struct(..)
             | Ty::Nullable(_)
             | Ty::Map(..)
-            | Ty::Enum(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            | Ty::Enum(..)
+            | Ty::Tuple(_)
+            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         });
         self.vm_release();
@@ -3524,6 +3714,9 @@ impl Interp<'_> {
                 | Op::MapSet { .. }
                 | Op::MapSnap { .. }
                 | Op::NewEnum { .. }
+                | Op::NewTuple { .. }
+                | Op::TupleGet { .. }
+                | Op::CallValue { .. }
                 | Op::EqG { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
                     Value::Enum(e, v, _) if *e == u32::from(eid) && *v == u32::from(vi) => {}
@@ -4044,6 +4237,28 @@ impl Interp<'_> {
                     fail!("R001", "unexpected result of a function");
                 }
             }
+            Op::CallValue {
+                dst,
+                f,
+                base: b,
+                site,
+            } => {
+                let span = code.spans[pc - 1];
+                let st = &code.sites[site as usize];
+                let at = base + b as usize;
+                let argv: Vec<Value> = st
+                    .tys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| reg_value(stack, ostack, at + i, t))
+                    .collect();
+                let fv = o!(f).clone();
+                let out = self.call_value(&fv, argv, span)?;
+                if st.ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
+                {
+                    fail!("R001", "unexpected result of a function value");
+                }
+            }
             Op::CallMethod { dst, base: b, site } => {
                 let span = code.spans[pc - 1];
                 let st = &code.sites[site as usize];
@@ -4168,6 +4383,37 @@ impl Interp<'_> {
                     ))
                 };
                 o!(dst) = Value::Enum(eid, vi, data);
+            }
+            Op::NewTuple { dst, base: b, site } => {
+                let tys = &code.tuples[site as usize];
+                let at = base + b as usize;
+                let items: Vec<Value> = tys
+                    .iter()
+                    .enumerate()
+                    .map(|(k, t)| reg_value(stack, ostack, at + k, t))
+                    .collect();
+                o!(dst) = Value::Tuple(items.into());
+            }
+            Op::TupleGet { dst, src, idx, fld } => {
+                let site = &code.fields[fld as usize];
+                let v = match &o!(src) {
+                    Value::Tuple(items) => items.get(idx as usize).cloned(),
+                    _ => None,
+                };
+                let Some(v) = v else {
+                    return self.fail(
+                        "R001",
+                        "a tuple without the value expected",
+                        code.spans[pc - 1],
+                    );
+                };
+                if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
+                    return self.fail(
+                        "R001",
+                        "a tuple value of an unexpected type",
+                        code.spans[pc - 1],
+                    );
+                }
             }
             Op::EqG { dst, a, b, site } => {
                 let span = code.spans[pc - 1];

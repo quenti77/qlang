@@ -970,6 +970,166 @@ fn enum_program(rng: &mut Rng) -> String {
     src
 }
 
+fn tuple_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 15 } else { 12 }) {
+            0 => {
+                out += &format!(
+                    "t = ({}, {})\n",
+                    int_expr(rng, &vars, 1),
+                    int_expr(rng, &vars, 1)
+                )
+            }
+            1 => {
+                out += &format!(
+                    "t = divmod({}, {})\n",
+                    int_expr(rng, &vars, 1),
+                    1 + rng.below(9)
+                )
+            }
+            2 => out += "acc += t.0 * 3 + t.1\n",
+            3 => {
+                out += &format!(
+                    "u = (\"s{{n}}\", {}, 0.5 * {})\n",
+                    int_expr(rng, &vars, 1),
+                    int_expr(rng, &vars, 1)
+                )
+            }
+            4 => out += "acc += u.0.len() + u.1\n",
+            5 => out += "if u.2 > 3.0 then n += 1 end\n",
+            6 => {
+                let u = unique();
+                out += &format!(
+                    "let (q{u}, r{u}) = divmod(acc, {})\nacc = q{u} + r{u}\n",
+                    1 + rng.below(9)
+                );
+            }
+            7 => {
+                let u = unique();
+                out += &format!("let (a{u}, _, c{u}) = u\nn += a{u}.len() + (c{u} as int)\n");
+            }
+            8 => out += "if t == (1, 2) then acc += 7 end\n",
+            9 => out += "w = (t, n > 2)\n",
+            10 => out += "let ((x0, y0), flag) = w\nif flag then acc += x0 + y0 end\n",
+            11 => {
+                let u = unique();
+                out += &format!(
+                    "match t\n  case (0, y{u}) then acc += y{u}\n  case (x{u}, 0) then n += x{u}\n  case (x{u}, y{u}) if x{u} > y{u} then acc += 1\n  else n += 2\nend\n"
+                );
+            }
+            12 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n  let (a, b) = divmod(i{u} + acc, 4)\n  acc += a * b\n  t = (b, a)\nend\n",
+                    rng.below(5)
+                );
+            }
+            13 => {
+                out += &format!(
+                    "if n > {} then\n  t = (n, acc)\nelse\n  t = divmod(acc, 3)\nend\n",
+                    rng.below(6)
+                )
+            }
+            _ => {
+                out += &format!(
+                    "while acc > {} do\n  let (q, r) = divmod(acc, 2)\n  acc = q + r\n  t = (r, q)\nend\n",
+                    30 + rng.below(20)
+                )
+            }
+        }
+    }
+    out
+}
+
+fn tuple_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += "fun divmod(a: int, b: int) -> (int, int)\n  (a div b, a mod b)\nend\n";
+    src += &format!(
+        "fun work(n: int) -> int\n  let acc = 0\n  let n = n\n  let t = (1, 2)\n  let u = (\"a\", 1, 1.0)\n  let w = (t, true)\n{}  acc + n + t.0 + t.1\nend\n",
+        tuple_stmts(rng, 2)
+    );
+    for _ in 0..3 {
+        src += &format!("print(work({}))\n", rng.below(30));
+    }
+    src += "let acc = 3\nlet n = 1\nlet t = (1, 2)\nlet u = (\"b\", 2, 2.5)\nlet w = (t, false)\n";
+    src += &tuple_stmts(rng, 2);
+    src += "print(acc)\nprint(n)\nprint(t)\nprint(u)\nprint(w)\n";
+    src
+}
+
+fn closure_stmts(rng: &mut Rng, depth: usize) -> String {
+    let vars = ["acc", "n"];
+    let mut out = String::new();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(if depth > 0 { 11 } else { 9 }) {
+            0 => out += &format!("acc += twice(inc, {})\n", int_expr(rng, &vars, 1)),
+            1 => {
+                out += &format!(
+                    "acc += twice({}, n)\n",
+                    rng.pick(&["inc", "dbl", "bump", "noisy"])
+                )
+            }
+            2 => out += "acc += repeat(dbl, n mod 5, acc mod 7)\n",
+            3 => out += "acc += total(xs, add)\n",
+            4 => out += "acc += total(xs, tally)\n",
+            5 => out += "names = label(n mod 4, tag)\n",
+            6 => out += "n += names.len()\n",
+            7 => {
+                out += &format!(
+                    "seen += apply2(scale, {}, 2.5) as int\n",
+                    int_expr(rng, &vars, 1)
+                )
+            }
+            8 => out += "if check(n, big) then acc += 1 end\n",
+            9 => {
+                let u = unique();
+                out += &format!(
+                    "for i{u} in 0..{} do\n  acc += twice(bump, i{u})\nend\n",
+                    rng.below(4)
+                );
+            }
+            _ => {
+                out += &format!(
+                    "while n < {} do\n  n += twice(inc, 1)\nend\n",
+                    3 + rng.below(6)
+                )
+            }
+        }
+    }
+    out
+}
+
+fn closure_program(rng: &mut Rng) -> String {
+    let mut src = String::new();
+    src += "let seen = 0\nlet hits = 0\n";
+    src += "fun inc(x: int) -> int\n  x + 1\nend\nfun dbl(x: int) -> int\n  x * 2\nend\n";
+    src += "fun bump(x: int) -> int\n  hits += 1\n  x + hits\nend\n";
+    src += "fun noisy(x: int) -> int\n  print(\"noisy {x}\")\n  x\nend\n";
+    src += "fun add(a: int, b: int) -> int\n  a + b\nend\nfun tally(a: int, b: int) -> int\n  hits += 1\n  a + b + hits\nend\nfun helper(a: int, b: int) -> int\n  if a > b then a - b else b - a end\nend\n";
+    src += "fun scale(x: int, k: float) -> float\n  x * k\nend\n";
+    src += "fun tag(i: int) -> string\n  \"t{i}\"\nend\n";
+    src += "fun big(x: int) -> bool\n  x > 6\nend\n";
+    src += "fun twice(f: fun(int) -> int, x: int) -> int\n  f(f(x))\nend\n";
+    src += "fun repeat(f: fun(int) -> int, k: int, x: int) -> int\n  let v = x\n  for i in 0..k do\n    v = f(v) mod 97\n  end\n  v\nend\n";
+    src += "fun total(xs: array<int>, f: fun(int, int) -> int) -> int\n  let t = 0\n  for x in xs do\n    t = f(t, x)\n  end\n  t\nend\n";
+    src += "fun label(k: int, f: fun(int) -> string) -> array<string>\n  let out: array<string> = []\n  for i in 0..k do\n    out.push(f(i))\n  end\n  out\nend\n";
+    src += "fun apply2(f: fun(int, float) -> float, x: int, k: float) -> float\n  f(x, k) + f(1, k)\nend\n";
+    src += "fun check(x: int, f: fun(int) -> bool) -> bool\n  f(x) or f(x + 3)\nend\n";
+    src += &format!(
+        "fun work(n: int) -> int\n  let acc = 0\n  let n = n\n  let xs = [1, 2, 3]\n  let names: array<string> = []\n{}  acc + n\nend\n",
+        closure_stmts(rng, 2)
+    );
+    for _ in 0..3 {
+        src += &format!("print(work({}))\n", rng.below(12));
+    }
+    src += "let acc = 1\nlet n = 2\nlet xs = [4, 5]\nlet names: array<string> = []\n";
+    src += &closure_stmts(rng, 2);
+    src += "print(acc)\nprint(n)\nprint(names)\nprint(seen)\nprint(hits)\n";
+    src
+}
+
 fn program(rng: &mut Rng) -> String {
     let mut src = String::new();
     // a helper called from the others (and recursive in a bounded way)
@@ -1268,6 +1428,40 @@ fn the_machine_and_the_tree_walker_agree_on_enumerations_in_many_more_programs()
             seed.wrapping_mul(0xA076_1D64_78BD_642F) | 1,
             500,
             enum_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_tuples() {
+    sweep_with(0x7091_E5ED_0000_0008, 300, tuple_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_tuples_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xD6E8_FEB8_6659_FD93) | 1,
+            500,
+            tuple_program,
+        );
+    }
+}
+
+#[test]
+fn the_machine_and_the_tree_walker_agree_on_function_values() {
+    sweep_with(0xC105_E5ED_0000_0009, 300, closure_program);
+}
+
+#[test]
+#[ignore]
+fn the_machine_and_the_tree_walker_agree_on_function_values_in_many_more_programs() {
+    for seed in 1..=20u64 {
+        sweep_with(
+            seed.wrapping_mul(0xBF58_476D_1CE4_E5B9) | 1,
+            500,
+            closure_program,
         );
     }
 }

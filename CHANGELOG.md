@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.45.0
+
+- Performance : la machine à registres compile les **tuples** (valeurs, paramètres, résultats, `t.0`, `let (q, r) = f(x)`, motifs de tuples dans `match`, `==`) et l'**appel d'une valeur fonction** (`f(x)` avec `f: fun(int) -> int`) : une fonction qui reçoit une fermeture est compilée, la fermeture elle-même reste interprétée. Tuples ×5,8, boucles qui appellent une fermeture ×2,5. 20 000 programmes aléatoires de plus donnent les mêmes résultats sur les deux moteurs.
+
 ## 0.44.0
 
 - Performance : la machine à registres compile les **énumérations** et **`match`** (variantes avec valeurs, motifs, gardes, intervalles, `Ok`/`Err`, `?` sur `Result` et sur `T?`, `==` entre valeurs), et une fonction générique ou `extern` appelée depuis du code compilé n'empêche plus de le compiler. Énumérations et `match` ×5, chaînes de `Result` ×6.

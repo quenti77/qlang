@@ -1,6 +1,6 @@
 # Journal des changements
 
-## Prochaine version
+## 0.41.0
 
 - Réflexion : `Reflect.methods<T>()` liste les méthodes d'un type avec leurs annotations (`FunctionInfo.has_self` est nouveau) et `Reflect.find_method<T, F>(valeur, "nom")` rend la méthode liée à la valeur, appelable. Les annotations des méthodes sont maintenant lisibles.
 

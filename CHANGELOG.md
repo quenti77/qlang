@@ -1,6 +1,6 @@
 # Journal des changements
 
-## Prochaine version
+## 0.43.0
 
 - Performance : la machine à registres compile aussi les valeurs **`none`** (`T?`, `x != none`, rétrécissement du type) et les **dictionnaires** (`m[k]`, `m[k] = v`, `for k, v in m`, toutes les méthodes) ; les méthodes prédéfinies viennent maintenant des signatures du vérificateur. Comptage de mots ×2,4.
 - Correction : une variable du fichier dont le type est rétréci par un test (`if x != none`) dans une fonction restait vue comme une variable locale par l'analyse ; elle reste la variable du fichier.

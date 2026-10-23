@@ -128,15 +128,20 @@ déjà choisie selon le type (`AddI`, `LtF`, `ForTest`...). Sont compilés :
 - les **énumérations** et **`match`** : variantes avec ou sans valeurs (`Shape.Circle(2.0)`, `Ok(x)`,
   `Err(e)`), motifs sur les variantes (avec valeurs et gardes `case Circle(r) if r > 3`), sur les
   nombres (`0`, `1..5`, `5..=10`), les textes, les booléens et `none`, `match` comme valeur ou comme
-  instruction, l'opérateur `?` (sur un `Result` comme sur un `T?`) et `==` entre deux valeurs. Les
-  motifs de tuples ne le sont pas ;
-- l'appel d'une fonction que la machine ne sait pas compiler (elle utilise une fermeture, un tuple...) :
+  instruction, l'opérateur `?` (sur un `Result` comme sur un `T?`) et `==` entre deux valeurs ;
+- les **tuples** : `(a, b)` comme valeur, paramètre ou résultat, `t.0`, `let (q, r) = f(x)` (même
+  imbriqué, avec `_`), motifs de tuples dans `match` (`case (0, y) then`) et `==` ;
+- l'**appel d'une valeur fonction** : `f(x)` quand `f` est un paramètre ou une variable de type
+  `fun(int) -> int`. La boucle qui appelle est compilée ; le corps de la fermeture, lui, tourne sur
+  l'interpréteur d'arbre (il garde ses variables capturées), tout comme la création de la
+  fermeture ;
+- l'appel d'une fonction que la machine ne sait pas compiler (elle crée une fermeture, utilise une structure générique...) :
   la fonction reste sur l'interpréteur d'arbre, mais celle qui l'appelle est compilée quand même ;
 - `(a, b) = (b, a + b)`, qui ne construit aucun tuple ;
 - les variables du fichier lues et écrites par une fonction compilée (une lecture ou une écriture
   de la portée à chaque accès, avec le même cache que l'interpréteur).
 
-Tout le reste (fermetures, tuples, structures génériques...) tourne sur
+Tout le reste (création de fermetures, structures génériques, identifiants et dates...) tourne sur
 l'interpréteur d'arbre, qui appelle la machine et en reçoit les appels sans difficulté. Une
 boucle qui contient un appel à une fonction lit et écrit alors les variables du fichier à leur
 place, et non dans des registres (l'appelée pourrait les changer) : un peu plus lent, mais
@@ -157,6 +162,8 @@ toujours compilée.
 | dictionnaires : comptage de mots (`map.q`) | 0,27 s | 0,11 s | ×2,4 |
 | ensembles (`set.q`) | 0,27 s | 0,19 s | ×1,4 |
 | énumérations et `match` : aires de formes, classement (`enum.q`) | 0,62 s | 0,12 s | ×5,3 |
+| tuples : `divmod`, chiffres d'un nombre, bornes d'un tableau (`tuple.q`) | 2,98 s | 0,52 s | ×5,8 |
+| fonctions passées en paramètre : `apply_n`, `fold`, `count_if` (`closure.q`) | 0,89 s | 0,36 s | ×2,5 |
 
 **Les instructions elles-mêmes.** Trois réglages sur la boucle d'exécution de la machine (environ
 ×1,5 de plus sur les boucles) : les constantes qui servent d'opérandes sont chargées une fois dans

@@ -387,3 +387,23 @@ fn results_and_the_question_mark_on_the_machine() {
         "136\nResult.Err(Error { message: \"odd 3\" })\nnone\n"
     );
 }
+
+#[test]
+fn tuples_on_the_machine() {
+    let src = "fun divmod(a: int, b: int) -> (int, int)\n  (a div b, a mod b)\nend\nfun pair(s: string, n: int) -> (string, int, float)\n  (s, n, 1.5 * n)\nend\nfun digits(n: int) -> int\n  let t = 0\n  let k = n\n  while k > 0 do\n    let (q, r) = divmod(k, 10)\n    t += r\n    k = q\n  end\n  t\nend\nfun kind(p: (int, int)) -> string\n  match p\n    case (0, 0) then \"origin\"\n    case (0, y) then \"axis y {y}\"\n    case (x, 0) then \"axis x {x}\"\n    case (x, y) if x == y then \"diagonal\"\n    else \"plane\"\n  end\nend\nfun run(n: int) -> int\n  let s = 0\n  for i in 0..n do\n    let p = divmod(i * 7, 5)\n    s += p.0 * 10 + p.1\n    let (a, _, _) = pair(\"x\", i)\n    s += a.len()\n    let (_, b, c) = pair(\"y\", i)\n    s += b + (c as int)\n  end\n  s\nend\nprint(run(10))\nprint(digits(98765))\nprint(kind((0, 0)))\nprint(kind((0, 4)))\nprint(kind((3, 0)))\nprint(kind((2, 2)))\nprint(kind((1, 2)))\nprint(pair(\"z\", 2))\nprint(divmod(17, 5) == (3, 2))";
+    assert_eq!(
+        same_compiled(src, 4),
+        "730\n35\norigin\naxis y 4\naxis x 3\ndiagonal\nplane\n(\"z\", 2, 3.0)\ntrue\n"
+    );
+}
+
+#[test]
+fn function_values_on_the_machine() {
+    let src = "let total = 0\nfun apply_n(f: fun(int) -> int, n: int, x: int) -> int\n  let v = x\n  for i in 0..n do\n    v = f(v) mod 1000\n  end\n  v\nend\nfun fold(xs: array<int>, init: int, f: fun(int, int) -> int) -> int\n  let acc = init\n  for x in xs do\n    acc = f(acc, x)\n  end\n  acc\nend\nfun each(xs: array<string>, f: fun(string))\n  for x in xs do\n    f(x)\n  end\nend\nfun build(n: int, f: fun(int) -> string) -> array<string>\n  let out: array<string> = []\n  for i in 0..n do\n    out.push(f(i))\n  end\n  out\nend\nfun risky(f: fun(int) -> int, a: array<int>) -> int\n  let s = 0\n  for i in 0..4 do\n    s += f(a[i])\n  end\n  s\nend\nlet k = 3\nlet g = fun(x: int) -> int\n  k += 1\n  total += x\n  x * 2 + k\nend\nprint(apply_n(g, 5, 1))\nprint(k)\nprint(total)\nprint(fold([1, 2, 3, 4], 0, fun(a: int, b: int) -> int\n  a + b * k\nend))\nlet seen: array<string> = []\neach([\"a\", \"b\"], fun(s: string)\n  seen.push(s + s)\nend)\nprint(seen)\nprint(build(3, fun(i: int) -> string\n  \"n{i}\"\nend))\nprint(risky(fun(x: int) -> int\n  10 div x\nend, [1, 2, 0, 5]))";
+    let out = same_compiled(src, 4);
+    assert!(
+        out.starts_with("182\n8\n151\n80\n[\"aa\", \"bb\"]\n"),
+        "{out}"
+    );
+    assert!(out.contains("R011"), "{out}");
+}

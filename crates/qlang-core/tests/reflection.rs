@@ -226,3 +226,34 @@ print(Reflect.find_method<Users, fun(int) -> string>(u, \"nope\") == none)
         "T300"
     );
 }
+
+#[test]
+fn bound_callables_are_the_public_methods_bound_to_a_value() {
+    let src = "#[annotation]
+struct Get
+  path: string
+end
+
+struct Posts
+  public tag: string
+end
+
+impl Posts
+  #[Get(\"/\")]
+  public fun list(self, n: int) -> string
+    \"{self.tag}:{n}\"
+  end
+
+  fun hidden(self) -> int
+    1
+  end
+end
+
+let p = Posts { tag: \"blog\" }
+let found = Reflect.bound_callables<Posts>(p)
+print(found.len())
+let out = found[0].call([Any.of(4)])
+print(\"{found[0].name} {found[0].annotation(\\\"Get\\\") != none} {out.unwrap().as<string>()}\")
+";
+    assert_eq!(run(src), "1\nlist true blog:4\n");
+}

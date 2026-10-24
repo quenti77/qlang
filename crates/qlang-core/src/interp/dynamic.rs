@@ -144,6 +144,16 @@ impl Interp<'_> {
         self.info("Callable", &fields)
     }
 
+    /// A `Callable` for the method `fid`, with `self` set to `obj`.
+    pub(super) fn callable_of_bound(&self, fid: FnId, obj: Value) -> Value {
+        let def = &self.prog.defs.fns[fid];
+        let fty = Ty::Fn(def.params.clone(), Box::new(def.ret.clone()));
+        let mut fields = self.function_fields(fid);
+        fields.retain(|(k, _)| *k != "has_self");
+        fields.push(("target", self.any_box(self.bound_method(fid, obj), &fty)));
+        self.info("Callable", &fields)
+    }
+
     // ------------------------------------------------------------------ Any
 
     pub(super) fn any_box(&self, value: Value, ty: &Ty) -> Value {

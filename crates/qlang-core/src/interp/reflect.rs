@@ -23,6 +23,26 @@ impl Interp<'_> {
                     .collect();
                 Value::array(infos)
             }
+            ReflectOp::BoundCallables(ty) => {
+                let Some(obj) = args.first() else {
+                    return Ok(Value::array(Vec::new()));
+                };
+                let fids: Vec<FnId> = self
+                    .methods_of(ty)
+                    .into_iter()
+                    .filter(|&fid| {
+                        let def = &self.prog.defs.fns[fid];
+                        def.has_self
+                            && def.vis == Visibility::Public
+                            && def.decl.as_ref().is_some_and(|d| d.tparams.is_empty())
+                    })
+                    .collect();
+                Value::array(
+                    fids.into_iter()
+                        .map(|fid| self.callable_of_bound(fid, obj.clone()))
+                        .collect(),
+                )
+            }
             ReflectOp::FindMethod(ty, f) => {
                 let (Ty::Fn(params, ret), Some(obj), Some(Value::Str(name))) =
                     (f, args.first(), args.get(1))
@@ -99,7 +119,7 @@ impl Interp<'_> {
     }
 
     /// A method as a function value: `self` is `obj` in the scope it runs in.
-    fn bound_method(&self, fid: FnId, obj: Value) -> Value {
+    pub(super) fn bound_method(&self, fid: FnId, obj: Value) -> Value {
         let def = &self.prog.defs.fns[fid];
         let scope = Scope::with_capacity(Some(self.envs[def.module].clone()), 1);
         scope.define_new("self", obj);

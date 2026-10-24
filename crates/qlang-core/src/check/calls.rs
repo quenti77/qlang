@@ -2201,6 +2201,33 @@ impl Checker {
                     Ty::Array(Box::new(self.prelude_ty("Callable"))),
                 )
             }
+            "bound_callables" => {
+                if !arity(self, 1, 1) {
+                    return Ty::Error;
+                }
+                let t = self.resolve_type(&targs[0]);
+                if t == Ty::Error {
+                    self.check_args_loose(args);
+                    return Ty::Error;
+                }
+                if !matches!(t, Ty::Struct(..) | Ty::Enum(..)) {
+                    self.err(
+                        "T301",
+                        "`Reflect.bound_callables` needs a struct or an enum type",
+                        targs[0].span,
+                    );
+                    self.check_args_loose(args);
+                    return Ty::Error;
+                }
+                let vt = self.expr(&args[0].value, &Want::Exp(t.clone()));
+                if !self.assignable(&vt, &t) {
+                    self.mismatch(args[0].value.span, &t, &vt);
+                }
+                (
+                    ReflectOp::BoundCallables(t),
+                    Ty::Array(Box::new(self.prelude_ty("Callable"))),
+                )
+            }
             "callable" => {
                 let Some(m) = self.module_arg(callee, name, targs, args, 1) else {
                     return Ty::Error;

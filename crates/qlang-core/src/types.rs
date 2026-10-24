@@ -587,6 +587,8 @@ pub enum ReflectOp {
     Callable(ModId),
     /// `Reflect.callables(module)`: every function of that module, as a `Callable`.
     Callables(ModId),
+    /// `Reflect.bound_callables<T>(value)`: the methods of `T`, bound to `value`, as `Callable`s.
+    BoundCallables(Ty),
     /// `Reflect.decode(ty, json)`: a `Json` read as the type held by an `Any`.
     Decode,
     /// `Reflect.parse_text(ty, text)`: a text read as the (scalar) type held by an `Any`.

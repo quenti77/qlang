@@ -1076,6 +1076,7 @@ on lit des descriptions (`StructInfo`, `EnumInfo`, `FunctionInfo`...), des valeu
 | `Reflect.find<fun(Request) -> Response>("home")` | la fonction `home` de ce fichier si son type est exactement celui-là, sinon `none` |
 | `Reflect.methods<Users>()` | `array<FunctionInfo>` des méthodes des `impl` de `Users` (`has_self` dit si elle prend `self`) |
 | `Reflect.find_method<Users, fun(Request) -> Response>(valeur, "list")` | la méthode `list` de `valeur`, déjà liée à elle, si son type (sans `self`) est celui-là, sinon `none` |
+| `Reflect.bound_callables<Users>(valeur)` | les méthodes publiques de `Users` (avec `self`, sans paramètre de type), déjà liées à `valeur`, en `array<Callable>` : c'est ce qui permet des contrôleurs en classes |
 
 Une annotation lue est une `AnnotationInfo` : `name` (celui de sa structure) et `args`, les
 arguments par nom de champ, en `Json` (les valeurs par défaut sont remplies ; les nombres sont des

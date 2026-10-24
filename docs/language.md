@@ -281,6 +281,19 @@ locale avant de la tester.
 Appeler une méthode ou lire un champ sur une valeur qui peut être `none` est une
 erreur de compilation.
 
+**`a ?? b`** donne `a` s'il n'est pas `none`, sinon `b`. `a` doit être nullable (`T?`) ;
+`b` est de type `T` (le résultat est alors un `T`) ou `T?` (le résultat reste nullable).
+`b` n'est évalué que si `a` est `none`, et `0` ou `""` ne sont pas `none` :
+
+```
+let port = env.get("PORT") ?? "8080"
+let d = a ?? b ?? 9      -- se lit a ?? (b ?? 9)
+```
+
+C'est l'opérateur le moins prioritaire des calculs (juste au-dessus de `..`) :
+`x ?? 1 + 2` vaut `x ?? (1 + 2)`. Une valeur qui n'est pas nullable à gauche est
+l'erreur `T010`.
+
 ### Tuples
 
 Un **tuple** regroupe un nombre fixe de valeurs, de types différents, sans déclarer de
@@ -457,6 +470,7 @@ De la plus faible à la plus forte :
 | Opérateurs                                | Remarque                                                     |
 | ----------------------------------------- | ------------------------------------------------------------ |
 | `=` `+=` `-=` `*=` `/=` `div=` `mod=` `%=` | affectation, associative à droite                           |
+| `??`                                      | valeur par défaut d'un nullable, associative à droite        |
 | `..` `..=`                                | intervalle, non associatif                                   |
 | `or`                                      |                                                              |
 | `and`                                     |                                                              |

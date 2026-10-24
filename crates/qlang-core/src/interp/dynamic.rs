@@ -27,6 +27,7 @@ impl Interp<'_> {
             ReflectOp::AnyAs(t) => ReflectOp::AnyAs(self.runtime_ty(t)),
             ReflectOp::Construct(t) => ReflectOp::Construct(self.runtime_ty(t)),
             ReflectOp::JsonTo(t) => ReflectOp::JsonTo(self.runtime_ty(t)),
+            ReflectOp::TypeInfo(t) => ReflectOp::TypeInfo(self.runtime_ty(t)),
             other => other.clone(),
         };
         Ok(match op {
@@ -41,6 +42,11 @@ impl Interp<'_> {
                 Value::array(ids.into_iter().map(|s| self.struct_info(s)).collect())
             }
             ReflectOp::TypeName(t) => Value::str(&t.show(&self.prog.defs)),
+            ReflectOp::TypeInfo(t) => self.type_info(t, &mut Vec::new()),
+            ReflectOp::TypeInfoOf => match &args[0] {
+                Value::Any(a) => self.type_info(&a.ty.clone(), &mut Vec::new()),
+                _ => Value::None,
+            },
             ReflectOp::AnyOf(t) => match &args[0] {
                 v @ Value::Any(_) => v.clone(),
                 v => self.any_box(v.clone(), t),
@@ -141,6 +147,7 @@ impl Interp<'_> {
         let mut fields = self.function_fields(fid);
         fields.retain(|(k, _)| *k != "has_self");
         fields.push(("target", self.any_box(self.fn_value(fid), &fty)));
+        fields.push(("ret", self.any_box(Value::None, &def.ret)));
         self.info("Callable", &fields)
     }
 
@@ -151,7 +158,93 @@ impl Interp<'_> {
         let mut fields = self.function_fields(fid);
         fields.retain(|(k, _)| *k != "has_self");
         fields.push(("target", self.any_box(self.bound_method(fid, obj), &fty)));
+        fields.push(("ret", self.any_box(Value::None, &def.ret)));
         self.info("Callable", &fields)
+    }
+
+    /// The shape of `ty` as a `TypeInfo`; `seen` holds the structs being described, so that a
+    /// struct that contains itself stops there.
+    fn type_info(&self, ty: &Ty, seen: &mut Vec<StructId>) -> Value {
+        let (base, nullable) = match ty {
+            Ty::Nullable(inner) => (&**inner, true),
+            other => (other, false),
+        };
+        let mut name = base.show(&self.prog.defs);
+        let mut item = Value::None;
+        let mut fields: Vec<Value> = Vec::new();
+        let mut variants: Vec<Value> = Vec::new();
+        let mut recursive = false;
+        let kind = match base {
+            Ty::Int => "int",
+            Ty::Float => "float",
+            Ty::Bool => "bool",
+            Ty::Str => "string",
+            Ty::Uuid => "uuid",
+            Ty::Ulid => "ulid",
+            Ty::DateTime => "datetime",
+            Ty::Bytes => "bytes",
+            Ty::Any => "any",
+            Ty::Unit => "unit",
+            Ty::Array(e) => {
+                item = self.type_info(e, seen);
+                "array"
+            }
+            Ty::Map(_, v) => {
+                item = self.type_info(v, seen);
+                "map"
+            }
+            Ty::Tuple(_) => "tuple",
+            Ty::Fn(..) => "function",
+            Ty::Struct(sid, _) if *sid == self.prelude_struct("Json") => "json",
+            Ty::Struct(sid, _) => {
+                name = self.prog.defs.structs[*sid].name.clone();
+                if seen.contains(sid) {
+                    recursive = true;
+                } else {
+                    seen.push(*sid);
+                    for (asid, i, f, fty) in self.fields_of(base) {
+                        if f.vis != Visibility::Public {
+                            continue;
+                        }
+                        let Some(json_name) = self.json_field_name(asid, i, &f) else {
+                            continue;
+                        };
+                        let shape = self.type_info(&fty, seen);
+                        fields.push(self.info(
+                            "FieldType",
+                            &[
+                                ("name", Value::str(&json_name)),
+                                ("field", Value::str(&f.name)),
+                                ("type_name", Value::str(&fty.show(&self.prog.defs))),
+                                ("annotations", self.annotation_infos(AnnKey::Field(asid, i))),
+                                ("info", shape),
+                            ],
+                        ));
+                    }
+                    seen.pop();
+                }
+                "struct"
+            }
+            Ty::Enum(eid, _) => {
+                let def = &self.prog.defs.enums[*eid];
+                name = def.name.clone();
+                variants = def.variants.iter().map(|v| Value::str(&v.name)).collect();
+                "enum"
+            }
+            _ => "other",
+        };
+        self.info(
+            "TypeInfo",
+            &[
+                ("kind", Value::str(kind)),
+                ("name", Value::str(&name)),
+                ("nullable", Value::Bool(nullable)),
+                ("item", item),
+                ("fields", Value::array(fields)),
+                ("variants", Value::array(variants)),
+                ("recursive", Value::Bool(recursive)),
+            ],
+        )
     }
 
     // ------------------------------------------------------------------ Any

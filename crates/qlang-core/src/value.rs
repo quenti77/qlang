@@ -191,6 +191,9 @@ pub struct FuncVal {
     pub decl: Rc<FunDecl>,
     pub env: Env,
     pub name: String,
+    /// The type arguments of the generic function that created this closure, for the
+    /// reflection it does later (`a.as<T>()`).
+    pub tenv: Option<Rc<std::collections::HashMap<crate::types::ParamId, crate::types::Ty>>>,
 }
 
 impl Value {

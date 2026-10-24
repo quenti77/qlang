@@ -28,3 +28,16 @@ fn a_host_without_redis_refuses_it_where_it_is_used() {
 fn a_program_that_never_uses_redis_compiles_anywhere() {
     assert!(codes("print(1)\n").is_empty());
 }
+
+#[test]
+fn signatures_and_stopping_are_for_the_qlang_command_only() {
+    assert_eq!(
+        codes("let r = Crypto.verify(\"RS256\", \"k\", \"m\".to_bytes(), \"s\".to_bytes())\n"),
+        vec!["T250"]
+    );
+    assert_eq!(
+        codes("let r = Crypto.sign(\"RS256\", \"k\", \"m\".to_bytes())\n"),
+        vec!["T250"]
+    );
+    assert_eq!(codes("let r = Process.stopping()\n"), vec!["T250"]);
+}

@@ -15,6 +15,8 @@ mod process;
 mod providers;
 mod redis;
 mod serve;
+mod signature;
+mod stop;
 mod testrun;
 mod ws;
 
@@ -437,6 +439,8 @@ impl Host for TerminalHost {
             || (self.allow_process && name == "process_run")
             || PASSWORD_EXTERNS.contains(&name)
             || redis::REDIS_EXTERNS.contains(&name)
+            || signature::SIGNATURE_EXTERNS.contains(&name)
+            || name == "process_stopping"
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -453,6 +457,12 @@ impl Host for TerminalHost {
         }
         if PASSWORD_EXTERNS.contains(&name) {
             return password_call(name, &args);
+        }
+        if signature::SIGNATURE_EXTERNS.contains(&name) {
+            return signature::call(name, &args);
+        }
+        if name == "process_stopping" {
+            return Ok(HostValue::Bool(stop::stopping(serve::is_stopping())));
         }
         if redis::REDIS_EXTERNS.contains(&name) {
             return redis::call(&mut self.redis, name, &args);

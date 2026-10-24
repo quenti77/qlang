@@ -663,6 +663,11 @@ static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// How long a stopping server lets the requests in progress finish.
 const STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// Whether the server was asked to stop (`Process.stopping()` in a served program).
+pub fn is_stopping() -> bool {
+    STOPPING.load(Ordering::SeqCst)
+}
+
 /// Writes to the server's log (standard error). Unlike `eprint!` it never panics when the log
 /// cannot be written (a closed terminal or pipe must not stop requests being answered).
 fn log(text: &str) {
@@ -674,6 +679,8 @@ fn log(text: &str) {
 /// its own copy of the program, so its variables are its own (use a database or files for what
 /// must be shared). Connections are read in parallel, so a slow client blocks nobody.
 fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
+    // `Process.stopping()` in the program must not take the signals from the server
+    crate::stop::serving();
     let file = opts.file.clone().unwrap_or_default();
     let source = match std::fs::read_to_string(&file) {
         Ok(s) => s,

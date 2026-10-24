@@ -1595,6 +1595,21 @@ impl Crypto
         constant_time_eq(a.to_bytes(), b.to_bytes())
     end
 
+    --" `true` if `signature` is the signature of `message` made with the private key that goes with
+    `key`, a public key as a PEM (`BEGIN PUBLIC KEY`, `BEGIN RSA PUBLIC KEY`) or a JWK (JSON text).
+    `alg` is `RS256`, `RS384`, `RS512` (RSA PKCS#1), `ES256`, `ES384` (the signature is `r` then `s`, as a
+    JWT writes it) or `EdDSA` (Ed25519). A wrong signature is `false`; `err` is for a key or an algorithm
+    that cannot be used. Needs the `qlang` command. --"
+    public fun verify(alg: string, key: string, message: bytes, signature: bytes) -> Result<bool, Error>
+        crypto_verify(alg, key, message, signature)
+    end
+
+    --" The signature of `message` with a private key: a PEM in PKCS#8 (`BEGIN PRIVATE KEY`; for RSA
+    also `BEGIN RSA PRIVATE KEY`). Same algorithms as `verify`. Needs the `qlang` command. --"
+    public fun sign(alg: string, key: string, message: bytes) -> Result<bytes, Error>
+        crypto_sign(alg, key, message)
+    end
+
     --" Like `equal` for bytes. --"
     public fun equal_bytes(a: bytes, b: bytes) -> bool
         constant_time_eq(a, b)
@@ -1912,6 +1927,13 @@ fun assert_close(actual: float, expected: float)
     assert_within(actual, expected, 0.000000001)
 end
 
+-- Signatures with a key pair: only the `qlang` command offers them.
+extern fun crypto_verify(alg: string, key: string, message: bytes, signature: bytes) -> Result<bool, Error>
+extern fun crypto_sign(alg: string, key: string, message: bytes) -> Result<bytes, Error>
+
+-- Whether the process was asked to stop (Ctrl-C, `kill`): only the `qlang` command.
+extern fun process_stopping() -> bool
+
 -- Starting programs: only where the host allows it.
 extern fun process_run(command: string, args: array<string>, input: string?) -> Result<ProcessOutput, Error>
 
@@ -1930,6 +1952,15 @@ struct Process
 end
 
 impl Process
+    --" Whether the program was asked to stop (Ctrl-C, `kill`, a service manager). The first call
+    makes the program take over: from then on the signal no longer ends it at once, it only makes
+    this return `true`, so that a worker can finish what it is doing and leave. A second signal
+    ends the program for good. In a `qlang serve` program it is `true` while the server stops.
+    Needs the `qlang` command. --"
+    public fun stopping() -> bool
+        process_stopping()
+    end
+
     --" Runs `command` with `args` and waits for it. `err` if it cannot be started; a program
     that ends with a non-zero `status` is still an `ok` result. --"
     public fun run(command: string, args: array<string>) -> Result<ProcessOutput, Error>

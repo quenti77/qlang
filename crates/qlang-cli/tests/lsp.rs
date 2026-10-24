@@ -342,3 +342,55 @@ fn rename_refuses_the_shorthand_that_means_two_things() {
         assert!(msg.contains("shorthand"), "{r}");
     }
 }
+
+/// `app` depends on `tools`; the editor may have opened `app` itself or the folder around it.
+fn app_with_package(name: &str) -> PathBuf {
+    let dir = project(name);
+    std::fs::create_dir_all(dir.join("tools")).unwrap();
+    std::fs::write(
+        dir.join("tools/qlang.toml"),
+        "[package]\nname = \"tools\"\nmain = \"lib.q\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("tools/lib.q"),
+        "fun twice(n: int) -> int\n  n * 2\nend\nexport twice\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("app/sub/deep")).unwrap();
+    std::fs::write(
+        dir.join("app/qlang.toml"),
+        "[dependencies]\ntools = { path = \"../tools\" }\n",
+    )
+    .unwrap();
+    dir
+}
+
+const USES_PACKAGE: &str = "import twice from \"@tools/lib.q\"\nprint(twice(2))\n";
+
+#[test]
+fn a_package_import_works_in_a_subfolder_of_the_project() {
+    let dir = app_with_package("pkg-sub");
+    let file = dir.join("app/sub/deep/a.q");
+    std::fs::write(&file, USES_PACKAGE).unwrap();
+    let mut c = Client::start(&dir.join("app"));
+    c.open(&file, USES_PACKAGE);
+    let d = c.diagnostics("a.q");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+#[test]
+fn a_package_import_works_when_the_editor_opened_the_folder_around_the_project() {
+    let dir = app_with_package("pkg-around");
+    let file = dir.join("app/sub/deep/a.q");
+    std::fs::write(&file, USES_PACKAGE).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&file, USES_PACKAGE);
+    let d = c.diagnostics("a.q");
+    assert!(d.is_empty(), "{d:?}");
+    // and in the project's own folder
+    let top = dir.join("app/b.q");
+    std::fs::write(&top, USES_PACKAGE).unwrap();
+    c.open(&top, USES_PACKAGE);
+    assert!(c.diagnostics("b.q").is_empty());
+}

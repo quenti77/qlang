@@ -332,7 +332,18 @@ impl Server {
 
     /// The directory imports are relative to for the file at `path`, and the file's name
     /// relative to it.
+    ///
+    /// The project is the folder of the nearest `qlang.toml` above the file (like the command
+    /// line does), so a project that lives in a subfolder of what the editor opened still finds
+    /// its packages. Without one, it is the folder the editor opened.
     fn project_of(&self, path: &Path) -> (PathBuf, String) {
+        if let Some(config) = crate::providers::find_config(path)
+            && let Some(dir) = config.parent()
+            && let Ok(real) = path.canonicalize()
+            && let Ok(rel) = real.strip_prefix(dir)
+        {
+            return (dir.to_path_buf(), posix(rel));
+        }
         if let Some(root) = &self.root
             && let Ok(rel) = path.strip_prefix(root)
         {

@@ -1190,6 +1190,14 @@ impl WebSocket
     public fun is_open(self) -> bool
         self.open
     end
+
+    --" What was queued to send since the last call, and forgets it: how a test reads what a
+    callback wrote (the server does the same before sending). --"
+    public fun take_frames(self) -> array<WsFrame>
+        let out = self.outbox
+        self.outbox = []
+        out
+    end
 end
 
 --" What happens on a WebSocket: each function is called with the connection, one event at a time

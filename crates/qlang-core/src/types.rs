@@ -571,6 +571,8 @@ pub struct TypeArgs {
 pub enum ReflectOp {
     /// `Reflect.struct_info<T>()`
     Struct(StructId),
+    /// `Reflect.struct_info<T>()` where `T` is a type parameter: read at run time.
+    StructOf(Ty),
     /// `Reflect.enum_info<T>()`
     Enum(EnumId),
     /// `Reflect.functions()` in this module.

@@ -1876,6 +1876,8 @@ impl Checker {
             | ReflectOp::AnyOf(t)
             | ReflectOp::AnyAs(t)
             | ReflectOp::Construct(t)
+            | ReflectOp::StructOf(t)
+            | ReflectOp::BoundCallables(t)
             | ReflectOp::JsonTo(t) => t,
             _ => return,
         };
@@ -2148,6 +2150,7 @@ impl Checker {
                 }
                 match self.resolve_type(&targs[0]) {
                     Ty::Struct(sid, _) => (ReflectOp::Struct(sid), self.prelude_ty("StructInfo")),
+                    t @ Ty::Param(_) => (ReflectOp::StructOf(t), self.prelude_ty("StructInfo")),
                     Ty::Error => return Ty::Error,
                     _ => {
                         self.err(
@@ -2210,7 +2213,7 @@ impl Checker {
                     self.check_args_loose(args);
                     return Ty::Error;
                 }
-                if !matches!(t, Ty::Struct(..) | Ty::Enum(..)) {
+                if !matches!(t, Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_)) {
                     self.err(
                         "T301",
                         "`Reflect.bound_callables` needs a struct or an enum type",
@@ -2448,7 +2451,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods` and `find_method`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method` and `bound_callables`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

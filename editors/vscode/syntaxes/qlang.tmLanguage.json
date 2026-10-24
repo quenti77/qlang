@@ -225,7 +225,7 @@
         { "name": "keyword.operator.range.qlang", "match": "\\.\\.=|\\.\\." },
         { "name": "keyword.operator.arrow.qlang", "match": "->" },
         { "name": "keyword.operator.arithmetic.qlang", "match": "\\*\\*|[+\\-*/%]" },
-        { "name": "keyword.operator.nullable.qlang", "match": "\\?" }
+        { "name": "keyword.operator.nullable.qlang", "match": "\\?\\??" }
       ]
     },
     "punctuation": {

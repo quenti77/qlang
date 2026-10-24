@@ -1114,6 +1114,42 @@ impl Checker {
                 }
                 Ty::Bool
             }
+            BinOp::Coalesce => {
+                let lt = self.expr(l, &Want::Any);
+                match self.resolve(&lt) {
+                    Ty::Error => {
+                        self.expr(r, &Want::Any);
+                        Ty::Error
+                    }
+                    Ty::NoneT => self.expr(r, &Want::Any),
+                    Ty::Nullable(inner) => {
+                        let rt = self.expr(r, &Want::Exp((*inner).clone()));
+                        let rr = self.resolve(&rt);
+                        if rr.is_error() {
+                            Ty::Error
+                        } else if self.assignable(&rt, &inner) {
+                            *inner
+                        } else if matches!(rr, Ty::Nullable(_) | Ty::NoneT)
+                            && self.assignable(&rt, &Ty::Nullable(inner.clone()))
+                        {
+                            Ty::Nullable(inner)
+                        } else {
+                            self.mismatch(r.span, &inner, &rt);
+                            *inner
+                        }
+                    }
+                    other => {
+                        self.expr(r, &Want::Any);
+                        let shown = self.show(&other);
+                        self.err(
+                            "T010",
+                            format!("`??` needs a nullable left side, found `{shown}`"),
+                            l.span,
+                        );
+                        other
+                    }
+                }
+            }
             _ => {
                 let lt = self.expr(l, &Want::Any);
                 // the right operand benefits from the left type (for `none`, literals...)

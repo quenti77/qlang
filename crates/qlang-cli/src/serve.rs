@@ -808,8 +808,10 @@ fn fingerprint() -> Vec<(String, u64, Option<std::time::SystemTime>)> {
 
 /// Watches the files of the program; a change that stays put for a moment bumps `RELOAD`.
 fn watch_files() {
-    let _ = std::thread::Builder::new().spawn(|| {
-        let mut last = fingerprint();
+    // the state to compare with is taken now, before any request is served: a change written
+    // while the thread is still starting must not be taken for the starting point
+    let mut last = fingerprint();
+    let _ = std::thread::Builder::new().spawn(move || {
         loop {
             std::thread::sleep(Duration::from_millis(250));
             let now = fingerprint();

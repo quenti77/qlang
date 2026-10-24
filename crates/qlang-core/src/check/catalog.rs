@@ -942,6 +942,16 @@ pub const FUNCTIONS: &[(&str, &str, &str)] = &[
     ),
     ("write", "write(value)", "Shows `value` without a new line."),
     (
+        "eprint",
+        "eprint(value)",
+        "Like `print`, on the error output (not mixed with the results of the program).",
+    ),
+    (
+        "ewrite",
+        "ewrite(value)",
+        "Like `write`, on the error output.",
+    ),
+    (
         "read",
         "read() -> string",
         "Reads a line and returns it without the new line. Not available everywhere (a web server has no keyboard).",

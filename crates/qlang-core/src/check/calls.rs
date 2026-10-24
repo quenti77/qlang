@@ -1369,6 +1369,8 @@ impl Checker {
         let static_name: &'static str = match name {
             "print" => "print",
             "write" => "write",
+            "eprint" => "eprint",
+            "ewrite" => "ewrite",
             "read" => "read",
             "read_all" => "read_all",
             "panic" => "panic",
@@ -1410,8 +1412,8 @@ impl Checker {
             }
         };
         match name {
-            "print" | "write" => {
-                if !arity(self, if name == "print" { 0 } else { 1 }, 1) {
+            "print" | "write" | "eprint" | "ewrite" => {
+                if !arity(self, if name == "print" || name == "eprint" { 0 } else { 1 }, 1) {
                     return Ty::Unit;
                 }
                 for a in args.iter().copied() {

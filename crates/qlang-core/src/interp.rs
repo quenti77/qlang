@@ -2685,6 +2685,25 @@ impl<'a> Interp<'a> {
                 self.emit(&text, span)?;
                 Ok(Value::Unit)
             }
+            "eprint" | "ewrite" => {
+                let mut text = match args.first() {
+                    Some(v) => self.stringify(v, span)?,
+                    None => String::new(),
+                };
+                if name == "eprint" {
+                    text.push('\n');
+                }
+                self.out_bytes += text.len();
+                if self.out_bytes > self.limits.max_output {
+                    return self.fail(
+                        "R902",
+                        "the program printed too much (output limit reached)",
+                        span,
+                    );
+                }
+                self.host.eprint(&text);
+                Ok(Value::Unit)
+            }
             "read" => match self.host.read_line() {
                 Ok(Some(line)) => Ok(Value::str(&line)),
                 Ok(None) => self.fail("R040", "no more input to read", span),

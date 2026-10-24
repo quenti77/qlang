@@ -206,7 +206,7 @@
           "captures": { "1": { "name": "variable.other.property.qlang" } }
         },
         {
-          "match": "\\b(print|write|read|panic|assert)\\b(?=\\s*\\()",
+          "match": "\\b(print|write|eprint|ewrite|read|read_all|exit|panic|assert)\\b(?=\\s*\\()",
           "captures": { "1": { "name": "support.function.builtin.qlang" } }
         },
         {

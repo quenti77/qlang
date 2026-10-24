@@ -131,3 +131,20 @@ fn sleep_needs_a_clock_and_a_sane_duration() {
             .contains("R017")
     );
 }
+
+#[test]
+fn eprint_and_ewrite_go_to_the_error_output() {
+    use qlang_core::check::compile;
+    use qlang_core::host::{Limits, MemoryHost};
+    let mut host = MemoryHost::default();
+    let p = compile(
+        "main.q",
+        "print(\"a\")\neprint(\"b\")\newrite(\"c\")\neprint()\n",
+        &mut host,
+    )
+    .unwrap();
+    let r = p.run(&mut host, Limits::default());
+    assert!(r.error.is_none());
+    assert_eq!(host.output, "a\n");
+    assert_eq!(host.errors, "b\nc\n");
+}

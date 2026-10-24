@@ -333,6 +333,9 @@ pub trait Host {
     /// Output text, exactly as given (newlines included).
     fn print(&mut self, text: &str);
 
+    /// Output text on the error output. Hosts without one drop it.
+    fn eprint(&mut self, _text: &str) {}
+
     /// Read one line of input (without its newline). `Ok(None)` is end of input.
     fn read_line(&mut self) -> Result<Option<String>, HostError> {
         Err(HostError::Unsupported("read"))
@@ -488,6 +491,8 @@ pub fn memory_exceeded() -> bool {
 #[derive(Default)]
 pub struct MemoryHost {
     pub output: String,
+    /// What the program wrote with `eprint` and `ewrite`.
+    pub errors: String,
     /// The lines of the program's log: `level message name=value...`.
     pub logs: Vec<String>,
     pub input: std::collections::VecDeque<String>,
@@ -541,6 +546,10 @@ impl MemoryHost {
 impl Host for MemoryHost {
     fn print(&mut self, text: &str) {
         self.output.push_str(text);
+    }
+
+    fn eprint(&mut self, text: &str) {
+        self.errors.push_str(text);
     }
 
     fn read_line(&mut self) -> Result<Option<String>, HostError> {

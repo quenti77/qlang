@@ -137,12 +137,13 @@ fn eprint_and_ewrite_go_to_the_error_output() {
     use qlang_core::check::compile;
     use qlang_core::host::{Limits, MemoryHost};
     let mut host = MemoryHost::default();
-    let p = compile(
+    let Ok(p) = compile(
         "main.q",
         "print(\"a\")\neprint(\"b\")\newrite(\"c\")\neprint()\n",
         &mut host,
-    )
-    .unwrap();
+    ) else {
+        panic!("does not compile");
+    };
     let r = p.run(&mut host, Limits::default());
     assert!(r.error.is_none());
     assert_eq!(host.output, "a\n");

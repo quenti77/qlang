@@ -402,7 +402,7 @@ impl Pool {
             .and_then(|()| c.stream.flush())
             .map_err(io_err)?;
         match c.read_reply(wait)? {
-            Some(r) => to_host(r).map_err(|e| HostError::Other(e)),
+            Some(r) => to_host(r).map_err(HostError::Other),
             None => Err(HostError::Other(
                 "Redis: the server did not answer in time".to_string(),
             )),

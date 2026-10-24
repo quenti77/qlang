@@ -1,5 +1,12 @@
 # Journal des changements
 
+## 0.53.0
+
+Septième version du cycle « frameworks web en qlang » : un client Redis, pour que plusieurs workers (et plusieurs machines) partagent un cache, des compteurs, une file de tâches et des messages sans interroger une base à vide.
+
+- **`Redis`** : `Redis.connect("redis://hôte:6379/0")` (ou `rediss://` en TLS), `command([...])`, et les commandes courantes en méthodes (`get`, `set`, `set_ex`, `set_if_absent`, `incr`, `expire`, listes, `blpop`, ensembles triés, `eval` pour du Lua, `publish`). **`Redis.subscriber(url, canaux)`** écoute des canaux : `next(ms)` rend le message suivant. Seule la commande `qlang` l'offre ; un serveur distant demande TLS. Testé contre Redis 7 (le CI en lance un).
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.7.0 s'en sert : `RedisStore` pour le cache et la limitation de débit (atomique, partagé), une file de tâches Redis (attente bloquante, pas de sondage), `RedisFeed` pour diffuser des messages WebSocket entre workers, et le `Relay` qui ne lit qu'une fois par worker.
+
 ## 0.52.0
 
 Sixième version du cycle « frameworks web en qlang » : les WebSocket, et deux corrections de l'éditeur.

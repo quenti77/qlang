@@ -1,5 +1,13 @@
 # Journal des changements
 
+## 0.52.0
+
+Sixième version du cycle « frameworks web en qlang » : les WebSocket, et deux corrections de l'éditeur.
+
+- **WebSocket** dans `qlang serve` : `Response.websocket(WebSocketHandler { on_message, on_open, on_close, on_tick, tick_ms })`. Poignée de main, trames (fragmentées, ping/pong, fermeture avec code), messages jusqu'à 1 Mo. Un worker sert **plusieurs connexions** en même temps, entre deux requêtes (`WebSocket.send`, `send_bytes`, `close_with`, `data`, `request`, `id`, `take_frames` pour les tests). Voir `docs/language.md`.
+- **Éditeur** : `import "@paquet/…"` marche aussi quand le projet est un sous-dossier du dossier ouvert (le projet est celui du `qlang.toml` le plus proche, comme en ligne de commande) ; **complétion dans les `import`** : les paquets (`@std/`), les fichiers et dossiers d'un paquet, ceux à côté du fichier ; VS Code propose aussi des suggestions dans les chaînes des fichiers qlang.
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.6.0 apporte `queue.q` (file de tâches dans la base : jobs typés, délais, reprises espacées, tâches abandonnées, commandes `queue:work`, `queue:failed`, `queue:retry`), `web/ws.q` (`Hub`, `Bus` par la base de données, `origin_guard`), `WsClient` pour tester un WebSocket sans réseau, et l'exemple `examples/chat`.
+
 ## 0.51.0
 
 Cinquième version du cycle « frameworks web en qlang » : des commandes en ligne de commande et des traductions, écrites dans `qlang-std`.

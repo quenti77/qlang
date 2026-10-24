@@ -2589,6 +2589,23 @@ Options de `qlang serve app.q` :
     retry? }` (`text/event-stream`). Le worker qui répond ne sert que cette connexion tant
     que ça dure (donne assez de `--workers`) ; si le client part, le flux s'arrête au morceau
     suivant. Entre deux morceaux, `time.sleep` attend.
+  - **WebSocket** : `Response.websocket(WebSocketHandler { ... })`, rendu à une requête qui demande
+    `Upgrade: websocket`, fait de la connexion un WebSocket (sinon `426`). Le gestionnaire a
+    `on_message(c: WebSocket, m: WsMessage)` (obligatoire), `on_open(c)`, `on_close(c)` et
+    `on_tick(c)` appelé toutes les `tick_ms` millisecondes (1000 par défaut ; 0 : jamais). Une
+    `WsMessage` a `text: string?`, `data: bytes?` et `binary`. Une `WebSocket` a `id` (unique),
+    `request` (la requête qui l'a ouverte, avec ce que les gardes ont mis dans `attrs`), `data`
+    (`map<string, Any>` à vous), `send(texte)`, `send_bytes(octets)`, `close()` et
+    `close_with(code, raison)` (1000 à 4999), `is_open()`. **Un worker sert beaucoup de
+    connexions** entre deux requêtes, une fonction de rappel à la fois, chacune avec son budget
+    d'étapes : une fonction de rappel doit être courte et ne jamais attendre. Un worker ne voit pas
+    les connexions des autres : pour parler à tout le monde, passe par une base de données
+    (`on_tick` qui lit les nouveaux messages). Les messages sont limités à 1 Mo (`1009`), les trames
+    non masquées ou mal formées ferment avec `1002`, un texte invalide avec `1007`, une erreur dans
+    une fonction de rappel avec `1011` (le détail va dans le journal) ; un `ping` est envoyé toutes
+    les 30 s. Les compressions de WebSocket ne sont pas négociées. **Le navigateur laisse n'importe
+    quelle page ouvrir un WebSocket vers ton serveur avec les cookies du visiteur** : vérifie
+    l'en-tête `Origin` (`req.header("origin")`).
   - **Compression** : avec `--compress`, un texte, JSON, JavaScript, XML ou SVG de 1 Ko ou plus
     est envoyé en gzip aux clients qui l'acceptent (`Content-Encoding: gzip`, `Vary`), sauf si le
     programme a déjà choisi un encodage. Désactivé par défaut (un proxy le fait aussi bien).

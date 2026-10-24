@@ -1,5 +1,15 @@
 # Journal des changements
 
+## 0.50.0
+
+Quatrième version du cycle « frameworks web en qlang » : un opérateur qui manquait, de quoi décrire les types pour la documentation d'une API, et ce que `qlang-std` 0.3.0 en fait.
+
+- **`a ?? b`** : la valeur de `a`, ou `b` si `a` est `none`. `b` n'est évalué qu'au besoin ; associatif à droite ; le moins prioritaire des opérateurs de calcul. Un côté gauche non nullable est l'erreur `T010`.
+- **`Reflect.bound_callables<T>(valeur)`** : les méthodes publiques de `T`, déjà liées à `valeur`, en `Callable` (des contrôleurs en classes).
+- **`Reflect.type_info<T>()`** et `Reflect.type_info_of(a)` : la forme d'un type (`TypeInfo` : genre, nom, nullable, élément, champs tels que `Json.of` les écrit avec leurs annotations, variantes, arguments de type). `ParamInfo.type_info()` et `Callable.return_info()` l'appliquent aux paramètres et au résultat d'une fonction.
+- `Reflect.struct_info` et `Reflect.bound_callables` acceptent un paramètre de type d'une fonction générique ; une fonction anonyme garde les types de la fonction générique qui l'a créée (`a.as<T>()` dedans).
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.3.0 apporte `web/` : contrôleurs en classes (`#[Controller]`, `App.controller`), `testing.q` (client de test sans serveur), `events.q`, `cache.q`, `limit.q` (limitation de débit), CORS à options, `openapi.q`.
+
 ## 0.49.0
 
 Troisième version du cycle « frameworks web en qlang » : de quoi écrire le paquet `web` de `qlang-std` (conteneur d'injection, routeur à paramètres injectés, middleware, validation, constructeur de requêtes, migrations, sessions).

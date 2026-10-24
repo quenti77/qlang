@@ -368,6 +368,8 @@ struct TypeInfo
     public fields: array<FieldType>
     --" The variants of an enum. --"
     public variants: array<string>
+    --" The type arguments of a generic struct or enum: `Result<Post, HttpError>` has two. --"
+    public args: array<TypeInfo>
     --" Set on a struct met again inside itself: its fields are left out there. --"
     public recursive: bool
 end

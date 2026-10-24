@@ -174,6 +174,7 @@ impl Interp<'_> {
         let mut fields: Vec<Value> = Vec::new();
         let mut variants: Vec<Value> = Vec::new();
         let mut recursive = false;
+        let mut args: Vec<Value> = Vec::new();
         let kind = match base {
             Ty::Int => "int",
             Ty::Float => "float",
@@ -196,8 +197,9 @@ impl Interp<'_> {
             Ty::Tuple(_) => "tuple",
             Ty::Fn(..) => "function",
             Ty::Struct(sid, _) if *sid == self.prelude_struct("Json") => "json",
-            Ty::Struct(sid, _) => {
+            Ty::Struct(sid, targs) => {
                 name = self.prog.defs.structs[*sid].name.clone();
+                args = targs.iter().map(|t| self.type_info(t, seen)).collect();
                 if seen.contains(sid) {
                     recursive = true;
                 } else {
@@ -225,7 +227,8 @@ impl Interp<'_> {
                 }
                 "struct"
             }
-            Ty::Enum(eid, _) => {
+            Ty::Enum(eid, targs) => {
+                args = targs.iter().map(|t| self.type_info(t, seen)).collect();
                 let def = &self.prog.defs.enums[*eid];
                 name = def.name.clone();
                 variants = def.variants.iter().map(|v| Value::str(&v.name)).collect();
@@ -242,6 +245,7 @@ impl Interp<'_> {
                 ("item", item),
                 ("fields", Value::array(fields)),
                 ("variants", Value::array(variants)),
+                ("args", Value::array(args)),
                 ("recursive", Value::Bool(recursive)),
             ],
         )

@@ -1150,6 +1150,10 @@ impl Checker {
             if owner.module == PRELUDE_MOD {
                 let need = match (owner.name.as_str(), name.name.as_str()) {
                     ("Db", "connect") => Some(("sql_connect", "there is no database access")),
+                    ("Redis", "connect" | "subscriber") => Some((
+                        "redis_connect",
+                        "Redis is only offered by the `qlang` command",
+                    )),
                     ("fs", "read") => Some(("fs_read", "there is no disk access")),
                     ("fs", "write") => Some(("fs_write", "there is no disk access")),
                     ("fs", "read_bytes") => Some(("fs_read_bytes", "there is no disk access")),

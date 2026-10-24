@@ -13,6 +13,7 @@ mod packages;
 mod password;
 mod process;
 mod providers;
+mod redis;
 mod serve;
 mod testrun;
 mod ws;
@@ -158,6 +159,7 @@ struct TerminalHost {
     rng: u64,
     /// Open SQL connections, for `Db.connect`.
     db: db::SqlConns,
+    redis: redis::Pool,
     /// The script's own arguments, for `env.args()` (everything after `--` on the command
     /// line), not including the file path or qlang's own options.
     script_args: Vec<String>,
@@ -434,6 +436,7 @@ impl Host for TerminalHost {
             || SQL_EXTERNS.contains(&name)
             || (self.allow_process && name == "process_run")
             || PASSWORD_EXTERNS.contains(&name)
+            || redis::REDIS_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -450,6 +453,9 @@ impl Host for TerminalHost {
         }
         if PASSWORD_EXTERNS.contains(&name) {
             return password_call(name, &args);
+        }
+        if redis::REDIS_EXTERNS.contains(&name) {
+            return redis::call(&mut self.redis, name, &args);
         }
         qlang_core::host::std_call(self, name, args)
             .unwrap_or(Err(HostError::Unsupported("extern")))
@@ -701,6 +707,7 @@ fn new_host_with(
         root,
         rng: seed.unwrap_or_else(system_entropy),
         db: db::SqlConns::default(),
+        redis: Default::default(),
         script_args,
         providers,
         packages,

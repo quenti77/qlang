@@ -1413,7 +1413,15 @@ impl Checker {
         };
         match name {
             "print" | "write" | "eprint" | "ewrite" => {
-                if !arity(self, if name == "print" || name == "eprint" { 0 } else { 1 }, 1) {
+                if !arity(
+                    self,
+                    if name == "print" || name == "eprint" {
+                        0
+                    } else {
+                        1
+                    },
+                    1,
+                ) {
                     return Ty::Unit;
                 }
                 for a in args.iter().copied() {

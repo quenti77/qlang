@@ -1,5 +1,12 @@
 # Journal des changements
 
+## 0.51.0
+
+Cinquième version du cycle « frameworks web en qlang » : des commandes en ligne de commande et des traductions, écrites dans `qlang-std`.
+
+- **`eprint(x)`** et **`ewrite(x)`** : comme `print` et `write`, sur la sortie d'erreur. Un hôte sans sortie d'erreur les jette ; `MemoryHost` les garde dans `errors`.
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.4.0 apporte `cli.q` (commandes `#[cli.Command]` à paramètres `#[cli.Arg]`, `#[cli.Opt]`, `Console` et services injectés, aide générée, codes de sortie), `i18n.q` (traductions JSON, pluriels, repli de langue, `Accept-Language`, nombres), `web/locale.q` (la langue de la requête) et `web/commands.q` (`routes:list`, `db:migrate`, `db:rollback`, `db:status`, `locale:missing`).
+
 ## 0.50.0
 
 Quatrième version du cycle « frameworks web en qlang » : un opérateur qui manquait, de quoi décrire les types pour la documentation d'une API, et ce que `qlang-std` 0.3.0 en fait.

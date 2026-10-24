@@ -1643,6 +1643,7 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | ------------------------ | --------------------------------------------------------------------- |
 | `print(x)`               | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
 | `write(x)`               | affiche `x` sans retour à la ligne                                    |
+| `eprint(x)`, `ewrite(x)` | comme `print` et `write`, sur la sortie d'erreur (jamais mêlée aux résultats ; un hôte sans sortie d'erreur les jette) |
 | `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
 | `read_all()`             | lit toutes les lignes restantes, reliées par des retours à la ligne (aucun après la dernière) |
 | `exit(code?)`            | termine le programme tout de suite avec ce code de sortie (0 par défaut) ; rien ne s'exécute après |

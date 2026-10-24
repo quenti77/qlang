@@ -15,6 +15,7 @@ mod process;
 mod providers;
 mod serve;
 mod testrun;
+mod ws;
 
 use qlang_core::check::compile;
 use qlang_core::host::{

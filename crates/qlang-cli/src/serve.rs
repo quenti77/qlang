@@ -7,9 +7,10 @@
 //! reverse proxy and bind it to localhost unless you know what you are doing.
 
 use crate::json::{self, Ceiling};
+use crate::ws::{self, WsEvent, WsLink};
 use qlang_core::check::compile;
 use qlang_core::host::Limits;
-use qlang_core::interp::{AppRequest, AppResponse};
+use qlang_core::interp::{AppRequest, AppResponse, WsOut};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -645,6 +646,8 @@ struct Job {
     reply: mpsc::Sender<Result<AppResponse, String>>,
     /// The pieces of an answer that is streamed (see `AppResponse::stream`).
     chunks: mpsc::Sender<Vec<u8>>,
+    /// The worker's side of the connection, when the request asked for a WebSocket.
+    ws: Option<WsLink>,
 }
 
 enum Msg {
@@ -947,13 +950,20 @@ fn worker(
                 watch_files();
             }
         }
+        // the WebSockets this worker serves: it answers their events between two requests
+        let mut conns: Vec<WsConn> = Vec::new();
+        let mut next_ws: u64 = 0;
         loop {
             // only one worker waits on the queue at a time, the others wait for their turn
             let msg = match pending.take() {
                 Some(job) => Ok(Msg::Job(job)),
-                None => match queue.lock() {
+                None if conns.is_empty() => match queue.lock() {
                     Ok(q) => q.recv(),
                     Err(_) => return Ok(()),
+                },
+                None => match ws_round(&mut app, &mut conns, queue, &program.sources) {
+                    Some(m) => Ok(m),
+                    None => continue,
                 },
             };
             match msg {
@@ -964,15 +974,61 @@ fn worker(
                         if let Some(new) = reload_check(file, opts, now) {
                             source = new;
                             pending = Some(job);
+                            for c in &conns {
+                                let _ = c.link.out.send(WsOut::Close(1012, "restarting".into()));
+                            }
                             break;
                         }
                     }
-                    let answer = app
+                    let mut answer = app
                         .handle(job.request)
                         .map_err(|d| d.render(&program.sources));
+                    let wants_ws = matches!(&answer, Ok(r) if r.websocket.is_some());
+                    if wants_ws && job.ws.is_none() {
+                        // the program answered with a WebSocket to a request that did not ask for one
+                        app.ws_reject();
+                        answer = Ok(AppResponse {
+                            status: 426,
+                            headers: vec![
+                                ("Upgrade".to_string(), "websocket".to_string()),
+                                (
+                                    "Content-Type".to_string(),
+                                    "text/plain; charset=utf-8".to_string(),
+                                ),
+                            ],
+                            body: "this address is a WebSocket: connect with a WebSocket client"
+                                .to_string(),
+                            raw: None,
+                            stream: false,
+                            websocket: None,
+                        });
+                    }
+                    let tick_ms = match &answer {
+                        Ok(r) => r.websocket.map(|w| w.tick_ms),
+                        Err(_) => None,
+                    };
                     let streaming = matches!(&answer, Ok(r) if r.stream);
                     let _ = job.reply.send(answer);
-                    if streaming {
+                    if let (Some(tick_ms), Some(link)) = (tick_ms, job.ws) {
+                        next_ws += 1;
+                        let id = format!(
+                            "{:016x}{:016x}",
+                            crate::system_entropy(),
+                            crate::system_entropy()
+                        );
+                        let n = next_ws;
+                        let tick = Duration::from_millis(tick_ms);
+                        conns.push(WsConn {
+                            n,
+                            link,
+                            tick,
+                            next_tick: Instant::now() + tick,
+                        });
+                        let opened = app.ws_accept(n, &id);
+                        let mut closing = Vec::new();
+                        ws_apply(&conns, opened, n, &program.sources, &mut closing);
+                        ws_finish(&mut app, &mut conns, closing, &program.sources);
+                    } else if streaming {
                         // this worker serves the stream until it ends or the client leaves
                         loop {
                             match app.next_chunk() {
@@ -990,10 +1046,127 @@ fn worker(
                         }
                     }
                 }
-                Ok(Msg::Stop) | Err(_) => return Ok(()),
+                Ok(Msg::Stop) | Err(_) => {
+                    for c in &conns {
+                        let _ = c.link.out.send(WsOut::Close(1001, "going away".into()));
+                    }
+                    return Ok(());
+                }
             }
         }
     }
+}
+
+/// A WebSocket a worker serves.
+struct WsConn {
+    n: u64,
+    link: WsLink,
+    /// Zero: no tick.
+    tick: Duration,
+    next_tick: Instant,
+}
+
+/// Sends what the callbacks queued; a close is noted in `closing`. An error in a callback is
+/// logged and closes the connection it happened on.
+fn ws_apply(
+    conns: &[WsConn],
+    result: Result<qlang_core::interp::WsOutputs, Box<qlang_core::diag::Diagnostic>>,
+    n: u64,
+    sources: &qlang_core::span::SourceMap,
+    closing: &mut Vec<u64>,
+) {
+    match result {
+        Ok(outputs) => {
+            for (to, out) in outputs {
+                if let Some(c) = conns.iter().find(|c| c.n == to) {
+                    if matches!(out, WsOut::Close(..)) {
+                        closing.push(to);
+                    }
+                    let _ = c.link.out.send(out);
+                }
+            }
+        }
+        Err(d) => {
+            log(&d.render(sources));
+            if let Some(c) = conns.iter().find(|c| c.n == n) {
+                let _ = c.link.out.send(WsOut::Close(1011, "internal error".into()));
+                closing.push(n);
+            }
+        }
+    }
+}
+
+/// Forgets the connections that ended, after their `on_close`.
+fn ws_finish(
+    app: &mut qlang_core::interp::App<'_>,
+    conns: &mut Vec<WsConn>,
+    mut closing: Vec<u64>,
+    sources: &qlang_core::span::SourceMap,
+) {
+    while let Some(n) = closing.pop() {
+        let Some(i) = conns.iter().position(|c| c.n == n) else {
+            continue;
+        };
+        // dropping the link lets the connection's writer end after the close frame
+        let gone = conns.remove(i);
+        let result = app.ws_close(n);
+        drop(gone);
+        ws_apply(conns, result, n, sources, &mut closing);
+    }
+}
+
+/// One turn for a worker that holds WebSockets: their messages and ticks, then a look at the
+/// queue of requests. Gives a request (or the stop order) when there is one.
+fn ws_round(
+    app: &mut qlang_core::interp::App<'_>,
+    conns: &mut Vec<WsConn>,
+    queue: &Arc<Mutex<mpsc::Receiver<Msg>>>,
+    sources: &qlang_core::span::SourceMap,
+) -> Option<Msg> {
+    let mut closing: Vec<u64> = Vec::new();
+    let mut busy = false;
+    let numbers: Vec<u64> = conns.iter().map(|c| c.n).collect();
+    for n in numbers {
+        loop {
+            let Some(c) = conns.iter().find(|c| c.n == n) else {
+                break;
+            };
+            match c.link.events.try_recv() {
+                Ok(WsEvent::Message(m)) => {
+                    busy = true;
+                    let result = app.ws_message(n, m);
+                    ws_apply(conns, result, n, sources, &mut closing);
+                }
+                Ok(WsEvent::Closed) | Err(mpsc::TryRecvError::Disconnected) => {
+                    closing.push(n);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+            }
+        }
+        let now = Instant::now();
+        let due = conns
+            .iter_mut()
+            .find(|c| c.n == n)
+            .filter(|c| !c.tick.is_zero() && now >= c.next_tick)
+            .map(|c| c.next_tick = now + c.tick)
+            .is_some();
+        if due && !closing.contains(&n) {
+            busy = true;
+            let result = app.ws_tick(n);
+            ws_apply(conns, result, n, sources, &mut closing);
+        }
+    }
+    ws_finish(app, conns, closing, sources);
+    if let Ok(q) = queue.try_lock()
+        && let Ok(m) = q.try_recv()
+    {
+        return Some(m);
+    }
+    if !busy {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    None
 }
 
 /// `%41` to `A`. In a query, `+` is a space.
@@ -1160,6 +1333,19 @@ fn serve_one(
     };
     let (reply, answer) = mpsc::channel();
     let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
+    // a request for a WebSocket: the two ends of the connection are made now
+    let upgrade = if request.method == "GET" {
+        ws::upgrade_key(&request.headers)
+    } else {
+        None
+    };
+    let (ws_link, ws_pipe) = match upgrade {
+        Some(_) => {
+            let (l, p) = ws::pipe();
+            (Some(l), Some(p))
+        }
+        None => (None, None),
+    };
     let app_request = AppRequest {
         method: request.method,
         url: request.target,
@@ -1179,6 +1365,7 @@ fn serve_one(
                 request: app_request,
                 reply,
                 chunks: chunk_tx,
+                ws: ws_link,
             }))
             .is_err()
     {
@@ -1191,6 +1378,37 @@ fn serve_one(
     )];
     let mut keep = keep;
     let status = match answer.recv_timeout(ANSWER_TIMEOUT) {
+        Ok(Ok(r)) if r.websocket.is_some() => {
+            // the worker only accepts when the request asked for it, so both are there
+            let (Some(key), Some(pipe)) = (upgrade, ws_pipe) else {
+                return false;
+            };
+            let mut head = String::from(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n",
+            );
+            head.push_str(&format!(
+                "Sec-WebSocket-Accept: {}\r\n",
+                ws::accept_key(&key)
+            ));
+            for (k, v) in &r.headers {
+                if !k.contains(['\r', '\n']) && !v.contains(['\r', '\n']) {
+                    head.push_str(&format!("{k}: {v}\r\n"));
+                }
+            }
+            head.push_str("\r\n");
+            if stream.write_all(head.as_bytes()).is_ok()
+                && stream.flush().is_ok()
+                && let Ok(connection) = stream.try_clone()
+            {
+                log(&format!("{line} -> 101 websocket\n"));
+                ws::run_session(connection, pipe);
+                log(&format!(
+                    "{line} websocket closed ({} ms)\n",
+                    started.elapsed().as_millis()
+                ));
+            }
+            return false;
+        }
         Ok(Ok(r)) if r.stream => {
             // an answer written as the program produces it: chunked, and the connection ends
             let mut head = response_head(u16::try_from(r.status).unwrap_or(500), &r.headers);

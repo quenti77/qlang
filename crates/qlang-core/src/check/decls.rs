@@ -983,7 +983,8 @@ impl Checker {
                     // the function a `Response` may carry to stream its body stays here
                     .filter(|f| {
                         !(s.module == PRELUDE_MOD
-                            && matches!(&f.ty, Ty::Nullable(t) if matches!(**t, Ty::Fn(..))))
+                            && (matches!(&f.ty, Ty::Nullable(t) if matches!(**t, Ty::Fn(..)))
+                                || (s.name == "Response" && f.name == "websocket")))
                     })
                     .find_map(|f| self.boundary_problem(&f.ty, path));
                 path.pop();

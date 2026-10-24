@@ -1,5 +1,14 @@
 # Journal des changements
 
+## 0.54.0
+
+Huitième version du cycle « frameworks web en qlang » : de quoi signer et vérifier des JWT avec une paire de clés, et arrêter proprement un worker.
+
+- **`Crypto.verify(alg, clé, message, signature)`** et **`Crypto.sign(alg, clé, message)`** : RSA PKCS#1 (`RS256`, `RS384`, `RS512`), courbes elliptiques (`ES256`, `ES384`) et Ed25519 (`EdDSA`) ; les clés sont des PEM (publique, PKCS#8, PKCS#1 pour RSA) ou des JWK. Seule la commande `qlang` les offre.
+- **`Process.stopping()`** : le programme demande s'il doit s'arrêter. Le premier appel lui donne la main sur Ctrl-C et `kill` (un second signal le termine), pour finir proprement la tâche en cours.
+- `qlang serve --watch` prend la première empreinte des fichiers avant de lancer son fil de surveillance (un test instable sur machine chargée).
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.8.0 apporte `jwt.q` (HS256 et clés asymétriques, `kid`, JWKS, `exp`/`nbf`/`iss`/`aud`), `web/auth.q` (`jwt_guard`, `scope_guard`, `fetch_jwks`) et des options pour la file de tâches : `#[Retry(tries, backoff)]`, `#[Unique]`, `#[Delay]` sur le type de la tâche, des intergiciels de tâche (`rate_limited`, `without_overlapping`, `Outcome.release`), `work_with(WorkOptions)` et l'arrêt propre du worker.
+
 ## 0.53.0
 
 Septième version du cycle « frameworks web en qlang » : un client Redis, pour que plusieurs workers (et plusieurs machines) partagent un cache, des compteurs, une file de tâches et des messages sans interroger une base à vide.

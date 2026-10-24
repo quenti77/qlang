@@ -2138,6 +2138,8 @@ secret. `Crypto` demande des octets à la source sécurisée du système.
 | `Crypto.random_bytes(n)` | `Result<bytes, Error>` : `n` octets imprévisibles |
 | `Crypto.token(n)` | `Result<string, Error>` : un jeton (session, lien de réinitialisation, clé d'API) fait de `n` octets en base64 « URL » (32 octets : 43 caractères) |
 | `Crypto.equal(a, b)`, `Crypto.equal_bytes(a, b)` | `true` si les deux sont égaux, **sans révéler où ils diffèrent** (temps constant) : pour comparer un jeton, une signature ou une empreinte reçus |
+| `Crypto.verify(alg, clé, message, signature)` | `Result<bool, Error>` : `true` si `signature` (des `bytes`) est la signature de `message` (des `bytes`) faite avec la clé privée qui va avec `clé`, une clé publique en PEM (`BEGIN PUBLIC KEY`, `BEGIN RSA PUBLIC KEY`) ou en JWK (texte JSON). `alg` : `RS256`, `RS384`, `RS512` (RSA PKCS#1), `ES256`, `ES384` (la signature est `r` puis `s`, comme l'écrit un JWT), `EdDSA` (Ed25519). Une fausse signature donne `false` ; `err` est pour une clé ou un algorithme inutilisable |
+| `Crypto.sign(alg, clé, message)` | `Result<bytes, Error>` : la signature de `message` avec une clé privée en PEM PKCS#8 (`BEGIN PRIVATE KEY` ; pour RSA aussi `BEGIN RSA PRIVATE KEY`). Mêmes algorithmes |
 
 `Password` garde des mots de passe. Il fabrique un texte à ranger dans la base (**Argon2id**, avec
 son propre sel au hasard et ses réglages dedans) et n'en garde jamais le mot de passe :
@@ -2152,6 +2154,7 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 - `verify` rend `err` si le texte n'est pas un hash. Calculer un hash prend quelques dizaines de
   millisecondes, exprès.
 - Après une connexion réussie, `needs_rehash` dit s'il faut refaire le hash (et le ranger).
+- `Crypto.verify` et `Crypto.sign` servent à signer et vérifier avec une paire de clés (un JWT en `RS256`, `ES256` ou `EdDSA`) ; le HMAC (`HS256`) se fait avec `Hash.hmac_sha256_raw`. Une clé EC doit être en PKCS#8 (`openssl pkcs8 -topk8 -nocrypt`).
 - Seule la commande `qlang` offre `Password` et `Crypto` (un autre hôte : erreur `T250` avant même
   de lancer ; un hôte de test peut répondre de sa graine, jamais pour de vrais secrets).
 
@@ -2792,6 +2795,14 @@ Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, 
 `Result<ProcessOutput, Error>` ; `ProcessOutput` a trois champs publics : `status` (le code de
 sortie, −1 si un signal l'a arrêté), `stdout` et `stderr` (ce qu'il a écrit, en texte).
 `Process.run_with_input(commande, arguments, texte)` écrit en plus `texte` sur son entrée standard.
+
+`Process.stopping()` dit si le programme a reçu l'ordre de s'arrêter (Ctrl-C, `kill`, un gestionnaire de services). **Le premier appel fait prendre la main au programme** : à partir de là le signal ne le termine plus tout de suite, il fait seulement rendre `true`, pour qu'un worker finisse ce qu'il fait et parte proprement ; un deuxième signal termine le programme (code 130). Un programme qui ne l'appelle jamais s'arrête comme avant. Dans un programme servi par `qlang serve`, c'est `true` pendant l'arrêt du serveur.
+
+```
+while not Process.stopping() do
+  faire_un_travail()
+end
+```
 
 ```
 let r = Process.run("git", ["rev-parse", "HEAD"])

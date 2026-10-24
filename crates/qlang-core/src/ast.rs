@@ -317,6 +317,7 @@ pub enum BinOp {
     GtEq,
     And,
     Or,
+    Coalesce,
 }
 
 impl BinOp {
@@ -337,6 +338,7 @@ impl BinOp {
             BinOp::GtEq => ">=",
             BinOp::And => "and",
             BinOp::Or => "or",
+            BinOp::Coalesce => "??",
         }
     }
 }

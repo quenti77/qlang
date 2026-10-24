@@ -1339,6 +1339,14 @@ impl<'a> Parser<'a> {
             }
             _ => return self.unexpected("a type"),
         };
+        if self.at(&Tok::QuestionQuestion) {
+            let span = self.peek_span();
+            return self.error_at(
+                "P030",
+                "a type can only be nullable once (`int?`, not `int??`)",
+                span,
+            );
+        }
         if self.at(&Tok::Question) {
             let q = self.bump().span;
             if self.at(&Tok::Question) {
@@ -1409,7 +1417,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_range(&mut self) -> PResult<Expr> {
-        let lhs = self.parse_or()?;
+        let lhs = self.parse_coalesce()?;
         let inclusive = match self.peek() {
             Tok::DotDot => false,
             Tok::DotDotEq => true,
@@ -1417,7 +1425,7 @@ impl<'a> Parser<'a> {
         };
         self.bump();
         self.skip_newlines();
-        let rhs = self.parse_or()?;
+        let rhs = self.parse_coalesce()?;
         let span = lhs.span.to(rhs.span);
         Ok(self.mk(
             span,
@@ -1432,6 +1440,18 @@ impl<'a> Parser<'a> {
     fn binary(&mut self, op: BinOp, l: Expr, r: Expr) -> Expr {
         let span = l.span.to(r.span);
         self.mk(span, ExprKind::Binary(op, Box::new(l), Box::new(r)))
+    }
+
+    /// `a ?? b`: the loosest binary operator, right-associative.
+    fn parse_coalesce(&mut self) -> PResult<Expr> {
+        let l = self.parse_or()?;
+        if !self.at(&Tok::QuestionQuestion) {
+            return Ok(l);
+        }
+        self.bump();
+        self.skip_newlines();
+        let r = self.parse_coalesce()?;
+        Ok(self.binary(BinOp::Coalesce, l, r))
     }
 
     fn parse_or(&mut self) -> PResult<Expr> {

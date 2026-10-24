@@ -1112,6 +1112,10 @@ impl<'a> Interp<'a> {
                     }
                     Ok(Value::Bool(self.eval_bool(r, env)?))
                 }
+                BinOp::Coalesce => match self.eval(l, env)? {
+                    Value::None => self.eval(r, env),
+                    v => Ok(v),
+                },
                 _ => {
                     let lv = self.eval(l, env)?;
                     let rv = self.eval(r, env)?;

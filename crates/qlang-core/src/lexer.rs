@@ -83,6 +83,7 @@ pub enum Tok {
     Dot,
     Arrow,
     Question,
+    QuestionQuestion,
     Comma,
     Colon,
     LParen,
@@ -181,6 +182,7 @@ impl Tok {
             Tok::Dot => ".",
             Tok::Arrow => "->",
             Tok::Question => "?",
+            Tok::QuestionQuestion => "??",
             Tok::Comma => ",",
             Tok::Colon => ":",
             Tok::LParen => "(",
@@ -482,6 +484,8 @@ pub fn lex_with_docs(
                     (Some(Tok::PercentAssign), 2)
                 } else if rest.starts_with(b"..") {
                     (Some(Tok::DotDot), 2)
+                } else if rest.starts_with(b"??") {
+                    (Some(Tok::QuestionQuestion), 2)
                 } else if rest.starts_with(b"->") {
                     (Some(Tok::Arrow), 2)
                 } else {

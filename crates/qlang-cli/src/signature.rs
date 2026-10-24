@@ -159,7 +159,26 @@ fn read_key(text: &str) -> Result<Material, Failure> {
 
 // ------------------------------------------------------------------------------- verify and sign
 
+/// The HMAC algorithm of `HS256`, `HS384` or `HS512`: the key is then a shared secret, not a PEM.
+fn hmac_algorithm(alg: &str) -> Option<ring::hmac::Algorithm> {
+    match alg {
+        "HS256" => Some(ring::hmac::HMAC_SHA256),
+        "HS384" => Some(ring::hmac::HMAC_SHA384),
+        "HS512" => Some(ring::hmac::HMAC_SHA512),
+        _ => None,
+    }
+}
+
+const SUPPORTED: &str =
+    "HS256, HS384, HS512, RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, EdDSA";
+
 pub fn verify(alg: &str, key: &str, message: &[u8], sig: &[u8]) -> Result<bool, Failure> {
+    if let Some(h) = hmac_algorithm(alg) {
+        // `ring` compares in constant time
+        return Ok(
+            ring::hmac::verify(&ring::hmac::Key::new(h, key.as_bytes()), message, sig).is_ok(),
+        );
+    }
     let Material::Public(public) = read_key(key)? else {
         return Err("a public key is needed to verify (a private key was given)".into());
     };
@@ -167,12 +186,15 @@ pub fn verify(alg: &str, key: &str, message: &[u8], sig: &[u8]) -> Result<bool, 
         "RS256" => &signature::RSA_PKCS1_2048_8192_SHA256,
         "RS384" => &signature::RSA_PKCS1_2048_8192_SHA384,
         "RS512" => &signature::RSA_PKCS1_2048_8192_SHA512,
+        "PS256" => &signature::RSA_PSS_2048_8192_SHA256,
+        "PS384" => &signature::RSA_PSS_2048_8192_SHA384,
+        "PS512" => &signature::RSA_PSS_2048_8192_SHA512,
         "ES256" => &signature::ECDSA_P256_SHA256_FIXED,
         "ES384" => &signature::ECDSA_P384_SHA384_FIXED,
         "EdDSA" => &signature::ED25519,
         other => {
             return Err(format!(
-                "the algorithm `{other}` is not supported (RS256, RS384, RS512, ES256, ES384, EdDSA are)"
+                "the algorithm `{other}` is not supported ({SUPPORTED} are)"
             ));
         }
     };
@@ -182,10 +204,17 @@ pub fn verify(alg: &str, key: &str, message: &[u8], sig: &[u8]) -> Result<bool, 
 }
 
 pub fn sign(alg: &str, key: &str, message: &[u8]) -> Result<Vec<u8>, Failure> {
+    if let Some(h) = hmac_algorithm(alg) {
+        if key.is_empty() {
+            return Err("the secret is empty".into());
+        }
+        let tag = ring::hmac::sign(&ring::hmac::Key::new(h, key.as_bytes()), message);
+        return Ok(tag.as_ref().to_vec());
+    }
     let material = read_key(key)?;
     let rng = SystemRandom::new();
     match (alg, material) {
-        ("RS256" | "RS384" | "RS512", m) => {
+        ("RS256" | "RS384" | "RS512" | "PS256" | "PS384" | "PS512", m) => {
             let pair = match m {
                 Material::Pkcs8(d) => signature::RsaKeyPair::from_pkcs8(&d),
                 Material::Pkcs1(d) => signature::RsaKeyPair::from_der(&d),
@@ -195,7 +224,10 @@ pub fn sign(alg: &str, key: &str, message: &[u8]) -> Result<Vec<u8>, Failure> {
             let padding: &'static dyn signature::RsaEncoding = match alg {
                 "RS256" => &signature::RSA_PKCS1_SHA256,
                 "RS384" => &signature::RSA_PKCS1_SHA384,
-                _ => &signature::RSA_PKCS1_SHA512,
+                "RS512" => &signature::RSA_PKCS1_SHA512,
+                "PS256" => &signature::RSA_PSS_SHA256,
+                "PS384" => &signature::RSA_PSS_SHA384,
+                _ => &signature::RSA_PSS_SHA512,
             };
             let mut out = vec![0u8; pair.public().modulus_len()];
             pair.sign(padding, &rng, message, &mut out)
@@ -223,7 +255,7 @@ pub fn sign(alg: &str, key: &str, message: &[u8]) -> Result<Vec<u8>, Failure> {
             Err("a private key in PKCS#8 (`BEGIN PRIVATE KEY`) is needed to sign".into())
         }
         (other, _) => Err(format!(
-            "the algorithm `{other}` is not supported (RS256, RS384, RS512, ES256, ES384, EdDSA are)"
+            "the algorithm `{other}` is not supported ({SUPPORTED} are)"
         )),
     }
 }
@@ -320,6 +352,37 @@ mod tests {
     const ED8: &[&str] = &["MC4CAQAwBQYDK2VwBCIEIGyQiDGTGCgMnTCfji83jvlguocFl4+30DStyKTB9ZoM"];
     const ED_PUB: &[&str] = &["MCowBQYDK2VwAyEARHfuzvoBx6Yn3ewRRAvJ2tWrdLP+Q0jm0KfZl5Cda/s="];
 
+    #[test]
+    fn hmac_algorithms_use_the_key_as_a_secret() {
+        for alg in ["HS256", "HS384", "HS512"] {
+            let tag = sign(alg, "a shared secret", b"msg").unwrap();
+            assert_eq!(
+                tag.len(),
+                match alg {
+                    "HS256" => 32,
+                    "HS384" => 48,
+                    _ => 64,
+                }
+            );
+            assert!(verify(alg, "a shared secret", b"msg", &tag).unwrap());
+            assert!(!verify(alg, "another secret", b"msg", &tag).unwrap());
+            assert!(!verify(alg, "a shared secret", b"other", &tag).unwrap());
+        }
+        // HS256 is the standard HMAC-SHA-256
+        let known = sign(
+            "HS256",
+            "key",
+            b"The quick brown fox jumps over the lazy dog",
+        )
+        .unwrap();
+        let hex: String = known.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
+        assert!(sign("HS256", "", b"m").is_err());
+    }
+
     fn pem(label: &str, parts: &[&str]) -> String {
         format!(
             "-----BEGIN {label}-----\n{}\n-----END {label}-----\n",
@@ -330,7 +393,7 @@ mod tests {
     #[test]
     fn rsa_signs_and_verifies_with_every_digest_and_every_key_form() {
         let msg = b"header.payload";
-        for alg in ["RS256", "RS384", "RS512"] {
+        for alg in ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512"] {
             for private in [pem("PRIVATE KEY", RSA8), pem("RSA PRIVATE KEY", RSA1)] {
                 let s = sign(alg, &private, msg).unwrap();
                 assert_eq!(s.len(), 256);
@@ -392,7 +455,7 @@ mod tests {
     fn mistakes_are_said_not_guessed() {
         let public = pem("PUBLIC KEY", RSA_PUB);
         assert!(
-            verify("HS256", &public, b"m", b"s")
+            verify("XS999", &public, b"m", b"s")
                 .unwrap_err()
                 .contains("not supported")
         );

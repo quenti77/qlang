@@ -1,5 +1,12 @@
 # Journal des changements
 
+## 0.55.0
+
+Neuvième version du cycle « frameworks web en qlang » : la fin de la liste des manques de la file de tâches, des relations et des JWT.
+
+- **`Crypto.verify` et `Crypto.sign`** gèrent maintenant **RSA-PSS** (`PS256`, `PS384`, `PS512`) et **HMAC** (`HS256`, `HS384`, `HS512` : la clé est le secret).
+- Le paquet [`qlang-std`](https://github.com/quenti77/qlang-std) 0.9.0 apporte : des **files nommées** avec priorités (`queue.lane`, `#[OnQueue]`, `WorkOptions.queues`, `queue:work --queues high,default`), des **chaînes** (`queue.chain().add(..).add(..).dispatch()`) et des **lots** (`queue.batch().add(..).when_done(..).when_failed(..)`) ; `web/relations.q` (`has_many`, `has_one`, `belongs_to`, `belongs_to_many` : une requête par relation, pas une par ligne) ; `web/refresh.q` (jetons de rafraîchissement avec rotation et détection de réutilisation) ; HS384/HS512/PS256-512 dans `jwt.q` ; le rejeu des messages manqués par `Bus.replay` pour un client WebSocket qui se reconnecte ; `web/queue_admin.q` (tableau de bord de la file).
+
 ## 0.54.0
 
 Huitième version du cycle « frameworks web en qlang » : de quoi signer et vérifier des JWT avec une paire de clés, et arrêter proprement un worker.

@@ -1597,15 +1597,17 @@ impl Crypto
 
     --" `true` if `signature` is the signature of `message` made with the private key that goes with
     `key`, a public key as a PEM (`BEGIN PUBLIC KEY`, `BEGIN RSA PUBLIC KEY`) or a JWK (JSON text).
-    `alg` is `RS256`, `RS384`, `RS512` (RSA PKCS#1), `ES256`, `ES384` (the signature is `r` then `s`, as a
-    JWT writes it) or `EdDSA` (Ed25519). A wrong signature is `false`; `err` is for a key or an algorithm
-    that cannot be used. Needs the `qlang` command. --"
+    `alg` is `RS256`, `RS384`, `RS512` (RSA PKCS#1), `PS256`, `PS384`, `PS512` (RSA-PSS), `ES256`, `ES384`
+    (the signature is `r` then `s`, as a JWT writes it) or `EdDSA` (Ed25519); with `HS256`, `HS384` or
+    `HS512` the `key` is a shared secret (HMAC, compared in constant time). A wrong signature is `false`;
+    `err` is for a key or an algorithm that cannot be used. Needs the `qlang` command. --"
     public fun verify(alg: string, key: string, message: bytes, signature: bytes) -> Result<bool, Error>
         crypto_verify(alg, key, message, signature)
     end
 
     --" The signature of `message` with a private key: a PEM in PKCS#8 (`BEGIN PRIVATE KEY`; for RSA
-    also `BEGIN RSA PRIVATE KEY`). Same algorithms as `verify`. Needs the `qlang` command. --"
+    also `BEGIN RSA PRIVATE KEY`), or the secret itself for `HS256`, `HS384`, `HS512`. Same algorithms as
+    `verify`. Needs the `qlang` command. --"
     public fun sign(alg: string, key: string, message: bytes) -> Result<bytes, Error>
         crypto_sign(alg, key, message)
     end

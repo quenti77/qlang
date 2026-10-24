@@ -47,6 +47,11 @@
         { "command": "qlang.restart", "when": "editorLangId == qlang" }
       ]
     },
+    "configurationDefaults": {
+      "[qlang]": {
+        "editor.quickSuggestions": { "other": "on", "comments": "off", "strings": "on" }
+      }
+    },
     "configuration": {
       "title": "qlang",
       "properties": {

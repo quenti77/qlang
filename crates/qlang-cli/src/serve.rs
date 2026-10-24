@@ -651,7 +651,7 @@ struct Job {
 }
 
 enum Msg {
-    Job(Job),
+    Job(Box<Job>),
     /// The server is stopping: a worker that reads this ends.
     Stop,
 }
@@ -885,7 +885,7 @@ fn worker(
     let mut ready = Some(ready);
     let mut seen = RELOAD.load(Ordering::SeqCst);
     // the request that was taken from the queue just before a reload
-    let mut pending: Option<Job> = None;
+    let mut pending: Option<Box<Job>> = None;
     loop {
         let seed = opts
             .seed
@@ -1127,10 +1127,7 @@ fn ws_round(
     let mut busy = false;
     let numbers: Vec<u64> = conns.iter().map(|c| c.n).collect();
     for n in numbers {
-        loop {
-            let Some(c) = conns.iter().find(|c| c.n == n) else {
-                break;
-            };
+        while let Some(c) = conns.iter().find(|c| c.n == n) {
             match c.link.events.try_recv() {
                 Ok(WsEvent::Message(m)) => {
                     busy = true;
@@ -1361,12 +1358,12 @@ fn serve_one(
     };
     if STOPPING.load(Ordering::SeqCst)
         || jobs
-            .send(Msg::Job(Job {
+            .send(Msg::Job(Box::new(Job {
                 request: app_request,
                 reply,
                 chunks: chunk_tx,
                 ws: ws_link,
-            }))
+            })))
             .is_err()
     {
         let _ = write_to(stream, 503, &[], b"server stopping", false, false);

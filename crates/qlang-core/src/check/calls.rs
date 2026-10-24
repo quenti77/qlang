@@ -1173,6 +1173,14 @@ impl Checker {
                         "password_needs_rehash",
                         "password hashing is only offered by the `qlang` command",
                     )),
+                    ("Crypto", "verify" | "sign") => Some((
+                        "crypto_verify",
+                        "signatures with a key pair are only offered by the `qlang` command",
+                    )),
+                    ("Process", "stopping") => Some((
+                        "process_stopping",
+                        "only the `qlang` command can be asked to stop",
+                    )),
                     ("Crypto", "random_bytes" | "token") => Some((
                         "secure_random_bytes",
                         "there is no source of secure randomness",

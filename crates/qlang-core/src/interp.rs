@@ -8,6 +8,8 @@ mod dynamic;
 mod externs;
 mod reflect;
 mod vm;
+mod ws;
+pub use ws::WsOutputs;
 
 use crate::ast::*;
 use crate::check::Program;
@@ -114,6 +116,32 @@ pub struct AppResponse {
     /// The answer is written piece by piece: the caller asks [`App::next_chunk`] until it
     /// gives `None` (`body` is not used).
     pub stream: bool,
+    /// The program turned the connection into a WebSocket: the caller does the handshake, then
+    /// drives the connection with [`App::ws_accept`] and the other `ws_` methods.
+    pub websocket: Option<WsInfo>,
+}
+
+/// What the server needs to know about a WebSocket the program accepted.
+#[derive(Clone, Copy, Debug)]
+pub struct WsInfo {
+    /// How often `on_tick` is called, in milliseconds (0: never).
+    pub tick_ms: u64,
+}
+
+/// Something received on a WebSocket.
+#[derive(Clone, Debug)]
+pub enum WsIn {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
+/// Something a WebSocket has to send.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WsOut {
+    Text(String),
+    Binary(Vec<u8>),
+    /// Close the connection with this code and reason.
+    Close(u16, String),
 }
 
 /// A program that serves requests: its top-level code ran once (it keeps its variables, like
@@ -198,6 +226,7 @@ impl App<'_> {
         let prog = it.prog;
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let value = it.request_value(&req);
+            it.cur_request = Some(value.clone());
             it.call_fid(handler, None, vec![value], Default::default())
         }));
         match outcome {
@@ -506,7 +535,20 @@ impl Interp<'_> {
             Some(f @ Value::Func(_)) => Some(f.clone()),
             _ => None,
         };
+        let websocket = match fields.get("websocket") {
+            Some(h @ Value::Struct(_)) => Some(h.clone()),
+            _ => None,
+        };
         drop(fields);
+        let ws_info = match websocket {
+            Some(handler) => {
+                let tick_ms = self.ws_handler_tick(&handler);
+                let request = self.cur_request.clone().unwrap_or(Value::None);
+                self.pending_ws = Some(self.ws_new(handler, request));
+                Some(WsInfo { tick_ms })
+            }
+            None => None,
+        };
         let streaming = stream.is_some();
         self.stream_fn = stream;
         Ok(AppResponse {
@@ -515,6 +557,7 @@ impl Interp<'_> {
             body,
             raw,
             stream: streaming,
+            websocket: ws_info,
         })
     }
 }
@@ -560,6 +603,12 @@ struct Interp<'a> {
     pending_targs: Option<HashMap<ParamId, Ty>>,
     /// The function of the streamed answer being produced (`Response.stream`).
     stream_fn: Option<Value>,
+    /// The request being answered (a WebSocket keeps it).
+    cur_request: Option<Value>,
+    /// A WebSocket the program just accepted, until the server accepts it with `ws_accept`.
+    pending_ws: Option<ws::WsSession>,
+    /// The open WebSockets of this worker, by the number the server gave them.
+    ws_sessions: Vec<(u64, ws::WsSession)>,
     /// Nesting and size of the value being converted to text (cycles, huge values).
     fmt_depth: usize,
     fmt_nodes: usize,
@@ -607,6 +656,9 @@ impl<'a> Interp<'a> {
             tenv: Vec::new(),
             pending_targs: None,
             stream_fn: None,
+            cur_request: None,
+            pending_ws: None,
+            ws_sessions: Vec::new(),
             fmt_depth: 0,
             fmt_nodes: 0,
             last_ulid: 0,

@@ -1126,6 +1126,84 @@ struct Response
     --" A body produced piece by piece: the server calls this function again and again and sends
     each text it gives, until it gives `none`. The worker that answers is busy until then. --"
     public stream: (fun() -> string?)? = none
+    --" Turns the connection into a WebSocket (see `Response.websocket`). --"
+    public websocket: WebSocketHandler? = none
+end
+
+--" A message received on a WebSocket: `text` for a text message, `data` for a binary one. --"
+struct WsMessage
+    public text: string? = none
+    public data: bytes? = none
+    public binary: bool = false
+end
+
+--" One thing a WebSocket has to send; `WebSocket.send` and friends make them. --"
+struct WsFrame
+    --" `text`, `binary` or `close`. --"
+    public kind: string
+    public text: string = ""
+    public data: bytes = bytes.empty()
+    public code: int = 1000
+end
+
+--" One WebSocket connection, as the callbacks of a `WebSocketHandler` see it. Many connections
+live in the same worker: do not wait inside a callback. --"
+struct WebSocket
+    --" A unique identifier of this connection. --"
+    public id: string
+    --" The request that opened it (path, query, cookies, what a guard put in `attrs`). --"
+    public request: Request
+    --" Whatever you want to remember about this connection (who it is, the room it joined). --"
+    public data: map<string, Any> = {}
+    outbox: array<WsFrame> = []
+    open: bool = true
+end
+
+impl WebSocket
+    --" Sends a text message. --"
+    public fun send(self, text: string)
+        if self.open then
+            self.outbox.push(WsFrame { kind: "text", text: text })
+        end
+    end
+
+    --" Sends a binary message. --"
+    public fun send_bytes(self, data: bytes)
+        if self.open then
+            self.outbox.push(WsFrame { kind: "binary", data: data })
+        end
+    end
+
+    --" Closes the connection (code 1000: normal). --"
+    public fun close(self)
+        self.close_with(1000, "")
+    end
+
+    --" Closes the connection with a code (1000-4999) and a short reason. --"
+    public fun close_with(self, code: int, reason: string)
+        if self.open then
+            self.open = false
+            self.outbox.push(WsFrame { kind: "close", text: reason, code: code })
+        end
+    end
+
+    public fun is_open(self) -> bool
+        self.open
+    end
+end
+
+--" What happens on a WebSocket: each function is called with the connection, one event at a time
+(a worker serves many connections, so a callback must be short). --"
+struct WebSocketHandler
+    --" A message arrived. --"
+    public on_message: fun(WebSocket, WsMessage)
+    --" The connection was opened. --"
+    public on_open: (fun(WebSocket))? = none
+    --" Called every `tick_ms` while the connection is open: poll a database, send the news. --"
+    public on_tick: (fun(WebSocket))? = none
+    public tick_ms: int = 1000
+    --" The connection ended (the client left, or `close`). Nothing can be sent any more. --"
+    public on_close: (fun(WebSocket))? = none
 end
 
 --" One event of a server-sent events stream (`Response.sse`). --"
@@ -1215,6 +1293,12 @@ impl Response
             let e = next()
             if e == none then none else e.to_text() end
         end)
+    end
+
+    --" Turns the request into a WebSocket (the request must ask for it: `Upgrade: websocket`).
+    From then on `handler` is called for each event of the connection. --"
+    public fun websocket(handler: WebSocketHandler) -> Response
+        Response { status: 101, body: "", websocket: handler }
     end
 
     --" A response (status 200) with these bytes as its body and this `Content-Type`. --"

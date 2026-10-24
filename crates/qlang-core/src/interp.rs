@@ -1595,7 +1595,7 @@ impl<'a> Interp<'a> {
     }
 
     /// `t` with the type arguments of the generic function being run put in.
-    fn runtime_ty(&self, t: &Ty) -> Ty {
+    pub(super) fn runtime_ty(&self, t: &Ty) -> Ty {
         match self.tenv.last() {
             Some(env) if t.contains_param() => t.subst(env),
             _ => t.clone(),

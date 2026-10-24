@@ -7,6 +7,10 @@ impl Interp<'_> {
     pub(super) fn reflect(&mut self, op: &ReflectOp, args: &[Value], span: Span) -> R<Value> {
         Ok(match op {
             ReflectOp::Struct(sid) => self.struct_info(*sid),
+            ReflectOp::StructOf(t) => match self.runtime_ty(t) {
+                Ty::Struct(sid, _) => self.struct_info(sid),
+                _ => return self.fail("R301", "`Reflect.struct_info` needs a struct type", span),
+            },
             ReflectOp::Enum(eid) => self.enum_info(*eid),
             ReflectOp::Functions(m) => {
                 let infos = self
@@ -24,6 +28,7 @@ impl Interp<'_> {
                 Value::array(infos)
             }
             ReflectOp::BoundCallables(ty) => {
+                let ty = &self.runtime_ty(ty);
                 let Some(obj) = args.first() else {
                     return Ok(Value::array(Vec::new()));
                 };

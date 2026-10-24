@@ -2154,7 +2154,7 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 - `verify` rend `err` si le texte n'est pas un hash. Calculer un hash prend quelques dizaines de
   millisecondes, exprès.
 - Après une connexion réussie, `needs_rehash` dit s'il faut refaire le hash (et le ranger).
-- `Crypto.verify` et `Crypto.sign` servent à signer et vérifier avec une paire de clés (un JWT en `RS256`, `ES256` ou `EdDSA`) ; le HMAC (`HS256`) se fait avec `Hash.hmac_sha256_raw`. Une clé EC doit être en PKCS#8 (`openssl pkcs8 -topk8 -nocrypt`).
+- `Crypto.verify` et `Crypto.sign` servent à signer et vérifier avec une paire de clés (un JWT en `RS256`, `PS256`, `ES256` ou `EdDSA`) ; avec `HS256`, `HS384` ou `HS512` la « clé » est un secret partagé (HMAC, comparé à temps constant). `RS384`/`RS512` et `PS384`/`PS512` existent aussi. Une clé EC doit être en PKCS#8 (`openssl pkcs8 -topk8 -nocrypt`).
 - Seule la commande `qlang` offre `Password` et `Crypto` (un autre hôte : erreur `T250` avant même
   de lancer ; un hôte de test peut répondre de sa graine, jamais pour de vrais secrets).
 

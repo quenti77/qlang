@@ -255,6 +255,11 @@ impl Host for TerminalHost {
         let _ = out.write_all(text.as_bytes());
     }
 
+    fn eprint(&mut self, text: &str) {
+        let mut err = std::io::stderr().lock();
+        let _ = err.write_all(text.as_bytes());
+    }
+
     fn read_line(&mut self) -> Result<Option<String>, HostError> {
         let _ = std::io::stdout().flush();
         let mut line = String::new();

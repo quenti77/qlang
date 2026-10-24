@@ -1942,6 +1942,307 @@ impl Process
     end
 end
 
+-- The `qlang` command provides Redis: these are the `extern fun` it implements.
+extern fun redis_connect(url: string) -> Result<int, Error>
+extern fun redis_command(conn: int, args: array<string>) -> Result<Json, Error>
+extern fun redis_poll(conn: int, timeout_ms: int) -> Result<Json, Error>
+extern fun redis_close(conn: int) -> Result<bool, Error>
+
+--" A message received on a Redis subscription. --"
+struct RedisMessage
+    public channel: string
+    public payload: string
+    --" The pattern that matched, for a `psubscribe`. --"
+    public pattern: string? = none
+end
+
+--" A Redis connection, opened with `Redis.connect(url)`: `redis://[user:password@]host[:port][/db]`, or
+`rediss://` for TLS. A server that is not on this machine needs `rediss://` (or `?tls=disable` to say
+that you want it in clear). Every command waits for its answer (30 s at most), so a connection serves
+one thing at a time: use one connection for commands and another for a subscription. --"
+struct Redis
+    --" The number of the connection, for the host. --"
+    public conn: int
+end
+
+impl Redis
+    --" Opens a connection. Needs the `qlang` command. --"
+    public fun connect(url: string) -> Result<Redis, Error>
+        let r = redis_connect(url)
+        if r.is_ok() then
+            Result.Ok(Redis { conn: r.unwrap() })
+        else
+            Result.Err(r.unwrap_err())
+        end
+    end
+
+    --" Opens a connection that only listens: it is subscribed to these channels, and `next` reads what
+    is published. --"
+    public fun subscriber(url: string, channels: array<string>) -> Result<Subscription, Error>
+        let r = Redis.connect(url)
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let sub = Subscription { conn: r.unwrap().conn }
+        if channels.is_empty() then
+            return Result.Ok(sub)
+        end
+        let done = sub.subscribe(channels)
+        if done.is_err() then
+            sub.close()
+            return Result.Err(done.unwrap_err())
+        end
+        Result.Ok(sub)
+    end
+
+    --" Any command, as its words: `r.command(["SET", "k", "v"])`. The answer is a `Json`: a text, a
+    number, `null`, or an array of those. A Redis error is an `err`. --"
+    public fun command(self, args: array<string>) -> Result<Json, Error>
+        redis_command(self.conn, args)
+    end
+
+    fun int_of(r: Result<Json, Error>) -> Result<int, Error>
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        if j.is_number() then
+            Result.Ok(j.as_number() as int)
+        else
+            Result.Err(Error { message: "Redis: a number was expected" })
+        end
+    end
+
+    fun text_of(r: Result<Json, Error>) -> Result<string?, Error>
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        if j.is_string() then
+            Result<string?, Error>.Ok(j.as_string())
+        else
+            Result<string?, Error>.Ok(none)
+        end
+    end
+
+    fun texts_of(r: Result<Json, Error>) -> Result<array<string>, Error>
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        let out: array<string> = []
+        if j.is_array() then
+            for x in j.as_array() do
+                if x.is_string() then
+                    out.push(x.as_string())
+                end
+            end
+        end
+        Result.Ok(out)
+    end
+
+    fun ok_of(r: Result<Json, Error>) -> Result<bool, Error>
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        Result.Ok(j.is_string() and j.as_string() == "OK")
+    end
+
+    --" The value of a key, or `none`. --"
+    public fun get(self, key: string) -> Result<string?, Error>
+        Redis.text_of(self.command(["GET", key]))
+    end
+
+    public fun set(self, key: string, value: string) -> Result<bool, Error>
+        Redis.ok_of(self.command(["SET", key, value]))
+    end
+
+    --" Sets a value that expires after `seconds`. --"
+    public fun set_ex(self, key: string, value: string, seconds: int) -> Result<bool, Error>
+        Redis.ok_of(self.command(["SET", key, value, "EX", "{seconds}"]))
+    end
+
+    --" Sets the value only if the key does not exist (a lock): `true` when it was set. It expires
+    after `seconds`. --"
+    public fun set_if_absent(self, key: string, value: string, seconds: int) -> Result<bool, Error>
+        Redis.ok_of(self.command(["SET", key, value, "NX", "EX", "{seconds}"]))
+    end
+
+    --" Deletes a key; how many existed (0 or 1). --"
+    public fun del(self, key: string) -> Result<int, Error>
+        Redis.int_of(self.command(["DEL", key]))
+    end
+
+    public fun exists(self, key: string) -> Result<bool, Error>
+        let n = Redis.int_of(self.command(["EXISTS", key]))
+        if n.is_err() then
+            return Result.Err(n.unwrap_err())
+        end
+        Result.Ok(n.unwrap() > 0)
+    end
+
+    --" Adds 1 to a number (0 if the key does not exist); gives the new value. --"
+    public fun incr(self, key: string) -> Result<int, Error>
+        Redis.int_of(self.command(["INCR", key]))
+    end
+
+    --" The key expires after `seconds`; `false` if it does not exist. --"
+    public fun expire(self, key: string, seconds: int) -> Result<bool, Error>
+        let n = Redis.int_of(self.command(["EXPIRE", key, "{seconds}"]))
+        if n.is_err() then
+            return Result.Err(n.unwrap_err())
+        end
+        Result.Ok(n.unwrap() > 0)
+    end
+
+    --" Puts a value at the start of a list; gives the length of the list. --"
+    public fun lpush(self, key: string, value: string) -> Result<int, Error>
+        Redis.int_of(self.command(["LPUSH", key, value]))
+    end
+
+    --" Puts a value at the end of a list; gives the length of the list. --"
+    public fun rpush(self, key: string, value: string) -> Result<int, Error>
+        Redis.int_of(self.command(["RPUSH", key, value]))
+    end
+
+    public fun lpop(self, key: string) -> Result<string?, Error>
+        Redis.text_of(self.command(["LPOP", key]))
+    end
+
+    public fun rpop(self, key: string) -> Result<string?, Error>
+        Redis.text_of(self.command(["RPOP", key]))
+    end
+
+    public fun llen(self, key: string) -> Result<int, Error>
+        Redis.int_of(self.command(["LLEN", key]))
+    end
+
+    public fun lrange(self, key: string, start: int, stop: int) -> Result<array<string>, Error>
+        Redis.texts_of(self.command(["LRANGE", key, "{start}", "{stop}"]))
+    end
+
+    --" Takes the first element of the first non-empty list, waiting up to `seconds` for one (0: for
+    ever). Gives (list, element), or `none` when the time ran out. --"
+    public fun blpop(self, keys: array<string>, seconds: int) -> Result<(string, string)?, Error>
+        let words = ["BLPOP"]
+        for k in keys do
+            words.push(k)
+        end
+        words.push("{seconds}")
+        let r = self.command(words)
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        if not j.is_array() then
+            return Result.Ok(none)
+        end
+        let parts = j.as_array()
+        if parts.len() != 2 then
+            return Result.Ok(none)
+        end
+        Result<(string, string)?, Error>.Ok((parts[0].as_string(), parts[1].as_string()))
+    end
+
+    --" Adds a member to a sorted set with a score (or changes its score); how many were added. --"
+    public fun zadd(self, key: string, score: float, member: string) -> Result<int, Error>
+        Redis.int_of(self.command(["ZADD", key, "{score}", member]))
+    end
+
+    public fun zrem(self, key: string, member: string) -> Result<int, Error>
+        Redis.int_of(self.command(["ZREM", key, member]))
+    end
+
+    public fun zcard(self, key: string) -> Result<int, Error>
+        Redis.int_of(self.command(["ZCARD", key]))
+    end
+
+    --" The members whose score is from `min` to `max`, lowest first, at most `limit`. --"
+    public fun zrange_by_score(self, key: string, min: float, max: float, limit: int) -> Result<array<string>, Error>
+        Redis.texts_of(self.command(["ZRANGEBYSCORE", key, "{min}", "{max}", "LIMIT", "0", "{limit}"]))
+    end
+
+    --" Sends a message to a channel; how many subscribers received it. --"
+    public fun publish(self, channel: string, message: string) -> Result<int, Error>
+        Redis.int_of(self.command(["PUBLISH", channel, message]))
+    end
+
+    --" Runs a Lua script atomically: `KEYS` and `ARGV` are what you give. --"
+    public fun eval(self, script: string, keys: array<string>, args: array<string>) -> Result<Json, Error>
+        let words = ["EVAL", script, "{keys.len()}"]
+        for k in keys do
+            words.push(k)
+        end
+        for a in args do
+            words.push(a)
+        end
+        self.command(words)
+    end
+
+    public fun close(self) -> Result<bool, Error>
+        redis_close(self.conn)
+    end
+end
+
+--" A connection that listens to channels (`Redis.subscriber`). --"
+struct Subscription
+    public conn: int
+end
+
+impl Subscription
+    --" Listens to more channels. --"
+    public fun subscribe(self, channels: array<string>) -> Result<bool, Error>
+        self.send("SUBSCRIBE", channels)
+    end
+
+    public fun unsubscribe(self, channels: array<string>) -> Result<bool, Error>
+        self.send("UNSUBSCRIBE", channels)
+    end
+
+    --" Listens to the channels that match patterns (`news.*`). --"
+    public fun psubscribe(self, patterns: array<string>) -> Result<bool, Error>
+        self.send("PSUBSCRIBE", patterns)
+    end
+
+    fun send(self, verb: string, names: array<string>) -> Result<bool, Error>
+        let words = [verb]
+        for n in names do
+            words.push(n)
+        end
+        let r = redis_command(self.conn, words)
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        Result.Ok(true)
+    end
+
+    --" The next message, waiting at most `timeout_ms` (0: only what already arrived). `none` when
+    nothing came. --"
+    public fun next(self, timeout_ms: int) -> Result<RedisMessage?, Error>
+        let r = redis_poll(self.conn, timeout_ms)
+        if r.is_err() then
+            return Result.Err(r.unwrap_err())
+        end
+        let j = r.unwrap()
+        if j.is_null() then
+            return Result.Ok(none)
+        end
+        let channel = j.get("channel")
+        let payload = j.get("payload")
+        if channel == none or payload == none or not channel.is_string() or not payload.is_string() then
+            return Result.Ok(none)
+        end
+        let pattern = j.get("pattern")
+        let p: string? = if pattern != none and pattern.is_string() then pattern.as_string() else none end
+        Result<RedisMessage?, Error>.Ok(RedisMessage { channel: channel.as_string(), payload: payload.as_string(), pattern: p })
+    end
+
+    public fun close(self) -> Result<bool, Error>
+        redis_close(self.conn)
+    end
+end
+
 --" A SQL database connection, opened with `Db.connect(url)`. --"
 struct Db
     conn: int

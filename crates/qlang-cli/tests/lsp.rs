@@ -394,3 +394,100 @@ fn a_package_import_works_when_the_editor_opened_the_folder_around_the_project()
     c.open(&top, USES_PACKAGE);
     assert!(c.diagnostics("b.q").is_empty());
 }
+
+fn labels(items: &Value) -> Vec<String> {
+    items
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|i| i["label"].as_str().unwrap().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The completion at the end of `line`, in a file next to `helper.q` and the package `tools`.
+fn complete_import(c: &mut Client, file: &Path, line: &str) -> Value {
+    c.open(file, &format!("{line}\n"));
+    let mut p = c.at(file, 0, line.chars().count() as u64);
+    p["context"] = json!({ "triggerKind": 2, "triggerCharacter": "/" });
+    c.request("textDocument/completion", p)
+}
+
+#[test]
+fn imports_complete_packages_files_and_folders() {
+    let dir = app_with_package("import-complete");
+    std::fs::write(dir.join("tools/extra.q"), "export\n").unwrap();
+    std::fs::create_dir_all(dir.join("tools/web")).unwrap();
+    std::fs::write(dir.join("tools/web/app.q"), "\n").unwrap();
+    let app = dir.join("app");
+    std::fs::write(app.join("helper.q"), "fun h() -> int\n  1\nend\nexport h\n").unwrap();
+    std::fs::create_dir_all(app.join("sub")).unwrap();
+    std::fs::write(app.join("sub/inner.q"), "\n").unwrap();
+    let main = app.join("main.q");
+    std::fs::write(&main, "").unwrap();
+    let mut c = Client::start(&dir);
+
+    // the packages, by name
+    let items = complete_import(&mut c, &main, "import h from \"@");
+    assert_eq!(labels(&items), vec!["@tools/"]);
+    // the inside of a package: files and folders (a folder goes on proposing)
+    let items = complete_import(&mut c, &main, "import twice from \"@tools/");
+    let l = labels(&items);
+    assert!(
+        l.contains(&"lib.q".to_string()) && l.contains(&"extra.q".to_string()),
+        "{l:?}"
+    );
+    assert!(l.contains(&"web/".to_string()), "{l:?}");
+    let folder = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "web/")
+        .unwrap();
+    assert_eq!(folder["command"]["command"], "editor.action.triggerSuggest");
+    let items = complete_import(&mut c, &main, "import \"@tools/web/");
+    assert_eq!(labels(&items), vec!["app.q"]);
+    // next to the file, without the file itself
+    let items = complete_import(&mut c, &main, "import h from \"./");
+    let l = labels(&items);
+    assert!(
+        l.contains(&"helper.q".to_string()) && l.contains(&"sub/".to_string()),
+        "{l:?}"
+    );
+    assert!(!l.contains(&"main.q".to_string()), "{l:?}");
+    let items = complete_import(&mut c, &main, "import \"./sub/");
+    assert_eq!(labels(&items), vec!["deep/", "inner.q"]);
+    // nothing typed: where to start
+    let items = complete_import(&mut c, &main, "import \"");
+    let l = labels(&items);
+    assert!(
+        l.contains(&"./".to_string()) && l.contains(&"@tools/".to_string()),
+        "{l:?}"
+    );
+    // the replaced text is the part after the last slash
+    let items = complete_import(&mut c, &main, "import \"@tools/li");
+    let lib = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "lib.q")
+        .unwrap();
+    assert_eq!(lib["textEdit"]["range"]["start"]["character"], 15);
+}
+
+#[test]
+fn a_slash_outside_an_import_proposes_nothing() {
+    let dir = project("slash");
+    let main = dir.join("main.q");
+    std::fs::write(&main, "").unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&main, "let a = \"x/\"\n");
+    let mut p = c.at(&main, 0, 12);
+    p["context"] = json!({ "triggerKind": 2, "triggerCharacter": "/" });
+    let r = c.request("textDocument/completion", p);
+    assert!(
+        r.is_null() || r.as_array().is_some_and(|a| a.is_empty()),
+        "{r}"
+    );
+}

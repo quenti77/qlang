@@ -253,7 +253,8 @@ let p = Posts { tag: \"blog\" }
 let found = Reflect.bound_callables<Posts>(p)
 print(found.len())
 let out = found[0].call([Any.of(4)])
-print(\"{found[0].name} {found[0].annotation(\\\"Get\\\") != none} {out.unwrap().as<string>()}\")
+let tagged = found[0].annotation(\"Get\") != none
+print(\"{found[0].name} {tagged} {out.unwrap().as<string>()}\")
 ";
     assert_eq!(run(src), "1\nlist true blog:4\n");
 }

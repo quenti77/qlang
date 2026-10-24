@@ -665,6 +665,132 @@ impl Server {
         v
     }
 
+    /// Inside the string of an `import`: the packages (`@std/`), the files and folders of a
+    /// package, or those next to the file. `None` anywhere else.
+    fn import_completions(
+        &self,
+        path: &Path,
+        line: &[char],
+        line0: usize,
+        col: usize,
+    ) -> Option<Value> {
+        let before: String = line[..col.min(line.len())].iter().collect();
+        if !before.trim_start().starts_with("import") {
+            return None;
+        }
+        // the cursor is in a string when the quotes before it are odd in number
+        if before.matches('"').count() & 1 == 0 {
+            return None;
+        }
+        let quote = before.rfind('"')?;
+        let typed = &before[quote + 1..];
+        let (project, _) = self.project_of(path);
+        let packages = Self::packages_of(&project);
+        // what is replaced: the part of the path after the last slash
+        let segment_start = typed.rfind('/').map_or(0, |i| i + 1);
+        let segment_chars = typed[segment_start..].chars().count();
+        let range = json!({
+            "start": { "line": line0, "character": utf16_col(line, col - segment_chars) },
+            "end": { "line": line0, "character": utf16_col(line, col) },
+        });
+        let item = |label: &str, kind: u32, folder: bool, detail: &str| {
+            let mut it = json!({
+                "label": label,
+                "kind": kind,
+                "detail": detail,
+                "textEdit": { "range": range, "newText": label },
+                "sortText": format!("{}{label}", if folder { "0" } else { "1" }),
+            });
+            if folder {
+                // a folder is not the end of the path: go on proposing
+                it["command"] = json!({ "title": "", "command": "editor.action.triggerSuggest" });
+            }
+            it
+        };
+        let mut items: Vec<Value> = Vec::new();
+        let listing = |dir: &Path, skip: Option<&str>| -> Vec<(String, bool)> {
+            let mut out: Vec<(String, bool)> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for e in rd.flatten() {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    if name.starts_with('.') || ["target", "node_modules"].contains(&name.as_str())
+                    {
+                        continue;
+                    }
+                    let is_dir = e.path().is_dir();
+                    if (is_dir || name.ends_with(".q")) && Some(name.as_str()) != skip {
+                        out.push((name, is_dir));
+                    }
+                }
+            }
+            out.sort();
+            out
+        };
+        if let Some(rest) = typed.strip_prefix('@') {
+            match rest.split_once('/') {
+                None => {
+                    // the name of a package
+                    for name in packages.names() {
+                        items.push(item(&format!("@{name}/"), 9, true, "package"));
+                    }
+                    // the segment before the slash includes the arobase
+                    let start = col - typed.chars().count();
+                    let range = json!({
+                        "start": { "line": line0, "character": utf16_col(line, start) },
+                        "end": { "line": line0, "character": utf16_col(line, col) },
+                    });
+                    for it in &mut items {
+                        it["textEdit"]["range"] = range.clone();
+                    }
+                }
+                Some((name, inside)) => {
+                    let base = packages.dir_of(name)?;
+                    let sub = inside.rfind('/').map_or("", |i| &inside[..i]);
+                    if sub.split('/').any(|p| p == "..") {
+                        return Some(Value::Array(Vec::new()));
+                    }
+                    for (n, is_dir) in listing(&base.join(sub), None) {
+                        if is_dir {
+                            items.push(item(&format!("{n}/"), 19, true, "folder"));
+                        } else {
+                            items.push(item(&n, 17, false, "file"));
+                        }
+                    }
+                }
+            }
+        } else {
+            let dir_part = typed.rfind('/').map_or("", |i| &typed[..=i]);
+            let here = path.parent().unwrap_or(Path::new("."));
+            let own = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if dir_part.is_empty() {
+                items.push(item("./", 19, true, "this folder"));
+                items.push(item("../", 19, true, "the folder above"));
+                for name in packages.names() {
+                    let label = format!("@{name}/");
+                    let mut it = item(&label, 9, true, "package");
+                    // the arobase is part of what is typed
+                    it["textEdit"]["range"] = json!({
+                        "start": { "line": line0, "character": utf16_col(line, col - typed.chars().count()) },
+                        "end": { "line": line0, "character": utf16_col(line, col) },
+                    });
+                    items.push(it);
+                }
+            } else {
+                for (n, is_dir) in listing(&here.join(dir_part), own.as_deref()) {
+                    if is_dir {
+                        items.push(item(&format!("{n}/"), 19, true, "folder"));
+                    } else {
+                        items.push(item(&n, 17, false, "file"));
+                    }
+                }
+                if dir_part == "./" || dir_part.ends_with("../") {
+                    items.push(item("../", 19, true, "the folder above"));
+                }
+            }
+        }
+        Some(Value::Array(items))
+    }
+
     fn completion(&mut self, params: &Value) -> Value {
         let Some((uri, line0, col)) = self.text_position(params) else {
             return Value::Null;
@@ -674,6 +800,14 @@ impl Server {
         };
         let lines = self.lines_of(&path);
         let line = lines[line0].clone();
+        // the quotes, the slash and the arobase only start a completion inside an `import`
+        let trigger = params["context"]["triggerCharacter"].as_str();
+        if let Some(items) = self.import_completions(&path, &line, line0, col) {
+            return items;
+        }
+        if matches!(trigger, Some("\"" | "/" | "@")) {
+            return Value::Null;
+        }
         let line_range = |from: usize, to: usize| {
             json!({
                 "start": { "line": line0, "character": utf16_col(&line, from) },
@@ -1133,7 +1267,7 @@ impl Server {
                 "positionEncoding": "utf-16",
                 "textDocumentSync": { "openClose": true, "change": 1, "save": { "includeText": false } },
                 "hoverProvider": true,
-                "completionProvider": { "triggerCharacters": [".", "{", ","] },
+                "completionProvider": { "triggerCharacters": [".", "{", ",", "\"", "/", "@"] },
                 "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
                 "definitionProvider": true,
                 "referencesProvider": true,

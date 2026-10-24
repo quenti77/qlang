@@ -269,6 +269,18 @@ impl Packages {
         }
     }
 
+    /// The names of the packages, sorted.
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.by_name.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    /// The directory of the package `name`.
+    pub fn dir_of(&self, name: &str) -> Option<&Path> {
+        self.by_name.get(name).map(|p| p.dir.as_path())
+    }
+
     /// The real file behind a module path `@name` or `@name/dir/file.q`.
     pub fn resolve(&self, path: &str) -> Result<PathBuf, String> {
         let (name, rest) = split_package_path(path).ok_or("not a package path")?;

@@ -2723,6 +2723,22 @@ côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait
 `env.args()` renvoie (`qlang run script.q -- a b`), et `fs` respecte `--root`
 comme les imports.
 
+### Prélude : `Redis`
+
+`Redis.connect(url)` ouvre une connexion à un serveur Redis (protocole RESP2) : `redis://[utilisateur:mot_de_passe@]hôte[:port][/base]`, ou `rediss://` pour TLS (le certificat est vérifié avec les racines de Mozilla, comme pour Postgres). Un serveur qui n'est pas sur cette machine demande `rediss://`, ou `?tls=disable` pour confirmer que tu le veux en clair. Seule la commande `qlang` l'offre (un autre hôte : erreur `T250`).
+
+| Appel | Résultat |
+| --- | --- |
+| `r.command(["SET", "k", "v"])` | `Result<Json, Error>` : n'importe quelle commande, par ses mots ; la réponse est un texte, un nombre, `null` ou un tableau de ces valeurs ; une erreur de Redis est un `err` |
+| `r.get(k)`, `r.set(k, v)`, `r.set_ex(k, v, secondes)`, `r.set_if_absent(k, v, secondes)` (un verrou), `r.del(k)`, `r.exists(k)`, `r.incr(k)`, `r.expire(k, secondes)` | les clés |
+| `r.lpush`, `r.rpush`, `r.lpop`, `r.rpop`, `r.llen`, `r.lrange(k, début, fin)`, `r.blpop(clés, secondes)` | les listes ; `blpop` attend un élément (0 : sans fin) et rend `(liste, élément)?` |
+| `r.zadd(k, score, membre)`, `r.zrem`, `r.zcard`, `r.zrange_by_score(k, min, max, limite)` | les ensembles triés |
+| `r.eval(script, clés, arguments)` | un script Lua, exécuté d'un bloc |
+| `r.publish(canal, message)` | publier ; rend le nombre d'abonnés |
+| `Redis.subscriber(url, canaux)` | une connexion qui **écoute** (`Subscription`) : `next(ms)` rend le prochain `RedisMessage?` (`channel`, `payload`, `pattern`) en attendant au plus `ms` (0 : ce qui est déjà arrivé), `subscribe`, `unsubscribe`, `psubscribe` |
+
+Une connexion fait une chose à la fois (chaque commande attend sa réponse, 30 s au plus, sauf `BLPOP` qui attend ce qu'on lui demande) : prends-en une pour les commandes et une autre pour écouter. Un `Subscription` ne lance pas de commandes. Les nombres reviennent en `float`, comme pour `Db`.
+
 ### Prélude : le journal `Log`
 
 `Log` écrit le journal du programme : `Log.debug("détail")`, `Log.info("démarré")`,

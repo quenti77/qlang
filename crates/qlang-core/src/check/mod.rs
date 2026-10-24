@@ -1979,11 +1979,11 @@ impl Redis
     --" Opens a connection that only listens: it is subscribed to these channels, and `next` reads what
     is published. --"
     public fun subscriber(url: string, channels: array<string>) -> Result<Subscription, Error>
-        let r = Redis.connect(url)
+        let r = redis_connect(url)
         if r.is_err() then
             return Result.Err(r.unwrap_err())
         end
-        let sub = Subscription { conn: r.unwrap().conn }
+        let sub = Subscription { conn: r.unwrap() }
         if channels.is_empty() then
             return Result.Ok(sub)
         end

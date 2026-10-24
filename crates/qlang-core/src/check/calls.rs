@@ -1876,6 +1876,7 @@ impl Checker {
             | ReflectOp::AnyOf(t)
             | ReflectOp::AnyAs(t)
             | ReflectOp::Construct(t)
+            | ReflectOp::TypeInfo(t)
             | ReflectOp::StructOf(t)
             | ReflectOp::BoundCallables(t)
             | ReflectOp::JsonTo(t) => t,
@@ -2255,6 +2256,26 @@ impl Checker {
                 }
                 (ReflectOp::TypeName(t), Ty::Str)
             }
+            "type_info" => {
+                if !arity(self, 1, 0) {
+                    return Ty::Error;
+                }
+                let t = self.resolve_type(&targs[0]);
+                if t == Ty::Error {
+                    return Ty::Error;
+                }
+                (ReflectOp::TypeInfo(t), self.prelude_ty("TypeInfo"))
+            }
+            "type_info_of" => {
+                if !arity(self, 0, 1) {
+                    return Ty::Error;
+                }
+                let t = self.expr(&args[0].value, &Want::Exp(Ty::Any));
+                if !self.assignable(&t, &Ty::Any) {
+                    self.mismatch(args[0].value.span, &Ty::Any, &t);
+                }
+                (ReflectOp::TypeInfoOf, self.prelude_ty("TypeInfo"))
+            }
             "json_text" => {
                 if !arity(self, 0, 1) {
                     return Ty::Error;
@@ -2451,7 +2472,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method` and `bound_callables`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method`, `bound_callables`, `type_info` and `type_info_of`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

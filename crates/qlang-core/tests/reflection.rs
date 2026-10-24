@@ -258,3 +258,66 @@ print(\"{found[0].name} {tagged} {out.unwrap().as<string>()}\")
 ";
     assert_eq!(run(src), "1\nlist true blog:4\n");
 }
+
+#[test]
+fn type_info_describes_the_shape_of_a_type() {
+    let src = "struct Address
+  public city: string
+  secret: string = \"s\"
+end
+
+struct User
+  public id: int
+  #[JsonName(\"full_name\")]
+  public name: string
+  public home: Address?
+  public friends: array<User> = []
+  #[JsonSkip]
+  public cache: int = 0
+end
+
+let i = Reflect.type_info<User>()
+print(\"{i.kind} {i.name} {i.fields.len()}\")
+for f in i.fields do
+  print(\"{f.name} {f.field} {f.info.kind} {f.info.nullable}\")
+end
+let friends = i.fields[3].info.item
+if friends != none then
+  print(friends.recursive)
+end
+let home = i.fields[2].info
+print(home.fields.len())
+";
+    assert_eq!(
+        run(src),
+        "struct User 4\nid id int false\nfull_name name string false\nhome home struct true\nfriends friends array false\ntrue\n1\n"
+    );
+}
+
+#[test]
+fn type_info_works_on_a_type_parameter() {
+    let src = "fun kind_of<T>() -> string
+  Reflect.type_info<T>().kind
+end
+print(kind_of<int>())
+print(kind_of<array<string>>())
+";
+    assert_eq!(run(src), "int\narray\n");
+}
+
+#[test]
+fn a_closure_keeps_the_type_arguments_of_the_function_that_made_it() {
+    let src = "fun reader<T>() -> fun(Any) -> bool
+  fun(a: Any) -> bool
+    a.as<T>() != none
+  end
+end
+fun other<U>(f: fun(Any) -> bool, v: U) -> bool
+  f(Any.of(v))
+end
+let ints = reader<int>()
+print(other(ints, 3))
+print(other(ints, \"x\"))
+";
+    assert_eq!(run(src), "true\nfalse\n");
+}

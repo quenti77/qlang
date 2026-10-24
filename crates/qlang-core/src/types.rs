@@ -609,6 +609,10 @@ pub enum ReflectOp {
     Construct(Ty),
     /// `Reflect.type_name<T>()`.
     TypeName(Ty),
+    /// `Reflect.type_info<T>()`: the shape of a type.
+    TypeInfo(Ty),
+    /// `Reflect.type_info_of(any)`: the shape of the type an `Any` holds.
+    TypeInfoOf,
     /// `Any.of(value)`, with the static type of `value`.
     AnyOf(Ty),
     /// `a.as<T>()`: the receiver is the first argument.

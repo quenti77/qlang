@@ -1177,6 +1177,7 @@ impl<'a> Interp<'a> {
                 decl: f.clone(),
                 env: env.clone(),
                 name: "<function>".into(),
+                tenv: self.tenv.last().map(|t| Rc::new(t.clone())),
             }))),
         }
     }
@@ -1333,6 +1334,7 @@ impl<'a> Interp<'a> {
             decl: def.decl.clone().expect("function without declaration"),
             env: self.envs[def.module].clone(),
             name: def.name.clone(),
+            tenv: None,
         }))
     }
 
@@ -1541,6 +1543,12 @@ impl<'a> Interp<'a> {
         match f {
             Value::Func(fv) => {
                 let fv = fv.clone();
+                if let Some(t) = &fv.tenv {
+                    self.tenv.push((**t).clone());
+                    let r = self.call_function(&fv.decl, &fv.env, None, args, &fv.name, span);
+                    self.tenv.pop();
+                    return r;
+                }
                 self.call_function(&fv.decl, &fv.env, None, args, &fv.name, span)
             }
             _ => self.fail("R007", "this value is not a function", span),

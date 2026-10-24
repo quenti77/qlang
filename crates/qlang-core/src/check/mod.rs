@@ -346,6 +346,48 @@ impl ParamInfo
     public fun parse(self, text: string) -> Result<Any, Error>
         Reflect.parse_text(self.ty, text)
     end
+
+    --" The shape of the type of this parameter. --"
+    public fun type_info(self) -> TypeInfo
+        Reflect.type_info_of(self.ty)
+    end
+end
+
+--" The shape of a type, as `Reflect.type_info<T>()` describes it: enough to write a schema. --"
+struct TypeInfo
+    --" `int`, `float`, `bool`, `string`, `uuid`, `ulid`, `datetime`, `bytes`, `any`, `unit`,
+    `json`, `array`, `map`, `tuple`, `struct`, `enum`, `function` or `other`. A `T?` has the kind
+    of `T` and `nullable` set. --"
+    public kind: string
+    --" The name of a struct or an enum, else the type as written. --"
+    public name: string
+    public nullable: bool
+    --" The element of an array, the value of a map. --"
+    public item: TypeInfo?
+    --" The fields `Json.of` writes: public, not `#[JsonSkip]`, under their `#[JsonName]`. --"
+    public fields: array<FieldType>
+    --" The variants of an enum. --"
+    public variants: array<string>
+    --" Set on a struct met again inside itself: its fields are left out there. --"
+    public recursive: bool
+end
+
+--" A field of a struct for a schema: its name in JSON, its shape and its annotations. --"
+struct FieldType
+    --" The name in JSON. --"
+    public name: string
+    --" The name of the field. --"
+    public field: string
+    public type_name: string
+    public annotations: array<AnnotationInfo>
+    public info: TypeInfo
+end
+
+impl FieldType
+    --" The annotation called `name`, or `none`. --"
+    public fun annotation(self, name: string) -> AnnotationInfo?
+        reflect_find_annotation(self.annotations, name)
+    end
 end
 
 --" A field of a struct, as reflection describes it. --"
@@ -453,6 +495,7 @@ struct Callable
     public return_type: string
     public annotations: array<AnnotationInfo>
     target: Any
+    ret: Any
 end
 
 impl Callable
@@ -464,6 +507,11 @@ impl Callable
     --" Calls the function. `err` when the number of arguments or one type is wrong. --"
     public fun call(self, args: array<Any>) -> Result<Any, Error>
         Reflect.invoke(self.target, args)
+    end
+
+    --" The shape of what the function returns. --"
+    public fun return_info(self) -> TypeInfo
+        Reflect.type_info_of(self.ret)
     end
 end
 

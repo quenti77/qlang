@@ -132,6 +132,7 @@ impl Interp<'_> {
             decl: def.decl.clone().expect("method without declaration"),
             env: scope,
             name: def.name.clone(),
+            tenv: None,
         }))
     }
 
@@ -143,7 +144,7 @@ impl Interp<'_> {
         Value::str(&ty.show(&self.prog.defs))
     }
 
-    fn annotation_infos(&self, key: AnnKey) -> Value {
+    pub(super) fn annotation_infos(&self, key: AnnKey) -> Value {
         let list = self.prog.res.annotations.get(&key);
         let infos = list
             .into_iter()

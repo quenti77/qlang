@@ -163,6 +163,10 @@ fn receiver_at<'a>(
         if l.file != file || l.end_line as usize != line0 + 1 || l.end_col as usize != dot_col + 1 {
             continue;
         }
+        // `not p.|` and `a + b.|`: the dot belongs to the last operand
+        if e.operator {
+            continue;
+        }
         let better = match best {
             None => true,
             Some(b) => l.line < b.loc.line || (l.line == b.loc.line && l.col < b.loc.col),
@@ -693,4 +697,93 @@ pub fn blank(text: &str, line0: usize, from: usize, to: usize) -> String {
         *l = out;
     }
     lines.join("\n")
+}
+
+/// What `alias.` offers when no expression is involved (`fun f() -> web.|`): the exports of the
+/// module the file imported under that name. `before_dot` is the text of the line before the dot.
+pub fn alias_completions(info: &Info, file: &str, before_dot: &str) -> Vec<Item> {
+    let name: String = before_dot
+        .trim_end()
+        .chars()
+        .rev()
+        .take_while(|c| is_word_char(*c))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    info.aliases
+        .get(file)
+        .and_then(|m| m.get(&name))
+        .map(|members| members.iter().map(|m| member_item(m, "1")).collect())
+        .unwrap_or_default()
+}
+
+/// Where the name before a dot starts, when that name stands where a type is written (after `->`,
+/// `:`, `<`, `as` or `extends`): the column of its first character.
+pub fn type_position(line: &[char], dot: usize) -> Option<usize> {
+    let mut s = dot;
+    while s > 0 && is_word_char(line[s - 1]) {
+        s -= 1;
+    }
+    if s == dot {
+        return None;
+    }
+    let before: String = line[..s].iter().collect();
+    let t = before.trim_end();
+    let typed = t.ends_with("->")
+        || (t.ends_with(':') && !t.ends_with("::"))
+        || t.ends_with('<')
+        || t.ends_with(" as")
+        || t.ends_with("extends");
+    typed.then_some(s)
+}
+
+/// Like [`blank`], and the start of the blanked part reads `int`, so that a type is still there
+/// (`fun f() -> web.|` is asked about as `fun f() -> int`).
+pub fn blank_as_type(text: &str, line0: usize, from: usize, to: usize) -> String {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+    if let Some(l) = lines.get_mut(line0) {
+        let chars: Vec<char> = l.chars().collect();
+        let to = to.min(chars.len());
+        let from = from.min(to);
+        let mut out: String = chars[..from].iter().collect();
+        let width = to - from;
+        if width >= 3 {
+            out.push_str("int");
+            out.extend(std::iter::repeat_n(' ', width - 3));
+        } else {
+            out.extend(std::iter::repeat_n(' ', width));
+        }
+        out.extend(chars[to..].iter());
+        *l = out;
+    }
+    lines.join("\n")
+}
+
+/// A snippet that writes the call: `name(${1:a}, ${2:b})` with the cursor in the parentheses.
+pub fn call_snippet(name: &str, detail: &str) -> String {
+    let params: Vec<String> = parameters(detail)
+        .into_iter()
+        .filter(|p| p != "self")
+        .collect();
+    if params.is_empty() {
+        return format!("{name}()$0");
+    }
+    let slots: Vec<String> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let label = p.split(':').next().unwrap_or(p).trim();
+            let label: String = label
+                .chars()
+                .filter(|c| is_word_char(*c) || *c == '.')
+                .collect();
+            format!(
+                "${{{}:{}}}",
+                i + 1,
+                if label.is_empty() { "arg" } else { &label }
+            )
+        })
+        .collect();
+    format!("{name}({})$0", slots.join(", "))
 }

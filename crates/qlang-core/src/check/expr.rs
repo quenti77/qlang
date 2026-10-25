@@ -47,7 +47,7 @@ impl Checker {
     }
 
     /// For editors: `Type` or `module` written alone (as in `Type.|`) still has members.
-    fn record_head(&mut self, e: &Expr) {
+    pub(crate) fn record_head(&mut self, e: &Expr) {
         if self.collecting() {
             let before = self.diags.len();
             let _ = self.try_head(e);

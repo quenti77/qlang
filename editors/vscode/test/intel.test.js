@@ -14,7 +14,7 @@ const binary = ['target/release/qlang', 'target/debug/qlang'].map((p) => path.jo
 const skip = !binary && 'build qlang first (cargo build)';
 
 function analyse(files, entry = 'main.q') {
-  const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest(entry, files, true), encoding: 'utf8' });
+  const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest(entry, files, true), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   assert.strictEqual(r.status, 0, r.stderr);
   return JSON.parse(r.stdout).info;
 }

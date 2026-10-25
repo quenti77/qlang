@@ -434,6 +434,22 @@ impl Server {
         })
     }
 
+    /// Like [`Self::analyse`], for code being typed: when it does not even parse (a block is still
+    /// open), `end` is added at the bottom until it does, so that completion keeps working.
+    fn analyse_unfinished(&mut self, uri: &str, text: &str) -> Option<Analysis> {
+        let mut source = text.to_string();
+        let mut first = None;
+        for _ in 0..=6 {
+            let a = self.analyse(uri, Some(&source))?;
+            if a.info.is_some() {
+                return Some(a);
+            }
+            first.get_or_insert(a);
+            source.push_str("\nend");
+        }
+        first
+    }
+
     /// The analysis of the open document, redone when the text changed since.
     fn analysis_for(&mut self, uri: &str) -> bool {
         if let Some(doc) = self.docs.get(uri)
@@ -835,7 +851,7 @@ impl Server {
                 Some(from) => intel::blank_as_type(&doc.text, line0, from, col),
                 None => intel::blank(&doc.text, line0, dot, col),
             };
-            let Some(a) = self.analyse(&uri, Some(&blanked)) else {
+            let Some(a) = self.analyse_unfinished(&uri, &blanked) else {
                 return Value::Null;
             };
             let Some(info) = &a.info else {
@@ -854,10 +870,30 @@ impl Server {
                     .collect(),
             );
         }
-        if !self.analysis_for(&uri) {
-            return Value::Null;
-        }
-        let a = &self.analyses[&uri];
+        // an unfinished word is only an unknown name to the compiler; open blocks are closed
+        let typed_text = match self.docs.get(&uri) {
+            Some(doc) => doc.text.clone(),
+            None => return Value::Null,
+        };
+        let current = self.analyses.get(&uri).is_some_and(|a| {
+            a.info.is_some() && self.docs.get(&uri).is_some_and(|d| d.version == a.version)
+        });
+        let rebuilt;
+        let a = if current {
+            &self.analyses[&uri]
+        } else {
+            let Some(fresh) = self.analyse_unfinished(&uri, &typed_text) else {
+                return Value::Null;
+            };
+            if fresh.info.is_some() {
+                rebuilt = fresh;
+                &rebuilt
+            } else if !self.analysis_for(&uri) {
+                return Value::Null;
+            } else {
+                &self.analyses[&uri]
+            }
+        };
         let Some(info) = &a.info else {
             return Value::Null;
         };

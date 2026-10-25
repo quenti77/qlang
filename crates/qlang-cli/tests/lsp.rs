@@ -665,6 +665,9 @@ fn completion_works_while_a_block_is_still_open() {
     assert!(ok.contains(&"Request".to_string()), "closed: {ok:?}");
     let l = labels_at(&mut c, &dir, "a.q", "fun handle(req: R)\n", 0, 17);
     assert!(l.contains(&"Request".to_string()), "{l:?}");
+    // and a parenthesis too
+    let l = labels_at(&mut c, &dir, "p.q", "fun handle(req: R\n", 0, 17);
+    assert!(l.contains(&"Request".to_string()), "{l:?}");
     let l = labels_at(
         &mut c,
         &dir,

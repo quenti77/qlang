@@ -699,6 +699,54 @@ pub fn blank(text: &str, line0: usize, from: usize, to: usize) -> String {
     lines.join("\n")
 }
 
+/// The text with the brackets still open at `line0:col` closed right there (`fun f(a: R|` becomes
+/// `fun f(a: R|)`), to ask the compiler about code that is being typed. Strings and comments are
+/// skipped; `None` when nothing is open.
+pub fn close_brackets(text: &str, line0: usize, col: usize) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut at = 0;
+    for l in text.split('\n').take(line0) {
+        at += l.chars().count() + 1;
+    }
+    let at = (at + col).min(chars.len());
+    let mut open: Vec<char> = Vec::new();
+    let mut i = 0;
+    while i < at {
+        match chars[i] {
+            '"' => {
+                i += 1;
+                while i < at && chars[i] != '"' && chars[i] != '\n' {
+                    if chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            '-' if chars.get(i + 1) == Some(&'-') => {
+                while i < at && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '(' => open.push(')'),
+            '[' => open.push(']'),
+            '{' => open.push('}'),
+            ')' | ']' | '}' => {
+                open.pop();
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if open.is_empty() {
+        return None;
+    }
+    let mut out: String = chars[..at].iter().collect();
+    out.extend(open.iter().rev());
+    out.extend(chars[at..].iter());
+    Some(out)
+}
+
 /// What `alias.` offers when no expression is involved (`fun f() -> web.|`): the exports of the
 /// module the file imported under that name. `before_dot` is the text of the line before the dot.
 pub fn alias_completions(info: &Info, file: &str, before_dot: &str) -> Vec<Item> {

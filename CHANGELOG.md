@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.56.2
+
+- **Éditeur** : l'autocomplétion marche aussi quand une parenthèse, un crochet ou une accolade est resté ouvert (`fun handle(req: R` propose `Request`) : la copie analysée est fermée à l'endroit du curseur.
+
 ## 0.56.1
 
 - **Éditeur** : l'autocomplétion marche aussi quand le fichier ne se compile pas encore parce qu'un bloc est resté ouvert (`fun handle(req: R)` sans son `end` propose `Request`). La copie analysée est complétée par des `end` ; le fichier, lui, n'est pas touché.

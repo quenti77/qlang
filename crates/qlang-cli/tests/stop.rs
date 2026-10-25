@@ -26,7 +26,7 @@ fn kill(pid: u32, signal: &str) {
 fn a_signal_only_sets_the_flag_once_the_program_asked() {
     let file = program(
         "clean",
-        "print(\"ready\")\nlet turns = 0\nwhile not Process.stopping() do\n  time.sleep(20)\n  turns += 1\nend\nprint(\"left cleanly\")\n",
+        "Process.stopping()\nprint(\"ready\")\nlet turns = 0\nwhile not Process.stopping() do\n  time.sleep(20)\n  turns += 1\nend\nprint(\"left cleanly\")\n",
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
         .arg("run")

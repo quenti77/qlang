@@ -13,7 +13,7 @@ impl Interp<'_> {
                     let shown = other.show(&self.prog.defs);
                     return self.fail(
                         "R301",
-                        &format!("`Reflect.struct_info` needs a struct type, found `{shown}`"),
+                        format!("`Reflect.struct_info` needs a struct type, found `{shown}`"),
                         span,
                     );
                 }

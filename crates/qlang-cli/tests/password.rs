@@ -58,7 +58,7 @@ fn the_log_is_written_on_the_error_output_from_a_level_up() {
     let o = run(&["--log-level", "warn", "--log-format", "json"]);
     let err = String::from_utf8_lossy(&o.stderr).into_owned();
     assert!(
-        err.contains("\"level\":\"warn\"") && !err.contains("\"info\""),
+        err.contains("\"level\":\"warning\"") && !err.contains("\"info\""),
         "{err}"
     );
     assert!(!run(&["--log-level", "loud"]).status.success());

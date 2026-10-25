@@ -1533,38 +1533,77 @@ extern fun password_needs_rehash(hash: string) -> Result<bool, Error>
 -- The host writes the program's log (every host has this one).
 extern fun log_write(level: string, message: string, fields: map<string, string>) -> bool
 
---" The program's log: `Log.info("started")`, with the levels `debug`, `info`, `warn` and
-`error`. The `qlang` command writes each line on its standard error (`--log-level warn` hides the
-lower ones, `--log-format json` writes JSON); another host may keep the lines or drop them. --"
+--" The program's log, with the levels of PSR-3: `Log.info("started")`, and a context of any
+value (a map, a structure, an array...) written as JSON: `Log.error("payment failed", {"order":
+42})`. From the lowest: `debug`, `info`, `notice`, `warning` (or `warn`), `error`, `critical`,
+`alert`, `emergency`. The `qlang` command writes each line on its standard error (`--log-level
+warning` hides the lower ones, `--log-format json` writes JSON, the context as an object under
+`context`); another host may keep the lines or drop them. --"
 struct Log
 end
 
 impl Log
-    --" Writes `message` at the level `level` with extra `name: value` pairs (`"debug"`, `"info"`,
-    `"warn"` or `"error"`; any other level is written as `info`). --"
+    --" Writes `message` at the level `level` (any other level is written as `info`) with the
+    `context`, a value of any type written as JSON. --"
+    public fun log<C>(level: string, message: string, context: C? = none)
+        let known = ["debug", "info", "notice", "warning", "warn", "error", "critical", "alert", "emergency"].contains(level)
+        let named = if known then level else "info" end
+        if context == none then
+            log_write(named, message, {})
+        else
+            log_write(named, message, { "context": Json.of(context).to_text() })
+        end
+    end
+
+    --" Writes `message` at the level `level` with extra `name: value` pairs. --"
     public fun write(level: string, message: string, fields: map<string, string>)
-        let known = level == "debug" or level == "info" or level == "warn" or level == "error"
+        let known = ["debug", "info", "notice", "warning", "warn", "error", "critical", "alert", "emergency"].contains(level)
         log_write(if known then level else "info" end, message, fields)
     end
 
-    --" A detail for whoever looks for a problem. --"
-    public fun debug(message: string)
-        log_write("debug", message, {})
+    --" Detailed information for whoever looks for a problem. --"
+    public fun debug<C>(message: string, context: C? = none)
+        Log.log("debug", message, context)
     end
 
     --" Something that happened and is worth knowing. --"
-    public fun info(message: string)
-        log_write("info", message, {})
+    public fun info<C>(message: string, context: C? = none)
+        Log.log("info", message, context)
+    end
+
+    --" A normal but significant event. --"
+    public fun notice<C>(message: string, context: C? = none)
+        Log.log("notice", message, context)
     end
 
     --" Something odd that the program survives. --"
-    public fun warn(message: string)
-        log_write("warn", message, {})
+    public fun warning<C>(message: string, context: C? = none)
+        Log.log("warning", message, context)
     end
 
-    --" Something that failed. --"
-    public fun error(message: string)
-        log_write("error", message, {})
+    --" The same as `warning`. --"
+    public fun warn<C>(message: string, context: C? = none)
+        Log.log("warning", message, context)
+    end
+
+    --" Something that failed, but the program goes on. --"
+    public fun error<C>(message: string, context: C? = none)
+        Log.log("error", message, context)
+    end
+
+    --" A component that is not available, an exception nobody expected. --"
+    public fun critical<C>(message: string, context: C? = none)
+        Log.log("critical", message, context)
+    end
+
+    --" Someone must act at once (the database is down). --"
+    public fun alert<C>(message: string, context: C? = none)
+        Log.log("alert", message, context)
+    end
+
+    --" The system cannot be used. --"
+    public fun emergency<C>(message: string, context: C? = none)
+        Log.log("emergency", message, context)
     end
 end
 

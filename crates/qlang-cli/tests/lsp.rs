@@ -678,3 +678,56 @@ fn completion_works_while_a_block_is_still_open() {
     );
     assert!(l.contains(&"total".to_string()), "{l:?}");
 }
+
+#[test]
+fn completion_works_in_a_condition_that_has_no_then_yet() {
+    let dir = project("complete-cond");
+    let mut c = Client::start(&dir);
+    let src = "struct U\n  public name: string\nend\n\nfun f(user: U, ok: bool) -> bool\n";
+    let cases = [
+        ("  if not us", 12, "user"),
+        ("  if not user.na", 16, "name"),
+        ("  if not ok and not u", 21, "user"),
+        ("  while not us", 14, "user"),
+        ("  for x in us", 13, "user"),
+    ];
+    for (i, (body, col, want)) in cases.iter().enumerate() {
+        let l = labels_at(
+            &mut c,
+            &dir,
+            &format!("c{i}.q"),
+            &format!("{src}{body}\n"),
+            5,
+            *col,
+        );
+        assert!(l.contains(&want.to_string()), "{body:?}: {l:?}");
+    }
+}
+
+#[test]
+fn a_parameter_with_a_default_is_shown_and_left_out_of_the_snippet() {
+    let dir = project("complete-default");
+    std::fs::write(
+        dir.join("lib.q"),
+        "fun note(message: string, level: int = 3, tag: string? = none) -> int\n  level\nend\nexport note\n",
+    )
+    .unwrap();
+    let mut c = Client::start(&dir);
+    let file = dir.join("main.q");
+    let src = "import \"./lib.q\" as lib\n\nlib.\n";
+    std::fs::write(&file, src).unwrap();
+    c.open(&file, src);
+    let r = c.request("textDocument/completion", c.at(&file, 2, 4));
+    let n = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "note")
+        .unwrap()
+        .clone();
+    assert_eq!(n["textEdit"]["newText"], "note(${1:message})$0", "{n}");
+    assert!(
+        n["detail"].as_str().unwrap().contains("level: int = 3"),
+        "{n}"
+    );
+}

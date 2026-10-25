@@ -88,6 +88,8 @@ pub struct Param {
     pub annotations: Vec<Annotation>,
     pub name: Ident,
     pub ty: TypeExpr,
+    /// `name: type = literal`: the value of the parameter when a call leaves it out.
+    pub default: Option<Rc<Expr>>,
 }
 
 #[derive(Debug)]

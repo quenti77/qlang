@@ -1500,9 +1500,15 @@ impl<'a> Interp<'a> {
     /// slot it fills (identity unless the call mixed in named arguments: see `arg_order`).
     fn eval_args(&mut self, node: NodeId, args: &[CallArg], env: &Env) -> R<Vec<Value>> {
         if let Some(order) = self.prog.res.arg_order.get(&node).cloned() {
-            let mut out: Vec<Option<Value>> = (0..args.len()).map(|_| None).collect();
+            let filled = self.prog.res.arg_defaults.get(&node).cloned();
+            let size = args.len() + filled.as_ref().map_or(0, Vec::len);
+            let mut out: Vec<Option<Value>> = (0..size).map(|_| None).collect();
             for (a, slot) in args.iter().zip(order.iter()) {
                 out[*slot] = Some(self.eval(&a.value, env)?);
+            }
+            // the parameters the call left out take their default
+            for (slot, d) in filled.iter().flatten() {
+                out[*slot] = Some(self.eval(d, env)?);
             }
             return Ok(out
                 .into_iter()

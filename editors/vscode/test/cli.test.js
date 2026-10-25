@@ -11,7 +11,7 @@ const repo = path.join(__dirname, '..', '..', '..');
 const binary = ['target/release/qlang', 'target/debug/qlang'].map((p) => path.join(repo, p)).find((p) => fs.existsSync(p));
 
 function check(entry, files) {
-  const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest(entry, files), encoding: 'utf8' });
+  const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest(entry, files), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   assert.strictEqual(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -71,7 +71,7 @@ test('the editor and the terminal agree on imports that go up a folder', { skip:
     assert.deepStrictEqual(Object.keys(files).sort(), ['common.q', 'sub/main.q']);
     assert.strictEqual(check('sub/main.q', files).ok, true);
     // what the Run button does: `cd sub && qlang run main.q`
-    const run = cp.spawnSync(binary, ['run', 'main.q'], { cwd: path.join(dir, 'sub'), encoding: 'utf8' });
+    const run = cp.spawnSync(binary, ['run', 'main.q'], { cwd: path.join(dir, 'sub'), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     assert.strictEqual(run.status, 0, run.stderr);
     assert.strictEqual(run.stdout, '7\n');
   } finally {
@@ -89,7 +89,7 @@ test('packages of the project are followed through `qlang packages`', { skip: !b
     fs.writeFileSync(path.join(dir, 'mail/src/mail.q'), 'import h from "./helper.q"\nexport h\n');
     fs.writeFileSync(path.join(dir, 'mail/src/helper.q'), 'fun h() -> int\n  1\nend\nexport h\n');
     const app = path.join(dir, 'app');
-    const found = cp.spawnSync(binary, ['packages'], { cwd: app, encoding: 'utf8' });
+    const found = cp.spawnSync(binary, ['packages'], { cwd: app, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     const packages = JSON.parse(found.stdout);
     assert.strictEqual(packages.mail.main, 'src/mail.q');
     const read = (rel) => {
@@ -99,7 +99,7 @@ test('packages of the project are followed through `qlang packages`', { skip: !b
     const main = 'import "@mail" as m\nprint(m.h())\nlet x: int = "no"';
     const files = lib.collectFiles('main.q', main, read, 200, packages);
     assert.ok('@mail/src/helper.q' in files, Object.keys(files).join());
-    const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest('main.q', files, false, packages), encoding: 'utf8' });
+    const r = cp.spawnSync(binary, ['check', '--json'], { input: lib.buildRequest('main.q', files, false, packages), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     const res = JSON.parse(r.stdout);
     const byFile = lib.toFileDiagnostics(res, 'main.q');
     assert.deepStrictEqual(Object.keys(byFile), ['main.q']);

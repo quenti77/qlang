@@ -1,0 +1,6 @@
+{
+  "std": {
+    "git": "https://github.com/quenti77/qlang-std",
+    "description": "Web framework pieces, queue, mail, S3, scheduler, JWT, CSV, TOML, templates, CLI helpers"
+  }
+}

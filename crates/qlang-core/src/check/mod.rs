@@ -1495,6 +1495,7 @@ extern fun fs_write_bytes(path: string, content: bytes) -> Result<bool, Error>
 extern fun env_get(name: string) -> string?
 extern fun env_args() -> array<string>
 extern fun http_send(req: Request) -> Result<Response, Error>
+extern fun http_send_all(reqs: array<Request>) -> Result<array<Response>, Error>
 
 --" Files on disk: `fs.read(path)` and `fs.write(path, content)`. Needs disk access. --"
 struct fs
@@ -1666,6 +1667,29 @@ impl http
     --" Sends an HTTP request and waits for the response. Needs network access. A connection failure is `err`, not a crash. --"
     public fun send(req: Request) -> Result<Response, Error>
         http_send(req)
+    end
+
+    --" Sends several requests **at the same time** and gives the answers in the same order, so
+    ten calls to slow services take as long as the slowest one. Each answer is a `Result` like
+    that of `send`: a request that failed (no connection, timeout) is an `err` and does not stop
+    the others. At most 16 run at once. Needs network access. --"
+    public fun send_all(reqs: array<Request>) -> array<Result<Response, Error>>
+        let out: array<Result<Response, Error>> = []
+        let answers = http_send_all(reqs)
+        if answers.is_err() then
+            for r in reqs do
+                out.push(Result<Response, Error>.Err(answers.unwrap_err()))
+            end
+            return out
+        end
+        for a in answers.unwrap() do
+            if a.status == 0 then
+                out.push(Result<Response, Error>.Err(Error { message: a.body }))
+            else
+                out.push(Result<Response, Error>.Ok(a))
+            end
+        end
+        out
     end
 end
 

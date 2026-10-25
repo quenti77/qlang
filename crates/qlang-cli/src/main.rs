@@ -3,6 +3,8 @@
 
 mod db;
 mod docgen;
+mod fmtcmd;
+mod index;
 mod init;
 mod install;
 mod json;
@@ -36,6 +38,9 @@ USAGE:
     qlang init [dir]                     start a project: qlang.toml, main.q, .gitignore
     qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
                                          project's files (or of the paths given)
+    qlang fmt [path...] [--check]        lay the files out (two spaces per level; only the white
+                                         space at the start and end of lines changes); --check
+                                         lists the files that would change and exits 1
     qlang test [path...] [--filter TEXT] [--seed N] [--max-steps N] [--trust-externs]
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
@@ -71,6 +76,8 @@ USAGE:
                                          tag/branch points to now, and rewrite qlang.lock
     qlang add <name> --git URL [--tag T | --rev R | --branch B]
     qlang add <name> --path DIR          add a dependency to qlang.toml and install it
+    qlang add <name>                     the same, from the package index (the latest tag)
+    qlang search [text]                  the packages of the index
     qlang remove <name>                  remove a dependency
     qlang --help | --version
 
@@ -132,6 +139,8 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("init") => init::init(&it.collect::<Vec<_>>()),
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
+        Some("fmt") => fmtcmd::run(&it.collect::<Vec<_>>()),
+        Some("search") => index::search(it.next()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -472,41 +481,70 @@ impl Host for TerminalHost {
     }
 
     fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
-        let mut r =
-            ureq::request(&req.method, &req.url).timeout(std::time::Duration::from_secs(60));
-        for (name, value) in &req.headers {
-            r = r.set(name, value);
-        }
-        let result = match (&req.body_bytes, &req.body) {
-            (Some(bytes), _) => r.send_bytes(bytes),
-            (None, Some(body)) => r.send_string(body),
-            (None, None) => r.call(),
-        };
-        match result {
-            Ok(resp) => {
-                let status = resp.status() as i64;
-                let headers = response_headers(&resp);
-                let (body, raw) = read_body(resp)?;
-                Ok(HttpResponse {
-                    status,
-                    headers,
-                    body,
-                    raw,
-                })
+        send_http(req)
+    }
+
+    fn http_send_all(&mut self, reqs: Vec<HttpRequest>) -> Vec<Result<HttpResponse, HostError>> {
+        // at most 16 at a time, the answers in the order of the requests
+        let mut out = Vec::with_capacity(reqs.len());
+        let mut reqs = reqs.into_iter();
+        loop {
+            let batch: Vec<HttpRequest> = reqs.by_ref().take(16).collect();
+            if batch.is_empty() {
+                break;
             }
-            // a non-2xx/3xx status is still a response, not a failure
-            Err(ureq::Error::Status(status, resp)) => {
-                let headers = response_headers(&resp);
-                let (body, raw) = read_body(resp)?;
-                Ok(HttpResponse {
-                    status: status as i64,
-                    headers,
-                    body,
-                    raw,
-                })
-            }
-            Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = batch
+                    .into_iter()
+                    .map(|r| scope.spawn(move || send_http(r)))
+                    .collect();
+                for h in handles {
+                    out.push(
+                        h.join().unwrap_or_else(|_| {
+                            Err(HostError::Other("the request panicked".into()))
+                        }),
+                    );
+                }
+            });
         }
+        out
+    }
+}
+
+fn send_http(req: HttpRequest) -> Result<HttpResponse, HostError> {
+    let mut r = ureq::request(&req.method, &req.url).timeout(std::time::Duration::from_secs(60));
+    for (name, value) in &req.headers {
+        r = r.set(name, value);
+    }
+    let result = match (&req.body_bytes, &req.body) {
+        (Some(bytes), _) => r.send_bytes(bytes),
+        (None, Some(body)) => r.send_string(body),
+        (None, None) => r.call(),
+    };
+    match result {
+        Ok(resp) => {
+            let status = resp.status() as i64;
+            let headers = response_headers(&resp);
+            let (body, raw) = read_body(resp)?;
+            Ok(HttpResponse {
+                status,
+                headers,
+                body,
+                raw,
+            })
+        }
+        // a non-2xx/3xx status is still a response, not a failure
+        Err(ureq::Error::Status(status, resp)) => {
+            let headers = response_headers(&resp);
+            let (body, raw) = read_body(resp)?;
+            Ok(HttpResponse {
+                status: status as i64,
+                headers,
+                body,
+                raw,
+            })
+        }
+        Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
     }
 }
 
@@ -641,6 +679,38 @@ fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            // `qlang add std`: no source given, so the index says where the package lives
+            let mut from_index: Vec<(String, String)> = Vec::new();
+            if options.is_empty() {
+                match index::find(name) {
+                    Some(entry) => {
+                        from_index.push(("git".into(), entry.git.clone()));
+                        match index::latest_tag(&entry.git) {
+                            Some(tag) => {
+                                println!("{name}: {} at {tag} (from the package index)", entry.git);
+                                from_index.push(("tag".into(), tag));
+                            }
+                            None => println!(
+                                "{name}: {} (from the package index; no version tag found, the default branch is used)",
+                                entry.git
+                            ),
+                        }
+                    }
+                    None => {
+                        return fail(format!(
+                            "`{name}` is not in the package index: give a source (--git URL or --path DIR), or look with `qlang search`"
+                        ));
+                    }
+                }
+            }
+            let options: Vec<(&str, &str)> = if from_index.is_empty() {
+                options
+            } else {
+                from_index
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str()))
+                    .collect()
+            };
             match install::add(&cwd, name, &options) {
                 Ok(p) => p,
                 Err(e) => return fail(e),

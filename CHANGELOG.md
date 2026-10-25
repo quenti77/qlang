@@ -1,5 +1,14 @@
 # Journal des changements
 
+## 0.56.0
+
+Dixième version du cycle « frameworks web en qlang » : l'outillage autour du langage (mise en forme, index de paquets, appels en parallèle) et, côté `qlang-std` 0.10.0, ce qu'il faut pour exploiter une application.
+
+- **`qlang fmt`** (`--check` pour la CI) : deux espaces par niveau, `case` d'un `match` un niveau plus loin. Seuls les espaces en début et fin de ligne changent ; les jetons du résultat sont comparés à ceux de la source, rien n'est écrit en cas de différence. Le serveur de langage répond à `textDocument/formatting`.
+- **`http.send_all(requêtes)`** : plusieurs requêtes en même temps (16 à la fois), les réponses dans l'ordre, un échec n'arrête pas les autres.
+- **Index de paquets** : `qlang add std` (sans `--git`) trouve le dépôt dans `packages.json` et prend la dernière étiquette `vX.Y.Z` ; `qlang search [texte]` liste l'index ; `QLANG_INDEX_URL` en désigne un autre.
+- `qlang-std` 0.10.0 : `mail.q` (Resend, Postmark, SendGrid, Mailgun, mémoire, journal, tâche `SendMail`), `s3.q` (signature AWS v4, vérifiée contre les exemples d'AWS et un vrai MinIO : texte, octets, URL signées), `schedule.q` (cron, une seule exécution par minute même avec plusieurs machines, `schedule:run` et `schedule:work`), `notify.q` (courriel, Slack/Discord, boîte de réception), `web/metrics.q` (Prometheus), `web/health.q` (vivacité et disponibilité), et `examples/deploy` (Dockerfile, compose, systemd, Caddy) testé de bout en bout.
+
 ## 0.55.0
 
 Neuvième version du cycle « frameworks web en qlang » : la fin de la liste des manques de la file de tâches, des relations et des JWT.

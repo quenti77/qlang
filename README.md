@@ -136,6 +136,34 @@ Elle est tirée des commentaires `--" … --"` placés juste au-dessus des décl
 noms exportés d'un fichier (tous, s'il n'a pas de `export`) avec leur signature, et les
 champs, méthodes et variantes `public` de leurs types. Les fichiers de test sont ignorés.
 
+### Mise en forme
+
+```sh
+qlang fmt              # remet en forme tous les fichiers .q du projet
+qlang fmt lib.q        # un fichier (ou un dossier)
+qlang fmt --check      # liste ceux qui changeraient, sans les toucher (code de sortie 1 : pour la CI)
+```
+
+Seuls les **espaces au début et à la fin des lignes** changent (deux espaces par niveau, les
+`case` d'un `match` un niveau plus loin que lui) : les jetons, les commentaires et les espaces
+à l'intérieur d'une ligne restent tels quels, et c'est vérifié à chaque passage (rien n'est écrit si le
+résultat ne contenait plus exactement les mêmes jetons). Les chaînes et commentaires sur plusieurs
+lignes ne sont pas touchés. L'extension VS Code propose « Mettre en forme le document » (le serveur
+de langage répond à `textDocument/formatting`).
+
+### Paquets
+
+```sh
+qlang search [texte]     # les paquets de l'index (nom, description, dépôt git)
+qlang add std            # ajoute un paquet de l'index : son dépôt, à sa dernière version taguée
+qlang add x --git URL --tag v1.0.0   # ou un dépôt à toi
+```
+
+L'index est un petit fichier `packages.json` (`{"nom": {"git": URL, "description": TEXTE}}`) du dépôt
+de qlang ; `QLANG_INDEX_URL` en désigne un autre (une URL ou un chemin), et sans réseau les paquets
+connus du binaire sont utilisés. L'index ne fait que dire quel dépôt git porte un nom : le paquet est
+ensuite récupéré et figé dans `qlang.lock` comme n'importe quel autre.
+
 ### Tests
 
 ```sh

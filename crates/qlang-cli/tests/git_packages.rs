@@ -274,3 +274,52 @@ fn install_puts_back_files_edited_by_hand() {
     assert!(d.qlang(&["install"]).2);
     assert_eq!(d.qlang(&["run", "main.q"]).0, "v1\n");
 }
+
+#[test]
+fn add_without_a_source_asks_the_index_and_takes_the_highest_tag() {
+    if !have_git() {
+        return;
+    }
+    let d = Dir::new("index");
+    let url = d.repo("mail", &[("lib.q", &lib("v1"))], "v1.2.0");
+    d.advance("mail", "lib.q", &lib("v2"), Some("v1.10.0"));
+    d.advance("mail", "lib.q", &lib("wip"), Some("not-a-version"));
+    d.write(
+        "app/qlang.toml",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    );
+    d.write("app/main.q", APP);
+    d.write(
+        "index.json",
+        &format!("{{\"mail\": {{\"git\": \"{url}\", \"description\": \"sends mail\"}}}}"),
+    );
+    let index = d.0.join("index.json").to_string_lossy().into_owned();
+    let run = |args: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .args(args)
+            .env("QLANG_INDEX_URL", &index)
+            .current_dir(d.0.join("app"))
+            .output()
+            .unwrap();
+        (
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+            o.status.success(),
+        )
+    };
+    let (out, _, ok) = run(&["search", "mail"]);
+    assert!(ok && out.contains("sends mail"), "{out}");
+    assert!(!run(&["search", "zzz"]).2);
+    let (out, err, ok) = run(&["add", "mail"]);
+    assert!(ok, "{out}{err}");
+    // v1.10.0 is higher than v1.2.0 (numbers, not text), and a tag that is no version is ignored
+    assert!(
+        d.read("app/qlang.toml").contains("tag = \"v1.10.0\""),
+        "{}",
+        d.read("app/qlang.toml")
+    );
+    let (out, _, _) = run(&["run", "main.q"]);
+    assert_eq!(out.trim(), "v2");
+    let (_, err, ok) = run(&["add", "unknown"]);
+    assert!(!ok && err.contains("not in the package index"), "{err}");
+}

@@ -85,7 +85,7 @@ pub fn std_has(caps: Capabilities, name: &str) -> bool {
         "secure_random_bytes" => caps.random,
         // pure functions, and the log: every host has them
         "constant_time_eq" | "log_write" => true,
-        "http_send" => caps.http,
+        "http_send" | "http_send_all" => caps.http,
         _ => false,
     }
 }
@@ -151,56 +151,23 @@ pub fn std_call<H: Host + ?Sized>(
             .args()
             .map(|xs| HostValue::Array(xs.into_iter().map(HostValue::Str).collect())),
         ("http_send", [HostValue::Map(fields)]) => {
-            let text = |key: &str| {
-                fields.iter().find_map(|(k, v)| match (k, v) {
-                    (HostValue::Str(k), HostValue::Str(v)) if k == key => Some(v.clone()),
-                    _ => None,
-                })
-            };
-            let headers = fields
-                .iter()
-                .find_map(|(k, v)| match (k, v) {
-                    (HostValue::Str(k), HostValue::Map(h)) if k == "headers" => Some(h),
-                    _ => None,
-                })
-                .map(|h| {
-                    h.iter()
-                        .filter_map(|(k, v)| match (k, v) {
-                            (HostValue::Str(k), HostValue::Str(v)) => Some((k.clone(), v.clone())),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let request = HttpRequest {
-                method: text("method").unwrap_or_default(),
-                url: text("url").unwrap_or_default(),
-                headers,
-                body: text("body"),
-                body_bytes: fields.iter().find_map(|(k, v)| match (k, v) {
-                    (HostValue::Str(k), HostValue::Bytes(b)) if k == "raw" => Some(b.clone()),
-                    _ => None,
-                }),
-            };
-            host.http_send(request).map(|r| {
-                HostValue::Map(vec![
-                    (HostValue::Str("status".into()), HostValue::Int(r.status)),
-                    (
-                        HostValue::Str("headers".into()),
-                        HostValue::Map(
-                            r.headers
-                                .into_iter()
-                                .map(|(k, v)| (HostValue::Str(k), HostValue::Str(v)))
-                                .collect(),
-                        ),
-                    ),
-                    (HostValue::Str("body".into()), HostValue::Str(r.body)),
-                    (
-                        HostValue::Str("raw".into()),
-                        r.raw.map_or(HostValue::Null, HostValue::Bytes),
-                    ),
-                ])
-            })
+            let request = request_of(fields);
+            host.http_send(request).map(|r| response_value(Ok(r)))
+        }
+        ("http_send_all", [HostValue::Array(items)]) => {
+            let mut requests = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    HostValue::Map(fields) => requests.push(request_of(fields)),
+                    _ => return Some(Err(wrong(name))),
+                }
+            }
+            Ok(HostValue::Array(
+                host.http_send_all(requests)
+                    .into_iter()
+                    .map(response_value)
+                    .collect(),
+            ))
         }
         (
             "fs_read"
@@ -210,6 +177,7 @@ pub fn std_call<H: Host + ?Sized>(
             | "env_get"
             | "env_args"
             | "http_send"
+            | "http_send_all"
             | "secure_random_bytes"
             | "constant_time_eq"
             | "log_write",
@@ -217,6 +185,74 @@ pub fn std_call<H: Host + ?Sized>(
         ) => Err(wrong(name)),
         _ => return None,
     })
+}
+
+/// The `Request` map of the prelude read as an [`HttpRequest`].
+fn request_of(fields: &[(HostValue, HostValue)]) -> HttpRequest {
+    let text = |key: &str| {
+        fields.iter().find_map(|(k, v)| match (k, v) {
+            (HostValue::Str(k), HostValue::Str(v)) if k == key => Some(v.clone()),
+            _ => None,
+        })
+    };
+    let headers = fields
+        .iter()
+        .find_map(|(k, v)| match (k, v) {
+            (HostValue::Str(k), HostValue::Map(h)) if k == "headers" => Some(h),
+            _ => None,
+        })
+        .map(|h| {
+            h.iter()
+                .filter_map(|(k, v)| match (k, v) {
+                    (HostValue::Str(k), HostValue::Str(v)) => Some((k.clone(), v.clone())),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    HttpRequest {
+        method: text("method").unwrap_or_default(),
+        url: text("url").unwrap_or_default(),
+        headers,
+        body: text("body"),
+        body_bytes: fields.iter().find_map(|(k, v)| match (k, v) {
+            (HostValue::Str(k), HostValue::Bytes(b)) if k == "raw" => Some(b.clone()),
+            _ => None,
+        }),
+    }
+}
+
+/// An answer as the `Response` map of the prelude. A request that failed (no connection, a
+/// timeout) is a response with status `0` whose body is the reason: that is how `http.send_all`
+/// returns many answers at once.
+fn response_value(r: Result<HttpResponse, HostError>) -> HostValue {
+    let (status, headers, body, raw) = match r {
+        Ok(r) => (r.status, r.headers, r.body, r.raw),
+        Err(e) => {
+            let why = match e {
+                HostError::Unsupported(what) => format!("{what} is not available here"),
+                HostError::Other(m) => m,
+            };
+            (0, Vec::new(), why, None)
+        }
+    };
+    HostValue::Map(vec![
+        (HostValue::Str("status".into()), HostValue::Int(status)),
+        (
+            HostValue::Str("headers".into()),
+            HostValue::Map(
+                headers
+                    .into_iter()
+                    .map(|(k, v)| (HostValue::Str(k), HostValue::Str(v)))
+                    .collect(),
+            ),
+        ),
+        (HostValue::Str("body".into()), HostValue::Str(body)),
+        (
+            HostValue::Str("raw".into()),
+            raw.map_or(HostValue::Null, HostValue::Bytes),
+        ),
+    ])
 }
 
 /// The names of the `extern fun` the prelude's `Db` is built on.
@@ -377,6 +413,12 @@ pub trait Host {
     /// all; the caller turns both into a qlang `Result::err`, never a crash.
     fn http_send(&mut self, _req: HttpRequest) -> Result<HttpResponse, HostError> {
         Err(HostError::Unsupported("http"))
+    }
+
+    /// Send several requests and give the answers in the same order. A host may do them at
+    /// the same time; the default does one after the other.
+    fn http_send_all(&mut self, reqs: Vec<HttpRequest>) -> Vec<Result<HttpResponse, HostError>> {
+        reqs.into_iter().map(|r| self.http_send(r)).collect()
     }
 
     /// Read a file's whole content as text. A missing file, a permission error, or content

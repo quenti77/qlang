@@ -2419,6 +2419,20 @@ let res = http.send(Request {
 })
 ```
 
+`http.send_all(requêtes)` en envoie **plusieurs en même temps** (16 à la fois au plus) et rend un
+`array<Result<Response, Error>>` dans le même ordre : dix appels à des services lents durent aussi
+longtemps que le plus lent. Une requête qui échoue est un `err` et n'arrête pas les autres.
+
+```
+let réponses = http.send_all([
+  Request { method: "GET", url: "https://a.example/api" },
+  Request { method: "GET", url: "https://b.example/api" },
+])
+for r in réponses do
+  print(if r.is_ok() then r.unwrap().status else 0 end)
+end
+```
+
 ### Répondre à des requêtes HTTP
 
 Un programme peut aussi **servir** des requêtes : `qlang serve app.q` écoute sur un port

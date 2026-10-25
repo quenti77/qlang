@@ -1161,6 +1161,7 @@ impl Checker {
                     ("env", "get") => Some(("env_get", "there is no process environment")),
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),
+                    ("http", "send_all") => Some(("http_send_all", "there is no network access")),
                     ("Password", "hash") => Some((
                         "password_hash",
                         "password hashing is only offered by the `qlang` command",

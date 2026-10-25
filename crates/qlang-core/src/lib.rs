@@ -8,6 +8,7 @@ pub mod check;
 pub mod codec;
 pub mod datetime;
 pub mod diag;
+pub mod fmt;
 pub mod fx;
 pub mod host;
 pub mod ids;

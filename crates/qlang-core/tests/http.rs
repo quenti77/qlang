@@ -123,3 +123,50 @@ print(http.send(req).unwrap().status)
     );
     assert_eq!(out, "0\ntrue\n201\n");
 }
+
+#[test]
+fn http_send_all_gives_an_answer_per_request_in_order_and_an_error_does_not_stop_the_others() {
+    let mut m = HashMap::new();
+    let ok = |body: &str| {
+        Ok(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: body.to_string(),
+            raw: None,
+        })
+    };
+    m.insert(("GET".to_string(), "https://a.test/".to_string()), ok("A"));
+    m.insert(
+        ("GET".to_string(), "https://down.test/".to_string()),
+        Err("connection refused".to_string()),
+    );
+    m.insert(("GET".to_string(), "https://c.test/".to_string()), ok("C"));
+    let out = exec(
+        r#"
+let answers = http.send_all([
+  Request { method: "GET", url: "https://a.test/" },
+  Request { method: "GET", url: "https://down.test/" },
+  Request { method: "GET", url: "https://c.test/" },
+])
+for a in answers do
+  if a.is_ok() then
+    print(a.unwrap().body)
+  else
+    print("err: {a.unwrap_err().message}")
+  end
+end
+print(http.send_all([]).len())
+"#,
+        host_with(m),
+    );
+    assert_eq!(out, "A\nerr: connection refused\nC\n0\n");
+}
+
+#[test]
+fn http_send_all_needs_the_network_capability() {
+    let out = exec(
+        "let r = http.send_all([Request { method: \"GET\", url: \"https://example.com\" }])",
+        MemoryHost::default(),
+    );
+    assert!(out.starts_with("COMPILE: T250"), "{out}");
+}

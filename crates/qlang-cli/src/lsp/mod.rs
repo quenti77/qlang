@@ -1168,6 +1168,30 @@ impl Server {
         respond(id, json!({ "changes": edits }));
     }
 
+    /// The whole document laid out (`qlang fmt`), as one edit; nothing when it is already so or
+    /// when it does not lex.
+    fn formatting(&mut self, params: &Value) -> Value {
+        let Some(uri) = params["textDocument"]["uri"].as_str() else {
+            return Value::Null;
+        };
+        let Some(doc) = self.docs.get(uri) else {
+            return Value::Null;
+        };
+        match qlang_core::fmt::format(&doc.text) {
+            Ok(out) if out != doc.text => {
+                let lines = doc.text.split('\n').count() as u64;
+                json!([{
+                    "range": {
+                        "start": { "line": 0, "character": 0 },
+                        "end": { "line": lines, "character": 0 },
+                    },
+                    "newText": out,
+                }])
+            }
+            _ => json!([]),
+        }
+    }
+
     fn document_symbols(&mut self, params: &Value) -> Value {
         let Some(uri) = params["textDocument"]["uri"].as_str().map(str::to_string) else {
             return Value::Null;
@@ -1273,6 +1297,7 @@ impl Server {
                 "referencesProvider": true,
                 "renameProvider": { "prepareProvider": true },
                 "documentSymbolProvider": true,
+                "documentFormattingProvider": true,
                 "workspaceSymbolProvider": true,
             },
             "serverInfo": { "name": "qlang", "version": env!("CARGO_PKG_VERSION") },
@@ -1370,6 +1395,7 @@ impl Server {
             "textDocument/prepareRename" => respond(id, self.prepare_rename(params)),
             "textDocument/rename" => self.rename(id, params),
             "textDocument/documentSymbol" => respond(id, self.document_symbols(params)),
+            "textDocument/formatting" => respond(id, self.formatting(params)),
             "workspace/symbol" => respond(id, self.workspace_symbols(params)),
             _ => respond_error(id, -32601, &format!("method not supported: {method}")),
         }

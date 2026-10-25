@@ -436,16 +436,25 @@ impl Server {
 
     /// Like [`Self::analyse`], for code being typed: when it does not even parse (a block is still
     /// open), `end` is added at the bottom until it does, so that completion keeps working.
-    fn analyse_unfinished(&mut self, uri: &str, text: &str) -> Option<Analysis> {
-        let mut source = text.to_string();
+    fn analyse_unfinished(
+        &mut self,
+        uri: &str,
+        text: &str,
+        at: (usize, usize),
+    ) -> Option<Analysis> {
+        // then, still failing, with the open brackets closed at the cursor too
+        let closed = intel::close_brackets(text, at.0, at.1);
         let mut first = None;
-        for _ in 0..=6 {
-            let a = self.analyse(uri, Some(&source))?;
-            if a.info.is_some() {
-                return Some(a);
+        for base in std::iter::once(text.to_string()).chain(closed) {
+            let mut source = base;
+            for _ in 0..=6 {
+                let a = self.analyse(uri, Some(&source))?;
+                if a.info.is_some() {
+                    return Some(a);
+                }
+                first.get_or_insert(a);
+                source.push_str("\nend");
             }
-            first.get_or_insert(a);
-            source.push_str("\nend");
         }
         first
     }
@@ -851,7 +860,7 @@ impl Server {
                 Some(from) => intel::blank_as_type(&doc.text, line0, from, col),
                 None => intel::blank(&doc.text, line0, dot, col),
             };
-            let Some(a) = self.analyse_unfinished(&uri, &blanked) else {
+            let Some(a) = self.analyse_unfinished(&uri, &blanked, (line0, col)) else {
                 return Value::Null;
             };
             let Some(info) = &a.info else {
@@ -882,7 +891,7 @@ impl Server {
         let a = if current {
             &self.analyses[&uri]
         } else {
-            let Some(fresh) = self.analyse_unfinished(&uri, &typed_text) else {
+            let Some(fresh) = self.analyse_unfinished(&uri, &typed_text, (line0, col)) else {
                 return Value::Null;
             };
             if fresh.info.is_some() {

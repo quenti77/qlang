@@ -49,7 +49,7 @@ fn a_signal_only_sets_the_flag_once_the_program_asked() {
 fn a_second_signal_ends_a_program_that_does_not_leave() {
     let file = program(
         "stubborn",
-        "print(\"ready\")\nProcess.stopping()\nwhile true do\n  time.sleep(20)\nend\n",
+        "Process.stopping()\nprint(\"ready\")\nwhile true do\n  time.sleep(20)\nend\n",
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
         .arg("run")

@@ -228,6 +228,8 @@ impl Checker {
                         None => Ty::Error,
                     },
                     _ => {
+                        // for editors: `module.Type.|` still has members
+                        self.record_head(e);
                         self.err(
                             "T154",
                             format!("`{}` is a type or a module, not a value", name.name),

@@ -521,3 +521,137 @@ fn formatting_returns_the_document_laid_out_and_nothing_when_it_already_is() {
     );
     assert_eq!(r.as_array().unwrap().len(), 0, "{r}");
 }
+
+/// The labels of the completion at (`line`, `col`) of `src`, written to `name` in `dir`.
+fn labels_at(
+    c: &mut Client,
+    dir: &Path,
+    name: &str,
+    src: &str,
+    line: u64,
+    col: u64,
+) -> Vec<String> {
+    let file = dir.join(name);
+    std::fs::write(&file, src).unwrap();
+    c.open(&file, src);
+    let r = c.request("textDocument/completion", c.at(&file, line, col));
+    r.as_array()
+        .map(|a| {
+            a.iter()
+                .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+const LIB: &str = "struct App\n  public n: int\nend\n\nimpl App\n  public fun new(items: array<string>) -> App\n    App { n: 0 }\n  end\n\n  public fun validate(self) -> array<string>\n    []\n  end\nend\n\nfun helper(a: int) -> int\n  a\nend\nexport App, helper\n";
+
+#[test]
+fn completion_works_after_an_operator_in_a_module_type_and_in_a_type_position() {
+    let dir = project("complete-more");
+    std::fs::write(dir.join("lib.q"), LIB).unwrap();
+    let mut c = Client::start(&dir);
+    let head = "import \"./lib.q\" as web\n\nfun build() -> web.App\n  let app = web.App.new([])\n  let p = app.validate()\n";
+    // `not p.|`: the dot belongs to `p`, not to `not p`
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "a.q",
+        &format!("{head}  if not p. then\n  end\n  app\nend\n"),
+        5,
+        11,
+    );
+    assert!(l.contains(&"is_empty".to_string()), "{l:?}");
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "b.q",
+        &format!("{head}  let n = 1 + p.\n  app\nend\n"),
+        5,
+        17,
+    );
+    assert!(l.contains(&"len".to_string()), "{l:?}");
+    // a type reached through a module
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "c.q",
+        &format!("{head}  let q = web.App.\n  app\nend\n"),
+        5,
+        18,
+    );
+    assert!(l.contains(&"new".to_string()), "{l:?}");
+    // the module in a type position, where there is no expression at all
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "d.q",
+        "import \"./lib.q\" as web\n\nfun build() -> web.\n  web.App.new([])\nend\n",
+        2,
+        19,
+    );
+    assert!(l.contains(&"App".to_string()), "{l:?}");
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "e.q",
+        "import \"./lib.q\" as web\n\nfun build(app: web.) -> int\n  1\nend\n",
+        2,
+        19,
+    );
+    assert!(l.contains(&"App".to_string()), "{l:?}");
+    // the functions of Reflect
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "f.q",
+        "fun f()\n  let x = Reflect.\nend\n",
+        1,
+        18,
+    );
+    assert!(
+        l.contains(&"callables".to_string()) && l.contains(&"struct_info".to_string()),
+        "{l:?}"
+    );
+}
+
+#[test]
+fn a_function_is_completed_with_its_parentheses_and_parameters() {
+    let dir = project("complete-snippet");
+    std::fs::write(dir.join("lib.q"), LIB).unwrap();
+    let mut c = Client::start(&dir);
+    let src = "import \"./lib.q\" as web\n\nlet x = web.\n";
+    let file = dir.join("g.q");
+    std::fs::write(&file, src).unwrap();
+    c.open(&file, src);
+    let r = c.request("textDocument/completion", c.at(&file, 2, 12));
+    let helper = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "helper")
+        .unwrap();
+    assert_eq!(helper["insertTextFormat"], 2);
+    assert_eq!(helper["textEdit"]["newText"], "helper(${1:a})$0");
+    // a type is inserted as it is
+    let app = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "App")
+        .unwrap();
+    assert_eq!(app["textEdit"]["newText"], "App");
+    assert!(app.get("insertTextFormat").is_none());
+    // a method without parameters gets empty parentheses
+    let src = "import \"./lib.q\" as web\n\nlet app = web.App.new([])\nlet y = app.\n";
+    std::fs::write(&file, src).unwrap();
+    c.open(&file, src);
+    let r = c.request("textDocument/completion", c.at(&file, 3, 12));
+    let v = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "validate")
+        .unwrap();
+    assert_eq!(v["textEdit"]["newText"], "validate()$0");
+}

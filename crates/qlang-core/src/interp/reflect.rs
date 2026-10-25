@@ -9,7 +9,14 @@ impl Interp<'_> {
             ReflectOp::Struct(sid) => self.struct_info(*sid),
             ReflectOp::StructOf(t) => match self.runtime_ty(t) {
                 Ty::Struct(sid, _) => self.struct_info(sid),
-                _ => return self.fail("R301", "`Reflect.struct_info` needs a struct type", span),
+                other => {
+                    let shown = other.show(&self.prog.defs);
+                    return self.fail(
+                        "R301",
+                        &format!("`Reflect.struct_info` needs a struct type, found `{shown}`"),
+                        span,
+                    );
+                }
             },
             ReflectOp::Enum(eid) => self.enum_info(*eid),
             ReflectOp::Functions(m) => {

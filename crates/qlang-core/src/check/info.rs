@@ -24,6 +24,9 @@ pub struct Info {
     pub members: BTreeMap<String, Vec<Member>>,
     /// `Type.member` and `module.member`, by the key found in [`ExprInfo::statics`].
     pub statics: BTreeMap<String, Vec<Member>>,
+    /// The modules a file imported, by file name and then by the name it gave them (`web`): what
+    /// `web.` offers where no expression is involved (`fun f() -> web.|`).
+    pub aliases: BTreeMap<String, BTreeMap<String, Vec<Member>>>,
     /// Every use of a name that stands for a definition (variable, function, type, field,
     /// method, variant), with the name where it is defined.
     pub refs: Vec<RefInfo>,
@@ -49,6 +52,10 @@ pub struct ExprInfo {
     /// The documentation comment of the function or type this name stands for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+    /// An operator expression (`not a`, `a + b`, `a..b`, `x = y`, `x as T`): when a `.` follows
+    /// its last operand, the `.` belongs to that operand, not to the whole expression.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub operator: bool,
 }
 
 #[derive(Serialize)]
@@ -106,6 +113,7 @@ struct RawExpr {
     id: ast::NodeId,
     name: Option<String>,
     statics: Option<String>,
+    operator: bool,
 }
 
 struct RawLocal {
@@ -131,12 +139,21 @@ impl Collector {
             ast::ExprKind::SelfVal => Some("self".to_string()),
             _ => None,
         };
+        let operator = matches!(
+            e.kind,
+            ast::ExprKind::Unary(..)
+                | ast::ExprKind::Binary(..)
+                | ast::ExprKind::Range { .. }
+                | ast::ExprKind::Assign { .. }
+                | ast::ExprKind::Cast(..)
+        );
         self.exprs.push(RawExpr {
             span: e.span,
             ty,
             id: e.id,
             name,
             statics: None,
+            operator,
         });
     }
 
@@ -147,6 +164,7 @@ impl Collector {
             id: e.id,
             name: None,
             statics: Some(key.clone()),
+            operator: false,
         });
         self.statics.entry(key).or_insert(what);
     }
@@ -637,6 +655,21 @@ impl Checker {
                     }
                     let params: Vec<Ty> = def.tparams.iter().map(|p| Ty::Param(*p)).collect();
                     self.impl_methods(&Ty::Struct(asid, params), false, &mut out);
+                    // the functions the checker knows by name (`Reflect.callables`...)
+                    if def.module == super::PRELUDE_MOD {
+                        for (owner, kind, name, detail, doc) in catalog::STATICS {
+                            if *owner == def.name {
+                                out.push(Member {
+                                    name: name.to_string(),
+                                    kind,
+                                    detail: detail.to_string(),
+                                    loc: None,
+                                    doc: Some(doc.to_string()),
+                                    public: true,
+                                });
+                            }
+                        }
+                    }
                 }
                 out.push(class_member());
             }
@@ -822,6 +855,7 @@ impl Checker {
                 label,
                 statics: r.statics,
                 doc,
+                operator: r.operator,
             });
         }
         for l in collected.locals {
@@ -883,6 +917,15 @@ impl Checker {
                 names.extend(prelude.iter().cloned());
             }
             info.globals.insert(self.modules[m].path.clone(), names);
+            let mut imported: BTreeMap<String, Vec<Member>> = BTreeMap::new();
+            for (alias, item) in &self.mscopes[m].items {
+                if let ItemRef::Module(target) = item {
+                    imported.insert(alias.clone(), self.item_members(*target, true));
+                }
+            }
+            if !imported.is_empty() {
+                info.aliases.insert(self.modules[m].path.clone(), imported);
+            }
         }
         Some(info)
     }

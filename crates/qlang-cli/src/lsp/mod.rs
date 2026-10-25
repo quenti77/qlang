@@ -659,8 +659,18 @@ impl Server {
         if let Some(doc) = &item.doc {
             v["documentation"] = json!({ "kind": "markdown", "value": doc });
         }
+        // a function or a method is written with its parentheses, the cursor between them
+        let call = matches!(item.kind.as_str(), "function" | "method");
+        let text = if call {
+            v["insertTextFormat"] = json!(2);
+            intel::call_snippet(&item.label, &item.detail)
+        } else {
+            item.label.clone()
+        };
         if let Some(r) = range {
-            v["textEdit"] = json!({ "range": r, "newText": item.label });
+            v["textEdit"] = json!({ "range": r, "newText": text });
+        } else if call {
+            v["insertText"] = json!(text);
         }
         v
     }
@@ -819,7 +829,12 @@ impl Server {
             let Some(doc) = self.docs.get(&uri) else {
                 return Value::Null;
             };
-            let blanked = intel::blank(&doc.text, line0, dot, col);
+            // after `->` or `:` a type must stay there, or the line does not even parse
+            let in_type = intel::type_position(&line, dot);
+            let blanked = match in_type {
+                Some(from) => intel::blank_as_type(&doc.text, line0, from, col),
+                None => intel::blank(&doc.text, line0, dot, col),
+            };
             let Some(a) = self.analyse(&uri, Some(&blanked)) else {
                 return Value::Null;
             };
@@ -828,7 +843,10 @@ impl Server {
             };
             let before: String = line[..dot].iter().collect();
             let range = line_range(start, col);
-            let items = intel::member_completions(info, &a.entry, line0, dot, &before);
+            let mut items = intel::member_completions(info, &a.entry, line0, dot, &before);
+            if items.is_empty() {
+                items = intel::alias_completions(info, &a.entry, &before);
+            }
             return Value::Array(
                 items
                     .iter()

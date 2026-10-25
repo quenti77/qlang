@@ -575,10 +575,27 @@ impl<'a> Parser<'a> {
                     self.bump();
                     let ty = self.parse_type()?;
                     let (annotations, _) = self.take_annotations();
+                    let default = if self.eat(&Tok::Assign) {
+                        let d = self.parse_expr()?;
+                        if !is_constant(&d) {
+                            return self.error_at(
+                                "P043",
+                                format!(
+                                    "the default of `{}` must be a literal (a number, a text without `{{}}`, `true`, `false`, `none`, `[]` or `{{}}`)",
+                                    pname.name
+                                ),
+                                d.span,
+                            );
+                        }
+                        Some(Rc::new(d))
+                    } else {
+                        None
+                    };
                     params.push(Param {
                         annotations,
                         name: pname,
                         ty,
+                        default,
                     });
                 }
                 if !self.eat(&Tok::Comma) {
@@ -911,6 +928,7 @@ impl<'a> Parser<'a> {
                         annotations: Vec::new(),
                         name: fname,
                         ty,
+                        default: None,
                     });
                     if !self.eat(&Tok::Comma) {
                         break;
@@ -2263,5 +2281,19 @@ impl<'a> Parser<'a> {
         self.next_id = sub.next_id;
         self.diags.append(&mut sub.diags);
         e.ok()
+    }
+}
+
+/// A value a call can fill in without running anything: what a parameter default may be.
+fn is_constant(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None => true,
+        ExprKind::Str(parts) => parts.iter().all(|p| matches!(p, StrPart::Lit(_))),
+        ExprKind::Unary(UnOp::Neg, inner) => {
+            matches!(inner.kind, ExprKind::Int(_) | ExprKind::Float(_))
+        }
+        ExprKind::Array(items) => items.is_empty(),
+        ExprKind::Map(items) => items.is_empty(),
+        _ => false,
     }
 }

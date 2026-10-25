@@ -1,5 +1,10 @@
 # Journal des changements
 
+## Non publié
+
+- **Valeurs par défaut des paramètres** : `fun connect(host: string, port: int = 5432, name: string? = none)`. Un appel peut omettre les paramètres qui en ont une (ou les sauter en nommant les suivants). La valeur est un littéral (nombre, texte, `true`, `false`, `none`, `[]`, `{}`). Un paramètre de type générique que seul un paramètre omis mentionne n'a rien à déduire. Le serveur de langage affiche `port: int = 5432` et laisse ces paramètres hors du modèle d'insertion.
+- **`Log` comme PSR-3** : `Log.info(message, contexte)`, le contexte (facultatif) étant n'importe quelle valeur, écrite en JSON (`context={...}` en texte, un objet `context` en `--log-format json`). Niveaux : `debug`, `info`, `notice`, `warning` (`warn` en est un autre nom), `error`, `critical`, `alert`, `emergency`, et `Log.log(niveau, message, contexte)`. `Log.write` reste. Changement : `Log.warn` écrit maintenant le niveau `warning` (JSON : `"level":"warning"`).
+
 ## 0.56.2
 
 - **Éditeur** : l'autocomplétion marche aussi quand une parenthèse, un crochet ou une accolade est resté ouvert (`fun handle(req: R` propose `Request`) : la copie analysée est fermée à l'endroit du curseur.

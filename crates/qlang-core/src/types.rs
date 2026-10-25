@@ -712,4 +712,7 @@ pub struct Resolutions {
     /// order written, which parameter slot it fills. Absent means purely positional
     /// (the common case), so the interpreter binds arguments in writing order as-is.
     pub arg_order: FxHashMap<NodeId, Vec<usize>>,
+    /// For a call that leaves out parameters having a default: the parameter slot and the
+    /// default value filling it (`arg_order` is then present too).
+    pub arg_defaults: FxHashMap<NodeId, Vec<(usize, Rc<Expr>)>>,
 }

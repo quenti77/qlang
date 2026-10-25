@@ -8,9 +8,20 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 static LEVEL: AtomicU8 = AtomicU8::new(1); // info
 static JSON: AtomicBool = AtomicBool::new(false);
 
-const LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
+/// From the lowest; `warn` is another name for `warning`.
+const LEVELS: [&str; 8] = [
+    "debug",
+    "info",
+    "notice",
+    "warning",
+    "error",
+    "critical",
+    "alert",
+    "emergency",
+];
 
 fn level_of(name: &str) -> Option<u8> {
+    let name = if name == "warn" { "warning" } else { name };
     LEVELS.iter().position(|l| *l == name).map(|i| i as u8)
 }
 
@@ -61,7 +72,7 @@ fn set_format(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes one line, if `level` is wanted. `fields` are the extra `name=value` pairs.
+/// Writes one line, if `level` is wanted. The `context` field, when there is one, holds JSON. `fields` are the extra `name=value` pairs.
 pub fn write(time_ms: Option<i64>, level: &str, message: &str, fields: &[(String, String)]) {
     let n = level_of(level).unwrap_or(1);
     if n < LEVEL.load(Ordering::SeqCst) {
@@ -76,7 +87,12 @@ pub fn write(time_ms: Option<i64>, level: &str, message: &str, fields: &[(String
         obj.insert("level".into(), level.into());
         obj.insert("message".into(), message.into());
         for (k, v) in fields {
-            obj.entry(k.clone()).or_insert_with(|| v.clone().into());
+            // the `context` of `Log.info(message, context)` is JSON already
+            let value = match (k.as_str(), serde_json::from_str::<serde_json::Value>(v)) {
+                ("context", Ok(json)) => json,
+                _ => v.clone().into(),
+            };
+            obj.entry(k.clone()).or_insert(value);
         }
         serde_json::Value::Object(obj).to_string()
     } else {
@@ -85,9 +101,12 @@ pub fn write(time_ms: Option<i64>, level: &str, message: &str, fields: &[(String
             line.push_str(t);
             line.push(' ');
         }
-        line.push_str(&format!("{:<5} {message}", level.to_ascii_uppercase()));
+        let shown = if level == "warning" { "warn" } else { level };
+        line.push_str(&format!("{:<5} {message}", shown.to_ascii_uppercase()));
         for (k, v) in fields {
-            if v.contains(' ') || v.is_empty() {
+            if k == "context" {
+                line.push_str(&format!(" context={v}"));
+            } else if v.contains(' ') || v.is_empty() {
                 line.push_str(&format!(" {k}={v:?}"));
             } else {
                 line.push_str(&format!(" {k}={v}"));
@@ -111,7 +130,7 @@ mod tests {
             .collect();
         configure(&mut args).unwrap();
         assert_eq!(args, ["run", "a.q", "--", "--log-level"]);
-        assert_eq!(LEVEL.load(Ordering::SeqCst), 2);
+        assert_eq!(LEVEL.load(Ordering::SeqCst), 3);
         let mut bad: Vec<String> = vec!["--log-level".into(), "loud".into()];
         assert!(configure(&mut bad).is_err());
         LEVEL.store(1, Ordering::SeqCst);

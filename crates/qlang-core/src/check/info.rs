@@ -321,12 +321,17 @@ impl Checker {
         params: &[Ty],
         ret: &Ty,
         map: &HashMap<ParamId, Ty>,
+        defaults: &[Option<String>],
     ) -> String {
         let shown: Vec<String> = params
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let t = self.show(&p.subst(map));
+                let t = match defaults.get(i) {
+                    Some(Some(d)) => format!("{t} = {d}"),
+                    _ => t,
+                };
                 match names.get(i) {
                     Some(n) if !n.is_empty() => format!("{n}: {t}"),
                     _ => t,
@@ -348,7 +353,17 @@ impl Checker {
             .as_ref()
             .map(|d| d.params.iter().map(|p| p.name.name.clone()).collect())
             .unwrap_or_default();
-        self.signature(&f.name, &names, &f.params, &f.ret, map)
+        let defaults: Vec<Option<String>> = f
+            .decl
+            .as_ref()
+            .map(|d| {
+                d.params
+                    .iter()
+                    .map(|p| p.default.as_ref().map(|e| show_default(e)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.signature(&f.name, &names, &f.params, &f.ret, map, &defaults)
     }
 
     fn fn_member(&self, fid: FnId, map: &HashMap<ParamId, Ty>) -> Member {
@@ -472,7 +487,7 @@ impl Checker {
                 out.push(Member {
                     name: name.to_string(),
                     kind: "method",
-                    detail: this.signature(name, &names, &params, &ret, &HashMap::new()),
+                    detail: this.signature(name, &names, &params, &ret, &HashMap::new(), &[]),
                     loc: None,
                     doc: Some(doc.to_string()),
                     public: true,
@@ -548,7 +563,7 @@ impl Checker {
             out.push(Member {
                 name: sig.name.clone(),
                 kind: "method",
-                detail: self.signature(&sig.name, &[], &sig.params, &ret, &HashMap::new()),
+                detail: self.signature(&sig.name, &[], &sig.params, &ret, &HashMap::new(), &[]),
                 loc: None,
                 doc: docs.and_then(|d| d.get(&sig.name)).cloned(),
                 public: true,
@@ -1011,6 +1026,30 @@ fn dedup(items: Vec<Member>) -> Vec<Member> {
         .into_iter()
         .filter(|m| seen.insert(m.name.clone()))
         .collect()
+}
+
+/// A parameter default as it is written (`3`, `"x"`, `none`, `[]`...).
+fn show_default(e: &ast::Expr) -> String {
+    match &e.kind {
+        ast::ExprKind::Int(n) => n.to_string(),
+        ast::ExprKind::Float(f) => format!("{f:?}"),
+        ast::ExprKind::Bool(b) => b.to_string(),
+        ast::ExprKind::None => "none".to_string(),
+        ast::ExprKind::Str(parts) => {
+            let text: String = parts
+                .iter()
+                .map(|p| match p {
+                    ast::StrPart::Lit(s) => s.as_str(),
+                    ast::StrPart::Expr(_) => "",
+                })
+                .collect();
+            format!("{text:?}")
+        }
+        ast::ExprKind::Unary(_, inner) => format!("-{}", show_default(inner)),
+        ast::ExprKind::Array(_) => "[]".to_string(),
+        ast::ExprKind::Map(_) => "{}".to_string(),
+        _ => "...".to_string(),
+    }
 }
 
 #[cfg(test)]

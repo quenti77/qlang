@@ -749,9 +749,32 @@ print(greet("hi", name: "ana"))             -- mélange positionnel + nommé
 
 Les arguments positionnels doivent précéder les arguments nommés, chaque
 paramètre ne peut être rempli qu'une fois, et tous les paramètres doivent
-être fournis. Les arguments nommés ne sont possibles que pour appeler une
+être fournis, sauf ceux qui ont une valeur par défaut (ci-dessous). Les arguments nommés ne sont possibles que pour appeler une
 fonction ou une méthode déclarée dans le code qlang (pas les fonctions ou
 méthodes natives comme `print` ou `.sort()`).
+
+### Valeurs par défaut
+
+Un paramètre peut avoir une valeur par défaut, écrite après son type : un appel peut alors
+l'omettre.
+
+```
+fun connect(host: string, port: int = 5432, tls: bool = false, name: string? = none) -> string
+  "{host}:{port}"
+end
+
+print(connect("db"))                      -- db:5432
+print(connect("db", 3306))                -- db:3306
+print(connect("db", tls: true))           -- on saute `port` en nommant le suivant
+```
+
+- La valeur est un **littéral** : un nombre (`-1` aussi), un texte sans `\{`, `true`, `false`, `none`, `[]` ou
+  `{}`. Elle doit avoir le type du paramètre (`T002` sinon, au premier appel qui l'utilise).
+- Les paramètres sans valeur par défaut sont obligatoires : `T240` (« expects 1 to 4 argument(s) »).
+- Un paramètre de type générique qui n'est mentionné que par un paramètre omis n'a rien à déduire :
+  `fun note<C>(message: string, context: C? = none)` s'appelle `note("a")` comme `note("a", {"k": 1})`.
+- Ça marche pour les fonctions et les méthodes déclarées en qlang, comme les arguments nommés ; pas pour
+  les types fonction (`fun(int) -> int`) ni `Callable.call`.
 
 ### Fonctions anonymes
 
@@ -2758,13 +2781,17 @@ Une connexion fait une chose à la fois (chaque commande attend sa réponse, 30 
 
 ### Prélude : le journal `Log`
 
-`Log` écrit le journal du programme : `Log.debug("détail")`, `Log.info("démarré")`,
-`Log.warn("lent")`, `Log.error("échec")`, ou `Log.write("info", "message", { "user": "ada" })` avec
-des champs en plus (un autre niveau est écrit comme `info`).
+`Log` écrit le journal du programme avec les niveaux de PSR-3 (PHP), du plus bas au plus haut :
+`debug`, `info`, `notice`, `warning` (ou `warn`), `error`, `critical`, `alert`, `emergency`. Chaque
+niveau est une fonction `Log.niveau(message, contexte)` ; le **contexte** est facultatif et peut être
+n'importe quelle valeur (table, structure, tableau...) : il est écrit en JSON.
 
 ```
 Log.info("démarré")
-Log.write("error", "paiement refusé", { "commande": "42", "raison": "carte expirée" })
+Log.error("paiement refusé", { "commande": 42, "raison": "carte expirée" })
+Log.warning("lent", Slow { route: "/pay", ms: 912 })
+Log.log("notice", "au choix", [1, 2])        -- le niveau est un texte (un inconnu est écrit `info`)
+Log.write("info", "ancien style", { "user": "ada" })   -- des champs texte à plat
 ```
 
 La commande `qlang` écrit une ligne par appel sur la **sortie d'erreur** (pas sur la sortie : le
@@ -2772,13 +2799,15 @@ journal ne se mélange pas aux résultats) :
 
 ```
 2026-10-23T18:50:33.145Z INFO  démarré
-2026-10-23T18:50:33.146Z ERROR paiement refusé commande=42 raison="carte expirée"
+2026-10-23T18:50:33.146Z ERROR paiement refusé context={"commande":42,"raison":"carte expirée"}
 ```
 
-- `--log-level debug|info|warn|error` (ou la variable `QLANG_LOG`) cache les niveaux plus bas ;
-  `info` par défaut.
-- `--log-format json` (ou `QLANG_LOG_FORMAT=json`) écrit un objet par ligne :
-  `{"level":"error","message":"...","commande":"42","time":"..."}`.
+- `--log-level debug|info|notice|warning|error|critical|alert|emergency` (ou la variable `QLANG_LOG`)
+  cache les niveaux plus bas ; `info` par défaut. `warn` est un autre nom de `warning`.
+- `--log-format json` (ou `QLANG_LOG_FORMAT=json`) écrit un objet par ligne, le contexte en objet :
+  `{"level":"error","message":"paiement refusé","context":{"commande":42},"time":"..."}`.
+- PSR-3 remplace aussi `{clé}` dans le message par la valeur du contexte : en qlang, `"{x}"` dans un
+  texte est déjà une interpolation, écris donc le message avec `"commande {id}"`.
 - Un autre hôte garde ou jette les lignes ; elles ne font jamais échouer le programme.
 
 ## 18. Fins de ligne

@@ -443,17 +443,28 @@ impl Server {
         at: (usize, usize),
     ) -> Option<Analysis> {
         // then, still failing, with the open brackets closed at the cursor too
-        let closed = intel::close_brackets(text, at.0, at.1);
+        let mut bases = vec![(text.to_string(), at.1)];
+        if let Some(closed) = intel::close_brackets(text, at.0, at.1) {
+            let shift = closed.chars().count() - text.chars().count();
+            bases.push((closed, at.1 + shift));
+        }
         let mut first = None;
-        for base in std::iter::once(text.to_string()).chain(closed) {
-            let mut source = base;
-            for _ in 0..=6 {
-                let a = self.analyse(uri, Some(&source))?;
-                if a.info.is_some() {
-                    return Some(a);
+        for (base, col) in bases {
+            // `if not x|` and `while y|` wait for their `then` / `do`
+            for tail in ["", " then", " do"] {
+                let mut source = if tail.is_empty() {
+                    base.clone()
+                } else {
+                    intel::insert_at(&base, at.0, col, tail)
+                };
+                for _ in 0..=6 {
+                    let a = self.analyse(uri, Some(&source))?;
+                    if a.info.is_some() {
+                        return Some(a);
+                    }
+                    first.get_or_insert(a);
+                    source.push_str("\nend");
                 }
-                first.get_or_insert(a);
-                source.push_str("\nend");
             }
         }
         first

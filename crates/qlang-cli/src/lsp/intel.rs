@@ -747,6 +747,20 @@ pub fn close_brackets(text: &str, line0: usize, col: usize) -> Option<String> {
     Some(out)
 }
 
+/// The text with `piece` written at `line0:col`.
+pub fn insert_at(text: &str, line0: usize, col: usize, piece: &str) -> String {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+    if let Some(l) = lines.get_mut(line0) {
+        let chars: Vec<char> = l.chars().collect();
+        let col = col.min(chars.len());
+        let mut out: String = chars[..col].iter().collect();
+        out.push_str(piece);
+        out.extend(chars[col..].iter());
+        *l = out;
+    }
+    lines.join("\n")
+}
+
 /// What `alias.` offers when no expression is involved (`fun f() -> web.|`): the exports of the
 /// module the file imported under that name. `before_dot` is the text of the line before the dot.
 pub fn alias_completions(info: &Info, file: &str, before_dot: &str) -> Vec<Item> {
@@ -810,9 +824,10 @@ pub fn blank_as_type(text: &str, line0: usize, from: usize, to: usize) -> String
 
 /// A snippet that writes the call: `name(${1:a}, ${2:b})` with the cursor in the parentheses.
 pub fn call_snippet(name: &str, detail: &str) -> String {
+    // a parameter that has a default (`b: int = 3`) can be left out: the snippet leaves it out
     let params: Vec<String> = parameters(detail)
         .into_iter()
-        .filter(|p| p != "self")
+        .filter(|p| p != "self" && !p.contains(" = "))
         .collect();
     if params.is_empty() {
         return format!("{name}()$0");

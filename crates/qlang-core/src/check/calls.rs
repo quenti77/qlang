@@ -16,6 +16,18 @@ pub(crate) struct CallSig {
     /// available (built-ins, trait dispatch through a bound), where named
     /// arguments are rejected.
     pub param_names: Option<Vec<String>>,
+    /// The default of each parameter (`b: int = 3`), in order; empty when none has one.
+    pub defaults: Vec<Option<Rc<Expr>>>,
+}
+
+/// The parameter defaults of a declared function (empty when there is none).
+fn fn_defaults(decl: &Option<Rc<FunDecl>>) -> Vec<Option<Rc<Expr>>> {
+    match decl {
+        Some(d) if d.params.iter().any(|p| p.default.is_some()) => {
+            d.params.iter().map(|p| p.default.clone()).collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// The parameter names of a declared function, for named-argument resolution.
@@ -572,6 +584,7 @@ impl Checker {
                     params,
                     ret: *ret,
                     param_names: None,
+                    defaults: Vec::new(),
                 };
                 self.check_args(e, &sig, &[], HashMap::new(), args, want)
             }
@@ -667,6 +680,7 @@ impl Checker {
             params: def.params.clone(),
             ret: def.ret.clone(),
             param_names: fn_param_names(&def.decl),
+            defaults: fn_defaults(&def.decl),
         };
         let generic = !sig.tparams.is_empty();
         self.callee_hint = Some(fid);
@@ -683,18 +697,27 @@ impl Checker {
     fn order_args<'a>(
         &mut self,
         e: &Expr,
-        sig: &CallSig,
+        sig: &'a CallSig,
         params: &[Ty],
         args: &'a [CallArg],
     ) -> Option<Vec<&'a Expr>> {
+        let default_of = |i: usize| sig.defaults.get(i).and_then(|d| d.as_ref());
         if args.iter().all(|a| a.name.is_none()) {
-            if args.len() != params.len() {
+            let left_out = (args.len()..params.len()).all(|i| default_of(i).is_some());
+            if args.len() > params.len() || (args.len() < params.len() && !left_out) {
+                let required = (0..params.len())
+                    .rposition(|i| default_of(i).is_none())
+                    .map_or(0, |i| i + 1);
+                let wanted = if required == params.len() {
+                    params.len().to_string()
+                } else {
+                    format!("{required} to {}", params.len())
+                };
                 self.err(
                     "T240",
                     format!(
-                        "`{}` expects {} argument(s), found {}",
+                        "`{}` expects {wanted} argument(s), found {}",
                         sig.name,
-                        params.len(),
                         args.len()
                     ),
                     e.span,
@@ -702,7 +725,18 @@ impl Checker {
                 self.check_args_loose(args);
                 return None;
             }
-            return Some(args.iter().map(|a| &a.value).collect());
+            let mut out: Vec<&'a Expr> = args.iter().map(|a| &a.value).collect();
+            if args.len() < params.len() {
+                let mut filled = Vec::new();
+                for i in args.len()..params.len() {
+                    let d = default_of(i).expect("checked above");
+                    out.push(&**d);
+                    filled.push((i, d.clone()));
+                }
+                self.res.arg_order.insert(e.id, (0..args.len()).collect());
+                self.res.arg_defaults.insert(e.id, filled);
+            }
+            return Some(out);
         }
         let Some(names) = &sig.param_names else {
             self.err(
@@ -765,6 +799,15 @@ impl Checker {
             self.check_args_loose(args);
             return None;
         }
+        let mut filled = Vec::new();
+        for (i, slot) in slots.iter_mut().enumerate() {
+            if slot.is_none()
+                && let Some(d) = default_of(i)
+            {
+                *slot = Some(&**d);
+                filled.push((i, d.clone()));
+            }
+        }
         if let Some(missing) = slots.iter().position(|s| s.is_none()) {
             let pn = names.get(missing).map(|s| s.as_str()).unwrap_or("?");
             self.err(
@@ -776,6 +819,9 @@ impl Checker {
             return None;
         }
         self.res.arg_order.insert(e.id, order);
+        if !filled.is_empty() {
+            self.res.arg_defaults.insert(e.id, filled);
+        }
         Some(slots.into_iter().map(|s| s.unwrap()).collect())
     }
 
@@ -845,6 +891,18 @@ impl Checker {
             if !self.assignable(&t, p) {
                 let want = self.resolve(p);
                 self.mismatch(a.span, &want, &t);
+            }
+        }
+        // a type parameter that only a left-out parameter with a default mentions has nothing
+        // to be inferred from: it stands for no type (`Log.info("x")` for `context: C? = none`)
+        if self.res.arg_defaults.contains_key(&e.id) {
+            for p in &sig.tparams {
+                if let Some(arg) = map.get(p).cloned() {
+                    let arg = self.resolve(&arg);
+                    if arg.contains_infer() {
+                        self.same(&arg, &Ty::Unit);
+                    }
+                }
             }
         }
         for p in &sig.tparams {
@@ -954,6 +1012,7 @@ impl Checker {
                 params,
                 ret,
                 param_names: None,
+                defaults: Vec::new(),
             };
             let out = self.check_args(e, &sig, &[], HashMap::new(), args, want);
             // the typed machine runs the built-in methods whose types it can hold
@@ -1006,6 +1065,7 @@ impl Checker {
                 params: f.params.clone(),
                 ret: f.ret.clone(),
                 param_names: fn_param_names(&f.decl),
+                defaults: fn_defaults(&f.decl),
             };
             self.callee_hint = Some(um.fid);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
@@ -1031,6 +1091,7 @@ impl Checker {
                     params: sig.params.iter().map(|p| p.subst(&map)).collect(),
                     ret: sig.ret.clone().map(|r| r.subst(&map)).unwrap_or(Ty::Error),
                     param_names: None,
+                    defaults: Vec::new(),
                 };
                 return self.check_args(e, &cs, &explicit, map, args, want);
             }
@@ -1051,6 +1112,7 @@ impl Checker {
                         params,
                         ret: *ret,
                         param_names: None,
+                        defaults: Vec::new(),
                     };
                     return self.check_args(e, &sig, &[], HashMap::new(), args, want);
                 }
@@ -1072,6 +1134,7 @@ impl Checker {
                 params: vec![],
                 ret: Ty::Str,
                 param_names: None,
+                defaults: Vec::new(),
             };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
@@ -1141,6 +1204,7 @@ impl Checker {
                 params: variant.fields.iter().map(|(_, t)| t.subst(&map)).collect(),
                 ret: ty.clone(),
                 param_names: Some(variant.fields.iter().map(|(n, _)| n.clone()).collect()),
+                defaults: Vec::new(),
             };
             let out = self.check_args(e, &sig, &[], HashMap::new(), args, want);
             self.res.expr_tys.insert(e.id, ty.clone());
@@ -1227,6 +1291,7 @@ impl Checker {
                     params,
                     ret,
                     param_names: None,
+                    defaults: Vec::new(),
                 };
                 return self.check_args(e, &sig, &[], HashMap::new(), args, want);
             }
@@ -1275,6 +1340,7 @@ impl Checker {
                 params: f.params.clone(),
                 ret: f.ret.clone(),
                 param_names: fn_param_names(&f.decl),
+                defaults: fn_defaults(&f.decl),
             };
             self.callee_hint = Some(um.fid);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
@@ -1289,6 +1355,7 @@ impl Checker {
                 params,
                 ret: *ret,
                 param_names: None,
+                defaults: Vec::new(),
             };
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
@@ -1376,6 +1443,7 @@ impl Checker {
             params: f.params.clone(),
             ret: f.ret.clone(),
             param_names: fn_param_names(&f.decl),
+            defaults: fn_defaults(&f.decl),
         };
         self.check_args(e, &sig, &[], um.map, args, want)
     }

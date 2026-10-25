@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.56.1
+
+- **Éditeur** : l'autocomplétion marche aussi quand le fichier ne se compile pas encore parce qu'un bloc est resté ouvert (`fun handle(req: R)` sans son `end` propose `Request`). La copie analysée est complétée par des `end` ; le fichier, lui, n'est pas touché.
+
 ## 0.56.0
 
 Dixième version du cycle « frameworks web en qlang » : l'outillage autour du langage (mise en forme, index de paquets, appels en parallèle) et, côté `qlang-std` 0.10.0, ce qu'il faut pour exploiter une application.

@@ -655,3 +655,23 @@ fn a_function_is_completed_with_its_parentheses_and_parameters() {
         .unwrap();
     assert_eq!(v["textEdit"]["newText"], "validate()$0");
 }
+
+#[test]
+fn completion_works_while_a_block_is_still_open() {
+    let dir = project("complete-open");
+    let mut c = Client::start(&dir);
+    // `fun` without its `end`: the file does not parse yet
+    let ok = labels_at(&mut c, &dir, "ok.q", "fun handle(req: R)\nend\n", 0, 17);
+    assert!(ok.contains(&"Request".to_string()), "closed: {ok:?}");
+    let l = labels_at(&mut c, &dir, "a.q", "fun handle(req: R)\n", 0, 17);
+    assert!(l.contains(&"Request".to_string()), "{l:?}");
+    let l = labels_at(
+        &mut c,
+        &dir,
+        "b.q",
+        "fun handle(count: int) -> int\n  let total = 1\n  tot\n",
+        2,
+        5,
+    );
+    assert!(l.contains(&"total".to_string()), "{l:?}");
+}

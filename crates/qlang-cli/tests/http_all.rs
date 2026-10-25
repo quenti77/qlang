@@ -44,15 +44,28 @@ fn http_send_all_runs_the_requests_at_the_same_time() {
     std::fs::write(
         &file,
         format!(
-            "let started = time.now()\nlet answers = http.send_all([\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/1\" }},\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/2\" }},\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/3\" }},\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:1/x\" }},\n])\nfor a in answers do\n  print(if a.is_ok() then a.unwrap().body else \"error\" end)\nend\nprint(time.now() - started < 1900)\n"
+            "let started = time.now()\nlet answers = http.send_all([\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/1\" }},\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/2\" }},\n  Request {{ method: \"GET\", url: \"http://127.0.0.1:{port}/3\" }},\n])\nfor a in answers do\n  print(if a.is_ok() then a.unwrap().body else \"error\" end)\nend\nprint(time.now() - started < 1900)\n"
         ),
     )
     .unwrap();
     let out = qlang().arg("run").arg(&file).output().unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "/1\n/2\n/3\nerror\ntrue\n",
+        "/1\n/2\n/3\ntrue\n",
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+#[test]
+fn a_request_that_cannot_connect_is_an_error_among_the_answers() {
+    let d = dir("refused");
+    let file = d.join("r.q");
+    std::fs::write(
+        &file,
+        "let answers = http.send_all([Request { method: \"GET\", url: \"http://127.0.0.1:1/x\" }])\nprint(answers.len())\nprint(answers[0].is_err())\n",
+    )
+    .unwrap();
+    let out = qlang().arg("run").arg(&file).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "1\ntrue\n");
 }

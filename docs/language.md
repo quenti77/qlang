@@ -1114,6 +1114,7 @@ on lit des descriptions (`StructInfo`, `EnumInfo`, `FunctionInfo`...), des valeu
 | `Reflect.methods<Users>()` | `array<FunctionInfo>` des méthodes des `impl` de `Users` (`has_self` dit si elle prend `self`) |
 | `Reflect.find_method<Users, fun(Request) -> Response>(valeur, "list")` | la méthode `list` de `valeur`, déjà liée à elle, si son type (sans `self`) est celui-là, sinon `none` |
 | `Reflect.type_info<T>()` | la forme d'un type, en `TypeInfo` : `kind` (`int`, `string`, `array`, `map`, `struct`, `enum`...), `name`, `nullable`, `item` (élément d'un tableau, valeur d'une table), `fields` (les champs que `Json.of` écrit : `FieldType` avec `name` JSON, `field`, `info`, `annotations`), `variants`, `recursive` ; de quoi écrire un schéma. `ParamInfo.type_info()` et `Callable.return_info()` donnent celle d'un paramètre et du résultat |
+| `Reflect.constructors(m)` | les structures de `m` (sans paramètre de type, ni annotation), chacune en `Callable` qui la **construit** à partir de ses champs, dans l'ordre (les champs privés aussi) : `params` sont les champs, `return_type` la structure, `annotations` les siennes. Sert à un conteneur qui remplit les champs d'un service tout seul |
 | `Reflect.bound_callables<Users>(valeur)` | les méthodes publiques de `Users` (avec `self`, sans paramètre de type), déjà liées à `valeur`, en `array<Callable>` : c'est ce qui permet des contrôleurs en classes |
 
 Une annotation lue est une `AnnotationInfo` : `name` (celui de sa structure) et `args`, les

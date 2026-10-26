@@ -1556,7 +1556,8 @@ impl<'a> Interp<'a> {
                         let module_arg = match op {
                             ReflectOp::Functions(_)
                             | ReflectOp::Structs(_)
-                            | ReflectOp::Callables(_) => args.len() == 1,
+                            | ReflectOp::Callables(_)
+                            | ReflectOp::Constructors(_) => args.len() == 1,
                             ReflectOp::Callable(_) => args.len() == 2,
                             _ => false,
                         };

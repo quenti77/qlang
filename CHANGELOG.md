@@ -1,5 +1,10 @@
 # Journal des changements
 
+## 0.58.0
+
+- **`Reflect.constructors(module)`** : les structures d'un module, chacune en `Callable` qui la construit à partir de ses champs (dans l'ordre, les champs privés aussi) ; `params`, `return_type` et `annotations` décrivent la structure. C'est ce qui permet à un conteneur d'injection de construire un service sans fonction fournisseur.
+- `qlang-std` 0.11.0 : `#[di.Service]` sur une structure (ses champs sont ses dépendances), `app.services(Reflect.constructors(module))`, `app.bind<Interface, Implémentation>()`, `di.services_of(...)`.
+
 ## 0.57.1
 
 - **Documentation** : la référence explique la sortie et la sortie d'erreur (`print` et `write` portent ce que le programme produit, `eprint`, `ewrite` et `Log` portent le journal, les avertissements et la progression ; la sortie d'erreur n'est pas réservée aux erreurs).

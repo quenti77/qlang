@@ -147,7 +147,7 @@ impl Interp<'_> {
         self.new_struct(self.prelude_struct(ty), fields)
     }
 
-    fn type_name(&self, ty: &Ty) -> Value {
+    pub(super) fn type_name(&self, ty: &Ty) -> Value {
         Value::str(&ty.show(&self.prog.defs))
     }
 
@@ -209,7 +209,7 @@ impl Interp<'_> {
         )
     }
 
-    fn param_info(&self, name: &str, ty: &Ty, annotations: Value) -> Value {
+    pub(super) fn param_info(&self, name: &str, ty: &Ty, annotations: Value) -> Value {
         self.info(
             "ParamInfo",
             &[

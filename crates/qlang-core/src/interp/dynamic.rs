@@ -71,6 +71,16 @@ impl Interp<'_> {
                     .collect();
                 Value::array(fids.into_iter().map(|f| self.callable_of(f)).collect())
             }
+            ReflectOp::Constructors(m) => {
+                let defs = &self.prog.defs;
+                let ids: Vec<StructId> = (0..defs.structs.len())
+                    .filter(|&s| {
+                        let d = &defs.structs[s];
+                        d.module == *m && d.tparams.is_empty() && !d.annotation
+                    })
+                    .collect();
+                Value::array(ids.into_iter().map(|s| self.constructor_of(s)).collect())
+            }
             ReflectOp::Callable(m) => {
                 let Value::Str(name) = &args[0] else {
                     return Ok(Value::None);
@@ -149,6 +159,59 @@ impl Interp<'_> {
         fields.push(("target", self.any_box(self.fn_value(fid), &fty)));
         fields.push(("ret", self.any_box(Value::None, &def.ret)));
         self.info("Callable", &fields)
+    }
+
+    /// A `Callable` that builds the structure `sid` from its fields, in order (private ones too).
+    fn constructor_of(&self, sid: StructId) -> Value {
+        let ty = Ty::Struct(sid, Vec::new());
+        let params: Vec<Value> = self
+            .fields_of(&ty)
+            .iter()
+            .map(|(asid, i, f, fty)| {
+                self.param_info(
+                    &f.name,
+                    fty,
+                    self.annotation_infos(AnnKey::Field(*asid, *i)),
+                )
+            })
+            .collect();
+        let fields = vec![
+            ("name", Value::str(&self.prog.defs.structs[sid].name)),
+            ("params", Value::array(params)),
+            ("return_type", self.type_name(&ty)),
+            ("annotations", self.annotation_infos(AnnKey::Struct(sid))),
+            ("target", self.any_box(Value::None, &ty)),
+            ("ret", self.any_box(Value::None, &ty)),
+        ];
+        self.info("Callable", &fields)
+    }
+
+    /// `invoke` of a constructor: the structure built from `items`, one per field.
+    fn construct_from(&mut self, ty: &Ty, items: &[Value]) -> Value {
+        let Ty::Struct(sid, _) = ty else {
+            return self.err_result("not a struct");
+        };
+        let fields = self.fields_of(ty);
+        if items.len() != fields.len() {
+            return self.err_result(&format!(
+                "expected {} argument(s), found {}",
+                fields.len(),
+                items.len()
+            ));
+        }
+        let mut out = SmallMap::default();
+        for ((_, _, f, fty), item) in fields.iter().zip(items.iter()) {
+            match self.any_fits(item, fty) {
+                Ok(v) => out.insert(&f.name, v),
+                Err(why) => return self.err_result(&format!("field `{}`: {why}", f.name)),
+            };
+        }
+        let obj = Value::Struct(Rc::new(StructObj {
+            def: *sid,
+            fields: RefCell::new(out),
+        }));
+        let boxed = self.any_box(obj, ty);
+        self.ok_result(boxed)
     }
 
     /// A `Callable` for the method `fid`, with `self` set to `obj`.
@@ -311,6 +374,10 @@ impl Interp<'_> {
         let (Value::Any(t), Value::Array(items)) = (target, list) else {
             return Ok(self.err_result("not a function"));
         };
+        if let Ty::Struct(..) = &t.ty {
+            let items: Vec<Value> = items.borrow().clone();
+            return Ok(self.construct_from(&t.ty.clone(), &items));
+        }
         let Ty::Fn(params, ret) = &t.ty else {
             return Ok(self.err_result("not a function"));
         };

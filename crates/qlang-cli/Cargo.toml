@@ -14,17 +14,17 @@ qlang-core = { path = "../qlang-core" }
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml_edit = "0.22"
-toml = { version = "0.8", default-features = false, features = ["parse"] }
-ureq = "2"
-rusqlite = { version = "0.31", features = ["bundled"] }
+toml_edit = "0.25"
+toml = { version = "1.1", default-features = false, features = ["parse"] }
+ureq = "3"
+rusqlite = { version = "0.40", features = ["bundled"] }
 postgres = "0.19"
-tokio-postgres-rustls = "0.12"
+tokio-postgres-rustls = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 bytes = "1"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 argon2 = { version = "0.5", default-features = false, features = ["std", "alloc", "password-hash"] }
-getrandom = "0.2"
+getrandom = "0.4"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }

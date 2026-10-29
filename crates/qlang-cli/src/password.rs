@@ -20,7 +20,7 @@ fn current() -> Argon2<'static> {
 /// A new hash of `plain`, with a fresh random salt.
 pub fn hash(plain: &str) -> Result<String, String> {
     let mut raw = [0u8; 16];
-    getrandom::getrandom(&mut raw).map_err(|e| format!("no source of randomness: {e}"))?;
+    getrandom::fill(&mut raw).map_err(|e| format!("no source of randomness: {e}"))?;
     let salt = SaltString::encode_b64(&raw).map_err(|e| e.to_string())?;
     current()
         .hash_password(plain.as_bytes(), &salt)

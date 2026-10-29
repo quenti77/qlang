@@ -2960,7 +2960,7 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 - **Bibliothèque standard :** elle couvre le quotidien (chaînes, tableaux, dictionnaires,
   `Set`, tuples, maths, encodages, fichiers, réseau, processus, tests). Le reste vit en
-  paquets : voir `qlang-std` (CSV, gabarits, TOML) ; YAML, mail et S3 ne sont pas écrits.
+  paquets : voir `qlang-std` (CSV, gabarits, TOML, mail, S3, conteneur de services) ; YAML n'est pas écrit.
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut), et pas de comparaison `<`.
 - **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme

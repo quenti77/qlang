@@ -984,3 +984,72 @@ fn a_bad_limit_is_refused_at_start() {
         assert_eq!(out.status.code(), Some(64), "{option} {value}");
     }
 }
+
+/// Damaged requests of every kind: the server answers or closes, and still answers afterwards.
+#[test]
+fn damaged_requests_do_not_stop_the_server() {
+    let server = start(
+        "damaged",
+        APP,
+        &[
+            "--max-body",
+            "4k",
+            "--max-headers",
+            "2k",
+            "--read-timeout",
+            "1",
+        ],
+    );
+    let good = "POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\n\r\nhello";
+    let mut seed: u64 = 0x2545F4914F6CDD1D;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut cases: Vec<Vec<u8>> = vec![
+        b"".to_vec(),
+        b"\r\n\r\n".to_vec(),
+        b"GET\r\n\r\n".to_vec(),
+        b"GET / HTTP/9.9\r\n\r\n".to_vec(),
+        b"GET / HTTP/1.1\r\nHost\r\n\r\n".to_vec(),
+        b"GET / HTTP/1.1\r\n: no-name\r\n\r\n".to_vec(),
+        b"POST /x HTTP/1.1\r\nContent-Length: -1\r\n\r\n".to_vec(),
+        b"POST /x HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n".to_vec(),
+        b"POST /x HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab".to_vec(),
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nZZ\r\nabc\r\n0\r\n\r\n".to_vec(),
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\n".to_vec(),
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n0\r\n\r\n".to_vec(),
+        b"GET /%zz%00%ff HTTP/1.1\r\nHost: t\r\n\r\n".to_vec(),
+        b"GET /\xff\xfe HTTP/1.1\r\nHost: t\r\n\r\n".to_vec(),
+        b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\n\r\n".to_vec(),
+        vec![0u8; 3000],
+        b"G".repeat(5000),
+    ];
+    for _ in 0..150 {
+        let mut bytes = good.as_bytes().to_vec();
+        for _ in 0..1 + next() % 4 {
+            let at = (next() as usize) % (bytes.len() + 1);
+            match next() % 3 {
+                0 if at < bytes.len() => {
+                    bytes.remove(at);
+                }
+                1 => bytes.insert(at, (next() % 256) as u8),
+                _ => bytes.truncate(at),
+            }
+        }
+        cases.push(bytes);
+    }
+    for case in &cases {
+        if let Ok(mut s) = TcpStream::connect(("127.0.0.1", server.port)) {
+            let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+            let _ = s.write_all(case);
+            let _ = s.shutdown(std::net::Shutdown::Write);
+            let mut sink = Vec::new();
+            let _ = s.read_to_end(&mut sink);
+        }
+    }
+    // still alive, and still right
+    assert!(exchange(&server, good).starts_with("HTTP/1.1 201"));
+}

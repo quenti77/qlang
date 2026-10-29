@@ -6,6 +6,7 @@
 - **Réponses 40 ms plus vite** : l'en-tête et le corps d'une réponse partent en une seule écriture (et `TCP_NODELAY` est mis sur les connexions). Avant, sur une connexion persistante, l'algorithme de Nagle et l'accusé de réception différé du client retardaient chaque réponse de 40 ms (24 requêtes par seconde et par connexion au banc, contre plus de 10 000 maintenant).
 - **`--no-access-log`** : n'écrit plus la ligne `GET /chemin -> 200 (1 ms)` de chaque requête.
 - **Banc de charge HTTP** : `python3 benches/http_load.py` (requêtes par seconde, latence p50/p95/p99, erreurs, mémoire du serveur dans la durée), le programme `benches/http/app.q`, le workflow `Bench` (sur demande et chaque lundi, JSON en artefact), et une section « Le serveur HTTP » dans `docs/performance.md`, dont l'introduction ne dit plus « pas de bytecode ».
+- **Sécurité** : `SECURITY.md` (comment signaler une faille, délais visés, ce qui en est une), un test de mutation du compilateur et du formateur sur les programmes de `examples/` (graine fixe en CI, balayage long chaque dimanche par le workflow `Fuzz` : 60 000 programmes abîmés sans plantage au premier essai), et un test de requêtes HTTP abîmées.
 - **Documentation** : la section 21 de la référence cite le mail et S3 parmi les paquets de `qlang-std`.
 
 ## 0.58.0

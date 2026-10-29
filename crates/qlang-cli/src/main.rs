@@ -62,7 +62,7 @@ USAGE:
     qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--static DIR] [--workers N]
                         [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev] [--compress]
                         [--max-connections N] [--max-body SIZE] [--max-headers SIZE]
-                        [--read-timeout S] [--idle-timeout S]
+                        [--read-timeout S] [--idle-timeout S] [--no-access-log]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
                                          (--watch: reload when a file of the program changes;

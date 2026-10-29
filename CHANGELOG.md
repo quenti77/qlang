@@ -1,5 +1,10 @@
 # Journal des changements
 
+## Prochaine version
+
+- **Serveur HTTP** : les bornes se règlent. `--max-connections N` (64), `--max-body TAILLE` (1 Mo), `--max-headers TAILLE` (64 Ko, `431` au-delà), `--read-timeout S` (20 s pour envoyer toute la requête) et `--idle-timeout S` (5 s de silence sur une connexion persistante), pour `qlang serve app.q` comme pour `qlang serve`. Un client trop lent reçoit maintenant `408` au lieu d'une connexion fermée sans réponse. Les en-têtes trop gros donnent `431` (c'était `400`).
+- **Documentation** : la section 21 de la référence cite le mail et S3 parmi les paquets de `qlang-std`.
+
 ## 0.58.0
 
 - **`Reflect.constructors(module)`** : les structures d'un module, chacune en `Callable` qui la construit à partir de ses champs (dans l'ordre, les champs privés aussi) ; `params`, `return_type` et `annotations` décrivent la structure. C'est ce qui permet à un conteneur d'injection de construire un service sans fonction fournisseur.

@@ -2616,6 +2616,11 @@ Options de `qlang serve app.q` :
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
+| `--max-connections N` | connexions ouvertes en même temps (64 par défaut, de 1 à 10000) ; les suivantes reçoivent `503` |
+| `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |
+| `--max-headers TAILLE` | taille de la ligne de requête et des en-têtes (64 Ko par défaut) ; au-delà, `431`     |
+| `--read-timeout S` | secondes laissées à un client pour envoyer **toute** sa requête (20 par défaut) ; au-delà, `408` (protège du slowloris) |
+| `--idle-timeout S` | secondes de silence après lesquelles une connexion persistante est fermée (5 par défaut) |
 
 - **Fichiers statiques** (`--static public`) : pour `GET` et `HEAD`, si le chemin désigne un
   fichier du dossier (ou `index.html` pour un dossier), il est servi avec son type
@@ -2629,7 +2634,9 @@ Options de `qlang serve app.q` :
 - **Arrêt** : Ctrl-C ou un signal `TERM` arrête proprement le serveur : les requêtes déjà
   acceptées reçoivent leur réponse (5 secondes au plus), les nouvelles reçoivent `503`.
 - **Le serveur** est simple : HTTP/1.1 sans TLS, 64 connexions en même temps au plus, corps
-  limité à 1 Mo. Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
+  limité à 1 Mo (les options `--max-connections`, `--max-body`, `--max-headers`,
+  `--read-timeout` et `--idle-timeout` changent ces bornes, aussi pour `qlang serve` sans
+  programme). Comme `qlang serve` pour le protocole JSON, **placez-le derrière un proxy
   inverse** et ne l'exposez pas directement à Internet.
   - **Connexions persistantes** : une connexion sert jusqu'à 100 requêtes (5 secondes de silence
     la ferment ; `Connection: close` aussi), requêtes envoyées d'un coup comprises.

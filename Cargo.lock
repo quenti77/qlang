@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "0.57.0"
+version = "0.57.1"
 dependencies = [
  "argon2",
  "bytes",
@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-core"
-version = "0.57.0"
+version = "0.57.1"
 dependencies = [
  "regex",
  "serde",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "0.57.0"
+version = "0.57.1"
 dependencies = [
  "qlang-core",
 ]

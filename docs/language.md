@@ -1666,7 +1666,7 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | ------------------------ | --------------------------------------------------------------------- |
 | `print(x)`               | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
 | `write(x)`               | affiche `x` sans retour à la ligne                                    |
-| `eprint(x)`, `ewrite(x)` | comme `print` et `write`, sur la sortie d'erreur (jamais mêlée aux résultats ; un hôte sans sortie d'erreur les jette) |
+| `eprint(x)`, `ewrite(x)` | comme `print` et `write`, sur la sortie d'erreur (jamais mêlée aux résultats ; un hôte sans sortie d'erreur les jette). Voir [Sortie et sortie d'erreur](#sortie-et-sortie-derreur) |
 | `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
 | `read_all()`             | lit toutes les lignes restantes, reliées par des retours à la ligne (aucun après la dernière) |
 | `exit(code?)`            | termine le programme tout de suite avec ce code de sortie (0 par défaut) ; rien ne s'exécute après |
@@ -1688,6 +1688,23 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 [Conversions](#conversions)) : les tableaux s'affichent `[1, 2, 3]`, les
 chaînes dans un tableau sont entre guillemets. `read()` renvoie toujours une
 `string` ; pour un nombre : `int.parse(read())`.
+
+#### Sortie et sortie d'erreur
+
+Un programme a deux sorties. La **sortie** (`print`, `write`) porte ce que le programme
+*produit* : c'est elle qu'on redirige vers un fichier ou qu'on passe à un autre programme
+(`qlang run x.q | jq`). La **sortie d'erreur** (`eprint`, `ewrite`, et le journal `Log`) porte
+tout ce qui parle *du* programme : journal, avertissements, progression. Malgré son nom, elle
+n'est pas réservée aux erreurs : un `Log.info` y va aussi. La gravité est dite par le niveau
+du journal (le champ `level` en `--log-format json`), pas par le flux.
+
+```sh
+qlang run rapport.q > rapport.txt     # le journal reste dans le terminal
+qlang run rapport.q 2> rapport.log    # le journal va dans un fichier
+```
+
+Docker, systemd et Kubernetes lisent les deux flux : un programme qui journalise sur la sortie
+d'erreur n'a ni fichier ni rotation à gérer.
 
 ### Méthodes prédéfinies
 
@@ -2795,7 +2812,7 @@ Log.write("info", "ancien style", { "user": "ada" })   -- des champs texte à pl
 ```
 
 La commande `qlang` écrit une ligne par appel sur la **sortie d'erreur** (pas sur la sortie : le
-journal ne se mélange pas aux résultats) :
+journal ne se mélange pas aux résultats ; voir [Sortie et sortie d'erreur](#sortie-et-sortie-derreur)) :
 
 ```
 2026-10-23T18:50:33.145Z INFO  démarré

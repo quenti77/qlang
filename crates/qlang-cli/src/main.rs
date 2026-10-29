@@ -370,7 +370,7 @@ impl Host for TerminalHost {
 
     fn secure_random(&mut self, n: usize) -> Result<Vec<u8>, HostError> {
         let mut out = vec![0u8; n];
-        getrandom::getrandom(&mut out)
+        getrandom::fill(&mut out)
             .map_err(|e| HostError::Other(format!("no source of randomness: {e}")))?;
         Ok(out)
     }
@@ -512,40 +512,34 @@ impl Host for TerminalHost {
 }
 
 fn send_http(req: HttpRequest) -> Result<HttpResponse, HostError> {
-    let mut r = ureq::request(&req.method, &req.url).timeout(std::time::Duration::from_secs(60));
+    // a non-2xx status is still a response, not a failure
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut builder = ureq::http::Request::builder()
+        .method(req.method.as_str())
+        .uri(req.url.as_str());
     for (name, value) in &req.headers {
-        r = r.set(name, value);
+        builder = builder.header(name.as_str(), value.as_str());
     }
+    let bad = |e: ureq::http::Error| HostError::Other(e.to_string());
     let result = match (&req.body_bytes, &req.body) {
-        (Some(bytes), _) => r.send_bytes(bytes),
-        (None, Some(body)) => r.send_string(body),
-        (None, None) => r.call(),
+        (Some(bytes), _) => agent.run(builder.body(bytes.clone()).map_err(bad)?),
+        (None, Some(body)) => agent.run(builder.body(body.clone()).map_err(bad)?),
+        (None, None) => agent.run(builder.body(()).map_err(bad)?),
     };
-    match result {
-        Ok(resp) => {
-            let status = resp.status() as i64;
-            let headers = response_headers(&resp);
-            let (body, raw) = read_body(resp)?;
-            Ok(HttpResponse {
-                status,
-                headers,
-                body,
-                raw,
-            })
-        }
-        // a non-2xx/3xx status is still a response, not a failure
-        Err(ureq::Error::Status(status, resp)) => {
-            let headers = response_headers(&resp);
-            let (body, raw) = read_body(resp)?;
-            Ok(HttpResponse {
-                status: status as i64,
-                headers,
-                body,
-                raw,
-            })
-        }
-        Err(ureq::Error::Transport(t)) => Err(HostError::Other(t.to_string())),
-    }
+    let resp = result.map_err(|e| HostError::Other(e.to_string()))?;
+    let status = i64::from(resp.status().as_u16());
+    let headers = response_headers(&resp);
+    let (body, raw) = read_body(resp)?;
+    Ok(HttpResponse {
+        status,
+        headers,
+        body,
+        raw,
+    })
 }
 
 /// The `extern fun` the prelude's `Password` is built on.
@@ -571,10 +565,13 @@ fn password_call(name: &str, args: &[HostValue]) -> Result<HostValue, HostError>
 
 /// The body of a response as text, and as bytes when it is not valid text. At most 16 MiB.
 #[allow(clippy::type_complexity)]
-fn read_body(resp: ureq::Response) -> Result<(String, Option<Vec<u8>>), HostError> {
+fn read_body(
+    resp: ureq::http::Response<ureq::Body>,
+) -> Result<(String, Option<Vec<u8>>), HostError> {
     use std::io::Read;
     let mut data = Vec::new();
-    resp.into_reader()
+    resp.into_body()
+        .into_reader()
         .take(16 << 20)
         .read_to_end(&mut data)
         .map_err(|e| HostError::Other(e.to_string()))?;
@@ -588,12 +585,14 @@ fn read_body(resp: ureq::Response) -> Result<(String, Option<Vec<u8>>), HostErro
 }
 
 /// The headers of a response, with lower-case names.
-fn response_headers(resp: &ureq::Response) -> Vec<(String, String)> {
-    resp.headers_names()
-        .into_iter()
-        .filter_map(|name| {
-            resp.header(&name)
-                .map(|v| (name.to_ascii_lowercase(), v.to_string()))
+fn response_headers(resp: &ureq::http::Response<ureq::Body>) -> Vec<(String, String)> {
+    resp.headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_ascii_lowercase(), v.to_string()))
         })
         .collect()
 }

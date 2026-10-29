@@ -44,13 +44,18 @@ fn parse(text: &str) -> Result<Vec<Entry>, String> {
 
 fn read(location: &str) -> Result<String, String> {
     if location.starts_with("http://") || location.starts_with("https://") {
-        let resp = ureq::get(location)
-            .timeout(std::time::Duration::from_secs(10))
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(10)))
+            .build()
+            .into();
+        let resp = agent
+            .get(location)
             .call()
             .map_err(|e| format!("cannot read the package index: {e}"))?;
         let mut text = String::new();
         use std::io::Read;
-        resp.into_reader()
+        resp.into_body()
+            .into_reader()
             .take(1 << 20)
             .read_to_string(&mut text)
             .map_err(|e| format!("cannot read the package index: {e}"))?;

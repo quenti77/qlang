@@ -19,6 +19,8 @@ Ce projet est entretenu par une personne, sur son temps : voici ce qu'on peut te
 Vous êtes informé de l'avancement, et cité dans le journal des changements si vous le souhaitez.
 Merci de laisser le temps de publier un correctif avant de parler de la faille publiquement.
 
+Les revues déjà faites (crypto, permissions) sont dans [`docs/security.md`](docs/security.md).
+
 ## Versions suivies
 
 qlang n'a pas encore de version 1.0. Seule la **dernière version** reçoit des correctifs de

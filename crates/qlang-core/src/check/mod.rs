@@ -1639,7 +1639,7 @@ impl Crypto
     `key`, a public key as a PEM (`BEGIN PUBLIC KEY`, `BEGIN RSA PUBLIC KEY`) or a JWK (JSON text).
     `alg` is `RS256`, `RS384`, `RS512` (RSA PKCS#1), `PS256`, `PS384`, `PS512` (RSA-PSS), `ES256`, `ES384`
     (the signature is `r` then `s`, as a JWT writes it) or `EdDSA` (Ed25519); with `HS256`, `HS384` or
-    `HS512` the `key` is a shared secret (HMAC, compared in constant time). A wrong signature is `false`;
+    `HS512` the `key` is a shared secret (HMAC, compared in constant time; an empty secret is an error). A wrong signature is `false`;
     `err` is for a key or an algorithm that cannot be used. Needs the `qlang` command. --"
     public fun verify(alg: string, key: string, message: bytes, signature: bytes) -> Result<bool, Error>
         crypto_verify(alg, key, message, signature)

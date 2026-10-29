@@ -1,12 +1,13 @@
 # Journal des changements
 
-## Prochaine version
+## 0.59.0
 
 - **Serveur HTTP** : les bornes se règlent. `--max-connections N` (64), `--max-body TAILLE` (1 Mo), `--max-headers TAILLE` (64 Ko, `431` au-delà), `--read-timeout S` (20 s pour envoyer toute la requête) et `--idle-timeout S` (5 s de silence sur une connexion persistante), pour `qlang serve app.q` comme pour `qlang serve`. Un client trop lent reçoit maintenant `408` au lieu d'une connexion fermée sans réponse. Les en-têtes trop gros donnent `431` (c'était `400`).
 - **Réponses 40 ms plus vite** : l'en-tête et le corps d'une réponse partent en une seule écriture (et `TCP_NODELAY` est mis sur les connexions). Avant, sur une connexion persistante, l'algorithme de Nagle et l'accusé de réception différé du client retardaient chaque réponse de 40 ms (24 requêtes par seconde et par connexion au banc, contre plus de 10 000 maintenant).
 - **`--no-access-log`** : n'écrit plus la ligne `GET /chemin -> 200 (1 ms)` de chaque requête.
 - **Banc de charge HTTP** : `python3 benches/http_load.py` (requêtes par seconde, latence p50/p95/p99, erreurs, mémoire du serveur dans la durée), le programme `benches/http/app.q`, le workflow `Bench` (sur demande et chaque lundi, JSON en artefact), et une section « Le serveur HTTP » dans `docs/performance.md`, dont l'introduction ne dit plus « pas de bytecode ».
 - **Sécurité** : `SECURITY.md` (comment signaler une faille, délais visés, ce qui en est une), un test de mutation du compilateur et du formateur sur les programmes de `examples/` (graine fixe en CI, balayage long chaque dimanche par le workflow `Fuzz` : 60 000 programmes abîmés sans plantage au premier essai), et un test de requêtes HTTP abîmées.
+- **Correctif de sécurité** : `Crypto.verify` avec un secret HMAC vide (`HS256`, `HS384`, `HS512`) est maintenant une erreur, comme `Crypto.sign` : un secret lu dans une variable d'environnement absente aurait laissé fabriquer un jeton valide. `docs/security.md` garde le résultat des revues (crypto, JWT, permissions) ; un test vérifie que `--root` retient `fs` (`..`, chemin absolu, lien symbolique).
 - **Documentation** : la section 21 de la référence cite le mail et S3 parmi les paquets de `qlang-std`.
 
 ## 0.58.0

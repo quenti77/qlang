@@ -174,6 +174,10 @@ const SUPPORTED: &str =
 
 pub fn verify(alg: &str, key: &str, message: &[u8], sig: &[u8]) -> Result<bool, Failure> {
     if let Some(h) = hmac_algorithm(alg) {
+        // a missing secret (an unset variable read as "") would let anyone sign a token
+        if key.is_empty() {
+            return Err("the secret is empty".into());
+        }
         // `ring` compares in constant time
         return Ok(
             ring::hmac::verify(&ring::hmac::Key::new(h, key.as_bytes()), message, sig).is_ok(),
@@ -381,6 +385,9 @@ mod tests {
             "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
         );
         assert!(sign("HS256", "", b"m").is_err());
+        // an empty secret must not verify a token anyone could have signed with it
+        let forged = ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b""), b"m");
+        assert!(verify("HS256", "", b"m", forged.as_ref()).is_err());
     }
 
     fn pem(label: &str, parts: &[&str]) -> String {

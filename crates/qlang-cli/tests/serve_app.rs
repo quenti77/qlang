@@ -920,3 +920,67 @@ fn text_answers_are_compressed_only_when_asked_for_and_wanted() {
     );
     assert!(!r.contains("Content-Encoding"), "{r}");
 }
+
+#[test]
+fn the_limits_can_be_changed() {
+    let server = start(
+        "limits",
+        APP,
+        &[
+            "--max-body",
+            "1k",
+            "--max-headers",
+            "512",
+            "--read-timeout",
+            "1",
+        ],
+    );
+    let big_body = format!(
+        "POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: {}\r\n\r\n",
+        2048
+    );
+    assert!(exchange(&server, &big_body).starts_with("HTTP/1.1 413"));
+    let small_body = "POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: 2\r\n\r\nhi";
+    assert!(exchange(&server, small_body).starts_with("HTTP/1.1 201"));
+    let long_header = format!(
+        "GET / HTTP/1.1\r\nHost: t\r\nX-Pad: {}\r\n\r\n",
+        "a".repeat(2000)
+    );
+    assert!(exchange(&server, &long_header).starts_with("HTTP/1.1 431"));
+    // a client that starts a request and never ends it is cut after --read-timeout
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n").unwrap();
+    let started = std::time::Instant::now();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    assert!(out.starts_with("HTTP/1.1 408"), "{out}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}
+
+#[test]
+fn connections_are_limited_by_option() {
+    let server = start("conns", APP, &["--max-connections", "1"]);
+    // the first connection stays open and silent: it takes the only slot
+    let _held = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // the refusal is written as soon as the connection is accepted
+    let mut refused = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    let mut out = String::new();
+    let _ = refused.read_to_string(&mut out);
+    assert!(out.starts_with("HTTP/1.1 503"), "{out}");
+}
+
+#[test]
+fn a_bad_limit_is_refused_at_start() {
+    for (option, value) in [
+        ("--max-body", "lots"),
+        ("--max-connections", "0"),
+        ("--read-timeout", "0"),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .args(["serve", "x.q", option, value])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(64), "{option} {value}");
+    }
+}

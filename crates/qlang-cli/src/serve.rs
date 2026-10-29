@@ -3,7 +3,7 @@
 //! - `qlang serve`: the JSON protocol (`POST /run`, `GET /health`);
 //! - `qlang serve app.q`: a qlang program answers the requests with its `handle` function.
 //!
-//! It is deliberately minimal (no TLS, no keep-alive). Put it behind a
+//! It is deliberately minimal (HTTP/1.1 with keep-alive, no TLS). Put it behind a
 //! reverse proxy and bind it to localhost unless you know what you are doing.
 
 use crate::json::{self, Ceiling};
@@ -19,8 +19,65 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-const MAX_BODY: usize = 1 << 20;
-const MAX_CONNECTIONS: usize = 64;
+/// What bounds a client: the options `--max-connections`, `--max-body`, `--max-headers`,
+/// `--read-timeout` and `--idle-timeout`, set once before the first connection.
+struct Tuning {
+    max_connections: usize,
+    max_body: usize,
+    max_headers: usize,
+    read_deadline: Duration,
+    idle: Duration,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Tuning {
+            max_connections: 64,
+            max_body: 1 << 20,
+            max_headers: 64 * 1024,
+            read_deadline: Duration::from_secs(20),
+            idle: Duration::from_secs(5),
+        }
+    }
+}
+
+static TUNING: std::sync::OnceLock<Tuning> = std::sync::OnceLock::new();
+
+fn tuning() -> &'static Tuning {
+    TUNING.get_or_init(Tuning::default)
+}
+
+/// `1048576`, `512k` or `2m`.
+fn parse_size(text: &str) -> Option<usize> {
+    let lower = text.to_ascii_lowercase();
+    let (digits, unit) = match lower.strip_suffix('k') {
+        Some(d) => (d, 1 << 10),
+        None => match lower.strip_suffix('m') {
+            Some(d) => (d, 1 << 20),
+            None => (lower.as_str(), 1),
+        },
+    };
+    digits
+        .parse::<usize>()
+        .ok()?
+        .checked_mul(unit)
+        .filter(|n| *n > 0)
+}
+
+/// Reads the value of a numeric option; `None` after printing what it needs.
+fn option_value<T>(
+    args: &[&str],
+    i: usize,
+    name: &str,
+    what: &str,
+    parse: fn(&str) -> Option<T>,
+) -> Option<T> {
+    let value = args.get(i).and_then(|s| parse(s));
+    if value.is_none() {
+        eprintln!("{name} needs {what}");
+    }
+    value
+}
 
 pub fn serve(args: &[&str]) -> ExitCode {
     let mut port: u16 = 8080;
@@ -29,6 +86,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         workers: 1,
         ..AppOptions::default()
     };
+    let mut tune = Tuning::default();
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -44,6 +102,63 @@ pub fn serve(args: &[&str]) -> ExitCode {
                         eprintln!("--max-steps needs a number");
                         return ExitCode::from(64);
                     }
+                }
+            }
+            "--max-connections" => {
+                i += 1;
+                match option_value(
+                    args,
+                    i,
+                    "--max-connections",
+                    "a number from 1 to 10000",
+                    |s| s.parse::<usize>().ok().filter(|n| (1..=10_000).contains(n)),
+                ) {
+                    Some(n) => tune.max_connections = n,
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--max-body" => {
+                i += 1;
+                match option_value(
+                    args,
+                    i,
+                    "--max-body",
+                    "a size in bytes (512k, 8m...)",
+                    parse_size,
+                ) {
+                    Some(n) => tune.max_body = n,
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--max-headers" => {
+                i += 1;
+                match option_value(
+                    args,
+                    i,
+                    "--max-headers",
+                    "a size in bytes (16k...)",
+                    parse_size,
+                ) {
+                    Some(n) => tune.max_headers = n,
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--read-timeout" => {
+                i += 1;
+                match option_value(args, i, "--read-timeout", "a number of seconds", |s| {
+                    s.parse::<u64>().ok().filter(|n| *n > 0)
+                }) {
+                    Some(n) => tune.read_deadline = Duration::from_secs(n),
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--idle-timeout" => {
+                i += 1;
+                match option_value(args, i, "--idle-timeout", "a number of seconds", |s| {
+                    s.parse::<u64>().ok().filter(|n| *n > 0)
+                }) {
+                    Some(n) => tune.idle = Duration::from_secs(n),
+                    None => return ExitCode::from(64),
                 }
             }
             "--watch" => app.watch = true,
@@ -133,6 +248,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         }
         i += 1;
     }
+    let _ = TUNING.set(tune);
     if let Some(file) = &app.file {
         match crate::providers::specs_for(Path::new(file), &app.extern_commands).and_then(|specs| {
             crate::providers::ensure_trusted(&specs, app.trust_externs).map(|()| specs)
@@ -180,7 +296,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
     let loopback = is_loopback(&bind);
     let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
-        if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+        if active.load(Ordering::SeqCst) >= tuning().max_connections {
             let _ = respond(stream, 503, "{\"error\":\"server busy\"}");
             continue;
         }
@@ -245,6 +361,7 @@ fn reason(status: u16) -> &'static str {
         422 => "Unprocessable Entity",
         429 => "Too Many Requests",
         408 => "Request Timeout",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         501 => "Not Implemented",
         503 => "Service Unavailable",
@@ -344,9 +461,6 @@ impl Parsed {
     }
 }
 
-/// How long a client has to send its whole request.
-const READ_DEADLINE: Duration = Duration::from_secs(20);
-
 /// Arms the read timeout with what is left before `deadline`; `false` when there is nothing left.
 fn wait_for_data(stream: &TcpStream, deadline: Instant) -> bool {
     let left = deadline.saturating_duration_since(Instant::now());
@@ -355,6 +469,12 @@ fn wait_for_data(stream: &TcpStream, deadline: Instant) -> bool {
     }
     let _ = stream.set_read_timeout(Some(left.min(Duration::from_secs(10))));
     true
+}
+
+/// A client too slow to send its request gets a 408; any other failure means it went away.
+fn read_failed(e: &std::io::Error) -> Option<(u16, &'static str)> {
+    use std::io::ErrorKind::{TimedOut, WouldBlock};
+    matches!(e.kind(), WouldBlock | TimedOut).then_some((408, "request timeout"))
 }
 
 /// Reads one request. `carry` holds what an earlier read took beyond its own request (the start
@@ -369,15 +489,15 @@ fn read_request(
 ) -> Result<Parsed, Option<(u16, &'static str)>> {
     // the whole request must arrive in time, not just every piece of it: a client sending a
     // byte every few seconds would otherwise hold one of the few connections for ever
-    let mut deadline = Instant::now() + READ_DEADLINE;
+    let mut deadline = Instant::now() + tuning().read_deadline;
     let mut buf: Vec<u8> = std::mem::take(carry);
     let mut chunk = [0u8; 8192];
     let header_end = loop {
         if let Some(p) = find(&buf, b"\r\n\r\n") {
             break p;
         }
-        if buf.len() > 64 * 1024 {
-            return Err(Some((400, "headers too large")));
+        if buf.len() > tuning().max_headers {
+            return Err(Some((431, "headers too large")));
         }
         if let (true, Some(wait)) = (buf.is_empty(), idle) {
             // a connection kept open: waiting for the next request is not an error
@@ -386,7 +506,7 @@ fn read_request(
                 Ok(0) | Err(_) => return Err(None),
                 Ok(n) => {
                     buf.extend_from_slice(&chunk[..n]);
-                    deadline = Instant::now() + READ_DEADLINE;
+                    deadline = Instant::now() + tuning().read_deadline;
                 }
             }
             continue;
@@ -395,10 +515,14 @@ fn read_request(
             return Err(Some((408, "request timeout")));
         }
         match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Err(None),
+            Ok(0) => return Err(None),
+            Err(e) => return Err(read_failed(&e)),
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
         }
     };
+    if header_end > tuning().max_headers {
+        return Err(Some((431, "headers too large")));
+    }
     let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
     let mut lines = head.lines();
     let request_line = lines.next().unwrap_or("");
@@ -451,7 +575,8 @@ fn read_request(
                 return Err(Some((408, "request timeout")));
             }
             match stream.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break,
+                Err(e) => return Err(read_failed(&e)),
                 Ok(n) => rest.extend_from_slice(&chunk[..n]),
             }
         }
@@ -489,7 +614,8 @@ fn read_chunked(
             return Err(Some((408, "request timeout")));
         }
         match stream.read(&mut tmp) {
-            Ok(0) | Err(_) => Err(None),
+            Ok(0) => Err(None),
+            Err(e) => Err(read_failed(&e)),
             Ok(n) => {
                 rest.extend_from_slice(&tmp[..n]);
                 Ok(())
@@ -585,7 +711,7 @@ fn refuse_browser(request: &Parsed, loopback: bool) -> Option<&'static str> {
 }
 
 fn handle_connection(mut stream: TcpStream, loopback: bool) {
-    let request = match read_request(&mut stream, &mut Vec::new(), MAX_BODY, None) {
+    let request = match read_request(&mut stream, &mut Vec::new(), tuning().max_body, None) {
         Ok(r) => r,
         Err(Some((status, message))) => {
             let _ = respond(stream, status, &format!("{{\"error\":\"{message}\"}}"));
@@ -759,7 +885,7 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
                         let _ = write_response(stream, 503, &[], b"server stopping", false);
                         continue;
                     }
-                    if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    if active.load(Ordering::SeqCst) >= tuning().max_connections {
                         let _ = write_response(stream, 503, &[], b"server busy", false);
                         continue;
                     }
@@ -1271,13 +1397,12 @@ const MAX_STATIC: u64 = 50 << 20;
 
 /// How many requests one connection may carry, and how long it may stay quiet between two.
 const KEEP_ALIVE_REQUESTS: usize = 100;
-const KEEP_ALIVE_IDLE: Duration = Duration::from_secs(5);
 
 /// Answers the requests of one connection, one after the other while the client wants it.
 fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, opts: &AppOptions) {
     let mut carry: Vec<u8> = Vec::new();
     for n in 0..KEEP_ALIVE_REQUESTS {
-        let idle = (n > 0).then_some(KEEP_ALIVE_IDLE);
+        let idle = (n > 0).then(|| tuning().idle);
         let more = serve_one(&mut stream, &mut carry, jobs, opts, idle);
         if !more || STOPPING.load(Ordering::SeqCst) {
             break;
@@ -1294,7 +1419,7 @@ fn serve_one(
     idle: Option<Duration>,
 ) -> bool {
     let started = Instant::now();
-    let request = match read_request(stream, carry, MAX_BODY, idle) {
+    let request = match read_request(stream, carry, tuning().max_body, idle) {
         Ok(r) => r,
         Err(Some((status, message))) => {
             let _ = write_to(stream, status, &[], message.as_bytes(), false, false);

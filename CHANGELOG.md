@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.57.1
+
+- **Documentation** : la référence explique la sortie et la sortie d'erreur (`print` et `write` portent ce que le programme produit, `eprint`, `ewrite` et `Log` portent le journal, les avertissements et la progression ; la sortie d'erreur n'est pas réservée aux erreurs).
+
 ## 0.57.0
 
 - **Valeurs par défaut des paramètres** : `fun connect(host: string, port: int = 5432, name: string? = none)`. Un appel peut omettre les paramètres qui en ont une (ou les sauter en nommant les suivants). La valeur est un littéral (nombre, texte, `true`, `false`, `none`, `[]`, `{}`). Un paramètre de type générique que seul un paramètre omis mentionne n'a rien à déduire. Le serveur de langage affiche `port: int = 5432` et laisse ces paramètres hors du modèle d'insertion.

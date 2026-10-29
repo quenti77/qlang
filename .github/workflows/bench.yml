@@ -1,0 +1,30 @@
+name: Bench
+
+# The HTTP load test (benches/http_load.py) on demand and every week: the numbers are in the
+# job summary and kept as a JSON file, to compare one release with the next. A shared runner
+# is noisy: read the trend, not one run.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  http:
+    name: HTTP load (qlang serve)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo build --release -p qlang-cli
+      - name: Load test
+        run: |
+          python3 benches/http_load.py --workers 2 --connections 32 --duration 15 --json http-bench.json | tee http-bench.txt
+          { echo '```'; cat http-bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: http-bench
+          path: http-bench.json

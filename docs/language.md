@@ -2620,6 +2620,7 @@ Options de `qlang serve app.q` :
 | `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |
 | `--max-headers TAILLE` | taille de la ligne de requête et des en-têtes (64 Ko par défaut) ; au-delà, `431`     |
 | `--read-timeout S` | secondes laissées à un client pour envoyer **toute** sa requête (20 par défaut) ; au-delà, `408` (protège du slowloris) |
+| `--no-access-log` | n'écrit pas la ligne de chaque requête (`GET /x -> 200 (1 ms)`) sur la sortie d'erreur |
 | `--idle-timeout S` | secondes de silence après lesquelles une connexion persistante est fermée (5 par défaut) |
 
 - **Fichiers statiques** (`--static public`) : pour `GET` et `HEAD`, si le chemin désigne un

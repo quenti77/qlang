@@ -1,7 +1,10 @@
 # Performance de l'interpréteur
 
-qlang est un interpréteur qui parcourt l'arbre du programme (pas de bytecode). Ce document
-dit comment mesurer, ce qui a déjà été gagné et ce qui reste.
+qlang est un interpréteur qui parcourt l'arbre du programme ; les fonctions et boucles qui ne
+calculent qu'avec des `int`, des `float` et des `bool` sont compilées à la volée en instructions
+sur des registres typés (voir « La machine à registres typée » plus bas). Ce document dit comment
+mesurer, ce qui a déjà été gagné et ce qui reste. La dernière section mesure le serveur HTTP,
+pas le calcul.
 
 ## Mesurer
 
@@ -199,3 +202,56 @@ modèle :
 2. **Bytecode** : compiler chaque fonction vers une suite d'instructions pour une machine à
    pile. Plus gros chantier, gain plus grand (de l'ordre de 3 à 5 fois), et il faut garder le
    décompte des pas, les limites mémoire et les messages d'erreur avec leur position.
+
+## Le serveur HTTP
+
+Les programmes de `benches/` mesurent le calcul. Pour le serveur (`qlang serve app.q`), le banc
+de charge est `benches/http_load.py` : il lance le serveur sur `benches/http/app.q`, ouvre des
+connexions persistantes depuis plusieurs processus clients et compte les requêtes par seconde, la
+latence (p50, p95, p99, maximum), les erreurs et la mémoire résidente du serveur, relevée chaque
+seconde.
+
+```sh
+cargo build --release -p qlang-cli
+python3 benches/http_load.py --workers 4 --connections 32 --duration 10
+python3 benches/http_load.py --duration 300 --scenario json,echo --json bench.json   # tenue dans la durée
+```
+
+Quatre scénarios : `hello` (un texte, le coût du serveur seul), `json` (`Json.of` d'un tableau de
+structures), `compute` (`fib(18)` à chaque requête : du calcul pur) et `echo` (un `POST` de 512
+octets rendu tel quel). La dernière colonne (`MB/min`) est la croissance de la mémoire sur la
+seconde moitié de la mesure : une fuite la ferait monter, une valeur proche de zéro est le
+bruit. Le workflow `Bench` de GitHub lance le même banc sur demande et chaque lundi, garde le
+JSON en artefact et affiche le tableau dans le résumé du job ; un exécuteur partagé est bruité,
+suivez la tendance plutôt qu'un chiffre.
+
+Mesuré sur une machine de bureau à 12 cœurs, binaire `glibc`, client Python sur la même
+machine (**un ordre de grandeur, pas une promesse**) :
+
+| Scénario | 1 worker | 4 workers | p99 (4 workers) |
+| --- | --- | --- | --- |
+| `hello` | 87 000 req/s | 92 000 req/s | 0,8 ms |
+| `json` | 35 000 req/s | 82 000 req/s | 1,1 ms |
+| `compute` (`fib(18)`) | 3 000 req/s | 8 800 req/s | 4,9 ms |
+| `echo` (512 octets) | 69 000 req/s | 89 000 req/s | 0,9 ms |
+
+Tenue dans la durée : 90 secondes de `json` puis de `echo` avec 4 workers (environ 7 millions de
+requêtes chacun) laissent la mémoire du serveur à 22 Mo du début à la fin, sans erreur.
+
+Ce que le banc montre, et ce qu'il ne dit pas :
+
+- Pour `hello` et `echo`, le **client** Python est le facteur limitant (ajouter des workers ne
+  change presque rien) : le serveur va au moins à ce débit. Un client écrit en Rust ou `wrk` irait
+  plus loin ; ces deux lignes sont un minimum.
+- Un worker exécute **une requête à la fois** : `compute` (3 ms de calcul) plafonne à environ
+  `1 / 3 ms` par worker, et monte avec `--workers`. Une requête lourde retarde donc celles qui
+  attendent le même worker ; c'est le p99 de ce scénario.
+- Le premier banc a trouvé un défaut : l'en-tête et le corps d'une réponse partaient en deux
+  écritures, et l'algorithme de Nagle les retardait de 40 ms à chaque requête d'une connexion
+  persistante (24 requêtes par seconde et par connexion). Ils partent maintenant en une écriture.
+- Le journal d'une ligne par requête coûte : `--no-access-log` le supprime (le banc l'utilise).
+  Pour un serveur en production, `--log-format json` et le middleware `logging()` donnent la
+  même information en structuré.
+- Sont **hors** du banc : TLS (fait par le proxy), la base de données, les WebSockets, les
+  requêtes de plusieurs mégaoctets. Les limites de taille et de durée se règlent avec
+  `--max-body`, `--max-headers`, `--read-timeout`, `--idle-timeout` et `--max-connections`.

@@ -161,6 +161,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     None => return ExitCode::from(64),
                 }
             }
+            "--no-access-log" => ACCESS_LOG.store(false, Ordering::SeqCst),
             "--watch" => app.watch = true,
             "--compress" => app.compress = true,
             "--dev" => DEV.store(true, Ordering::SeqCst),
@@ -424,10 +425,13 @@ fn write_to(
         body.len(),
         if keep_alive { "keep-alive" } else { "close" }
     ));
-    stream.write_all(head.as_bytes())?;
+    // one write: the head and the body sent apart wait on each other (Nagle's algorithm against
+    // the client's delayed acknowledgement), 40 ms on every request of a kept connection
+    let mut out = head.into_bytes();
     if !head_only {
-        stream.write_all(body)?;
+        out.extend_from_slice(body);
     }
+    stream.write_all(&out)?;
     stream.flush()
 }
 
@@ -800,6 +804,15 @@ fn log(text: &str) {
     let _ = std::io::stderr().write_all(text.as_bytes());
 }
 
+/// `--no-access-log` turns the line written for every request off.
+static ACCESS_LOG: AtomicBool = AtomicBool::new(true);
+
+fn access_log(text: &str) {
+    if ACCESS_LOG.load(Ordering::Relaxed) {
+        log(text);
+    }
+}
+
 /// `qlang serve app.q`: every worker runs the program's top-level code once, then calls its
 /// `handle(req: Request) -> Response` for the requests it takes from the queue. A worker has
 /// its own copy of the program, so its variables are its own (use a database or files for what
@@ -889,6 +902,7 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
                         let _ = write_response(stream, 503, &[], b"server busy", false);
                         continue;
                     }
+                    let _ = stream.set_nodelay(true);
                     let slot = Slot::take(&active);
                     let (jobs, opts) = (jobs.clone(), opts.clone());
                     let _ = std::thread::Builder::new().spawn(move || {
@@ -1452,7 +1466,7 @@ fn serve_one(
         ];
         let body = compressed(&mut headers, bytes, accepts_gzip);
         let sent = write_to(stream, 200, &headers, &body, head_only, keep).is_ok();
-        log(&format!(
+        access_log(&format!(
             "{line} -> 200 static ({} ms)\n",
             started.elapsed().as_millis()
         ));
@@ -1535,7 +1549,7 @@ fn serve_one(
             {
                 log(&format!("{line} -> 101 websocket\n"));
                 ws::run_session(connection, pipe);
-                log(&format!(
+                access_log(&format!(
                     "{line} websocket closed ({} ms)\n",
                     started.elapsed().as_millis()
                 ));
@@ -1621,7 +1635,7 @@ fn serve_one(
             504
         }
     };
-    log(&format!(
+    access_log(&format!(
         "{line} -> {status} ({} ms)\n",
         started.elapsed().as_millis()
     ));

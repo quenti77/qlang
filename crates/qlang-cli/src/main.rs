@@ -36,6 +36,8 @@ qlang - a small, readable language
 
 USAGE:
     qlang init [dir]                     start a project: qlang.toml, main.q, .gitignore
+    qlang init --web [dir]               start a web application: routes, services, a test, and
+                                         the `std` package (--no-install: do not fetch it)
     qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
                                          project's files (or of the paths given)
     qlang fmt [path...] [--check]        lay the files out (two spaces per level; only the white

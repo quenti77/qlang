@@ -601,6 +601,13 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
     (
         "Reflect",
         "function",
+        "declared",
+        "declared(module) -> array<Callable>",
+        "The functions then the structures of an imported module, as `Callable`s: `callables` followed by `constructors`.",
+    ),
+    (
+        "Reflect",
+        "function",
         "constructors",
         "constructors(module) -> array<Callable>",
         "The structures of an imported module, each one a `Callable` that builds it from its fields (in order), with the annotations of the structure.",

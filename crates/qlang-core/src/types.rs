@@ -595,6 +595,8 @@ pub enum ReflectOp {
     /// `Reflect.constructors(module)`: every structure of that module, as a `Callable` that
     /// builds it from its fields (in order).
     Constructors(ModId),
+    /// `Reflect.declared(module)`: its functions then its structures, as `Callable`s.
+    Declared(ModId),
     /// `Reflect.bound_callables<T>(value)`: the methods of `T`, bound to `value`, as `Callable`s.
     BoundCallables(Ty),
     /// `Reflect.bound_callables_of(value)`: the same for an `Any`, whatever struct it holds.

@@ -1,5 +1,10 @@
 # Journal des changements
 
+## 0.66.0
+
+- **Pool de connexions** : `qlang serve --db-pool N` partage au plus N connexions réelles à PostgreSQL ou MySQL entre tous les workers. Un `Db` en emprunte une pour chaque requête et la rend, et garde la même pendant une transaction ; si les N sont prises, la requête attend 30 s au plus. Mesuré sur PostgreSQL : 6 transactions simultanées avec 2 connexions au lieu de 6. SQLite n'est pas concerné.
+- Les migrations (statut, retour en arrière, `db:migrate`, `db:rollback`, `db:status`) sont dans `qlang-std` et leur génération dans `kit make migration`.
+
 ## 0.65.0
 
 - **Envoyer un fichier** : `Response.file(chemin)` et `Response.download(chemin, nom)` envoient un fichier du disque par morceaux (jamais en entier en mémoire), avec `Content-Length`, le type d'après l'extension, `404` s'il manque et `403` hors de `--root`. Le worker est libre pendant l'envoi.

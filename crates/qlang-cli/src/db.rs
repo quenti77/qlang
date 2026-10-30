@@ -12,9 +12,189 @@
 use qlang_core::host::{HostError, SqlRow, SqlValue};
 use std::collections::HashMap;
 
-trait SqlConn {
+trait SqlConn: Send {
     fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String>;
     fn execute(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64, String>;
+    /// Told by the owner after each statement: a transaction is open (`true`), so the connection
+    /// must stay the same one until it ends. Only a pooled connection cares.
+    fn set_pinned(&mut self, _pinned: bool) {}
+}
+
+// ---------------------------------------------------------------- the pool
+
+/// `--db-pool N`: at most this many real connections to a PostgreSQL or MySQL server, shared by
+/// every worker of the process (0: each handle has its own connection, the default).
+static POOL_SIZE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn set_pool_size(n: usize) {
+    POOL_SIZE.store(n, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// How long a statement waits for a free connection before it fails.
+const POOL_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+struct UrlPool {
+    max: usize,
+    /// How a real connection is opened (replaced in the tests).
+    opener: fn(&str) -> Result<Box<dyn SqlConn>, HostError>,
+    wait: std::time::Duration,
+    state: std::sync::Mutex<PoolState>,
+    freed: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct PoolState {
+    idle: Vec<Box<dyn SqlConn>>,
+    /// Real connections that exist: idle ones and the ones in use.
+    total: usize,
+}
+
+fn pools() -> &'static std::sync::Mutex<HashMap<String, std::sync::Arc<UrlPool>>> {
+    static POOLS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::sync::Arc<UrlPool>>>> =
+        std::sync::OnceLock::new();
+    POOLS.get_or_init(Default::default)
+}
+
+fn pool_for(url: &str, max: usize) -> std::sync::Arc<UrlPool> {
+    let mut all = pools().lock().unwrap_or_else(|e| e.into_inner());
+    all.entry(url.to_string())
+        .or_insert_with(|| {
+            std::sync::Arc::new(UrlPool {
+                max,
+                opener: SqlConns::open_physical,
+                wait: POOL_WAIT,
+                state: Default::default(),
+                freed: std::sync::Condvar::new(),
+            })
+        })
+        .clone()
+}
+
+impl UrlPool {
+    fn acquire(&self, url: &str) -> Result<Box<dyn SqlConn>, String> {
+        let deadline = std::time::Instant::now() + self.wait;
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(conn) = state.idle.pop() {
+                return Ok(conn);
+            }
+            if state.total < self.max {
+                state.total += 1;
+                drop(state);
+                return match (self.opener)(url) {
+                    Ok(conn) => Ok(conn),
+                    Err(e) => {
+                        self.forget();
+                        Err(format!("{e:?}"))
+                    }
+                };
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err(format!(
+                    "the database pool is exhausted: its {} connections are all busy (--db-pool)",
+                    self.max
+                ));
+            }
+            state = self
+                .freed
+                .wait_timeout(state, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
+
+    fn release(&self, conn: Box<dyn SqlConn>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.idle.push(conn);
+        self.freed.notify_one();
+    }
+
+    /// A real connection is gone (lost, or never opened): its place is free again.
+    fn forget(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.total = state.total.saturating_sub(1);
+        self.freed.notify_one();
+    }
+}
+
+/// What a handle is when there is a pool: it takes a real connection for each statement, and keeps
+/// the same one for a whole transaction.
+struct PooledConn {
+    url: String,
+    pool: std::sync::Arc<UrlPool>,
+    held: Option<Box<dyn SqlConn>>,
+    pinned: bool,
+}
+
+impl PooledConn {
+    fn run<T>(
+        &mut self,
+        mut f: impl FnMut(&mut dyn SqlConn) -> Result<T, String>,
+        starts_transaction: bool,
+    ) -> Result<T, String> {
+        let mut retried = false;
+        loop {
+            let mut conn = match self.held.take() {
+                Some(c) => c,
+                None => self.pool.acquire(&self.url)?,
+            };
+            let result = f(conn.as_mut());
+            match &result {
+                Err(why) if connection_lost(why) => {
+                    // the server dropped it: a new one replaces it, unless a transaction was open
+                    // (what it did is lost, and the owner says so)
+                    drop(conn);
+                    self.pool.forget();
+                    if self.pinned || retried {
+                        self.pinned = false;
+                        return result;
+                    }
+                    retried = true;
+                    continue;
+                }
+                _ => {}
+            }
+            if self.pinned || (starts_transaction && result.is_ok()) {
+                self.held = Some(conn);
+            } else {
+                self.pool.release(conn);
+            }
+            return result;
+        }
+    }
+}
+
+impl SqlConn for PooledConn {
+    fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
+        self.run(|c| c.query(sql, params), false)
+    }
+    fn execute(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64, String> {
+        let word = sql.trim().to_ascii_uppercase();
+        let begins =
+            word == "BEGIN" || word.starts_with("BEGIN ") || word.starts_with("START TRANSACTION");
+        self.run(|c| c.execute(sql, params), begins)
+    }
+    fn set_pinned(&mut self, pinned: bool) {
+        self.pinned = pinned;
+        if !pinned && let Some(conn) = self.held.take() {
+            self.pool.release(conn);
+        }
+    }
+}
+
+impl Drop for PooledConn {
+    fn drop(&mut self) {
+        // a handle closed in the middle of a transaction: its connection is not clean
+        if let Some(conn) = self.held.take() {
+            if self.pinned {
+                drop(conn);
+                self.pool.forget();
+            } else {
+                self.pool.release(conn);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------- SQLite
@@ -618,7 +798,30 @@ pub struct SqlConns {
 }
 
 impl SqlConns {
+    /// A handle for `url`: a real connection, or, with `--db-pool` and a server database, a
+    /// handle that borrows one from the shared pool when it needs it.
     fn open_url(url: &str) -> Result<Box<dyn SqlConn>, HostError> {
+        let max = POOL_SIZE.load(std::sync::atomic::Ordering::SeqCst);
+        let server = url.starts_with("postgres://")
+            || url.starts_with("postgresql://")
+            || url.starts_with("mysql://")
+            || url.starts_with("mariadb://");
+        if max > 0 && server {
+            // one real connection now, so that a wrong URL or password fails at `Db.connect`
+            let pool = pool_for(url, max);
+            let first = pool.acquire(url).map_err(HostError::Other)?;
+            pool.release(first);
+            return Ok(Box::new(PooledConn {
+                url: url.to_string(),
+                pool,
+                held: None,
+                pinned: false,
+            }));
+        }
+        Self::open_physical(url)
+    }
+
+    fn open_physical(url: &str) -> Result<Box<dyn SqlConn>, HostError> {
         let conn: Box<dyn SqlConn> = if let Some(path) = url.strip_prefix("sqlite://") {
             Box::new(SqliteConn(
                 rusqlite::Connection::open(path).map_err(|e| HostError::Other(e.to_string()))?,
@@ -760,6 +963,10 @@ impl SqlConns {
         if result.is_ok() && change != 0 {
             let depth = self.depth.entry(conn).or_insert(0);
             *depth = (*depth as i32 + change).max(0) as u32;
+            let open = *depth > 0;
+            if let Some(handle) = self.open.get_mut(&conn) {
+                handle.set_pinned(open);
+            }
         }
         log_query(sql, started);
         result.map_err(HostError::Other)
@@ -910,5 +1117,115 @@ mod reconnect_tests {
         let (mut c, id) = with_table();
         assert!(c.execute(id, "COMMIT", vec![]).is_err());
         assert_eq!(c.depth.get(&id).copied().unwrap_or(0), 0);
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static OPENED: AtomicUsize = AtomicUsize::new(0);
+
+    /// A real connection that says which one it is.
+    struct Numbered(usize);
+
+    impl SqlConn for Numbered {
+        fn query(&mut self, _: &str, _: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
+            Ok(vec![SqlRow {
+                columns: vec![("n".to_string(), SqlValue::Int(self.0 as i64))],
+            }])
+        }
+        fn execute(&mut self, _: &str, _: &[SqlValue]) -> Result<u64, String> {
+            Ok(0)
+        }
+    }
+
+    fn open_numbered(_: &str) -> Result<Box<dyn SqlConn>, HostError> {
+        Ok(Box::new(Numbered(OPENED.fetch_add(1, Ordering::SeqCst))))
+    }
+
+    fn handle(pool: &std::sync::Arc<UrlPool>) -> PooledConn {
+        PooledConn {
+            url: "postgres://test".to_string(),
+            pool: pool.clone(),
+            held: None,
+            pinned: false,
+        }
+    }
+
+    fn pool(max: usize, wait_ms: u64) -> std::sync::Arc<UrlPool> {
+        std::sync::Arc::new(UrlPool {
+            max,
+            opener: open_numbered,
+            wait: std::time::Duration::from_millis(wait_ms),
+            state: Default::default(),
+            freed: std::sync::Condvar::new(),
+        })
+    }
+
+    fn which(c: &mut PooledConn) -> i64 {
+        match &c.query("SELECT", &[]).unwrap()[0].columns[0].1 {
+            SqlValue::Int(n) => *n,
+            _ => -1,
+        }
+    }
+
+    #[test]
+    fn many_handles_share_a_few_real_connections() {
+        let p = pool(2, 50);
+        let mut handles: Vec<PooledConn> = (0..6).map(|_| handle(&p)).collect();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..3 {
+            for h in handles.iter_mut() {
+                seen.insert(which(h));
+            }
+        }
+        assert_eq!(
+            seen.len(),
+            1,
+            "one after the other they reuse the same one: {seen:?}"
+        );
+        assert_eq!(p.state.lock().unwrap().total, 1);
+    }
+
+    #[test]
+    fn a_transaction_keeps_its_connection_and_others_use_another() {
+        let p = pool(2, 50);
+        let (mut a, mut b) = (handle(&p), handle(&p));
+        a.execute("BEGIN", &[]).unwrap();
+        a.set_pinned(true);
+        let mine = which(&mut a);
+        assert_eq!(which(&mut a), mine);
+        assert_ne!(which(&mut b), mine);
+        a.execute("COMMIT", &[]).unwrap();
+        a.set_pinned(false);
+        // released: now b may get either, and the pool never made a third
+        which(&mut a);
+        assert_eq!(p.state.lock().unwrap().total, 2);
+    }
+
+    #[test]
+    fn an_exhausted_pool_fails_instead_of_waiting_forever() {
+        let p = pool(1, 30);
+        let (mut a, mut b) = (handle(&p), handle(&p));
+        a.execute("BEGIN", &[]).unwrap();
+        a.set_pinned(true);
+        let err = b.query("SELECT", &[]).unwrap_err();
+        assert!(err.contains("pool is exhausted"), "{err}");
+        // and once the transaction ends, b can go
+        a.set_pinned(false);
+        assert!(b.query("SELECT", &[]).is_ok());
+    }
+
+    #[test]
+    fn a_handle_closed_inside_a_transaction_frees_its_place() {
+        let p = pool(1, 30);
+        let mut a = handle(&p);
+        a.execute("BEGIN", &[]).unwrap();
+        a.set_pinned(true);
+        drop(a);
+        assert_eq!(p.state.lock().unwrap().total, 0);
+        assert!(handle(&p).query("SELECT", &[]).is_ok());
     }
 }

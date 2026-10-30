@@ -2686,6 +2686,7 @@ Options de `qlang serve app.q` :
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
+| `--db-pool N` | au plus N connexions réelles à PostgreSQL ou MySQL pour tout le processus, partagées par les workers (par défaut : une connexion par `Db.connect` et par worker). Un `Db` en prend une pour chaque requête SQL et la rend ; pendant une transaction (`begin` jusqu'à `commit`/`rollback`) il garde la même. Si les N sont occupées, la requête attend jusqu'à 30 s, puis échoue. Les réglages de session (`SET`, tables temporaires) ne survivent pas d'une requête à l'autre hors transaction. SQLite n'est pas concerné |
 | `--max-connections N` | connexions ouvertes en même temps (64 par défaut, de 1 à 10000) ; les suivantes reçoivent `503` |
 | `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |
 | `--max-headers TAILLE` | taille de la ligne de requête et des en-têtes (64 Ko par défaut) ; au-delà, `431`     |

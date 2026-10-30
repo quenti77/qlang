@@ -163,6 +163,15 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     None => return ExitCode::from(64),
                 }
             }
+            "--db-pool" => {
+                i += 1;
+                match option_value(args, i, "--db-pool", "a number from 1 to 1000", |s| {
+                    s.parse::<usize>().ok().filter(|n| (1..=1000).contains(n))
+                }) {
+                    Some(n) => crate::db::set_pool_size(n),
+                    None => return ExitCode::from(64),
+                }
+            }
             "--no-access-log" => ACCESS_LOG.store(false, Ordering::SeqCst),
             "--watch" => app.watch = true,
             "--compress" => app.compress = true,

@@ -180,6 +180,7 @@ impl Packages {
         let mut packages = Packages::default();
         let manifest = read_manifest(project_dir)?;
         if let Some(m) = &manifest {
+            crate::selfupdate::check_project_requirement(m)?;
             let deps = parse_dependencies(m, project_dir, "this project")?;
             packages.add_all(deps, project_dir, "this project", true)?;
         }

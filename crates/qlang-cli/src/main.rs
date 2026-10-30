@@ -17,6 +17,7 @@ mod password;
 mod process;
 mod providers;
 mod redis;
+mod selfupdate;
 mod serve;
 mod signature;
 mod stop;
@@ -75,6 +76,9 @@ USAGE:
     qlang lsp                            language server (Language Server Protocol, on standard
                                          input and output): errors, hovers, completion, go to
                                          definition, references, rename, symbols
+    qlang self-update [--version X.Y.Z] [--check]
+                                         replace qlang by the latest release (or by X.Y.Z); the
+                                         download is checked against the release's SHA256SUMS
     qlang packages                       the packages of the project here, as JSON (for editors)
     qlang install                        fetch the git packages listed in qlang.toml into
                                          .qlang/packages, at the commits of qlang.lock
@@ -148,6 +152,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
         Some("fmt") => fmtcmd::run(&it.collect::<Vec<_>>()),
+        Some("self-update") => selfupdate::run(&it.collect::<Vec<_>>()),
         Some("search") => index::search(it.next()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())

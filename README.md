@@ -27,7 +27,7 @@ print(7 div 2)             -- 3
 
 ## Installation
 
-Pas besoin de Rust : on télécharge un programme déjà compilé (Linux et macOS).
+Pas besoin de Rust : on télécharge un programme déjà compilé (Linux, macOS et Windows).
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
@@ -39,19 +39,35 @@ la version. Les fichiers publiés ont aussi une attestation de provenance signé
 prouve qu'ils sortent du workflow de ce dépôt : `gh attestation verify qlang-x86_64-unknown-linux-musl.tar.gz --repo quenti77/qlang`
 (les versions publiées avant 0.36 n'en ont pas).
 
-**Windows** : il n'y a pas de programme précompilé pour l'instant. Il faut le compiler :
-installer Rust ([rustup.rs](https://rustup.rs), version 1.88 ou plus récente), puis
+**Windows** (PowerShell) :
 
 ```powershell
-cargo install --git https://github.com/quenti77/qlang qlang-cli
+irm https://raw.githubusercontent.com/quenti77/qlang/main/install.ps1 | iex
 ```
 
-(`--force` pour mettre à jour). L'extension VS Code (`qlang.vsix`, sur la page
+Le programme va dans `%LOCALAPPDATA%\qlang\bin` (ajouté au `PATH` de l'utilisateur), après vérification
+de la somme de contrôle. Le script n'a été exécuté que dans la CI, pas encore sur beaucoup de machines :
+dis-le si quelque chose coince. L'extension VS Code (`qlang.vsix`, sur la page
 [Releases](https://github.com/quenti77/qlang/releases)) s'installe avec
 `code --install-extension qlang.vsix`.
 
-**Mettre à jour** : relancer la même commande. Elle indique `Updated: qlang 0.1.0 -> qlang 0.2.0`,
-ou `Already up to date`.
+**Docker** : une image légère (le seul programme `qlang`, utilisateur non root), pour Linux amd64 et arm64 :
+
+```sh
+docker run --rm -v "$PWD":/app -p 8080:8080 ghcr.io/quenti77/qlang:latest serve app.q --bind 0.0.0.0
+```
+
+**Gestionnaires de paquets** : chaque release publie aussi `qlang.rb` (Homebrew), `qlang.json` (Scoop)
+et `PKGBUILD` (AUR), prêts à copier dans un tap, un bucket ou un dépôt AUR ; ces dépôts ne sont pas
+encore créés, donc `brew install` et `scoop install` ne sont pas encore possibles.
+
+**Mettre à jour** : `qlang self-update` (ou relancer la même commande d'installation). Il télécharge la
+dernière version, vérifie la somme de contrôle et remplace le programme ; `qlang self-update --version 0.63.0`
+installe une version précise (même plus ancienne), `qlang self-update --check` dit seulement s'il y en a une nouvelle.
+
+**Version par projet** : `qlang = "0.64"` dans le `[package]` de `qlang.toml` demande au moins cette
+version ; avec un qlang plus ancien, le projet refuse de démarrer et dit de lancer `qlang self-update`.
+`qlang init` l'écrit pour toi.
 
 **Options** :
 

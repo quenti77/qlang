@@ -1,5 +1,13 @@
 # Journal des changements
 
+## 0.64.0
+
+- **`qlang self-update`** : remplace le programme par la dernière version (ou `--version X.Y.Z`), après avoir vérifié la somme de contrôle de `SHA256SUMS` ; `--check` dit seulement s'il y a plus récent. Linux, macOS et Windows.
+- **Version de qlang par projet** : `qlang = "0.64"` dans le `[package]` de `qlang.toml` (minimum ; `">=0.64.1"` pareil, `"=0.64.2"` exactement). Un qlang plus ancien refuse de lancer le projet et dit de lancer `qlang self-update`. `qlang init` l'écrit.
+- **Windows** : programme précompilé (`qlang-x86_64-pc-windows-msvc.zip`) dans les releases et `install.ps1`.
+- **Docker** : image officielle `ghcr.io/quenti77/qlang` (`FROM scratch`, utilisateur non root, amd64 et arm64).
+- **Gestionnaires de paquets** : chaque release publie `qlang.rb` (Homebrew), `qlang.json` (Scoop) et `PKGBUILD` (AUR), remplis avec les sommes de contrôle.
+
 ## 0.63.0
 
 - **`Term`** : le terminal pour écrire une interface en terminal. `Term.session(f)` (mode brut, écran alternatif, curseur caché, tout remis en fin), `Term.event(attente_ms)` (touches avec `ctrl`/`alt`/`shift`, souris, collage, redimensionnement, focus, délai), `Term.size()`, `Term.colors()` (`NO_COLOR` respecté), `Term.write`, `Term.frame` (mise à jour synchronisée), `Term.clear`, `Term.title`, `Term.mouse`, `Term.paste`, `Term.focus`, `Term.alt_screen`, `Term.hide_cursor`, `Term.raw`. Linux, macOS et Windows. Hors terminal, seuls la taille, les couleurs et `write` répondent ; hors de la commande `qlang`, c'est une erreur de compilation (`T250`). Le terminal est remis en état même si le programme plante, avant l'affichage de l'erreur.

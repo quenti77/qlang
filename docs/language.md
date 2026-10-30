@@ -73,10 +73,12 @@ Ce document décrit le langage tel qu'il est implémenté. La grammaire
     - [Heure et aléatoire](#heure-et-aléatoire)
     - [Identifiants : `uuid` et `ulid`](#identifiants--uuid-et-ulid)
     - [Dates et heures : `datetime`](#dates-et-heures--datetime)
+    - [Fuseaux horaires : `Zone`](#fuseaux-horaires--zone)
     - [Expressions régulières](#expressions-régulières)
     - [Encodages et hachages](#encodages-et-hachages)
     - [Octets : `bytes`](#octets--bytes)
     - [Secrets : `Crypto` et `Password`](#secrets--crypto-et-password)
+    - [Compression et archives : `Gzip`, `Zip`, `Tar`](#compression-et-archives--gzip-zip-tar)
   - [16. Prélude : `Result`, `Error` et JSON](#16-prélude--result-error-et-json)
     - [Prélude : `Result` et `Error`](#prélude--result-et-error)
     - [Prélude : JSON](#prélude--json)
@@ -2114,6 +2116,31 @@ end
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
 
+### Fuseaux horaires : `Zone`
+
+Un `datetime` est toujours un instant en UTC. Une `Zone` de la base IANA (`Europe/Paris`,
+`America/New_York`, `UTC`...) dit ce que lit une horloge murale de cet endroit à cet instant, heure d'été
+comprise, et l'inverse. Elle a besoin de la commande `qlang` (`T250` ailleurs, dans le navigateur par exemple).
+
+| | |
+| --- | --- |
+| `Zone.of("Europe/Paris")` | un `Result<Zone, Error>` : `err` pour un nom inconnu |
+| `z.offset_seconds(t)` | le décalage avec UTC à cet instant, en secondes (7200 à Paris l'été) |
+| `z.abbreviation(t)` | `CET`, `CEST`, `EST`... (un nombre comme `+03` pour les zones qui n'en ont pas) |
+| `z.wall(t)` | l'heure de l'horloge murale, sous forme de `datetime` dont les champs sont ceux de l'horloge (`z.wall(t).hour()` est l'heure locale) ; ce n'est pas l'instant : ne pas le comparer à des instants |
+| `z.format(t, "YYYY-MM-DD HH:mm")` | `t` écrit avec l'horloge de la zone |
+| `z.local(2026, 10, 11, 9, 0, 0)` | l'instant où une horloge de la zone lit cette date et cette heure |
+
+```
+let paris = Zone.of("Europe/Paris").unwrap()
+let t = datetime.of(2026, 7, 1, 12, 0, 0)          -- 12:00 UTC
+print(paris.format(t, "YYYY-MM-DD HH:mm"))          -- 2026-07-01 14:00
+print(paris.abbreviation(t))                        -- CEST
+```
+
+Une heure qui n'existe pas (passage à l'heure d'été : 02:30 le 29 mars 2026 à Paris) se lit avec le
+décalage d'avant le changement ; une heure qui existe deux fois (retour à l'heure d'hiver) est la première.
+
 ### Expressions régulières
 
 L'espace de noms `regex` propose les opérations courantes sur les expressions
@@ -2267,6 +2294,33 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 - `Crypto.verify` et `Crypto.sign` servent à signer et vérifier avec une paire de clés (un JWT en `RS256`, `PS256`, `ES256` ou `EdDSA`) ; avec `HS256`, `HS384` ou `HS512` la « clé » est un secret partagé (HMAC, comparé à temps constant). `RS384`/`RS512` et `PS384`/`PS512` existent aussi. Une clé EC doit être en PKCS#8 (`openssl pkcs8 -topk8 -nocrypt`).
 - Seule la commande `qlang` offre `Password` et `Crypto` (un autre hôte : erreur `T250` avant même
   de lancer ; un hôte de test peut répondre de sa graine, jamais pour de vrais secrets).
+
+### Compression et archives : `Gzip`, `Zip`, `Tar`
+
+Compresser et décompresser des octets, et lire ou écrire des archives **en mémoire** (le disque
+passe par `fs.read_bytes` / `fs.write_bytes`). Il faut la commande `qlang` (`T250` ailleurs).
+
+| | |
+| --- | --- |
+| `Gzip.compress(data)`, `Gzip.compress_level(data, 0..9)` | des `bytes` gzip |
+| `Gzip.decompress(data)`, `Gzip.decompress_max(data, max)` | un `Result<bytes, Error>` ; au plus 256 Mo décompressés par défaut |
+| `Zip.read(data)`, `Zip.read_max(data, max)` | les fichiers d'une archive zip : `Result<array<ArchiveEntry>, Error>` (les dossiers sont ignorés) |
+| `Zip.write(entries)` | un `Result<bytes, Error>` |
+| `Tar.read(data)`, `Tar.read_max`, `Tar.write(entries)`, `Tar.write_gz(entries)` | pareil pour `.tar` ; `read` reconnaît aussi un `.tar.gz` |
+
+Un `ArchiveEntry` a un `name` (le chemin dans l'archive) et des `data` (`bytes`).
+
+```
+let fichiers = [ArchiveEntry { name: "docs/a.txt", data: "bonjour".to_bytes() }]
+let zip = Zip.write(fichiers).unwrap()
+for e in Zip.read(zip).unwrap() do
+  print("{e.name} : {e.data.len()} octets")
+end
+```
+
+Deux protections : un nom qui sortirait du dossier où l'on extrait (`../x`, `/etc/passwd`, `C:\x`) est
+refusé en lecture comme en écriture, et le contenu décompressé est borné (une petite archive peut
+contenir des gigaoctets). Pas de mot de passe ni de chiffrement dans les zip.
 
 ## 16. Prélude : `Result`, `Error` et JSON
 
@@ -3130,7 +3184,7 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 
 - **Bibliothèque standard :** elle couvre le quotidien (chaînes, tableaux, dictionnaires,
   `Set`, tuples, maths, encodages, fichiers, réseau, processus, tests). Le reste vit en
-  paquets : voir `qlang-std` (CSV, gabarits, TOML, mail, S3, conteneur de services) ; YAML n'est pas écrit.
+  paquets : voir `qlang-std` (CSV, gabarits, TOML, YAML, XML, mail, S3, conteneur de services).
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut), et pas de comparaison `<`.
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les

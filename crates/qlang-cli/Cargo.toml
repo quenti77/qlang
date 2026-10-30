@@ -31,3 +31,5 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }
 tar = { version = "0.4", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"

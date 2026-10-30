@@ -1,5 +1,11 @@
 # Journal des changements
 
+## 0.67.0
+
+- **Compression et archives en mémoire** : `Gzip` (`compress`, `compress_level`, `decompress`, `decompress_max`), `Zip` et `Tar` (`read`, `read_max`, `write`, et `write_gz` pour `.tar.gz`) avec `ArchiveEntry { name, data }`. Un nom qui sort du dossier (`../x`, chemin absolu) est refusé, et le contenu décompressé est borné à 256 Mo par défaut.
+- **Fuseaux horaires** : `Zone.of("Europe/Paris")` avec `offset_seconds`, `abbreviation`, `wall`, `format` et `local` (heure d'été comprise ; une heure qui n'existe pas se lit avec le décalage d'avant, une heure qui existe deux fois est la première). La base IANA est dans le programme `qlang` (`T250` dans le navigateur).
+- `qlang-std` 0.17.0 : `yaml.q` et `xml.q`.
+
 ## 0.66.0
 
 - **Pool de connexions** : `qlang serve --db-pool N` partage au plus N connexions réelles à PostgreSQL ou MySQL entre tous les workers. Un `Db` en emprunte une pour chaque requête et la rend, et garde la même pendant une transaction ; si les N sont prises, la requête attend 30 s au plus. Mesuré sur PostgreSQL : 6 transactions simultanées avec 2 connexions au lieu de 6. SQLite n'est pas concerné.

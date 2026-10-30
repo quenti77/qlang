@@ -1494,6 +1494,11 @@ extern fun fs_read_bytes(path: string) -> Result<bytes, Error>
 extern fun fs_write_bytes(path: string, content: bytes) -> Result<bool, Error>
 extern fun fs_create_dir(path: string) -> Result<bool, Error>
 extern fun fs_exists(path: string) -> Result<bool, Error>
+extern fun fs_is_dir(path: string) -> Result<bool, Error>
+extern fun fs_list(path: string) -> Result<array<string>, Error>
+extern fun fs_open_lines(path: string) -> Result<int, Error>
+extern fun fs_read_line(handle: int) -> Result<string?, Error>
+extern fun fs_close_lines(handle: int) -> Result<bool, Error>
 extern fun env_get(name: string) -> string?
 extern fun env_args() -> array<string>
 extern fun http_send(req: Request) -> Result<Response, Error>
@@ -1533,6 +1538,544 @@ impl fs
     --" Whether a file or a folder is there. Needs disk access. --"
     public fun exists(path: string) -> Result<bool, Error>
         fs_exists(path)
+    end
+
+    --" Whether `path` is a folder (`false` when it is not there). Needs disk access. --"
+    public fun is_dir(path: string) -> Result<bool, Error>
+        fs_is_dir(path)
+    end
+
+    --" The names (not the paths) of what a folder holds, sorted. Needs disk access. --"
+    public fun list(path: string) -> Result<array<string>, Error>
+        fs_list(path)
+    end
+
+    --" Opens a text file to read it one line at a time, without loading it all: `next()` gives each
+    line (without its line break) until `none`, `close()` lets go early. A line may be 16 MB at most, and 64
+    files can be open at once. Needs disk access. --"
+    public fun lines(path: string) -> Result<Lines, Error>
+        open_lines(path)
+    end
+
+    --" Calls `f` with each line of a text file, one at a time (the file is never all in memory), and
+    gives how many there were. Needs disk access. --"
+    public fun each_line(path: string, f: fun(string)) -> Result<int, Error>
+        for_each_line(path, f)
+    end
+
+    --" The lines of a text file as an array (the whole file is loaded: for a big one, `lines` or
+    `each_line`). Needs disk access. --"
+    public fun read_lines(path: string) -> Result<array<string>, Error>
+        let out: array<string> = []
+        let r = for_each_line(path, fun(line: string) out.push(line) end)
+        if r.is_err() then
+            return Result<array<string>, Error>.Err(r.unwrap_err())
+        end
+        Result<array<string>, Error>.Ok(out)
+    end
+
+    --" The paths that match a pattern, sorted: `*` is any characters but `/`, `**` any characters
+    including `/` (`src/**/*.q` goes into every folder; `**/` also matches no folder at all), `?` one
+    character, `[a-c]` / `[!a-c]` a set. The pattern starts at the folder before its first wildcard.
+    Needs disk access. --"
+    public fun glob(pattern: string) -> Result<array<string>, Error>
+        let parts = pattern.split("/")
+        let fixed: array<string> = []
+        for part in parts do
+            if part.contains("*") or part.contains("?") or part.contains("[") then
+                break
+            end
+            fixed.push(part)
+        end
+        let start = if fixed.is_empty() then "." elseif fixed.len() == 1 and fixed[0] == "" then "/" else fixed.join("/") end
+        let found: array<string> = []
+        let walked = glob_walk(start, pattern, 0, found)
+        if walked.is_err() then
+            return Result<array<string>, Error>.Err(walked.unwrap_err())
+        end
+        found.sort()
+        Result<array<string>, Error>.Ok(found)
+    end
+end
+
+--" A text file being read one line at a time (see `fs.lines`). --"
+struct Lines
+    public handle: int
+end
+
+fun open_lines(path: string) -> Result<Lines, Error>
+    let r = fs_open_lines(path)
+    if r.is_err() then
+        return Result<Lines, Error>.Err(r.unwrap_err())
+    end
+    Result<Lines, Error>.Ok(Lines { handle: r.unwrap() })
+end
+
+fun for_each_line(path: string, f: fun(string)) -> Result<int, Error>
+    let opened = open_lines(path)
+    if opened.is_err() then
+        return Result<int, Error>.Err(opened.unwrap_err())
+    end
+    let reader = opened.unwrap()
+    let count = 0
+    while true do
+        let next = reader.next()
+        if next.is_err() then
+            return Result<int, Error>.Err(next.unwrap_err())
+        end
+        let line = next.unwrap()
+        if line == none then
+            break
+        end
+        f(line)
+        count += 1
+    end
+    Result<int, Error>.Ok(count)
+end
+
+impl Lines
+    --" The next line without its line break, or `none` at the end of the file (it is then closed).
+    A line that is not text, or longer than 16 MB, is an `err`. --"
+    public fun next(self) -> Result<string?, Error>
+        fs_read_line(self.handle)
+    end
+
+    --" Closes the file before its end (a file that was read to its end closes by itself). --"
+    public fun close(self)
+        fs_close_lines(self.handle)
+    end
+end
+
+fun glob_walk(dir: string, pattern: string, depth: int, found: array<string>) -> Result<bool, Error>
+    if depth > 40 or found.len() > 100000 then
+        return Result<bool, Error>.Ok(true)
+    end
+    let names = fs_list(dir)
+    if names.is_err() then
+        -- a pattern whose folder is not there matches nothing
+        return Result<bool, Error>.Ok(true)
+    end
+    for name in names.unwrap() do
+        let full = if dir == "." and not pattern.starts_with("./") then name elseif dir.ends_with("/") then dir + name else dir + "/" + name end
+        if Path.matches(pattern, full) then
+            found.push(full)
+        end
+        let sub = fs_is_dir(full)
+        if sub.is_ok() and sub.unwrap() then
+            let walked = glob_walk(full, pattern, depth + 1, found)
+            if walked.is_err() then
+                return walked
+            end
+        end
+    end
+    Result<bool, Error>.Ok(true)
+end
+
+--" File paths written as text, with `/` between the parts (also on Windows). Nothing here touches the
+disk: `Path.join("uploads", name)`, `Path.ext("photo.PNG")`. --"
+struct Path
+end
+
+impl Path
+    --" `true` for `/a/b` and `C:/a`. --"
+    public fun is_absolute(p: string) -> bool
+        p.starts_with("/") or regex.matches(p, "^[A-Za-z]:/")
+    end
+
+    --" The shortest way to write the same path: `a//b/./c/../d/` is `a/b/d`, `""` is `.`; a `..` that
+    cannot go up stays at the start of a relative path and is dropped at the root. --"
+    public fun normalize(p: string) -> string
+        if p == "" then
+            return "."
+        end
+        let rooted = p.starts_with("/")
+        let drive = ""
+        let body = p
+        if not rooted and regex.matches(p, "^[A-Za-z]:/") then
+            drive = p.substring(0, 2)
+            body = p.substring(2, p.len())
+            rooted = true
+        end
+        let stack: array<string> = []
+        for part in body.split("/") do
+            if part == "" or part == "." then
+                continue
+            end
+            if part == ".." then
+                let top = stack.last()
+                if top != none and top != ".." then
+                    stack.pop()
+                else
+                    if not rooted then
+                        stack.push("..")
+                    end
+                end
+                continue
+            end
+            stack.push(part)
+        end
+        let joined = stack.join("/")
+        if rooted then
+            return drive + "/" + joined
+        end
+        if joined == "" then "." else joined end
+    end
+
+    --" The parts one after the other, normalised; an absolute part starts the path again
+    (`join_all(["a", "/b", "c"])` is `/b/c`), empty parts are ignored. --"
+    public fun join_all(parts: array<string>) -> string
+        let kept = parts.filter(fun(s: string) -> bool s != "" end)
+        if kept.is_empty() then
+            return ""
+        end
+        let out = kept[0]
+        let i = 1
+        while i < kept.len() do
+            let next = kept[i]
+            if Path.is_absolute(next) then
+                out = next
+            else
+                out = if out.ends_with("/") then out + next else out + "/" + next end
+            end
+            i += 1
+        end
+        Path.normalize(out)
+    end
+
+    --" Two parts, like `join_all`. --"
+    public fun join(a: string, b: string) -> string
+        Path.join_all([a, b])
+    end
+
+    fun trimmed(p: string) -> string
+        let t = p
+        while t.len() > 1 and t.ends_with("/") do
+            t = t.substring(0, t.len() - 1)
+        end
+        t
+    end
+
+    --" The last part: `/a/b.txt` is `b.txt`, `/a/b/` is `b`, `/` is `/`, `""` is `.`. --"
+    public fun base(p: string) -> string
+        if p == "" then
+            return "."
+        end
+        let t = Path.trimmed(p)
+        if t == "/" then
+            return "/"
+        end
+        let at = t.last_index_of("/")
+        if at == none then t else t.substring(at + 1, t.len()) end
+    end
+
+    --" Everything but the last part: `/a/b.txt` is `/a`, `b.txt` is `.`, `/a` is `/`. --"
+    public fun dir(p: string) -> string
+        let t = Path.trimmed(p)
+        let at = t.last_index_of("/")
+        if at == none then
+            return "."
+        end
+        if at == 0 then
+            return "/"
+        end
+        Path.normalize(t.substring(0, at))
+    end
+
+    --" The extension of the last part, without the dot: `a.tar.gz` is `gz`; `""` for `.bashrc`,
+    `a.` and a name without a dot. --"
+    public fun ext(p: string) -> string
+        let name = Path.base(p)
+        let dot = name.last_index_of(".")
+        if dot == none or dot == 0 or dot == name.len() - 1 then
+            return ""
+        end
+        name.substring(dot + 1, name.len())
+    end
+
+    --" The last part without its extension: `a.tar.gz` is `a.tar`, `.bashrc` stays `.bashrc`. --"
+    public fun stem(p: string) -> string
+        let name = Path.base(p)
+        let e = Path.ext(p)
+        if e == "" then name else name.substring(0, name.len() - e.len() - 1) end
+    end
+
+    --" The path with another extension (`""` removes it): `a/b.txt` and `md` give `a/b.md`. --"
+    public fun with_ext(p: string, e: string) -> string
+        let old = Path.ext(p)
+        let root = if old == "" then p else p.substring(0, p.len() - old.len() - 1) end
+        if e == "" then root else root + "." + e end
+    end
+
+    fun glob_regex(pattern: string) -> string
+        let out = "^"
+        let chars = pattern.chars()
+        let i = 0
+        let n = chars.len()
+        while i < n do
+            let c = chars[i]
+            if c == "*" then
+                if i + 1 < n and chars[i + 1] == "*" then
+                    if i + 2 < n and chars[i + 2] == "/" then
+                        out = out + "(?:.*/)?"
+                        i += 3
+                    else
+                        out = out + ".*"
+                        i += 2
+                    end
+                else
+                    out = out + "[^/]*"
+                    i += 1
+                end
+                continue
+            end
+            if c == "?" then
+                out = out + "[^/]"
+                i += 1
+                continue
+            end
+            if c == "[" then
+                let close = i + 1
+                if close < n and (chars[close] == "!" or chars[close] == "^") then
+                    close += 1
+                end
+                if close < n and chars[close] == "]" then
+                    close += 1
+                end
+                while close < n and chars[close] != "]" do
+                    close += 1
+                end
+                if close >= n then
+                    out = out + "\\["
+                    i += 1
+                    continue
+                end
+                let inner = chars.slice(i + 1, close).join("")
+                if inner.starts_with("!") then
+                    inner = "^" + inner.substring(1, inner.len())
+                end
+                out = out + "[" + inner.replace("\\", "\\\\") + "]"
+                i = close + 1
+                continue
+            end
+            if "\\.+()|\{\}^$".contains(c) then
+                out = out + "\\" + c
+            else
+                out = out + c
+            end
+            i += 1
+        end
+        out + "$"
+    end
+
+    --" Whether `text` matches the glob `pattern`: `*` any characters but `/`, `**` any characters
+    including `/` (`**/` may match no folder), `?` one character, `[a-c]` / `[!a-c]` a set of characters. --"
+    public fun matches(pattern: string, text: string) -> bool
+        regex.matches(text, Path.glob_regex(pattern))
+    end
+end
+
+--" Numbers and text laid out for people: `Format.number(1234567.891, 2)` is `1,234,567.89`,
+`Format.bytes(1536)` is `1.5 KB`, `Format.sprintf("%-8s|%05.1f", [Any.of("ab"), Any.of(3.14159)])` is
+`ab      |003.1`. --"
+struct Format
+end
+
+fun digits_with(text: string, thousands: string) -> string
+    let out = ""
+    let i = text.len()
+    while i > 3 do
+        out = thousands + text.substring(i - 3, i) + out
+        i -= 3
+    end
+    text.substring(0, i) + out
+end
+
+impl Format
+    --" The integer with a separator between the thousands: `1234567` and `,` give `1,234,567`. --"
+    public fun int_with(n: int, thousands: string) -> string
+        let text = "{n}"
+        if text.starts_with("-") then
+            return "-" + digits_with(text.substring(1, text.len()), thousands)
+        end
+        digits_with(text, thousands)
+    end
+
+    --" The integer with commas between the thousands: `1,234,567`. --"
+    public fun int(n: int) -> string
+        Format.int_with(n, ",")
+    end
+
+    --" `n` with exactly `decimals` digits after the point (0 to 15, rounded), `point` before them and
+    `thousands` between the groups of three digits of the integer part. A number too large for that
+    (more than about 9e18 once scaled) is written as it is. --"
+    public fun number_with(n: float, decimals: int, point: string, thousands: string) -> string
+        let d = if decimals < 0 then 0 elseif decimals > 15 then 15 else decimals end
+        if n != n then
+            return "NaN"
+        end
+        let scaled_float = n.abs() * (10.0 ** d)
+        if scaled_float >= 9000000000000000000.0 then
+            return "{n}"
+        end
+        let scaled = scaled_float.round()
+        let text = "{scaled}"
+        if text.len() <= d then
+            text = "0".repeat(d + 1 - text.len()) + text
+        end
+        let whole = digits_with(text.substring(0, text.len() - d), thousands)
+        let out = if d == 0 then whole else whole + point + text.substring(text.len() - d, text.len()) end
+        if n < 0.0 and scaled != 0 then "-" + out else out end
+    end
+
+    --" `n` with `decimals` digits after the point and commas between the thousands: `1,234.50`. --"
+    public fun number(n: float, decimals: int) -> string
+        Format.number_with(n, decimals, ".", ",")
+    end
+
+    --" A size in bytes for a person: `512 B`, `1.5 KB`, `3.2 MB` (units of 1024). --"
+    public fun bytes(n: int) -> string
+        if n < 1024 and n > -1024 then
+            return "{n} B"
+        end
+        let units = ["KB", "MB", "GB", "TB", "PB"]
+        let value = n as float
+        let i = -1
+        while (value >= 1024.0 or value <= -1024.0) and i < 4 do
+            value = value / 1024.0
+            i += 1
+        end
+        Format.number(value, 1) + " " + units[i]
+    end
+
+    fun pad(text: string, width: int, left: bool, fill: string) -> string
+        if text.len() >= width then
+            return text
+        end
+        if left then text.pad_left(width, fill) else text.pad_right(width, fill) end
+    end
+
+    fun sprintf_fail(message: string)
+        panic("Format.sprintf: {message}")
+    end
+
+    --" A text from a template: `%s` a text (any value is written as it prints), `%d` an integer, `%f` a
+    number with `.2` decimals, `%x` `%X` `%o` `%b` an integer in base 16, 8 or 2, `%%` a percent sign. After the `%`: `-` (pad on the right), `0` (pad with zeros), `+` (always a
+    sign), a width, `.precision` (decimals for `%f`, longest text for `%s`). The values come as an array
+    of `Any`; a value that does not fit its `%` or a missing one is a panic, like a wrong index: it is a
+    mistake of the program. --"
+    public fun sprintf(template: string, args: array<Any>) -> string
+        let chars = template.chars()
+        let n = chars.len()
+        let out = ""
+        let i = 0
+        let used = 0
+        while i < n do
+            let c = chars[i]
+            if c != "%" then
+                out = out + c
+                i += 1
+                continue
+            end
+            i += 1
+            if i >= n then
+                Format.sprintf_fail("the template ends after a `%`")
+            end
+            if chars[i] == "%" then
+                out = out + "%"
+                i += 1
+                continue
+            end
+            let left = false
+            let zero = false
+            let plus = false
+            while i < n and (chars[i] == "-" or chars[i] == "0" or chars[i] == "+") do
+                if chars[i] == "-" then
+                    left = true
+                end
+                if chars[i] == "0" then
+                    zero = true
+                end
+                if chars[i] == "+" then
+                    plus = true
+                end
+                i += 1
+            end
+            let width = 0
+            while i < n and chars[i].is_digit() do
+                width = width * 10 + (int.parse(chars[i]) ?? 0)
+                i += 1
+            end
+            let precision = -1
+            if i < n and chars[i] == "." then
+                i += 1
+                precision = 0
+                while i < n and chars[i].is_digit() do
+                    precision = precision * 10 + (int.parse(chars[i]) ?? 0)
+                    i += 1
+                end
+            end
+            if i >= n then
+                Format.sprintf_fail("the template ends inside a `%`")
+            end
+            let verb = chars[i]
+            i += 1
+            if used >= args.len() then
+                Format.sprintf_fail("`%{verb}` has no value (the array has {args.len()})")
+            end
+            let arg = args[used]
+            used += 1
+            let body = ""
+            let numeric = false
+            if verb == "s" then
+                let text = arg.as<string>() ?? "{arg}"
+                body = if precision >= 0 and text.len() > precision then text.substring(0, precision) else text end
+            elseif verb == "d" then
+                let v = arg.as<int>()
+                if v == none then
+                    Format.sprintf_fail("`%d` needs an int, got {arg}")
+                end
+                body = "{v}"
+                if plus and (v ?? 0) >= 0 then
+                    body = "+" + body
+                end
+                numeric = true
+            elseif verb == "f" then
+                let f = arg.as<float>()
+                let as_int = arg.as<int>()
+                let v = if f != none then f else if as_int != none then as_int as float else none end end
+                if v == none then
+                    Format.sprintf_fail("`%f` needs a number, got {arg}")
+                end
+                body = Format.number_with(v ?? 0.0, if precision < 0 then 6 else precision end, ".", "")
+                if plus and (v ?? 0.0) >= 0.0 then
+                    body = "+" + body
+                end
+                numeric = true
+            elseif verb == "x" or verb == "X" or verb == "o" or verb == "b" then
+                let v = arg.as<int>()
+                if v == none then
+                    Format.sprintf_fail("`%{verb}` needs an int, got {arg}")
+                end
+                let value = v ?? 0
+                body = if verb == "o" then value.to_oct() elseif verb == "b" then value.to_bin() else value.to_hex() end
+                if verb == "X" then
+                    body = body.upper()
+                end
+                numeric = true
+            else
+                Format.sprintf_fail("`%{verb}` is not a known conversion (s d f x X o b)")
+            end
+            if numeric and zero and not left and body.len() < width then
+                let sign = if body.starts_with("-") or body.starts_with("+") then body.substring(0, 1) else "" end
+                let rest = body.substring(sign.len(), body.len())
+                body = sign + "0".repeat(width - body.len()) + rest
+            end
+            out = out + Format.pad(body, width, not left, " ")
+        end
+        if used < args.len() then
+            Format.sprintf_fail("{args.len() - used} value(s) were not used")
+        end
+        out
     end
 end
 

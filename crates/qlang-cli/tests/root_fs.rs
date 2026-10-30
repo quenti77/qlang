@@ -50,7 +50,7 @@ print(fs.write_bytes("up/a/b/f.bin", "x".to_bytes()).is_ok())
 print(fs.create_dir("../outside").is_ok())
 print(fs.create_dir("up/new/../../../outside2").is_ok())
 print(fs.create_dir("/tmp/qlang-should-not-exist-9z").is_ok())
-print(fs.exists("/etc").is_ok())
+print(fs.exists("..").is_ok())
 "#,
     )
     .unwrap();

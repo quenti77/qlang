@@ -1053,3 +1053,163 @@ fn damaged_requests_do_not_stop_the_server() {
     // still alive, and still right
     assert!(exchange(&server, good).starts_with("HTTP/1.1 201"));
 }
+
+const FAILING: &str = r#"
+let db = Db.connect("sqlite://:memory:").unwrap()
+db.execute("CREATE TABLE t (id INT)", []).unwrap()
+
+fun helper(n: int) -> int
+  if n == 3 then
+    panic("exploded <here>")
+  end
+  n
+end
+
+fun handle(req: Request) -> Response
+  if req.url == "/ok" then
+    let rows = db.query("SELECT id FROM t WHERE id = ?", [Json.number(1.0)])
+    return Response { status: 200, body: "fine" }
+  end
+  for i in [1, 2, 3, 4] do
+    db.query("SELECT id FROM t WHERE id = ?", [Json.number(i as float)])
+  end
+  Response { status: 200, body: "{helper(3)}" }
+end
+"#;
+
+fn get_with(server: &Server, path: &str, accept: &str) -> String {
+    exchange(
+        server,
+        &format!(
+            "GET {path} HTTP/1.1\r\nHost: t\r\nAccept: {accept}\r\nCookie: qs=topsecret\r\n\r\n"
+        ),
+    )
+}
+
+#[test]
+fn dev_shows_a_page_for_a_browser_json_for_a_client_and_text_otherwise() {
+    let server = start("devpage", FAILING, &["--dev"]);
+    let html = get_with(&server, "/boom", "text/html,application/xhtml+xml");
+    assert!(html.starts_with("HTTP/1.1 500"), "{html}");
+    assert!(html.contains("text/html"), "{html}");
+    assert!(html.contains("exploded &lt;here&gt;"), "{html}");
+    assert!(html.contains("class=\"line hit\""), "{html}");
+    assert!(html.contains("N+1?"), "{html}");
+    assert!(html.contains("/boom"), "{html}");
+    assert!(
+        !html.contains("topsecret"),
+        "the cookie must not be shown: {html}"
+    );
+
+    let json = get_with(&server, "/boom", "application/json");
+    assert!(json.contains("application/json"), "{json}");
+    let body = json.split("\r\n\r\n").nth(1).unwrap();
+    let v: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exploded <here>")
+    );
+    assert_eq!(v["queries"].as_array().unwrap().len(), 4);
+    assert_eq!(v["request"]["method"], "GET");
+    assert!(!body.contains("topsecret"), "{body}");
+
+    let text = get_with(&server, "/boom", "*/*");
+    assert!(
+        text.contains("text/plain") && text.contains("Internal Server Error"),
+        "{text}"
+    );
+    assert!(text.contains("exploded"), "{text}");
+
+    // a request that works carries how long its SQL took
+    let ok = get_with(&server, "/ok", "text/html");
+    assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+    assert!(ok.contains("Server-Timing: db;dur="), "{ok}");
+}
+
+#[test]
+fn without_dev_the_page_shows_nothing_of_the_program() {
+    let server = start("nodev", FAILING, &[]);
+    for accept in ["text/html", "application/json", "*/*"] {
+        let r = get_with(&server, "/boom", accept);
+        assert!(r.starts_with("HTTP/1.1 500"), "{r}");
+        assert!(r.ends_with("Internal Server Error"), "{accept}: {r}");
+        assert!(!r.contains("exploded") && !r.contains("handle"), "{r}");
+        assert!(!r.contains("Server-Timing"), "{r}");
+    }
+}
+
+#[test]
+fn dev_is_refused_on_a_public_address() {
+    let file = app_file("devpublic", APP);
+    let run = |extra: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .arg("serve")
+            .arg(&file)
+            .args(["--port", &free_port().to_string(), "--dev"])
+            .args(extra)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let refused = run(&["--bind", "0.0.0.0"]).wait_with_output().unwrap();
+    assert_eq!(refused.status.code(), Some(64));
+    let out = String::from_utf8_lossy(&refused.stderr);
+    assert!(out.contains("only allowed on localhost"), "{out}");
+    // --dev-public says it is meant; a started server never exits by itself, so end it
+    let mut allowed = run(&["--bind", "0.0.0.0", "--dev-public"]);
+    let mut line = String::new();
+    BufReader::new(allowed.stderr.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let _ = allowed.kill();
+    let _ = allowed.wait();
+    assert!(line.contains("serving"), "{line}");
+}
+
+#[test]
+fn a_failure_is_one_json_line_with_its_stack_in_production() {
+    let file = app_file("jsonlog", FAILING);
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .arg("serve")
+        .arg(&file)
+        .args([
+            "--port",
+            &port.to_string(),
+            "--log-format",
+            "json",
+            "--no-access-log",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut reader = BufReader::new(child.stderr.take().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.contains("serving"), "{line}");
+    let answer = exchange_port(port, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(answer.ends_with("Internal Server Error"), "{answer}");
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+    let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(v["level"], "error", "{line}");
+    assert!(
+        v["message"].as_str().unwrap().contains("exploded"),
+        "{line}"
+    );
+    assert_eq!(v["context"]["code"], "R050", "{line}");
+    assert_eq!(v["context"]["url"], "/boom", "{line}");
+    let stack = v["context"]["stack"].as_array().unwrap();
+    assert!(
+        stack.iter().any(|f| f.as_str().unwrap().contains("helper")),
+        "{line}"
+    );
+    // the source code is not in the log
+    assert!(!line.contains("panic(\"exploded"), "{line}");
+}

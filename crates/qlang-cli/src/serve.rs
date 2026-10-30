@@ -6,6 +6,7 @@
 //! It is deliberately minimal (HTTP/1.1 with keep-alive, no TLS). Put it behind a
 //! reverse proxy and bind it to localhost unless you know what you are doing.
 
+use crate::devpage::{self, RequestInfo};
 use crate::json::{self, Ceiling};
 use crate::ws::{self, WsEvent, WsLink};
 use qlang_core::check::compile;
@@ -87,6 +88,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         ..AppOptions::default()
     };
     let mut tune = Tuning::default();
+    let mut dev_public = false;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -165,6 +167,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
             "--watch" => app.watch = true,
             "--compress" => app.compress = true,
             "--dev" => DEV.store(true, Ordering::SeqCst),
+            "--dev-public" => dev_public = true,
             "--trust-externs" => app.trust_externs = true,
             "--allow-process" => app.allow_process = true,
             "--extern" => {
@@ -248,6 +251,15 @@ pub fn serve(args: &[&str]) -> ExitCode {
             }
         }
         i += 1;
+    }
+    // the page of `--dev` shows the source code and the request: only to this machine
+    if DEV.load(Ordering::SeqCst) && !dev_public && !is_loopback(&bind) {
+        eprintln!(
+            "--dev shows the code of the program in its error pages: it is only allowed on \
+             localhost (--bind {bind} is not). Remove --dev, or add --dev-public if this server \
+             is not reachable by anyone else."
+        );
+        return ExitCode::from(64);
     }
     let _ = TUNING.set(tune);
     if let Some(file) = &app.file {
@@ -773,7 +785,7 @@ struct AppOptions {
 /// A request waiting for an interpreter, and where to send the answer.
 struct Job {
     request: AppRequest,
-    reply: mpsc::Sender<Result<AppResponse, String>>,
+    reply: mpsc::Sender<Result<AppResponse, Box<devpage::Failure>>>,
     /// The pieces of an answer that is streamed (see `AppResponse::stream`).
     chunks: mpsc::Sender<Vec<u8>>,
     /// The worker's side of the connection, when the request asked for a WebSocket.
@@ -796,6 +808,25 @@ const STOP_GRACE: Duration = Duration::from_secs(5);
 /// Whether the server was asked to stop (`Process.stopping()` in a served program).
 pub fn is_stopping() -> bool {
     STOPPING.load(Ordering::SeqCst)
+}
+
+/// Writes the failure of a request to the log: the diagnostic with its stack as text, or one JSON
+/// line with the stack in its `context`.
+fn log_failure(f: &devpage::Failure) {
+    if crate::logging::json_enabled() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .ok();
+        crate::logging::write(
+            now,
+            "error",
+            &f.message,
+            &[("context".to_string(), f.log_context())],
+        );
+    } else {
+        log(&f.text);
+    }
 }
 
 /// Writes to the server's log (standard error). Unlike `eprint!` it never panics when the log
@@ -1131,9 +1162,45 @@ fn worker(
                             break;
                         }
                     }
+                    let dev = DEV.load(Ordering::SeqCst);
+                    // what a failure is reported with: the headers only for the page of `--dev`
+                    let info = RequestInfo {
+                        method: job.request.method.clone(),
+                        url: job.request.url.clone(),
+                        headers: if dev {
+                            job.request.headers.clone()
+                        } else {
+                            Vec::new()
+                        },
+                    };
+                    if dev {
+                        crate::db::start_query_log();
+                    }
                     let mut answer = app
                         .handle(job.request)
-                        .map_err(|d| d.render(&program.sources));
+                        .map_err(|d| Box::new(devpage::Failure::new(&d, &program.sources)));
+                    if dev {
+                        let queries = crate::db::take_query_log();
+                        if let Some(line) =
+                            devpage::n_plus_one_warning(&info.method, &info.url, &queries)
+                        {
+                            log(&line);
+                        }
+                        match &mut answer {
+                            Ok(r) if !queries.is_empty() => {
+                                let ms: f64 = queries.iter().map(|q| q.ms).sum();
+                                r.headers.push((
+                                    "Server-Timing".to_string(),
+                                    format!("db;dur={ms:.1};desc=\"{} queries\"", queries.len()),
+                                ));
+                            }
+                            Err(f) => f.queries = queries,
+                            _ => {}
+                        }
+                    }
+                    if let Err(f) = &mut answer {
+                        f.request = Some(info);
+                    }
                     let wants_ws = matches!(&answer, Ok(r) if r.websocket.is_some());
                     if wants_ws && job.ws.is_none() {
                         // the program answered with a WebSocket to a request that did not ask for one
@@ -1448,6 +1515,7 @@ fn serve_one(
         && request
             .header("accept-encoding")
             .is_some_and(|v| v.to_ascii_lowercase().contains("gzip"));
+    let accept_header = request.header("accept").unwrap_or("").to_string();
     let (path, query) = split_target(&request.target);
 
     // files first, like a web server in front of the program
@@ -1609,15 +1677,37 @@ fn serve_one(
             }
             status
         }
-        Ok(Err(diagnostic)) => {
+        Ok(Err(failure)) => {
             // the details stay in the server's log: they are not for the client
-            log(&diagnostic);
-            let shown = if DEV.load(Ordering::SeqCst) {
-                format!("Internal Server Error\n\n{diagnostic}")
+            log_failure(&failure);
+            let (headers, body): (Vec<(String, String)>, String) = if DEV.load(Ordering::SeqCst) {
+                let accept = accept_header.to_ascii_lowercase();
+                if accept.contains("application/json") && !accept.contains("text/html") {
+                    (
+                        vec![(
+                            "Content-Type".to_string(),
+                            "application/json; charset=utf-8".to_string(),
+                        )],
+                        failure.json(),
+                    )
+                } else if accept.contains("text/html") {
+                    (
+                        vec![(
+                            "Content-Type".to_string(),
+                            "text/html; charset=utf-8".to_string(),
+                        )],
+                        failure.html(),
+                    )
+                } else {
+                    (
+                        text_plain.to_vec(),
+                        format!("Internal Server Error\n\n{}", failure.text),
+                    )
+                }
             } else {
-                "Internal Server Error".to_string()
+                (text_plain.to_vec(), "Internal Server Error".to_string())
             };
-            if write_to(stream, 500, &text_plain, shown.as_bytes(), head_only, keep).is_err() {
+            if write_to(stream, 500, &headers, body.as_bytes(), head_only, keep).is_err() {
                 keep = false;
             }
             500

@@ -1,5 +1,10 @@
 # Journal des changements
 
+## 0.65.0
+
+- **Envoyer un fichier** : `Response.file(chemin)` et `Response.download(chemin, nom)` envoient un fichier du disque par morceaux (jamais en entier en mémoire), avec `Content-Length`, le type d'après l'extension, `404` s'il manque et `403` hors de `--root`. Le worker est libre pendant l'envoi.
+- **HTTPS** : documenté comme un proxy inverse devant `qlang serve` (`docs/security.md`), avec les en-têtes à faire poser par le proxy. `qlang-std` 0.16.0 : `web/proxy.q`, sessions côté serveur (base de données, Redis) et `cache.DbStore`.
+
 ## 0.64.0
 
 - **`qlang self-update`** : remplace le programme par la dernière version (ou `--version X.Y.Z`), après avoir vérifié la somme de contrôle de `SHA256SUMS` ; `--check` dit seulement s'il y a plus récent. Linux, macOS et Windows.

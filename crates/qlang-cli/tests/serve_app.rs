@@ -1213,3 +1213,113 @@ fn a_failure_is_one_json_line_with_its_stack_in_production() {
     // the source code is not in the log
     assert!(!line.contains("panic(\"exploded"), "{line}");
 }
+
+#[test]
+fn a_file_is_sent_from_the_disk_with_its_length_and_type() {
+    let dir = std::env::temp_dir().join(format!("qlang-file-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(dir.join("data.bin"), &big).unwrap();
+    std::fs::write(dir.join("page.json"), "{\"a\":1}").unwrap();
+    let source = format!(
+        r#"
+fun handle(req: Request) -> Response
+  if req.path == "/big" then
+    return Response.file("{d}/data.bin")
+  end
+  if req.path == "/json" then
+    return Response.file("{d}/page.json")
+  end
+  if req.path == "/save" then
+    return Response.download("{d}/page.json", "my \"report\".json")
+  end
+  if req.path == "/gone" then
+    return Response.file("{d}/missing.bin")
+  end
+  Response.text("ok")
+end
+"#,
+        d = dir.display()
+    );
+    let server = start("sendfile", &source, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(b"GET /big HTTP/1.1\r\nHost: t\r\n\r\n")
+        .unwrap();
+    let (head, body) = read_one(&mut s);
+    assert!(head.contains("Content-Length: 300000"), "{head}");
+    assert!(
+        head.contains("Content-Type: application/octet-stream"),
+        "{head}"
+    );
+    assert_eq!(body, big);
+    // the same connection serves the next request
+    s.write_all(b"GET /json HTTP/1.1\r\nHost: t\r\n\r\n")
+        .unwrap();
+    let (head, body) = read_one(&mut s);
+    assert!(head.contains("Content-Type: application/json"), "{head}");
+    assert_eq!(body, b"{\"a\":1}");
+    s.write_all(b"HEAD /big HTTP/1.1\r\nHost: t\r\n\r\n")
+        .unwrap();
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        s.read_exact(&mut byte).unwrap();
+        head.push(byte[0]);
+    }
+    assert!(String::from_utf8_lossy(&head).contains("Content-Length: 300000"));
+    drop(s);
+    let saved = exchange(
+        &server,
+        "GET /save HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        saved.contains("Content-Disposition: attachment; filename=\"my report.json\""),
+        "{}",
+        &saved[..300.min(saved.len())]
+    );
+    let gone = exchange(
+        &server,
+        "GET /gone HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(gone.starts_with("HTTP/1.1 404"), "{gone}");
+}
+
+#[test]
+fn a_file_outside_of_root_is_refused() {
+    let base = std::env::temp_dir().join(format!("qlang-fileroot-{}", std::process::id()));
+    // the program lives in this folder, which is the root
+    let inside =
+        std::env::temp_dir().join(format!("qlang-serve-test-{}-fileroot", std::process::id()));
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("secret.txt"), "secret").unwrap();
+    std::fs::write(inside.join("ok.txt"), "fine").unwrap();
+    let source = format!(
+        r#"
+fun handle(req: Request) -> Response
+  if req.path == "/secret" then
+    return Response.file("{b}/secret.txt")
+  end
+  Response.file("{i}/ok.txt")
+end
+"#,
+        b = base.display(),
+        i = inside.display()
+    );
+    let root = inside.display().to_string();
+    let server = start("fileroot", &source, &["--root", &root]);
+    let secret = exchange(
+        &server,
+        "GET /secret HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(secret.starts_with("HTTP/1.1 403"), "{secret}");
+    assert!(!secret.contains("secret."));
+    let fine = exchange(
+        &server,
+        "GET /ok HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        fine.starts_with("HTTP/1.1 200") && fine.ends_with("fine"),
+        "{fine}"
+    );
+}

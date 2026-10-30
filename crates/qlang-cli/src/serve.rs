@@ -422,6 +422,83 @@ fn response_head(status: u16, headers: &[(String, String)]) -> String {
     head
 }
 
+/// Answers with a file of the disk (`Response.file`), read piece by piece. The status and
+/// whether the connection can still be used.
+fn send_file(
+    stream: &mut TcpStream,
+    r: AppResponse,
+    path: &str,
+    root: Option<&Path>,
+    head_only: bool,
+    keep: bool,
+) -> (u16, bool) {
+    let text_plain = [(
+        "Content-Type".to_string(),
+        "text/plain; charset=utf-8".to_string(),
+    )];
+    let refuse = |stream: &mut TcpStream, status: u16, message: &str| {
+        let sent = write_to(
+            stream,
+            status,
+            &text_plain,
+            message.as_bytes(),
+            head_only,
+            keep,
+        )
+        .is_ok();
+        (status, sent)
+    };
+    let file = PathBuf::from(path);
+    if let Some(root) = root {
+        let inside = match (file.canonicalize(), root.canonicalize()) {
+            (Ok(f), Ok(r)) => f.starts_with(r),
+            _ => false,
+        };
+        if file.exists() && !inside {
+            return refuse(stream, 403, "the file is outside of --root");
+        }
+    }
+    let opened = std::fs::File::open(&file);
+    let (mut handle, size) = match opened.and_then(|f| f.metadata().map(|m| (f, m))) {
+        Ok((f, m)) if m.is_file() => (f, m.len()),
+        _ => return refuse(stream, 404, "file not found"),
+    };
+    let mut headers = r.headers;
+    if !headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+    {
+        headers.push(("Content-Type".to_string(), content_type(&file).to_string()));
+    }
+    let mut head = response_head(u16::try_from(r.status).unwrap_or(200), &headers);
+    head.push_str(&format!(
+        "Content-Length: {size}\r\nConnection: {}\r\n\r\n",
+        if keep { "keep-alive" } else { "close" }
+    ));
+    let status = u16::try_from(r.status).unwrap_or(200);
+    if stream.write_all(head.as_bytes()).is_err() {
+        return (status, false);
+    }
+    if head_only {
+        return (status, stream.flush().is_ok());
+    }
+    let mut left = size;
+    let mut buf = vec![0u8; 64 * 1024];
+    while left > 0 {
+        let want = buf.len().min(usize::try_from(left).unwrap_or(buf.len()));
+        match handle.read(&mut buf[..want]) {
+            Ok(0) | Err(_) => return (status, false), // the file shrank: the length is wrong
+            Ok(n) => {
+                if stream.write_all(&buf[..n]).is_err() {
+                    return (status, false);
+                }
+                left -= n as u64;
+            }
+        }
+    }
+    (status, stream.flush().is_ok())
+}
+
 /// Writes a response on a connection that stays open when `keep_alive` is true.
 fn write_to(
     stream: &mut TcpStream,
@@ -1220,6 +1297,7 @@ fn worker(
                                 .to_string(),
                             raw: None,
                             stream: false,
+                            file: None,
                             websocket: None,
                         });
                     }
@@ -1625,6 +1703,14 @@ fn serve_one(
                 ));
             }
             return false;
+        }
+        Ok(Ok(r)) if r.file.is_some() => {
+            let path = r.file.clone().unwrap_or_default();
+            let (code, sent) = send_file(stream, r, &path, opts.root.as_deref(), head_only, keep);
+            if !sent {
+                keep = false;
+            }
+            code
         }
         Ok(Ok(r)) if r.stream => {
             // an answer written as the program produces it: chunked, and the connection ends

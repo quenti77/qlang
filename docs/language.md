@@ -2738,6 +2738,13 @@ Options de `qlang serve app.q` :
     retry? }` (`text/event-stream`). Le worker qui répond ne sert que cette connexion tant
     que ça dure (donne assez de `--workers`) ; si le client part, le flux s'arrête au morceau
     suivant. Entre deux morceaux, `time.sleep` attend.
+  - **Envoyer un fichier** : `Response.file(chemin)` envoie le fichier du disque par morceaux de
+    64 Ko (`Content-Length` d'après sa taille, `Content-Type` d'après son extension, sinon
+    `application/octet-stream`) ; le serveur le lit lui-même, donc un gros fichier ne remplit pas la
+    mémoire et le worker est libre tout de suite. `Response.download(chemin, "rapport.pdf")` ajoute
+    `Content-Disposition: attachment`. `404` si le fichier n'existe pas, `403` hors de `--root`. Pas de
+    `Range` pour l'instant. C'est au programme de vérifier qui a le droit de le télécharger, et de ne
+    jamais fabriquer `chemin` avec ce que le client a écrit sans le nettoyer (`Path.normalize`).
   - **WebSocket** : `Response.websocket(WebSocketHandler { ... })`, rendu à une requête qui demande
     `Upgrade: websocket`, fait de la connexion un WebSocket (sinon `426`). Le gestionnaire a
     `on_message(c: WebSocket, m: WsMessage)` (obligatoire), `on_open(c)`, `on_close(c)` et

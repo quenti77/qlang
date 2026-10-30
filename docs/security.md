@@ -28,6 +28,17 @@ Revue de `crates/qlang-cli/src/signature.rs`, `Crypto` du prélude et `jwt.q` de
 - **Reste à votre charge** : choisir un secret long et aléatoire (`Crypto.token`), le garder hors du
   code, faire tourner les clés (`kid`).
 
+## HTTPS (TLS)
+
+`qlang serve` parle HTTP en clair, c'est un choix assumé : le certificat, son renouvellement et les
+réglages TLS sont le métier d'un proxy inverse (Caddy, nginx, Traefik, l'équilibreur de l'hébergeur), qui
+parle à qlang sur la machine. Démarrer qlang sur l'adresse locale (`--bind 127.0.0.1`) pour que seul le proxy
+l'atteigne, et faire remplacer `X-Forwarded-For` / `X-Forwarded-Proto` par le proxy lui-même (Caddy
+`reverse_proxy` le fait ; nginx : `proxy_set_header X-Forwarded-For $remote_addr;`
+`proxy_set_header X-Forwarded-Proto $scheme;`). Côté programme, `qlang-std` a `web/proxy.q`
+(`is_https`, `client_ip`, `redirect_to_https()`) et les cookies de session prennent `Secure`.
+Un TLS intégré à `qlang serve` n'est pas fait.
+
 ## Permissions
 
 Un programme qlang ne peut que ce que son hôte lui laisse :

@@ -1126,6 +1126,9 @@ struct Response
     --" A body produced piece by piece: the server calls this function again and again and sends
     each text it gives, until it gives `none`. The worker that answers is busy until then. --"
     public stream: (fun() -> string?)? = none
+    --" A file of the server's disk sent as the body (see `Response.file`): the server reads it piece
+    by piece, so a big file does not fill the memory and the worker is free at once. --"
+    public file: string? = none
     --" Turns the connection into a WebSocket (see `Response.websocket`). --"
     public websocket: WebSocketHandler? = none
 end
@@ -1292,6 +1295,21 @@ impl Response
     `--workers` enough). --"
     public fun stream(content_type: string, next: fun() -> string?) -> Response
         Response { status: 200, headers: { "Content-Type": content_type, "Cache-Control": "no-cache", "X-Accel-Buffering": "no" }, body: "", stream: next }
+    end
+
+    --" Sends the file at `path` (`Content-Length` from its size, `Content-Type` from its extension,
+    `application/octet-stream` when unknown): read piece by piece by the server, so it can be big. It is
+    `404` when the file does not exist, and refused outside `--root`. The program decides who may get
+    it: check the user first, and never build `path` from what the client wrote without cleaning it
+    (`Path.normalize`). Change `headers["Content-Type"]` for another type. --"
+    public fun file(path: string) -> Response
+        Response { status: 200, headers: {}, body: "", file: path }
+    end
+
+    --" Like `file`, and the browser saves it under `filename` (`Content-Disposition: attachment`). --"
+    public fun download(path: string, filename: string) -> Response
+        let clean = filename.chars().filter(fun(c: string) -> bool c != "\"" and c != "\\" and c != ";" and c != "\n" and c != "\r" end).join("")
+        Response { status: 200, headers: { "Content-Disposition": "attachment; filename=\"{clean}\"; filename*=UTF-8''{Url.encode(filename)}" }, body: "", file: path }
     end
 
     --" A server-sent events response (`text/event-stream`): `next` gives the events one after the

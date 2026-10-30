@@ -137,6 +137,69 @@ fn document(file: &Path, shown: &str) -> Result<String, String> {
     Ok(render(shown, &items))
 }
 
+/// A documentation comment split at its tags: `@param name text` and `@return text` (also
+/// `@returns`). A line that starts with neither continues the tag above it.
+#[derive(Default)]
+struct Doc {
+    summary: String,
+    params: Vec<(String, String)>,
+    returns: Option<String>,
+}
+
+fn split_doc(doc: &str) -> Doc {
+    #[derive(PartialEq)]
+    enum Into {
+        Summary,
+        Param,
+        Return,
+    }
+    let mut out = Doc::default();
+    let mut into = Into::Summary;
+    for line in doc.trim().lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("@param") {
+            let rest = rest.trim_start();
+            let (name, text) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            out.params.push((name.to_string(), text.trim().to_string()));
+            into = Into::Param;
+        } else if let Some(rest) = line
+            .strip_prefix("@returns")
+            .or_else(|| line.strip_prefix("@return"))
+        {
+            out.returns = Some(rest.trim().to_string());
+            into = Into::Return;
+        } else {
+            let target = match into {
+                Into::Summary => Some(&mut out.summary),
+                Into::Param => out.params.last_mut().map(|p| &mut p.1),
+                Into::Return => out.returns.as_mut(),
+            };
+            if let Some(t) = target {
+                if !t.is_empty() && !line.is_empty() {
+                    t.push(' ');
+                }
+                t.push_str(line);
+            }
+        }
+    }
+    out.summary = out.summary.trim().to_string();
+    out
+}
+
+/// The tags of a documentation comment, as a Markdown list under `indent`.
+fn render_tags(doc: &Doc, indent: &str, out: &mut String) {
+    for (name, text) in &doc.params {
+        out.push_str(&format!("{indent}- parameter `{name}`"));
+        if !text.is_empty() {
+            out.push_str(&format!(" — {text}"));
+        }
+        out.push('\n');
+    }
+    if let Some(text) = &doc.returns {
+        out.push_str(&format!("{indent}- returns {text}\n"));
+    }
+}
+
 fn is_top_level(it: &ItemInfo) -> bool {
     it.owner.is_none()
 }
@@ -150,8 +213,15 @@ fn render(file: &str, items: &[&ItemInfo]) -> String {
     for top in tops {
         out.push_str(&format!("## `{}`\n\n", top.label));
         if let Some(doc) = &top.doc {
-            out.push_str(doc.trim());
-            out.push_str("\n\n");
+            let doc = split_doc(doc);
+            if !doc.summary.is_empty() {
+                out.push_str(&doc.summary);
+                out.push_str("\n\n");
+            }
+            if !doc.params.is_empty() || doc.returns.is_some() {
+                render_tags(&doc, "", &mut out);
+                out.push('\n');
+            }
         }
         // methods of a type can be declared far from it: match on the owner's name
         for (kind, title) in [
@@ -169,11 +239,13 @@ fn render(file: &str, items: &[&ItemInfo]) -> String {
             out.push_str(&format!("**{title}**\n\n"));
             for m in members {
                 out.push_str(&format!("- `{}`", m.label));
-                if let Some(doc) = &m.doc {
+                let doc = m.doc.as_deref().map(split_doc).unwrap_or_default();
+                if !doc.summary.is_empty() {
                     out.push_str(" — ");
-                    out.push_str(&doc.trim().replace('\n', " "));
+                    out.push_str(&doc.summary);
                 }
                 out.push('\n');
+                render_tags(&doc, "  ", &mut out);
             }
             out.push('\n');
         }

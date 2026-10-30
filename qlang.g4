@@ -388,9 +388,9 @@ methodDeclaration
 // trait Shape
 //   fun area(self) -> float
 // end
-// Signatures seulement (pas de méthode par défaut, pas de super-trait).
+// trait Named extends Base, Other<int>   (super-traits : T136 si l'impl n'implémente pas aussi Base)
 traitDeclaration
-    : Trait Identifier typeParameters? Newline
+    : Trait Identifier typeParameters? (Extends namedType (',' namedType)*)? Newline
       (methodSignature Newline+)*
       End
     ;

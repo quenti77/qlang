@@ -527,11 +527,17 @@ impl Checker {
                 }
             }
             Ty::Enum(..) => self.impl_methods(ty, true, &mut out),
-            Ty::Trait(tid, _) => self.trait_methods(*tid, &mut out),
+            Ty::Trait(tid, targs) => {
+                for (t, _) in self.trait_closure(*tid, targs) {
+                    self.trait_methods(t, &mut out);
+                }
+            }
             Ty::Param(p) => {
                 let bounds = self.defs.params[*p].bounds.clone();
-                for (tid, _) in bounds {
-                    self.trait_methods(tid, &mut out);
+                for (tid, targs) in bounds {
+                    for (t, _) in self.trait_closure(tid, &targs) {
+                        self.trait_methods(t, &mut out);
+                    }
                 }
             }
             _ => {}

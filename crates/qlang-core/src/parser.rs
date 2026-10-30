@@ -811,6 +811,15 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
+        let mut supers = Vec::new();
+        if self.eat(&Tok::Extends) {
+            loop {
+                supers.push(self.parse_type()?);
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+        }
         let mut sigs = Vec::new();
         loop {
             self.skip_newlines();
@@ -845,6 +854,7 @@ impl<'a> Parser<'a> {
             span: start.to(end),
             name,
             tparams,
+            supers,
             sigs,
         })
     }
@@ -1582,6 +1592,10 @@ impl<'a> Parser<'a> {
     fn parse_unary(&mut self) -> PResult<Expr> {
         if self.at(&Tok::Minus) {
             let start = self.bump().span;
+            if self.at(&Tok::MinInt) {
+                let end = self.bump().span;
+                return Ok(self.mk(start.to(end), ExprKind::Int(i64::MIN)));
+            }
             let e = self.parse_unary()?;
             let span = start.to(e.span);
             return Ok(self.mk(span, ExprKind::Unary(UnOp::Neg, Box::new(e))));
@@ -1808,6 +1822,7 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> PResult<Expr> {
         let span = self.peek_span();
         match self.peek() {
+            Tok::MinInt => self.error_at("L005", "integer literal is too large", span),
             Tok::Int(v) => {
                 self.bump();
                 Ok(self.mk(span, ExprKind::Int(v)))
@@ -2023,6 +2038,10 @@ impl<'a> Parser<'a> {
     fn parse_pattern_number(&mut self) -> PResult<Pattern> {
         let neg = self.eat(&Tok::Minus);
         match self.peek() {
+            Tok::MinInt if neg => {
+                self.bump();
+                Ok(Pattern::Int(i64::MIN))
+            }
             Tok::Int(v) => {
                 self.bump();
                 Ok(Pattern::Int(if neg { -v } else { v }))
@@ -2058,7 +2077,7 @@ impl<'a> Parser<'a> {
 
     fn parse_pattern(&mut self) -> PResult<Pattern> {
         match self.peek() {
-            Tok::Minus | Tok::Int(_) | Tok::Float(_) => {
+            Tok::Minus | Tok::Int(_) | Tok::MinInt | Tok::Float(_) => {
                 let lo = self.parse_pattern_number()?;
                 let inclusive = match self.peek() {
                     Tok::DotDot => false,

@@ -7,6 +7,9 @@ use crate::span::Span;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tok {
     Int(i64),
+    /// `9223372036854775808`: one more than the largest integer, only valid after a `-`
+    /// (it makes `-9223372036854775808`, the smallest one).
+    MinInt,
     Float(f64),
     /// Raw content between the quotes (escapes and `{}` not yet processed).
     Str(String),
@@ -103,7 +106,7 @@ impl Tok {
     /// Human-readable description for error messages.
     pub fn describe(&self) -> String {
         match self {
-            Tok::Int(_) | Tok::Float(_) => "a number".into(),
+            Tok::Int(_) | Tok::MinInt | Tok::Float(_) => "a number".into(),
             Tok::Str(_) => "a string".into(),
             Tok::Ident(n) => format!("`{n}`"),
             Tok::Newline => "end of line".into(),
@@ -194,7 +197,7 @@ impl Tok {
             Tok::RBrace => "}",
             Tok::Newline => "end of line",
             Tok::Eof => "end of file",
-            Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Ident(_) => "?",
+            Tok::Int(_) | Tok::MinInt | Tok::Float(_) | Tok::Str(_) | Tok::Ident(_) => "?",
         }
     }
 }
@@ -670,6 +673,10 @@ fn lex_number(
         match text.parse::<i64>() {
             Ok(v) => toks.push(Token {
                 tok: Tok::Int(v),
+                span: span(start, i),
+            }),
+            Err(_) if text.replace('_', "") == "9223372036854775808" => toks.push(Token {
+                tok: Tok::MinInt,
                 span: span(start, i),
             }),
             Err(_) => {

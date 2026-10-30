@@ -7,7 +7,10 @@ restant sobre.
 
 Ce document décrit le langage tel qu'il est implémenté. La grammaire
 [`qlang.g4`](../qlang.g4) en donne un aperçu indicatif de la syntaxe, et le
-[README](../README.md) explique comment l'utiliser (terminal, JSON, HTTP).
+[README](../README.md) explique comment l'utiliser (terminal, JSON, HTTP). Ce qui est **stable**, **provisoire**
+ou **expérimental**, et comment une fonction est dépréciée (`#[deprecated("…")]`, avertissement `W001`,
+`--deny-warnings`), est dit dans [stability.md](stability.md) ; les changements cassants sont dans
+[migration.md](migration.md).
 
 ## Sommaire
 
@@ -1116,6 +1119,12 @@ end
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
   type, sans parent ni champ `static` (`T291`, `T295`). Une annotation sur une instruction est une
   erreur (`P051`).
+
+**`#[deprecated("utilise X")]`** est une annotation prédéfinie (pas une structure à déclarer) : elle marque une
+fonction ou une méthode comme dépréciée. Un appel venant d'un **autre module** produit l'avertissement `W001`
+(« `f` is deprecated: utilise X ») à l'endroit de l'appel, sans arrêter le programme ; `--deny-warnings` sur
+`qlang check`, `run` ou `test` en fait une erreur. Sans texte, c'est l'erreur `T292`. Le cycle complet
+(annoncer, avertir, retirer) est dans [stability.md](stability.md).
 
 ### Réflexion
 

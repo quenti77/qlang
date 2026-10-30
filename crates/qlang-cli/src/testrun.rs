@@ -48,6 +48,7 @@ pub fn run(args: &[&str]) -> ExitCode {
     let mut limits = Limits::default();
     let mut trust = false;
     let mut allow_process = false;
+    let mut deny_warnings = false;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -74,6 +75,7 @@ pub fn run(args: &[&str]) -> ExitCode {
             }
             "--trust-externs" => trust = true,
             "--allow-process" => allow_process = true,
+            "--deny-warnings" => deny_warnings = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
@@ -138,6 +140,14 @@ pub fn run(args: &[&str]) -> ExitCode {
                 continue;
             }
         };
+        if deny_warnings && !program.warnings.is_empty() {
+            println!("FAIL {shown}: it has warnings, and --deny-warnings is on");
+            for w in &program.warnings {
+                print!("{}", indent(&w.render(&program.sources)));
+            }
+            failed += 1;
+            continue;
+        }
         for name in program.test_names() {
             if filter.as_ref().is_some_and(|f| !name.contains(f.as_str())) {
                 continue;

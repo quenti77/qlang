@@ -2155,7 +2155,8 @@ impl Log
         Log.log("warning", message, context)
     end
 
-    --" The same as `warning`. --"
+    --" The same as `warning`. Deprecated since 0.69: use `Log.warning`; it will be removed in 0.72. --"
+    #[deprecated("use Log.warning (Log.warn will be removed in 0.72)")]
     public fun warn<C>(message: string, context: C? = none)
         Log.log("warning", message, context)
     end

@@ -645,6 +645,27 @@ impl Checker {
         }
     }
 
+    /// A call to something marked `#[deprecated("...")]` is a warning at the call (not in the
+    /// prelude, and not from the module that declares it).
+    fn warn_deprecated(&mut self, fid: FnId, span: Span) {
+        if self.cur_mod == PRELUDE_MOD || self.defs.fns[fid].module == self.cur_mod {
+            return;
+        }
+        let Some(decl) = self.defs.fns[fid].decl.clone() else {
+            return;
+        };
+        for a in &decl.annotations {
+            if super::annotations::is_deprecated(a) {
+                let why = super::annotations::deprecation_message(a).unwrap_or_default();
+                let name = self.defs.fns[fid].name.clone();
+                crate::diag::push_capped(
+                    &mut self.diags,
+                    Diagnostic::warning("W001", format!("`{name}` is deprecated: {why}"), span),
+                );
+            }
+        }
+    }
+
     fn call_fn_item(
         &mut self,
         e: &Expr,
@@ -656,6 +677,7 @@ impl Checker {
     ) -> Ty {
         let def = self.defs.fns[fid].clone();
         self.check_extern_available(fid, e.span);
+        self.warn_deprecated(fid, callee.span);
         self.res.paths.insert(callee.id, PathRes::Fn(fid));
         if let Some(d) = self.fn_def_span(fid) {
             let at = match &callee.kind {
@@ -1073,6 +1095,7 @@ impl Checker {
                 defaults: fn_defaults(&f.decl),
             };
             self.callee_hint = Some(um.fid);
+            self.warn_deprecated(um.fid, callee.span);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // trait methods through a generic bound or a trait-typed value
@@ -1379,6 +1402,7 @@ impl Checker {
                 defaults: fn_defaults(&f.decl),
             };
             self.callee_hint = Some(um.fid);
+            self.warn_deprecated(um.fid, callee.span);
             return self.check_args(e, &sig, &explicit, um.map, args, want);
         }
         // otherwise a static field/variant: evaluate as a value and call it

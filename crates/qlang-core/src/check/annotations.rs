@@ -96,6 +96,16 @@ impl Checker {
                 }
                 continue;
             }
+            if is_deprecated(a) {
+                if deprecation_message(a).is_none() {
+                    self.err(
+                        "T292",
+                        "`#[deprecated]` takes one text: `#[deprecated(\"use Other.thing\")]`",
+                        a.span,
+                    );
+                }
+                continue;
+            }
             if let (Some(data), Some(key)) = (self.check_annotation(a), key) {
                 self.res.annotations.entry(key).or_default().push(data);
             }
@@ -247,6 +257,30 @@ fn literal_of(e: &ast::Expr) -> Option<Lit> {
         ExprKind::Array(items) => Lit::Array(items.iter().map(literal_of).collect::<Option<_>>()?),
         _ => return None,
     })
+}
+
+/// `#[deprecated("use X")]`: built in, not a struct. Calls to what carries it get a warning.
+pub(crate) fn is_deprecated(a: &Annotation) -> bool {
+    a.path.len() == 1 && a.path[0].name == "deprecated"
+}
+
+/// The message of a `#[deprecated("...")]`.
+pub(crate) fn deprecation_message(a: &Annotation) -> Option<String> {
+    match a.args.as_slice() {
+        [arg] if arg.name.is_none() => match &arg.value.kind {
+            ExprKind::Str(parts) => Some(
+                parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        StrPart::Lit(t) => Some(t.to_string()),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn is_marker(a: &Annotation) -> bool {

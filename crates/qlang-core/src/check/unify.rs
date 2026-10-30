@@ -125,11 +125,7 @@ impl Checker {
                 }
                 None => false,
             },
-            (Ty::Trait(a, aa), Ty::Trait(b, ba)) => {
-                a == b
-                    && aa.len() == ba.len()
-                    && aa.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y))
-            }
+            // a trait value is also a value of every trait it extends
             (_, Ty::Trait(tid, targs)) => self.implements(&f, *tid, targs),
             (Ty::Param(a), Ty::Param(b)) => a == b,
             (Ty::Enum(a, aa), Ty::Enum(b, ba)) => {
@@ -209,23 +205,49 @@ impl Checker {
 
     // ------------------------------------------------------------ traits
 
+    /// A trait followed by every trait it extends, directly or not, with their arguments.
+    pub fn trait_closure(&self, tid: TraitId, targs: &[Ty]) -> Vec<(TraitId, Vec<Ty>)> {
+        let mut out: Vec<(TraitId, Vec<Ty>)> = vec![(tid, targs.to_vec())];
+        let mut next = 0;
+        while next < out.len() && out.len() < 64 {
+            let (t, a) = out[next].clone();
+            next += 1;
+            let def = &self.defs.traits[t];
+            let map: HashMap<ParamId, Ty> = def.tparams.iter().cloned().zip(a).collect();
+            for (st, sa) in &def.supers {
+                if !out.iter().any(|(x, _)| x == st) {
+                    out.push((*st, sa.iter().map(|x| x.subst(&map)).collect()));
+                }
+            }
+        }
+        out
+    }
+
     pub fn implements(&mut self, ty: &Ty, tid: TraitId, targs: &[Ty]) -> bool {
         let ty = self.resolve(ty);
         match &ty {
             Ty::Error => return true,
             Ty::Trait(t, a) => {
-                return *t == tid
-                    && a.len() == targs.len()
-                    && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y));
+                for (st, sa) in self.trait_closure(*t, a) {
+                    if st == tid
+                        && sa.len() == targs.len()
+                        && sa.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
+                    {
+                        return true;
+                    }
+                }
+                return false;
             }
             Ty::Param(p) => {
                 let bounds = self.defs.params[*p].bounds.clone();
                 for (t, a) in bounds {
-                    if t == tid
-                        && a.len() == targs.len()
-                        && a.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
-                    {
-                        return true;
+                    for (st, sa) in self.trait_closure(t, &a) {
+                        if st == tid
+                            && sa.len() == targs.len()
+                            && sa.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
+                        {
+                            return true;
+                        }
                     }
                 }
                 return false;

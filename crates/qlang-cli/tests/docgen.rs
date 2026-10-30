@@ -113,3 +113,26 @@ fn a_file_that_does_not_compile_is_reported() {
     assert_eq!(code, Some(1));
     assert!(err.contains("does not compile"), "{err}");
 }
+
+#[test]
+fn param_and_return_tags_are_laid_out() {
+    let d = Dir::new("tags");
+    d.write(
+        "lib.q",
+        "--\" Adds two numbers.\n  @param a the first one\n  @param b the second one,\n    maybe negative\n  @return their sum --\"\nfun add(a: int, b: int) -> int\n  a + b\nend\n\nstruct Box\n  public n: int\nend\n\nimpl Box\n  --\" Grows the box.\n  @param by how much\n  @returns the new size --\"\n  public fun grow(self, by: int) -> int\n    self.n + by\n  end\nend\n",
+    );
+    let (out, err, code) = d.qlang(&["doc", "lib.q"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.contains("Adds two numbers.\n\n"), "{out}");
+    assert!(!out.contains("@param") && !out.contains("@return"), "{out}");
+    assert!(out.contains("- parameter `a` — the first one\n"), "{out}");
+    assert!(
+        out.contains("- parameter `b` — the second one, maybe negative\n"),
+        "{out}"
+    );
+    assert!(out.contains("- returns their sum\n"), "{out}");
+    assert!(
+        out.contains("- `fun grow(by: int) -> int` — Grows the box.\n  - parameter `by` — how much\n  - returns the new size\n"),
+        "{out}"
+    );
+}

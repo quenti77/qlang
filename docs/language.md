@@ -172,6 +172,20 @@ n'a pas de `export`) avec leur signature et leur commentaire, puis les champs, m
 variantes `public` de leurs types. `qlang doc` seul documente le projet (sans les fichiers
 de test ni le dossier `examples`) ; `qlang doc lib.q` un fichier ; `-o API.md` écrit dans un fichier.
 
+Deux étiquettes, au début d'une ligne du commentaire, sont mises en forme : `@param nom texte`
+(un par paramètre) et `@return texte` (ou `@returns`). Une ligne qui n'en commence pas
+continue l'étiquette au-dessus. Le reste du commentaire est la description.
+
+```
+--" Additionne deux nombres.
+  @param a le premier
+  @param b le second, éventuellement négatif
+  @return leur somme --"
+fun add(a: int, b: int) -> int
+  a + b
+end
+```
+
 ---
 
 ## 3. Valeurs et types
@@ -206,6 +220,8 @@ la [section 14](#dictionnaires). Les types que tu définis
   0 à 10, pas un nombre.
 - Un `int` ne dépasse pas 64 bits : un calcul qui sort de cette plage est une
   erreur (« integer overflow »), jamais un résultat faux en silence.
+- Le plus petit `int`, `-9223372036854775808`, s'écrit comme littéral (y compris dans un
+  `case`). Les chiffres sans le `-` (`9223372036854775808`) restent une erreur (`L005`).
 
 ### Chaînes
 
@@ -1274,6 +1290,28 @@ print(Dog { }.greet())   -- Hello, Rex!
 Dans le corps par défaut, `self` a le type du trait lui-même : on peut y
 appeler les autres méthodes du trait (y compris d'autres méthodes abstraites,
 comme `name()` ici), mais pas accéder à des champs.
+
+### Un trait qui en étend d'autres
+
+`trait B extends A` (ou `extends A, C`) : celui qui implémente `B` doit aussi implémenter `A`
+(sinon `T136`). Une valeur de type `B`, ou un paramètre générique `T: B`, a aussi les méthodes
+de `A`, et passe là où un `A` est attendu.
+
+```
+trait Named
+  fun name(self) -> string
+end
+
+trait Greeter extends Named
+  fun greet(self) -> string
+    "bonjour {self.name()}"
+  end
+end
+
+fun hello(g: Greeter) -> string
+  g.greet() + " / " + g.name()     -- name() vient de Named
+end
+```
 
 ### Un trait comme type
 
@@ -2971,12 +3009,6 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
   paquets : voir `qlang-std` (CSV, gabarits, TOML, mail, S3, conteneur de services) ; YAML n'est pas écrit.
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut), et pas de comparaison `<`.
-- **Plus petit entier :** `-9223372036854775808` ne peut pas s'écrire comme
-  littéral (le chiffre sans signe dépasse 64 bits).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les
   chaînes et commentaires acceptent tous les caractères Unicode.
-- **Traits qui en exigent d'autres** (un trait qui suppose qu'un autre est
-  aussi implémenté) : non prévus pour l'instant.
 - **Fonctions anonymes génériques :** non prévues.
-- **Format des commentaires de documentation** : le texte reste libre (`qlang doc` le recopie
-  tel quel). À prévoir, selon l'usage : un format léger du type `@param` / `@return`.

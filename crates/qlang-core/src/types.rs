@@ -346,6 +346,8 @@ pub struct TraitDef {
     pub tparams: Vec<ParamId>,
     /// Default argument for each trait parameter (`Rhs = Self`).
     pub defaults: Vec<Option<Ty>>,
+    /// The traits this one extends (`trait B extends A`), with their arguments.
+    pub supers: Vec<(TraitId, Vec<Ty>)>,
     pub sigs: Vec<SigDef>,
     pub lang: Option<Lang>,
 }
@@ -477,6 +479,7 @@ impl Defs {
             span: Span::default(),
             tparams,
             defaults,
+            supers: Vec::new(),
             sigs: vec![SigDef {
                 name: lang.method_name().to_string(),
                 tparams: vec![],

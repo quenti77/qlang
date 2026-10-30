@@ -147,6 +147,7 @@ impl Checker {
                         // see the comment on `StructDef.tparams` above: the count is already known
                         tparams: vec![0; t.tparams.len()],
                         defaults: vec![None; t.tparams.len()],
+                        supers: Vec::new(),
                         sigs: Vec::new(),
                         lang: None,
                     });
@@ -695,6 +696,25 @@ impl Checker {
             // `self` inside a default body: the trait itself, applied to its own
             // type parameters (dispatches through the same path as a generic bound).
             let self_ty = Ty::Trait(id, tp_ids.iter().map(|p| Ty::Param(*p)).collect());
+            let mut supers: Vec<(TraitId, Vec<Ty>)> = Vec::new();
+            for st in &t.supers {
+                match self.resolve_type(st) {
+                    Ty::Trait(sid, sargs) if sid == id => {
+                        let _ = sargs;
+                        self.err("T136", "a trait cannot extend itself", st.span);
+                    }
+                    Ty::Trait(sid, sargs) => supers.push((sid, sargs)),
+                    Ty::Error => {}
+                    other => {
+                        let shown = self.show(&other);
+                        self.err(
+                            "T136",
+                            format!("a trait can only extend another trait, not `{shown}`"),
+                            st.span,
+                        );
+                    }
+                }
+            }
             let mut sigs: Vec<SigDef> = Vec::new();
             for s in &t.sigs {
                 let name = s.name.clone().unwrap();
@@ -755,6 +775,7 @@ impl Checker {
             let def = &mut self.defs.traits[id];
             def.tparams = tp_ids;
             def.defaults = vec![None; n];
+            def.supers = supers;
             def.sigs = sigs;
             self.tparam_scope.clear();
         }
@@ -1131,6 +1152,22 @@ impl Checker {
             map.insert(*p, a.clone());
         }
         let trait_shown = self.show(&Ty::Trait(tid, targs.clone()));
+        for (st, sa) in &tdef.supers {
+            let sa: Vec<Ty> = sa.iter().map(|x| x.subst(&map)).collect();
+            if !self.implements(&def.target, *st, &sa) {
+                let (target, needed) = (
+                    self.show(&def.target),
+                    self.show(&Ty::Trait(*st, sa.clone())),
+                );
+                self.err(
+                    "T136",
+                    format!(
+                        "trait `{trait_shown}` extends `{needed}`: `{target}` must implement it too"
+                    ),
+                    imp.target.span,
+                );
+            }
+        }
         for sig in &tdef.sigs {
             let Some((_, fid)) = def.methods.iter().find(|(n, _)| *n == sig.name).cloned() else {
                 if let Some(default_fid) = sig.default {

@@ -164,6 +164,8 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub tparams: Vec<TypeParam>,
+    /// `trait B extends A, C`: the traits every implementation of `B` must also implement.
+    pub supers: Vec<TypeExpr>,
     pub sigs: Vec<Rc<FunDecl>>,
 }
 

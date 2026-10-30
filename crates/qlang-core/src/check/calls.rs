@@ -1075,7 +1075,10 @@ impl Checker {
             Ty::Param(p) => self.defs.params[*p].bounds.clone(),
             Ty::Trait(t, a) => vec![(*t, a.clone())],
             _ => vec![],
-        };
+        }
+        .into_iter()
+        .flat_map(|(t, a)| self.trait_closure(t, &a))
+        .collect();
         for (tid, targs2) in trait_refs {
             let td = self.defs.traits[tid].clone();
             if let Some(sig) = td.sigs.iter().find(|s| s.name == name.name && s.has_self) {

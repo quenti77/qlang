@@ -115,3 +115,31 @@ fn without_an_entry_run_asks_for_a_file() {
     assert_eq!(code, Some(1));
     assert!(err.contains("the entry \"gone.q\" does not exist"), "{err}");
 }
+
+#[test]
+fn init_web_writes_a_web_application() {
+    let d = Dir::new("web");
+    let (out, err, code) = d.qlang(".", &["init", "--web", "--no-install", "site"]);
+    assert_eq!(code, Some(0), "{err}");
+    for f in [
+        "qlang.toml",
+        "main.q",
+        "app.q",
+        "providers.q",
+        "controllers.q",
+        "app_test.q",
+        ".gitignore",
+    ] {
+        assert!(d.exists(&format!("site/{f}")), "{f} missing\n{out}");
+    }
+    assert!(d.read("site/main.q").contains("fun handle(req: Request)"));
+    assert!(d.read("site/app.q").contains("App.boot("));
+    assert!(out.contains("qlang serve main.q"), "{out}");
+    // nothing is overwritten, and a second run in a project is refused
+    let (_, err, code) = d.qlang(".", &["init", "--web", "--no-install", "site"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("already"), "{err}");
+    // an unknown option is a usage error
+    let (_, _, code) = d.qlang(".", &["init", "--nope"]);
+    assert_eq!(code, Some(64));
+}

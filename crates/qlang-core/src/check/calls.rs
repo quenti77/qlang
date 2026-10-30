@@ -2301,6 +2301,15 @@ impl Checker {
                     Ty::Array(Box::new(self.prelude_ty("Callable"))),
                 )
             }
+            "declared" => {
+                let Some(m) = self.module_arg(callee, name, targs, args, 0) else {
+                    return Ty::Error;
+                };
+                (
+                    ReflectOp::Declared(m),
+                    Ty::Array(Box::new(self.prelude_ty("Callable"))),
+                )
+            }
             "constructors" => {
                 let Some(m) = self.module_arg(callee, name, targs, args, 0) else {
                     return Ty::Error;
@@ -2590,7 +2599,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `constructors`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method`, `bound_callables`, `bound_callables_of`, `type_info` and `type_info_of`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `constructors`, `declared`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method`, `bound_callables`, `bound_callables_of`, `type_info` and `type_info_of`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

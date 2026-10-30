@@ -71,6 +71,27 @@ impl Interp<'_> {
                     .collect();
                 Value::array(fids.into_iter().map(|f| self.callable_of(f)).collect())
             }
+            ReflectOp::Declared(m) => {
+                let fids: Vec<FnId> = self
+                    .reflectable_functions(*m)
+                    .filter(|&fid| {
+                        self.prog.defs.fns[fid]
+                            .decl
+                            .as_ref()
+                            .is_some_and(|d| d.tparams.is_empty())
+                    })
+                    .collect();
+                let defs = &self.prog.defs;
+                let ids: Vec<StructId> = (0..defs.structs.len())
+                    .filter(|&s| {
+                        let d = &defs.structs[s];
+                        d.module == *m && d.tparams.is_empty() && !d.annotation
+                    })
+                    .collect();
+                let mut all: Vec<Value> = fids.into_iter().map(|f| self.callable_of(f)).collect();
+                all.extend(ids.into_iter().map(|s| self.constructor_of(s)));
+                Value::array(all)
+            }
             ReflectOp::Constructors(m) => {
                 let defs = &self.prog.defs;
                 let ids: Vec<StructId> = (0..defs.structs.len())

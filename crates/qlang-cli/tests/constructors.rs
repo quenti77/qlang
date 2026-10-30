@@ -29,3 +29,30 @@ fn a_structure_is_built_from_its_fields_private_ones_too() {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+
+#[test]
+fn declared_gives_the_functions_then_the_structures() {
+    let dir = std::env::temp_dir().join(format!("qlang-declared-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("models.q"),
+        "struct Db\n  public url: string\nend\nfun make() -> int\n  1\nend\nexport Db, make\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.q"),
+        "import \"models.q\" as models\nfor c in Reflect.declared(models) do\n  print(\"{c.name} {c.return_type}\")\nend\nprint(Reflect.declared(models).len() == Reflect.callables(models).len() + Reflect.constructors(models).len())\n",
+    )
+    .unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .arg("run")
+        .arg(dir.join("main.q"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout),
+        "make int\nDb Db\ntrue\n",
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+}

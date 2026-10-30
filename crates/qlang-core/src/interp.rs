@@ -1557,7 +1557,8 @@ impl<'a> Interp<'a> {
                             ReflectOp::Functions(_)
                             | ReflectOp::Structs(_)
                             | ReflectOp::Callables(_)
-                            | ReflectOp::Constructors(_) => args.len() == 1,
+                            | ReflectOp::Constructors(_)
+                            | ReflectOp::Declared(_) => args.len() == 1,
                             ReflectOp::Callable(_) => args.len() == 2,
                             _ => false,
                         };

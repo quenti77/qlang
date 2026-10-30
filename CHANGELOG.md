@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.68.0
+
+- **`Panic.guard(f)`** : lance une fonction sans qu'un échec (`panic`, `assert`, `unwrap` d'une erreur, index hors limites) arrête le programme. Elle rend `none` si `f` a fini, sinon un `Caught` avec `code`, `message` et `places` (`fichier:ligne`, du plus proche au plus lointain). Les limites de pas et de mémoire ne sont pas attrapées. C'est ce qu'il fallait à l'interpréteur pour un lanceur de tests comme `qlang-test` (voir #129).
+
 ## 0.67.1
 
 - **Correction de `qlang self-update`** : avec les archives réelles des versions 0.64.0 à 0.67.0, il remplaçait le programme par un **fichier vide** (l'entrée du dossier `qlang/` de l'archive a le même nom de fichier que le programme). Il ne prend plus que les vrais fichiers, refuse un programme de moins de 1 Ko, et lance le programme téléchargé (`--version`) avant de remplacer l'ancien : s'il ne tourne pas, rien n'est changé. **Si un `self-update` a laissé un `qlang` vide, relancer `install.sh` (ou `install.ps1`) ; depuis 0.64–0.67, le plus simple pour passer à 0.67.1 est aussi `install.sh`.**

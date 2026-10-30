@@ -1494,6 +1494,7 @@ impl Checker {
             "read_all" => "read_all",
             "panic" => "panic",
             "exit" => "exit",
+            "panic_guard" => "panic_guard",
             _ => "assert",
         };
         self.res
@@ -1566,6 +1567,13 @@ impl Checker {
                     self.require_value(t, args[0].span);
                 }
                 Ty::Never
+            }
+            "panic_guard" => {
+                if arity(self, 1, 1) {
+                    let t = self.expr(args[0], &Want::Any);
+                    self.require_value(t, args[0].span);
+                }
+                Ty::Nullable(Box::new(Ty::Array(Box::new(Ty::Str))))
             }
             "exit" => {
                 if arity(self, 0, 1)

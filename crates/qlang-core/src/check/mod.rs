@@ -2612,6 +2612,41 @@ impl Process
     end
 end
 
+--" What `Panic.guard` caught: a failed `assert`, a `panic`, an `unwrap` of an error, an index out of
+range... `places` are `file:line` pieces, the innermost first: where it happened, then the calls that
+led there (up to 8). --"
+struct Caught
+    public code: string
+    public message: string
+    public places: array<string>
+end
+
+--" Runs a function so that a panic in it does not stop the program (for a test runner, or to keep a
+batch going). Running out of steps or memory is not caught.
+
+```
+let failure = Panic.guard(fun() assert_eq(1 + 1, 3) end)
+if failure != none then
+  print(failure.message)            -- assertion failed...
+end
+```
+
+The state the function changed (variables it reached, files, the database) stays as it was left. --"
+struct Panic
+end
+
+impl Panic
+    --" `none` when `f` finished, else what stopped it. --"
+    public fun guard(f: fun()) -> Caught?
+        let caught = panic_guard(f)
+        if caught == none then
+            return none
+        end
+        let parts = caught
+        Caught { code: parts[0], message: parts[1], places: parts.slice(2, parts.len()) }
+    end
+end
+
 -- The `qlang` command provides compression and the time zone database.
 extern fun archive_gzip(data: bytes, level: int) -> bytes
 extern fun archive_gunzip(data: bytes, max: int) -> Result<bytes, Error>

@@ -9,8 +9,17 @@ use crate::ast::{Ident, ImportKind, StmtKind, TypeExpr, TypeExprKind, TypeParam,
 const BUILTIN_TYPES: [&str; 9] = [
     "int", "float", "bool", "string", "uuid", "ulid", "datetime", "array", "range",
 ];
-pub(crate) const BUILTIN_FNS: [&str; 9] = [
-    "print", "write", "eprint", "ewrite", "read", "read_all", "panic", "assert", "exit",
+pub(crate) const BUILTIN_FNS: [&str; 10] = [
+    "print",
+    "write",
+    "eprint",
+    "ewrite",
+    "read",
+    "read_all",
+    "panic",
+    "assert",
+    "exit",
+    "panic_guard",
 ];
 
 impl Checker {

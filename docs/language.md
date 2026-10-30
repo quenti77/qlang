@@ -1724,6 +1724,7 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `assert_some(x)`, `assert_none(x)` | pour un test : la valeur d'un nullable qui ne doit pas être `none` / vérifie qu'il l'est |
 | `assert_contains(tableau, v)`, `assert_contains_text(texte, morceau)` | pour un test : `v` est dans le tableau / `morceau` est dans le texte |
 | `assert_close(a, b)`, `assert_within(a, b, tolérance)` | pour un test : deux `float` égaux à la tolérance près (un milliardième par défaut ; relative dès que `b` dépasse 1) |
+| `Panic.guard(f)`         | lance `f` sans qu'un échec (`panic`, `assert`, `unwrap` d'une erreur, index hors limites…) arrête le programme : `none` si `f` a fini, sinon un `Caught` avec `code`, `message` et `places` (`fichier:ligne`, du plus proche au plus lointain). Les limites de pas et de mémoire ne sont pas attrapées. Fait pour les lanceurs de tests (`qlang-test`) |
 | `int.parse(s)`           | renvoie un `int?` : `none` si `s` n'est pas un entier valide          |
 | `float.parse(s)`         | renvoie un `float?`                                                   |
 

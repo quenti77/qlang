@@ -1102,6 +1102,11 @@ pub const FUNCTIONS: &[(&str, &str, &str)] = &[
         "Reads every remaining line, joined by new lines (none after the last). Not available everywhere.",
     ),
     (
+        "panic_guard",
+        "panic_guard(f: fun()) -> array<string>?",
+        "Runs `f` and stops a panic or a failed assertion in it from stopping the program: `none` when it finished, else the error as text pieces. Use `Panic.guard`, which wraps it.",
+    ),
+    (
         "exit",
         "exit(code?: int)",
         "Ends the program now, with this exit code (0 by default). Nothing after it runs.",

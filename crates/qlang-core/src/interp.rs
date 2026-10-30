@@ -2808,6 +2808,46 @@ impl<'a> Interp<'a> {
                 self.guard_alloc(text.len(), span)?;
                 Ok(Value::str(&text))
             }
+            "panic_guard" => {
+                let f = args[0].clone();
+                let (depth, frames, tenv, cur) = (
+                    self.depth,
+                    self.frames.len(),
+                    self.tenv.len(),
+                    self.cur_call,
+                );
+                match self.call_value(&f, vec![], span) {
+                    Ok(_) | Err(Ctrl::Return(_)) => Ok(Value::None),
+                    // running out of steps or memory is not a test failing: it goes on
+                    Err(Ctrl::Error(mut d)) if !d.code.starts_with("R90") => {
+                        self.depth = depth;
+                        self.frames.truncate(frames);
+                        self.tenv.truncate(tenv);
+                        self.cur_call = cur;
+                        self.fmt_depth = 0;
+                        self.fmt_nodes = 0;
+                        d.resolve(&self.prog.sources);
+                        // code, message, then the places: where it happened, then who called
+                        let place = |l: &Option<crate::diag::LocationInfo>| {
+                            l.as_ref()
+                                .map(|l| format!("{}:{}", l.file, l.line))
+                                .unwrap_or_default()
+                        };
+                        let mut out = vec![
+                            Value::str(&d.code),
+                            Value::str(&d.message),
+                            Value::str(&place(&d.location)),
+                        ];
+                        for n in &d.notes {
+                            if n.message.starts_with("called from") {
+                                out.push(Value::str(&place(&n.location)));
+                            }
+                        }
+                        Ok(Value::array(out))
+                    }
+                    Err(other) => Err(other),
+                }
+            }
             "exit" => {
                 let code = match args.first() {
                     Some(Value::Int(n)) => (*n).clamp(0, 255) as i32,

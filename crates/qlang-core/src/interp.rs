@@ -775,6 +775,9 @@ impl<'a> Interp<'a> {
                 span,
             );
         }
+        if crate::host::cancelled() {
+            return self.fail("R906", "the task was cancelled", span);
+        }
         if let Some(d) = self.deadline
             && std::time::Instant::now() > d
         {

@@ -7,6 +7,8 @@ use crate::ast::*;
 /// Why `Term` is not there: only the terminal host has it.
 /// Why compression and time zones are not there.
 /// Why `Shared` is not there.
+/// Why `Worker` is not there.
+const TASK_ONLY: &str = "tasks are only offered by the `qlang` command";
 const SHARED_ONLY: &str = "shared numbers are only offered by the `qlang` command";
 const ARCHIVE_ONLY: &str = "compression and time zones are only offered by the `qlang` command";
 const TERM_ONLY: &str = "the terminal is only offered by the `qlang` command";
@@ -1303,6 +1305,17 @@ impl Checker {
                         Some(("term_mode", TERM_ONLY))
                     }
                     ("Term", "event") => Some(("term_event", TERM_ONLY)),
+                    ("Worker", "spawn") => Some(("task_spawn", TASK_ONLY)),
+                    ("Worker", "send") => Some(("task_send", TASK_ONLY)),
+                    ("Worker", "recv") => Some(("task_recv", TASK_ONLY)),
+                    ("Worker", "wait") => Some(("task_wait", TASK_ONLY)),
+                    ("Worker", "cancel") => Some(("task_cancel", TASK_ONLY)),
+                    ("Worker", "is_done") => Some(("task_done", TASK_ONLY)),
+                    ("Worker", "input") => Some(("task_input", TASK_ONLY)),
+                    ("Worker", "emit") => Some(("task_emit", TASK_ONLY)),
+                    ("Worker", "next") => Some(("task_next", TASK_ONLY)),
+                    ("Worker", "cancelled") => Some(("task_cancelled", TASK_ONLY)),
+                    ("Worker", "finish") => Some(("task_finish", TASK_ONLY)),
                     ("Shared", "add") => Some(("shared_add", SHARED_ONLY)),
                     ("Shared", "get") => Some(("shared_get", SHARED_ONLY)),
                     ("Shared", "set") => Some(("shared_set", SHARED_ONLY)),

@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.71.0
+
+- **Tâches : `Worker`**. `Worker.spawn("fichier.q", entrée)` lance le `fun run()` d'un fichier dans un interpréteur à part, en même temps que le programme ; rien n'est partagé, on s'envoie des `Json` (`send`/`recv` côté programme, `Worker.emit`/`Worker.next`/`Worker.input` côté tâche). `wait(ms)` rend le résultat (`Worker.finish`) avec un délai, ou l'erreur de la tâche ; `cancel()` demande l'arrêt et **arrête** la tâche (`R906`) au prochain contrôle, même dans une boucle qui ne regarde pas `Worker.cancelled()` (vrai aussi quand le serveur s'arrête). 64 tâches au plus, permissions du programme, dans `--root`.
+
 ## 0.70.0
 
 - **Délai par requête** : `qlang serve --request-timeout S` (30 par défaut, `0` pour aucun). Une requête qui dure plus longtemps est arrêtée par `R905` et le worker sert la suivante. L'horloge est lue tous les quelques milliers de pas (comme la mémoire) : un programme qui attend dans `time.sleep` ou une requête SQL lente s'arrête quand il reprend la main.

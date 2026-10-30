@@ -57,3 +57,12 @@ fn shared_numbers_need_the_qlang_command_too() {
         "{out}"
     );
 }
+
+#[test]
+fn workers_need_the_qlang_command_too() {
+    let out = exec("print(Worker.spawn(\"a.q\", Json.null()).is_ok())");
+    assert!(
+        out.starts_with("COMPILE: T250") && out.contains("only offered by the `qlang` command"),
+        "{out}"
+    );
+}

@@ -23,6 +23,7 @@ mod serve;
 mod shared;
 mod signature;
 mod stop;
+mod task;
 mod term;
 mod testrun;
 mod ws;
@@ -617,6 +618,7 @@ impl Host for TerminalHost {
             || term::TERM_EXTERNS.contains(&name)
             || archive::ARCHIVE_EXTERNS.contains(&name)
             || shared::SHARED_EXTERNS.contains(&name)
+            || task::TASK_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -645,6 +647,13 @@ impl Host for TerminalHost {
         }
         if shared::SHARED_EXTERNS.contains(&name) {
             return shared::call(name, &args);
+        }
+        if task::TASK_EXTERNS.contains(&name) {
+            let parent = task::Parent {
+                root: self.root.clone(),
+                allow_process: self.allow_process,
+            };
+            return task::call(name, &args, &parent);
         }
         if name == "process_stopping" {
             return Ok(HostValue::Bool(stop::stopping(serve::is_stopping())));

@@ -1,5 +1,14 @@
 # Journal des changements
 
+## 0.62.0
+
+- **`Path`** : `join`, `join_all`, `normalize`, `base`, `dir`, `ext`, `stem`, `with_ext`, `is_absolute` et `matches` (le motif de `fs.glob`), sur des chemins écrits en texte avec `/`.
+- **Parcourir le disque** : `fs.list(dossier)`, `fs.is_dir(chemin)` et `fs.glob("src/**/*.q")`.
+- **Lire un gros fichier ligne à ligne** : `fs.lines(chemin)` (`next()`, `close()`), `fs.each_line(chemin, f)` et `fs.read_lines(chemin)` ; une ligne de 16 Mo au plus, 64 fichiers ouverts au plus, tout dans le dossier de `--root`.
+- **`Format`** : `number(n, décimales)`, `number_with`, `int`, `int_with`, `bytes` (`1.5 KB`) et `sprintf("%-8s|%05.1f", [Any.of("ab"), Any.of(3.14159)])`.
+- **Transactions imbriquées** : un `begin()` dans un `begin()` est un `SAVEPOINT` (SQLite, PostgreSQL, MySQL), et un `rollback()` intérieur n'annule que le bloc intérieur. Nouveau `db.transaction(fun() -> Result<T, Error> ... end)`.
+- `qlang-std` 0.14.0 : `create_many` des usines et les seeders s'appuient sur ces transactions imbriquées.
+
 ## 0.61.0
 
 - **Page d'erreur de `--dev`** : le message et le code, la ligne fautive avec celles autour, la pile, la requête (sans cookies ni jetons) et le SQL exécuté avec ses durées ; en HTML pour un navigateur, en JSON (`Accept: application/json`) ou en texte. `--dev` est refusé hors `localhost` sauf `--dev-public`.

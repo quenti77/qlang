@@ -2926,7 +2926,8 @@ impl Db
         sql_close(self.conn)
     end
 
-    --" Starts a transaction. --"
+    --" Starts a transaction (a savepoint when one is already open: `begin` can be nested, and each `commit` or
+    `rollback` closes the last `begin`). --"
     public fun begin(self) -> Result<bool, Error>
         sql_done(sql_execute(self.conn, "BEGIN", []))
     end
@@ -2939,6 +2940,26 @@ impl Db
     --" Cancels everything done since `begin()`. --"
     public fun rollback(self) -> Result<bool, Error>
         sql_done(sql_execute(self.conn, "ROLLBACK", []))
+    end
+
+    --" Runs `body` in a transaction: the transaction is committed when it gives `ok`, and rolled back
+    when it gives `err` (which `transaction` gives back). Inside another transaction it is a savepoint:
+    only what `body` did is undone. --"
+    public fun transaction<T>(self, body: fun() -> Result<T, Error>) -> Result<T, Error>
+        let started = sql_done(sql_execute(self.conn, "BEGIN", []))
+        if started.is_err() then
+            return Result<T, Error>.Err(started.unwrap_err())
+        end
+        let outcome = body()
+        if outcome.is_err() then
+            sql_execute(self.conn, "ROLLBACK", [])
+            return outcome
+        end
+        let done = sql_done(sql_execute(self.conn, "COMMIT", []))
+        if done.is_err() then
+            return Result<T, Error>.Err(done.unwrap_err())
+        end
+        outcome
     end
 end
 "#;

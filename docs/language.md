@@ -2209,6 +2209,35 @@ print(b.at(1))               -- 195 (none hors des octets)
 - Une `extern fun` peut prendre et rendre des `bytes` ; à un programme externe (`--extern`,
   `qlang.toml`), ils passent en base64.
 
+### Chemins et mise en forme : `Path` et `Format`
+
+`Path` manipule des chemins **écrits en texte**, avec `/` entre les parties (aussi sous Windows) ; il ne touche pas
+au disque.
+
+| Appel | Résultat |
+| --- | --- |
+| `Path.join("uploads", nom)`, `Path.join_all(["a", "", "b/", "../c"])` | les parties mises bout à bout et normalisées (`a/c`) ; une partie absolue repart de zéro ; les parties vides sont ignorées |
+| `Path.normalize("a//b/./c/../d/")` | `a/b/d` ; `""` donne `.` ; un `..` qui ne peut plus monter reste au début d'un chemin relatif et disparaît à la racine |
+| `Path.base("/a/b.txt")`, `Path.dir("/a/b.txt")` | `b.txt` ; `/a` (`dir("b.txt")` est `.`) |
+| `Path.ext("a.tar.gz")`, `Path.stem("a.tar.gz")` | `gz` (sans le point, `""` pour `.bashrc`) ; `a.tar` |
+| `Path.with_ext("a/b.txt", "md")` | `a/b.md` (`""` retire l'extension) |
+| `Path.is_absolute(p)` | `true` pour `/a` et `C:/a` |
+| `Path.matches("src/**/*.q", texte)` | le motif de `fs.glob`, sans le disque |
+
+`Format` met en forme des nombres et du texte pour des personnes.
+
+| Appel | Résultat |
+| --- | --- |
+| `Format.number(1234567.891, 2)` | `1,234,567.89` ; `number_with(n, 2, ",", " ")` choisit la virgule et le séparateur (`1 234 567,89`) |
+| `Format.int(1234567)` | `1,234,567` ; `int_with(n, " ")` choisit le séparateur |
+| `Format.bytes(1536)` | `1.5 KB` (unités de 1024 : `B`, `KB`, `MB`, `GB`, `TB`, `PB`) |
+| `Format.sprintf("%-8s|%05.1f", [Any.of("ab"), Any.of(3.14159)])` | `ab      \|003.1` |
+
+`sprintf` comprend `%s` (n'importe quelle valeur, écrite comme elle s'affiche), `%d`, `%f` (6 décimales par défaut),
+`%x`, `%X`, `%o`, `%b` et `%%` ; entre le `%` et la lettre : `-` (à gauche), `0` (zéros devant), `+` (toujours un signe),
+une largeur et `.précision` (décimales pour `%f`, longueur maximale pour `%s`). Une valeur qui ne convient pas à son `%`, ou
+manquante ou en trop, est un arrêt (`panic`) qui dit laquelle : c'est une erreur du programme, comme un mauvais indice.
+
 ### Secrets : `Crypto` et `Password`
 
 `random` est un générateur qu'on peut fixer (`--seed`) : bien pour les tests, **jamais** pour un
@@ -2782,7 +2811,11 @@ end
 - **`close()`** ferme la connexion ; `Result<bool, Error>`.
 - **`begin()`**, **`commit()`** et **`rollback()`** : une transaction (`Result<bool,
   Error>`). Les requêtes entre `begin()` et `commit()`/`rollback()` sont groupées ;
-  `rollback()` annule tout ce qui a été fait depuis `begin()`.
+  `rollback()` annule tout ce qui a été fait depuis `begin()`. **Elles s'imbriquent** : un `begin()` dans un `begin()` est
+  un point de sauvegarde (`SAVEPOINT`), et chaque `commit()` ou `rollback()` ferme le dernier `begin()` ouvert : un
+  `rollback()` intérieur n'annule que ce que le `begin()` intérieur a commencé.
+  `db.transaction(fun() -> Result<T, Error> ... end)` fait le tout : commit si la fonction rend `ok`, rollback si
+  elle rend `err` (qu'il rend aussi), et c'est un point de sauvegarde dans une autre transaction.
 
 ```
 db.begin()
@@ -2820,6 +2853,30 @@ octets)` font de même avec des [`bytes`](#octets--bytes) (une image, une archiv
 `fs.create_dir(dossier)` crée un dossier et ceux qui manquent au-dessus (rien ne se passe s'il existe) ;
 `fs.exists(chemin)` dit si un fichier ou un dossier est là (`Result<bool, Error>`). Avec `--root`, ils
 restent dans le dossier : un `..` après un dossier qui n'existe pas encore est refusé.
+
+**Parcourir et lire par morceaux.** `fs.list(dossier)` donne les noms (triés) de ce qu'il contient ;
+`fs.is_dir(chemin)` dit si c'est un dossier ; `fs.glob("src/**/*.q")` donne les chemins qui correspondent
+au motif (`*` : des caractères sauf `/`, `**` : des caractères y compris `/`, `**/` peut aussi correspondre à aucun
+dossier, `?` : un caractère, `[a-c]` / `[!a-c]` : un ensemble), triés, en partant du dossier qui précède le premier
+joker. Pour un gros fichier, **`fs.lines(chemin)`** l'ouvre sans le charger : `lignes.next()` rend chaque ligne
+(sans son retour à la ligne, `\r\n` compris) puis `none` ; `lignes.close()` le referme avant la fin (à la fin, il se
+ferme seul). `fs.each_line(chemin, fun(ligne: string) ... end)` appelle une fonction pour chaque ligne et rend leur
+nombre ; `fs.read_lines(chemin)` donne toutes les lignes en tableau (le fichier est alors tout en mémoire). Une
+ligne de plus de 16 Mo, ou qui n'est pas du texte, est une erreur ; 64 fichiers au plus sont ouverts ainsi en même temps.
+Tout cela reste dans le dossier de `--root`.
+
+```
+let total = 0
+fs.each_line("journal.log", fun(ligne: string)
+  if ligne.contains("ERROR") then
+    total += 1
+  end
+end).unwrap()
+
+for chemin in fs.glob("src/**/*.q").unwrap() do
+  print(Path.stem(chemin))
+end
+```
 
 ```
 let r = fs.read("config.json")

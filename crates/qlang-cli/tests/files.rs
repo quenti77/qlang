@@ -164,3 +164,48 @@ print(fs.glob("**/*.txt").unwrap().join(","))
         String::from_utf8_lossy(&o.stderr)
     );
 }
+
+#[test]
+fn transactions_nest_and_db_transaction_commits_or_rolls_back() {
+    let d = Dir::new("tx");
+    let (out, err) = d.run(
+        r#"let db = Db.connect("sqlite://:memory:").unwrap()
+db.execute("CREATE TABLE t (a INT)", []).unwrap()
+fun total(db: Db) -> int
+  db.query("SELECT a FROM t", []).unwrap().len()
+end
+print(total(db))
+db.begin().unwrap()
+db.execute("INSERT INTO t VALUES (1)", []).unwrap()
+db.begin().unwrap()
+db.execute("INSERT INTO t VALUES (2)", []).unwrap()
+db.rollback().unwrap()
+print(total(db))
+db.commit().unwrap()
+print(total(db))
+let ok = db.transaction(fun() -> Result<string, Error>
+  db.execute("INSERT INTO t VALUES (3)", []).unwrap()
+  Result<string, Error>.Ok("kept")
+end)
+print(ok.unwrap())
+print(total(db))
+let failed = db.transaction(fun() -> Result<string, Error>
+  db.execute("INSERT INTO t VALUES (4)", []).unwrap()
+  Result<string, Error>.Err(Error { message: "nope" })
+end)
+print(failed.unwrap_err().message)
+print(total(db))
+-- inside another transaction only the inner part is undone
+db.begin().unwrap()
+db.execute("INSERT INTO t VALUES (5)", []).unwrap()
+db.transaction(fun() -> Result<string, Error>
+  db.execute("INSERT INTO t VALUES (6)", []).unwrap()
+  Result<string, Error>.Err(Error { message: "inner" })
+end)
+db.commit().unwrap()
+print(total(db))
+"#,
+        &[],
+    );
+    assert_eq!(out, "0\n1\n1\nkept\n2\nnope\n2\n3\n", "{err}");
+}

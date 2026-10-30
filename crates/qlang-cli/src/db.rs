@@ -611,8 +611,10 @@ pub struct SqlConns {
     open: HashMap<u64, Box<dyn SqlConn>>,
     /// Where each connection came from, to open it again when the server drops it.
     urls: HashMap<u64, String>,
-    /// Connections inside `BEGIN ... COMMIT`: one lost there cannot be replaced silently.
-    in_transaction: std::collections::HashSet<u64>,
+    /// How many `begin()` are open on each connection: the first is a real transaction, the next
+    /// ones are savepoints (so `begin` inside `begin` works, and an inner `rollback` undoes only
+    /// what the inner `begin` started). A connection lost inside one cannot be replaced silently.
+    depth: HashMap<u64, u32>,
 }
 
 impl SqlConns {
@@ -647,7 +649,7 @@ impl SqlConns {
     /// timeout, a proxy). Never inside a transaction: what was done there is lost, and saying so
     /// is better than running the rest of it outside.
     fn reconnect(&mut self, conn: u64, why: &str) -> Result<(), HostError> {
-        if self.in_transaction.remove(&conn) {
+        if self.depth.remove(&conn).is_some_and(|d| d > 0) {
             return Err(HostError::Other(format!(
                 "the database connection was lost inside a transaction: {why}"
             )));
@@ -665,21 +667,32 @@ impl SqlConns {
         Ok(())
     }
 
-    fn track_transaction(&mut self, conn: u64, sql: &str) {
-        let word = sql
-            .trim_start()
-            .split(|c: char| c.is_whitespace() || c == ';')
-            .next()
-            .unwrap_or("")
-            .to_ascii_uppercase();
+    /// What `BEGIN`, `COMMIT` and `ROLLBACK` become on this connection: the first level is the
+    /// real thing, the levels inside it are savepoints. Any other statement is left as it is.
+    fn transaction_statement(&self, conn: u64, sql: &str) -> (String, i32) {
+        let word = sql.trim().trim_end_matches(';').trim().to_ascii_uppercase();
+        let depth = self.depth.get(&conn).copied().unwrap_or(0);
         match word.as_str() {
-            "BEGIN" | "START" => {
-                self.in_transaction.insert(conn);
+            "BEGIN" | "BEGIN TRANSACTION" | "START TRANSACTION" => {
+                if depth == 0 {
+                    (sql.to_string(), 1)
+                } else {
+                    (format!("SAVEPOINT qlang_sp{depth}"), 1)
+                }
             }
-            "COMMIT" | "END" | "ROLLBACK" => {
-                self.in_transaction.remove(&conn);
+            "COMMIT" | "END" | "COMMIT TRANSACTION" if depth > 1 => {
+                (format!("RELEASE SAVEPOINT qlang_sp{}", depth - 1), -1)
             }
-            _ => {}
+            "COMMIT" | "END" | "COMMIT TRANSACTION" if depth == 1 => (sql.to_string(), -1),
+            "ROLLBACK" | "ROLLBACK TRANSACTION" if depth > 1 => (
+                format!(
+                    "ROLLBACK TO SAVEPOINT qlang_sp{0}; RELEASE SAVEPOINT qlang_sp{0}",
+                    depth - 1
+                ),
+                -1,
+            ),
+            "ROLLBACK" | "ROLLBACK TRANSACTION" if depth == 1 => (sql.to_string(), -1),
+            _ => (sql.to_string(), 0),
         }
     }
 
@@ -707,6 +720,22 @@ impl SqlConns {
         result.map_err(HostError::Other)
     }
 
+    /// Runs one statement, or several separated by `;` (a savepoint rollback and its release).
+    fn run(&mut self, conn: u64, statement: &str, params: &[SqlValue]) -> Result<u64, String> {
+        let handle = self
+            .open
+            .get_mut(&conn)
+            .ok_or_else(|| "this database connection is closed".to_string())?;
+        if statement.starts_with("ROLLBACK TO SAVEPOINT") {
+            let mut total = 0;
+            for part in statement.split("; ") {
+                total += handle.execute(part, &[])?;
+            }
+            return Ok(total);
+        }
+        handle.execute(statement, params)
+    }
+
     pub fn execute(
         &mut self,
         conn: u64,
@@ -714,21 +743,23 @@ impl SqlConns {
         params: Vec<SqlValue>,
     ) -> Result<u64, HostError> {
         let started = std::time::Instant::now();
-        let mut result = self.get(conn)?.execute(sql, &params);
+        let (statement, change) = self.transaction_statement(conn, sql);
+        let mut result = self.run(conn, &statement, &params);
         if let Err(why) = &result
             && connection_lost(why)
         {
             // inside a transaction the connection is not replaced: the error says so
             match self.reconnect(conn, why) {
-                Ok(()) => result = self.get(conn)?.execute(sql, &params),
+                Ok(()) => result = self.run(conn, &statement, &params),
                 Err(e) => {
                     log_query(sql, started);
                     return Err(e);
                 }
             }
         }
-        if result.is_ok() {
-            self.track_transaction(conn, sql);
+        if result.is_ok() && change != 0 {
+            let depth = self.depth.entry(conn).or_insert(0);
+            *depth = (*depth as i32 + change).max(0) as u32;
         }
         log_query(sql, started);
         result.map_err(HostError::Other)
@@ -738,7 +769,7 @@ impl SqlConns {
         self.get(conn)?;
         self.open.remove(&conn);
         self.urls.remove(&conn);
-        self.in_transaction.remove(&conn);
+        self.depth.remove(&conn);
         Ok(())
     }
 }
@@ -821,5 +852,63 @@ mod reconnect_tests {
         // nothing is recorded once it was taken
         conns.query(id, "SELECT 1", vec![]).unwrap();
         assert!(take_query_log().is_empty());
+    }
+
+    fn count(conns: &mut SqlConns, id: u64) -> usize {
+        conns.query(id, "SELECT a FROM t", vec![]).unwrap().len()
+    }
+
+    fn with_table() -> (SqlConns, u64) {
+        let mut conns = SqlConns::default();
+        let id = conns.connect("sqlite://:memory:").unwrap();
+        conns.execute(id, "CREATE TABLE t (a INT)", vec![]).unwrap();
+        (conns, id)
+    }
+
+    #[test]
+    fn begin_inside_begin_is_a_savepoint_and_commit_keeps_everything() {
+        let (mut c, id) = with_table();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "INSERT INTO t VALUES (1)", vec![]).unwrap();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "INSERT INTO t VALUES (2)", vec![]).unwrap();
+        c.execute(id, "COMMIT", vec![]).unwrap();
+        c.execute(id, "COMMIT", vec![]).unwrap();
+        assert_eq!(count(&mut c, id), 2);
+        assert_eq!(c.depth.get(&id).copied().unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn an_inner_rollback_undoes_only_the_inner_part() {
+        let (mut c, id) = with_table();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "INSERT INTO t VALUES (1)", vec![]).unwrap();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "INSERT INTO t VALUES (2)", vec![]).unwrap();
+        c.execute(id, "ROLLBACK", vec![]).unwrap();
+        assert_eq!(count(&mut c, id), 1);
+        c.execute(id, "COMMIT", vec![]).unwrap();
+        assert_eq!(count(&mut c, id), 1);
+    }
+
+    #[test]
+    fn an_outer_rollback_undoes_the_committed_inner_part_too() {
+        let (mut c, id) = with_table();
+        c.execute(id, "begin;", vec![]).unwrap();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "BEGIN", vec![]).unwrap();
+        c.execute(id, "INSERT INTO t VALUES (3)", vec![]).unwrap();
+        c.execute(id, "COMMIT", vec![]).unwrap();
+        c.execute(id, "COMMIT", vec![]).unwrap();
+        assert_eq!(count(&mut c, id), 1);
+        c.execute(id, "ROLLBACK", vec![]).unwrap();
+        assert_eq!(count(&mut c, id), 0);
+    }
+
+    #[test]
+    fn a_commit_without_begin_is_the_databases_error() {
+        let (mut c, id) = with_table();
+        assert!(c.execute(id, "COMMIT", vec![]).is_err());
+        assert_eq!(c.depth.get(&id).copied().unwrap_or(0), 0);
     }
 }

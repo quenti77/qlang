@@ -72,6 +72,11 @@ fn set_format(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the log is written as JSON (`--log-format json`).
+pub fn json_enabled() -> bool {
+    JSON.load(Ordering::SeqCst)
+}
+
 /// Writes one line, if `level` is wanted. The `context` field, when there is one, holds JSON. `fields` are the extra `name=value` pairs.
 pub fn write(time_ms: Option<i64>, level: &str, message: &str, fields: &[(String, String)]) {
     let n = level_of(level).unwrap_or(1);

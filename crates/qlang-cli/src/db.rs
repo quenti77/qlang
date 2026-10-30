@@ -524,6 +524,84 @@ mod mysql_tests {
     }
 }
 
+// --------------------------------------------------------------------- query log
+
+/// One statement run while a request was handled (`--dev`).
+#[derive(Clone, Debug)]
+pub struct LoggedQuery {
+    pub sql: String,
+    pub ms: f64,
+}
+
+thread_local! {
+    static QUERY_LOG: std::cell::RefCell<Option<Vec<LoggedQuery>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The most statements kept for one request.
+const MAX_LOGGED: usize = 500;
+
+/// Starts recording the statements of this thread (one worker handles one request at a time).
+pub fn start_query_log() {
+    QUERY_LOG.with(|l| *l.borrow_mut() = Some(Vec::new()));
+}
+
+/// What was recorded since [`start_query_log`], and stops recording.
+pub fn take_query_log() -> Vec<LoggedQuery> {
+    QUERY_LOG.with(|l| l.borrow_mut().take().unwrap_or_default())
+}
+
+fn log_query(sql: &str, started: std::time::Instant) {
+    QUERY_LOG.with(|l| {
+        if let Some(log) = l.borrow_mut().as_mut()
+            && log.len() < MAX_LOGGED
+        {
+            log.push(LoggedQuery {
+                sql: sql.split_whitespace().collect::<Vec<_>>().join(" "),
+                ms: started.elapsed().as_secs_f64() * 1000.0,
+            });
+        }
+    });
+}
+
+/// The statements that ran many times with only their values changing: the sign of an N+1.
+/// Each one is the statement, how many times it ran and the time they took together.
+pub fn repeated(queries: &[LoggedQuery]) -> Vec<(String, usize, f64)> {
+    let mut groups: Vec<(String, usize, f64)> = Vec::new();
+    for q in queries {
+        match groups.iter_mut().find(|g| g.0 == q.sql) {
+            Some(g) => {
+                g.1 += 1;
+                g.2 += q.ms;
+            }
+            None => groups.push((q.sql.clone(), 1, q.ms)),
+        }
+    }
+    groups.retain(|g| g.1 >= 3);
+    groups.sort_by(|a, b| b.1.cmp(&a.1));
+    groups
+}
+
+/// Whether an error says the connection itself is gone (not that the statement is wrong).
+fn connection_lost(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "connection closed",
+        "closed connection",
+        "connection is closed",
+        "broken pipe",
+        "connection reset",
+        "server has gone away",
+        "lost connection",
+        "terminating connection",
+        "unexpected eof",
+        "unexpected end of file",
+        "connection timed out",
+    ]
+    .iter()
+    .any(|s| m.contains(s))
+}
+
 // --------------------------------------------------------------------- table
 
 /// Open connections, keyed by the handle given to qlang as `Db.conn`.
@@ -531,10 +609,14 @@ mod mysql_tests {
 pub struct SqlConns {
     next_id: u64,
     open: HashMap<u64, Box<dyn SqlConn>>,
+    /// Where each connection came from, to open it again when the server drops it.
+    urls: HashMap<u64, String>,
+    /// Connections inside `BEGIN ... COMMIT`: one lost there cannot be replaced silently.
+    in_transaction: std::collections::HashSet<u64>,
 }
 
 impl SqlConns {
-    pub fn connect(&mut self, url: &str) -> Result<u64, HostError> {
+    fn open_url(url: &str) -> Result<Box<dyn SqlConn>, HostError> {
         let conn: Box<dyn SqlConn> = if let Some(path) = url.strip_prefix("sqlite://") {
             Box::new(SqliteConn(
                 rusqlite::Connection::open(path).map_err(|e| HostError::Other(e.to_string()))?,
@@ -549,10 +631,56 @@ impl SqlConns {
                 "unknown database URL \"{url}\" (use sqlite://..., postgres://... or mysql://...)"
             )));
         };
+        Ok(conn)
+    }
+
+    pub fn connect(&mut self, url: &str) -> Result<u64, HostError> {
+        let conn = Self::open_url(url)?;
         let id = self.next_id;
         self.next_id += 1;
         self.open.insert(id, conn);
+        self.urls.insert(id, url.to_string());
         Ok(id)
+    }
+
+    /// Opens `conn` again from its URL, after the server dropped it (a restart, an idle
+    /// timeout, a proxy). Never inside a transaction: what was done there is lost, and saying so
+    /// is better than running the rest of it outside.
+    fn reconnect(&mut self, conn: u64, why: &str) -> Result<(), HostError> {
+        if self.in_transaction.remove(&conn) {
+            return Err(HostError::Other(format!(
+                "the database connection was lost inside a transaction: {why}"
+            )));
+        }
+        let Some(url) = self.urls.get(&conn).cloned() else {
+            return Err(HostError::Other(why.to_string()));
+        };
+        let fresh = Self::open_url(&url).map_err(|e| {
+            HostError::Other(format!(
+                "{why} (and the database cannot be reached again: {e:?})"
+            ))
+        })?;
+        eprintln!("database connection lost ({why}): reconnected");
+        self.open.insert(conn, fresh);
+        Ok(())
+    }
+
+    fn track_transaction(&mut self, conn: u64, sql: &str) {
+        let word = sql
+            .trim_start()
+            .split(|c: char| c.is_whitespace() || c == ';')
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        match word.as_str() {
+            "BEGIN" | "START" => {
+                self.in_transaction.insert(conn);
+            }
+            "COMMIT" | "END" | "ROLLBACK" => {
+                self.in_transaction.remove(&conn);
+            }
+            _ => {}
+        }
     }
 
     fn get(&mut self, conn: u64) -> Result<&mut Box<dyn SqlConn>, HostError> {
@@ -567,9 +695,16 @@ impl SqlConns {
         sql: &str,
         params: Vec<SqlValue>,
     ) -> Result<Vec<SqlRow>, HostError> {
-        self.get(conn)?
-            .query(sql, &params)
-            .map_err(HostError::Other)
+        let started = std::time::Instant::now();
+        let mut result = self.get(conn)?.query(sql, &params);
+        if let Err(why) = &result
+            && connection_lost(why)
+            && self.reconnect(conn, why).is_ok()
+        {
+            result = self.get(conn)?.query(sql, &params);
+        }
+        log_query(sql, started);
+        result.map_err(HostError::Other)
     }
 
     pub fn execute(
@@ -578,14 +713,113 @@ impl SqlConns {
         sql: &str,
         params: Vec<SqlValue>,
     ) -> Result<u64, HostError> {
-        self.get(conn)?
-            .execute(sql, &params)
-            .map_err(HostError::Other)
+        let started = std::time::Instant::now();
+        let mut result = self.get(conn)?.execute(sql, &params);
+        if let Err(why) = &result
+            && connection_lost(why)
+        {
+            // inside a transaction the connection is not replaced: the error says so
+            match self.reconnect(conn, why) {
+                Ok(()) => result = self.get(conn)?.execute(sql, &params),
+                Err(e) => {
+                    log_query(sql, started);
+                    return Err(e);
+                }
+            }
+        }
+        if result.is_ok() {
+            self.track_transaction(conn, sql);
+        }
+        log_query(sql, started);
+        result.map_err(HostError::Other)
     }
 
     pub fn close(&mut self, conn: u64) -> Result<(), HostError> {
         self.get(conn)?;
         self.open.remove(&conn);
+        self.urls.remove(&conn);
+        self.in_transaction.remove(&conn);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::*;
+
+    /// A connection the server dropped: every statement says so.
+    struct Dropped;
+
+    impl SqlConn for Dropped {
+        fn query(&mut self, _: &str, _: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
+            Err("connection closed".to_string())
+        }
+        fn execute(&mut self, _: &str, _: &[SqlValue]) -> Result<u64, String> {
+            Err("server has gone away".to_string())
+        }
+    }
+
+    #[test]
+    fn a_dropped_connection_is_opened_again_and_the_statement_runs() {
+        let mut conns = SqlConns::default();
+        let id = conns.connect("sqlite://:memory:").unwrap();
+        conns.open.insert(id, Box::new(Dropped));
+        let rows = conns.query(id, "SELECT 1 AS one", vec![]).unwrap();
+        assert_eq!(rows.len(), 1);
+        // and it keeps working
+        assert!(conns.execute(id, "CREATE TABLE t (a INT)", vec![]).is_ok());
+        conns.open.insert(id, Box::new(Dropped));
+        assert!(conns.execute(id, "CREATE TABLE u (a INT)", vec![]).is_ok());
+    }
+
+    #[test]
+    fn a_connection_lost_inside_a_transaction_is_an_error_not_a_silent_retry() {
+        let mut conns = SqlConns::default();
+        let id = conns.connect("sqlite://:memory:").unwrap();
+        conns.execute(id, "BEGIN", vec![]).unwrap();
+        conns.open.insert(id, Box::new(Dropped));
+        let e = conns
+            .execute(id, "CREATE TABLE t (a INT)", vec![])
+            .unwrap_err();
+        assert!(format!("{e:?}").contains("inside a transaction"), "{e:?}");
+        // the next statement starts afresh on a new connection
+        assert!(conns.execute(id, "CREATE TABLE t (a INT)", vec![]).is_ok());
+    }
+
+    #[test]
+    fn an_error_of_the_statement_is_not_taken_for_a_lost_connection() {
+        let mut conns = SqlConns::default();
+        let id = conns.connect("sqlite://:memory:").unwrap();
+        let e = conns
+            .query(id, "SELECT * FROM missing_table", vec![])
+            .unwrap_err();
+        assert!(format!("{e:?}").contains("no such table"), "{e:?}");
+        assert!(!connection_lost("syntax error at or near FROM"));
+        assert!(connection_lost(
+            "db error: terminating connection due to administrator command"
+        ));
+    }
+
+    #[test]
+    fn statements_are_recorded_with_their_time_and_repeats_are_found() {
+        let mut conns = SqlConns::default();
+        let id = conns.connect("sqlite://:memory:").unwrap();
+        conns.execute(id, "CREATE TABLE t (a INT)", vec![]).unwrap();
+        start_query_log();
+        for _ in 0..4 {
+            conns
+                .query(id, "SELECT  a\n FROM t WHERE a = ?", vec![SqlValue::Int(1)])
+                .unwrap();
+        }
+        conns.query(id, "SELECT 1", vec![]).unwrap();
+        let log = take_query_log();
+        assert_eq!(log.len(), 5);
+        assert_eq!(log[0].sql, "SELECT a FROM t WHERE a = ?");
+        let again = repeated(&log);
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].1, 4);
+        // nothing is recorded once it was taken
+        conns.query(id, "SELECT 1", vec![]).unwrap();
+        assert!(take_query_log().is_empty());
     }
 }

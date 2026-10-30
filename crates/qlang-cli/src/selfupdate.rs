@@ -123,7 +123,7 @@ fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>, String> {
         for i in 0..zip.len() {
             let mut file = zip.by_index(i).map_err(|e| format!("{name}: {e}"))?;
             let entry = file.name().map(|n| n.to_string()).unwrap_or_default();
-            if entry.ends_with(&format!("/{exe}")) || entry == exe {
+            if !file.is_dir() && (entry.ends_with(&format!("/{exe}")) || entry == exe) {
                 file.read_to_end(&mut out)
                     .map_err(|e| format!("{name}: {e}"))?;
                 return Ok(out);
@@ -138,7 +138,8 @@ fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>, String> {
                 .path()
                 .map_err(|e| format!("{name}: {e}"))?
                 .into_owned();
-            if path.file_name().is_some_and(|f| f == exe) {
+            // the folder `qlang/` is an entry too, with the same file name: only a file counts
+            if entry.header().entry_type().is_file() && path.file_name().is_some_and(|f| f == exe) {
                 entry
                     .read_to_end(&mut out)
                     .map_err(|e| format!("{name}: {e}"))?;
@@ -159,6 +160,17 @@ fn replace(exe: &Path, bytes: &[u8]) -> Result<(), String> {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755));
+    }
+    // it must run before it takes the place of the one that works
+    let runs = std::process::Command::new(&new)
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success() && o.stdout.starts_with(b"qlang "));
+    if !runs {
+        let _ = std::fs::remove_file(&new);
+        return Err(
+            "the downloaded program does not run on this system: nothing was changed".to_string(),
+        );
     }
     let _ = std::fs::remove_file(&old);
     std::fs::rename(exe, &old).map_err(|e| {
@@ -266,6 +278,12 @@ fn update(version: Option<String>, check: bool) -> Result<(), String> {
         ));
     }
     let program = extract(&archive, &name)?;
+    if program.len() < 1024 {
+        return Err(format!(
+            "{name} does not hold a program ({} bytes)",
+            program.len()
+        ));
+    }
     let exe = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
     replace(&exe, &program)?;
     println!(

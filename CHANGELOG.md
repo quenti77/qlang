@@ -1,5 +1,13 @@
 # Journal des changements
 
+## 0.61.0
+
+- **Page d'erreur de `--dev`** : le message et le code, la ligne fautive avec celles autour, la pile, la requête (sans cookies ni jetons) et le SQL exécuté avec ses durées ; en HTML pour un navigateur, en JSON (`Accept: application/json`) ou en texte. `--dev` est refusé hors `localhost` sauf `--dev-public`.
+- **Journal SQL en développement** : une requête répétée au moins trois fois est signalée (`N+1?`) dans la sortie d'erreur, et une réponse réussie porte `Server-Timing: db;dur=...`.
+- **Connexion de base coupée** : `Db` rouvre toute seule la connexion que le serveur a fermée (redémarrage, inactivité) et rejoue l'instruction une fois ; dans une transaction, l'erreur le dit. Plus besoin de redémarrer `qlang serve` après un redémarrage de la base.
+- **Erreurs en production** : avec `--log-format json`, une erreur du programme est une ligne JSON avec sa pile (`context.stack`), son code et la requête, sans le code source.
+- `qlang-std` 0.13.0 : `web/seed.q` (`Factory` avec `field`, `state`, `make`, `create`, `create_many` ; `Seeder`, `run_seeders`) et la commande `db:seed`.
+
 ## 0.60.0
 
 - **`qlang init --web [dossier]`** : un projet web prêt à lancer (`main.q`, `app.q`, `providers.q`, `controllers.q`, `app_test.q`, `qlang.toml`, `.gitignore`), qui installe le paquet `std` (`--no-install` pour ne pas le télécharger). `qlang serve main.q --watch --dev`, `qlang test`.

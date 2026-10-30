@@ -4,6 +4,9 @@ use super::expr::Want;
 use super::*;
 use crate::ast::*;
 
+/// Why `Term` is not there: only the terminal host has it.
+const TERM_ONLY: &str = "the terminal is only offered by the `qlang` command";
+
 /// A callable signature, before instantiating its generics.
 pub(crate) struct CallSig {
     pub name: String,
@@ -1262,6 +1265,17 @@ impl Checker {
                         "secure_random_bytes",
                         "there is no source of secure randomness",
                     )),
+                    ("Term", "is_tty") => Some(("term_is_tty", TERM_ONLY)),
+                    ("Term", "size") => Some(("term_size", TERM_ONLY)),
+                    ("Term", "colors") => Some(("term_colors", TERM_ONLY)),
+                    ("Term", "raw" | "session") => Some(("term_raw", TERM_ONLY)),
+                    ("Term", "write" | "frame" | "clear" | "title") => {
+                        Some(("term_write", TERM_ONLY))
+                    }
+                    ("Term", "alt_screen" | "hide_cursor" | "mouse" | "paste" | "focus") => {
+                        Some(("term_mode", TERM_ONLY))
+                    }
+                    ("Term", "event") => Some(("term_event", TERM_ONLY)),
                     ("Process", "run" | "run_with_input") => Some((
                         "process_run",
                         "starting programs is not allowed here; the terminal needs `--allow-process`",

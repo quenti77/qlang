@@ -233,7 +233,7 @@ let a = "Bonjour"
 let b = "ligne 1\nligne 2"
 ```
 
-Échappements : `\n` `\t` `\r` `\0` `\\` `\"` `\{` `\}`.
+Échappements : `\n` `\t` `\r` `\0` `\e` (le caractère ESC, pour les séquences d'un terminal) `\\` `\"` `\{` `\}`.
 
 **Interpolation.** Une expression entre accolades est évaluée et insérée dans la
 chaîne. C'est une aide : la concaténation avec `+` fonctionne aussi.
@@ -2128,7 +2128,7 @@ print(regex.replace_all("a1 b2", "\\d", "#"))          --> "a# b#"
 print(regex.split("a,b,,c", ","))                     --> ["a", "b", "", "c"]
 ```
 
-Une chaîne qlang n'autorise que les échappements `\n \t \r \0 \\ \" \{ \}` :
+Une chaîne qlang n'autorise que les échappements `\n \t \r \0 \e \\ \" \{ \}` :
 un `\d` ou `\w` de la syntaxe regex doit s'écrire `\\d`, `\\w`... dans le
 texte du motif (un seul `\` littéral dans la chaîne).
 
@@ -3008,6 +3008,42 @@ end
   pas besoin.
 - Un programme lancé n'est **pas limité** par `--root` ni par les limites de qlang (pas, mémoire) ;
   il est arrêté s'il tourne plus d'une minute, et on garde au plus 16 Mo de chaque flux.
+
+### Prélude : le terminal
+
+`Term` sert aux programmes qui dessinent un écran (une interface en terminal). Il faut la commande
+`qlang` lancée depuis un terminal : ailleurs (protocole JSON, navigateur) l'emploi est une erreur de
+compilation (`T250`), et dans un tube ou un fichier seuls `size`, `colors` et `write` répondent.
+
+```
+Term.session(fun() -> bool
+  Term.mouse(true)
+  while true do
+    let ev = Term.event(250).unwrap()           -- au plus 250 ms
+    if ev.kind == "key" and ev.key == "q" then
+      break
+    end
+    Term.frame("\e[1;1H{ev.kind} {ev.key}   ")
+  end
+  true
+end)
+```
+
+- `Term.is_tty()`, `Term.size()` (`Size` : `cols`, `rows` ; `COLUMNS` et `LINES`, sinon 80 par 24, hors
+  terminal), `Term.colors()` (0, 16, 256 ou 16777216 ; 0 avec `NO_COLOR`, hors terminal ou `TERM=dumb`).
+- `Term.write(texte)` écrit tel quel et affiche aussitôt ; `Term.frame(texte)` entoure l'écran d'une mise
+  à jour synchronisée (pas de scintillement) ; `Term.clear()`, `Term.title(texte)`. Construisez l'écran
+  entier en un texte et écrivez-le d'un coup ; `\e` est le caractère d'échappement (`"\e[31mrouge\e[0m"`).
+- `Term.raw(true)` : les touches arrivent sans attendre Entrée ni s'afficher (Ctrl-C est alors une touche, `key`
+  `"c"` avec `ctrl`, pas un signal). `Term.alt_screen`, `Term.hide_cursor`, `Term.mouse`, `Term.paste`
+  (le collage arrive en un événement) et `Term.focus` prennent `true` ou `false`.
+- `Term.event(attente_ms)` rend un `Event` : `kind` vaut `"key"` (`key` : le caractère ou `"Enter"`, `"Tab"`,
+  `"Esc"`, `"Backspace"`, `"Delete"`, `"Up"`..., `"F1"`...`"F12"`, avec `ctrl`, `alt`, `shift`), `"mouse"`
+  (`action` : `down`, `up`, `drag`, `move`, `scroll_up`... ; `button` ; `x`, `y` depuis 0), `"resize"` (`x`, `y` :
+  les colonnes et les lignes), `"paste"`, `"focus"` (`text`) ou `"timeout"`. Une attente négative dure sans fin.
+- `Term.session(f)` prépare l'écran (mode brut, écran alternatif, curseur caché), appelle `f` et remet
+  le terminal comme avant, quoi qu'il arrive ; la commande `qlang` le fait aussi si le programme plante
+  ou s'arrête au milieu, avant d'écrire l'erreur.
 
 ---
 

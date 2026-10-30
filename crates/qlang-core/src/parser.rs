@@ -2188,6 +2188,7 @@ impl<'a> Parser<'a> {
                         Some(b't') => cur.push('\t'),
                         Some(b'r') => cur.push('\r'),
                         Some(b'0') => cur.push('\0'),
+                        Some(b'e') => cur.push('\u{1b}'),
                         Some(b'\\') => cur.push('\\'),
                         Some(b'"') => cur.push('"'),
                         Some(b'{') => cur.push('{'),
@@ -2202,7 +2203,7 @@ impl<'a> Parser<'a> {
                                 &mut self.diags,
                                 Diagnostic::error(
                                     "P020",
-                                    "unknown escape sequence (allowed: \\n \\t \\r \\0 \\\\ \\\" \\{ \\})",
+                                    "unknown escape sequence (allowed: \\n \\t \\r \\0 \\e \\\\ \\\" \\{ \\})",
                                     s,
                                 ),
                             );

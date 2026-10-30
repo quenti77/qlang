@@ -20,6 +20,7 @@ mod redis;
 mod serve;
 mod signature;
 mod stop;
+mod term;
 mod testrun;
 mod ws;
 
@@ -113,10 +114,12 @@ fn main() -> ExitCode {
         .stack_size(1 << 30)
         .spawn(move || real_main(args))
         .expect("cannot start the interpreter thread");
-    match handle.join() {
+    let code = match handle.join() {
         Ok(code) => code,
         Err(_) => ExitCode::from(101),
-    }
+    };
+    term::restore();
+    code
 }
 
 fn real_main(args: Vec<String>) -> ExitCode {
@@ -601,6 +604,7 @@ impl Host for TerminalHost {
             || redis::REDIS_EXTERNS.contains(&name)
             || signature::SIGNATURE_EXTERNS.contains(&name)
             || name == "process_stopping"
+            || term::TERM_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -620,6 +624,9 @@ impl Host for TerminalHost {
         }
         if signature::SIGNATURE_EXTERNS.contains(&name) {
             return signature::call(name, &args);
+        }
+        if term::TERM_EXTERNS.contains(&name) {
+            return term::call(name, &args);
         }
         if name == "process_stopping" {
             return Ok(HostValue::Bool(stop::stopping(serve::is_stopping())));
@@ -1070,6 +1077,8 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let result = program.run(&mut host, limits);
+    // an error must not be written on the alternate screen, nor in raw mode
+    term::restore();
     let _ = std::io::stdout().flush();
     match result.error {
         None => match result.exit_code {

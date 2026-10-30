@@ -591,6 +591,26 @@ pub fn memory_exceeded() -> bool {
     MEMORY.get().is_some_and(|(probe, max)| probe() > *max)
 }
 
+thread_local! {
+    static CANCEL: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Gives the thread a flag that stops the program running on it (`R906`) at its next check, the one
+/// that also looks at the memory. `None` removes it. A task started by `Worker.spawn` has one.
+pub fn set_cancel_flag(flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) {
+    CANCEL.with(|c| *c.borrow_mut() = flag);
+}
+
+/// Whether the flag of this thread (see [`set_cancel_flag`]) is raised.
+pub fn cancelled() -> bool {
+    CANCEL.with(|c| {
+        c.borrow()
+            .as_ref()
+            .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+    })
+}
+
 /// A host that keeps everything in memory. Used by tests and by web servers.
 #[derive(Default)]
 pub struct MemoryHost {

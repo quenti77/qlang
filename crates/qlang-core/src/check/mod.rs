@@ -2648,6 +2648,153 @@ impl Panic
     end
 end
 
+-- The `qlang` command provides the tasks.
+extern fun task_spawn(file: string, input: string) -> Result<int, Error>
+extern fun task_send(id: int, message: string) -> Result<bool, Error>
+extern fun task_recv(id: int, timeout_ms: int) -> Result<string?, Error>
+extern fun task_wait(id: int, timeout_ms: int) -> Result<string?, Error>
+extern fun task_cancel(id: int) -> bool
+extern fun task_done(id: int) -> bool
+extern fun task_input() -> string
+extern fun task_emit(message: string) -> Result<bool, Error>
+extern fun task_next(timeout_ms: int) -> string?
+extern fun task_cancelled() -> bool
+extern fun task_finish(result: string)
+
+--" Work that runs **at the same time** as your program, in a task of its own: a file of yours run by an
+interpreter that shares nothing with the program (the model of the workers of `qlang serve`). The two talk by
+sending `Json` values. Needs the `qlang` command; at most 64 tasks at once.
+
+The file of the task has a `fun run()`:
+
+```
+-- square.q
+fun run()
+  let n = (Worker.input().get("n") ?? Json.null()).as_number()
+  Worker.finish(Json.number(n * n))
+end
+```
+
+and the program starts it and waits:
+
+```
+let w = Worker.spawn("square.q", Json.of({"n": 12})).unwrap()
+let result = w.wait(5000).unwrap()                 -- 144.0, or none if it is not over after 5 s
+```
+
+A task can also talk while it works. In the task: `Worker.emit(value)` sends to the program, `Worker.next(ms)`
+waits for what the program sent (`none` after `ms`), `Worker.cancelled()` says whether it was asked to stop
+(by `cancel()`, or because the server is stopping). In the program: `w.recv(ms)`, `w.send(value)`,
+`w.cancel()`, `w.is_done()`. `cancel()` also **stops the task at its next few thousand steps** (error
+`R906`), even in a loop that never looks at `cancelled()`; a task waiting in a host call stops when it returns.
+
+The file is looked for from the folder you run `qlang` in (inside `--root` if there is one). The task has the
+permissions of the program (`--allow-process`...), its own memory and its own database connections, and it
+runs the top of its file again. `wait` gives the result **once**: a task is forgotten after it. A task that
+fails (an error in its file, `R906`) makes `wait` an `err` with the message. --"
+struct Worker
+    public id: int
+end
+
+impl Worker
+    --" Starts the file `file` (its `fun run()`) with `input`, which the task reads with `Worker.input()`. --"
+    public fun spawn(file: string, input: Json) -> Result<Worker, Error>
+        let made = task_spawn(file, input.to_text())
+        if made.is_err() then
+            return Result<Worker, Error>.Err(made.unwrap_err())
+        end
+        Result<Worker, Error>.Ok(Worker { id: made.unwrap() })
+    end
+
+    --" Sends a value to the task (it reads it with `Worker.next`). --"
+    public fun send(self, message: Json) -> Result<bool, Error>
+        task_send(self.id, message.to_text())
+    end
+
+    --" The next value the task emitted, waiting at most `timeout_ms`; `none` if there is none. --"
+    public fun recv(self, timeout_ms: int) -> Result<Json?, Error>
+        let got = task_recv(self.id, timeout_ms)
+        if got.is_err() then
+            return Result<Json?, Error>.Err(got.unwrap_err())
+        end
+        let text = got.unwrap()
+        if text == none then
+            return Result<Json?, Error>.Ok(none)
+        end
+        let parsed = Json.parse(text)
+        if parsed.is_err() then
+            return Result<Json?, Error>.Err(parsed.unwrap_err())
+        end
+        Result<Json?, Error>.Ok(parsed.unwrap())
+    end
+
+    --" The result of the task (what it gave to `Worker.finish`, `null` if nothing), waiting at most
+    `timeout_ms`: `none` when it is still running. An `err` if the task failed or its result was already taken. --"
+    public fun wait(self, timeout_ms: int) -> Result<Json?, Error>
+        let got = task_wait(self.id, timeout_ms)
+        if got.is_err() then
+            return Result<Json?, Error>.Err(got.unwrap_err())
+        end
+        let text = got.unwrap()
+        if text == none then
+            return Result<Json?, Error>.Ok(none)
+        end
+        let parsed = Json.parse(text)
+        if parsed.is_err() then
+            return Result<Json?, Error>.Err(parsed.unwrap_err())
+        end
+        Result<Json?, Error>.Ok(parsed.unwrap())
+    end
+
+    --" Asks the task to stop: `Worker.cancelled()` becomes true for it, and it is stopped at its next few
+    thousand steps. --"
+    public fun cancel(self)
+        task_cancel(self.id)
+    end
+
+    --" Whether the task is over (its result may still wait to be taken with `wait`). --"
+    public fun is_done(self) -> bool
+        task_done(self.id)
+    end
+
+    --" In a task: what the program gave to `spawn`. --"
+    public fun input() -> Json
+        let parsed = Json.parse(task_input())
+        if parsed.is_err() then
+            return Json.null()
+        end
+        parsed.unwrap()
+    end
+
+    --" In a task: sends a value to the program (it reads it with `recv`). --"
+    public fun emit(message: Json) -> Result<bool, Error>
+        task_emit(message.to_text())
+    end
+
+    --" In a task: the next value the program sent, waiting at most `timeout_ms`; `none` if there is none. --"
+    public fun next(timeout_ms: int) -> Json?
+        let text = task_next(timeout_ms)
+        if text == none then
+            return none
+        end
+        let parsed = Json.parse(text)
+        if parsed.is_err() then
+            return none
+        end
+        parsed.unwrap()
+    end
+
+    --" In a task: whether it was asked to stop (`cancel`, or the server is stopping). --"
+    public fun cancelled() -> bool
+        task_cancelled()
+    end
+
+    --" In a task: sets the result `wait` will give. --"
+    public fun finish(result: Json)
+        task_finish(result.to_text())
+    end
+end
+
 -- The `qlang` command provides the numbers shared by the workers.
 extern fun shared_add(name: string, delta: int) -> Result<int, Error>
 extern fun shared_get(name: string) -> int

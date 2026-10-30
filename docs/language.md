@@ -1759,6 +1759,46 @@ Les nombres vivent dans la mémoire du processus : perdus à l'arrêt, **non par
 Redis). Un nom fait de 1 à 128 octets, au plus 10 000 noms ; un dépassement d'entier est une erreur. Il faut la
 commande `qlang` (`T250` ailleurs).
 
+#### Travail en parallèle : `Worker`
+
+Une **tâche** est un fichier de ton projet qu'un interpréteur à part exécute en même temps que le programme. Elle ne
+partage rien avec lui (même modèle que les workers de `qlang serve`) : les deux se parlent en s'envoyant des valeurs
+`Json`. Il faut la commande `qlang` (`T250` ailleurs) ; 64 tâches au plus en même temps.
+
+```
+-- carre.q : le fichier de la tâche
+fun run()
+  let n = (Worker.input().get("n") ?? Json.null()).as_number()
+  Worker.finish(Json.number(n * n))
+end
+```
+
+```
+let w = Worker.spawn("carre.q", Json.of({"n": 12})).unwrap()
+let resultat = w.wait(5000).unwrap()            -- 144, ou none si ce n'est pas fini au bout de 5 s
+```
+
+| Côté programme | Rôle |
+| --- | --- |
+| `Worker.spawn(fichier, entrée)` | lance le `fun run()` du fichier : `Result<Worker, Error>` |
+| `w.wait(ms)` | le résultat (`Worker.finish`, `null` sinon), au plus `ms` d'attente : `none` s'il tourne encore ; `err` si la tâche a échoué (le message dit pourquoi). **Une seule fois** : la tâche est ensuite oubliée |
+| `w.send(valeur)` / `w.recv(ms)` | envoyer à la tâche / prendre la prochaine valeur qu'elle a émise (`none` après `ms`) |
+| `w.cancel()` | demande l'arrêt : `Worker.cancelled()` devient vrai pour la tâche, **et elle est arrêtée** (erreur `R906`) au prochain contrôle (tous les quelques milliers de pas), même dans une boucle qui ne regarde jamais |
+| `w.is_done()` | la tâche est-elle finie |
+
+| Côté tâche | Rôle |
+| --- | --- |
+| `Worker.input()` | ce que le programme a donné à `spawn` |
+| `Worker.emit(valeur)` / `Worker.next(ms)` | envoyer au programme / attendre ce qu'il a envoyé (`none` après `ms`, ou si on demande l'arrêt) |
+| `Worker.cancelled()` | l'arrêt est-il demandé (`cancel()`, ou le serveur s'arrête) |
+| `Worker.finish(valeur)` | fixe le résultat de `wait` |
+
+À savoir : le fichier est cherché depuis le dossier où `qlang` tourne (et doit être dans `--root` s'il y en a un) ; la
+tâche a les permissions du programme (`--allow-process`…), sa mémoire à elle et ses propres connexions à la base ;
+elle exécute de nouveau le haut de son fichier ; une tâche en attente dans un appel bloquant (`time.sleep`, une
+requête lente) s'arrête quand l'appel rend la main. Un `print` dans une tâche écrit sur la même sortie que le
+programme.
+
 #### Sortie et sortie d'erreur
 
 Un programme a deux sorties. La **sortie** (`print`, `write`) porte ce que le programme

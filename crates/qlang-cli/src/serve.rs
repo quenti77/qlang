@@ -28,6 +28,10 @@ struct Tuning {
     max_headers: usize,
     read_deadline: Duration,
     idle: Duration,
+    /// How long the program may take to answer one request (zero: no limit).
+    request_timeout: Duration,
+    /// How many requests may wait for a worker (zero: only `max_connections` bounds them).
+    max_queue: usize,
 }
 
 impl Default for Tuning {
@@ -38,6 +42,8 @@ impl Default for Tuning {
             max_headers: 64 * 1024,
             read_deadline: Duration::from_secs(20),
             idle: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(30),
+            max_queue: 0,
         }
     }
 }
@@ -151,6 +157,32 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     s.parse::<u64>().ok().filter(|n| *n > 0)
                 }) {
                     Some(n) => tune.read_deadline = Duration::from_secs(n),
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--request-timeout" => {
+                i += 1;
+                match option_value(
+                    args,
+                    i,
+                    "--request-timeout",
+                    "a number of seconds (0: none)",
+                    |s| s.parse::<u64>().ok(),
+                ) {
+                    Some(n) => tune.request_timeout = Duration::from_secs(n),
+                    None => return ExitCode::from(64),
+                }
+            }
+            "--max-queue" => {
+                i += 1;
+                match option_value(
+                    args,
+                    i,
+                    "--max-queue",
+                    "a number of requests (0: no limit)",
+                    |s| s.parse::<usize>().ok().filter(|n| *n <= 100_000),
+                ) {
+                    Some(n) => tune.max_queue = n,
                     None => return ExitCode::from(64),
                 }
             }
@@ -885,7 +917,18 @@ enum Msg {
 }
 
 /// How long a connection waits for the program before answering 504.
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Requests sent to the workers and not started yet.
+static QUEUED: AtomicUsize = AtomicUsize::new(0);
+
+/// How long the connection waits for the answer: the time the program has, and a little more.
+fn answer_timeout() -> Duration {
+    let t = tuning().request_timeout;
+    if t.is_zero() {
+        Duration::from_secs(24 * 3600)
+    } else {
+        t + Duration::from_secs(5)
+    }
+}
 /// Set when the server was asked to stop.
 static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// How long a stopping server lets the requests in progress finish.
@@ -1214,6 +1257,8 @@ fn worker(
                 return Err(ExitCode::from(2));
             }
         };
+        let timeout = tuning().request_timeout;
+        app.set_request_timeout((!timeout.is_zero()).then_some(timeout));
         if let Some(r) = ready.take() {
             r()?;
             if opts.watch {
@@ -1238,6 +1283,7 @@ fn worker(
             };
             match msg {
                 Ok(Msg::Job(job)) => {
+                    QUEUED.fetch_sub(1, Ordering::SeqCst);
                     let now = RELOAD.load(Ordering::SeqCst);
                     if opts.watch && now != seen {
                         seen = now;
@@ -1663,6 +1709,20 @@ fn serve_one(
         path,
         query,
     };
+    let max_queue = tuning().max_queue;
+    if max_queue > 0 && QUEUED.load(Ordering::SeqCst) >= max_queue {
+        // every worker is busy and the line is full: say so now rather than let it grow
+        let _ = write_to(
+            stream,
+            503,
+            &[("Retry-After".to_string(), "1".to_string())],
+            b"server busy",
+            false,
+            false,
+        );
+        return false;
+    }
+    QUEUED.fetch_add(1, Ordering::SeqCst);
     if STOPPING.load(Ordering::SeqCst)
         || jobs
             .send(Msg::Job(Box::new(Job {
@@ -1673,6 +1733,7 @@ fn serve_one(
             })))
             .is_err()
     {
+        QUEUED.fetch_sub(1, Ordering::SeqCst);
         let _ = write_to(stream, 503, &[], b"server stopping", false, false);
         return false;
     }
@@ -1681,7 +1742,7 @@ fn serve_one(
         "text/plain; charset=utf-8".to_string(),
     )];
     let mut keep = keep;
-    let status = match answer.recv_timeout(ANSWER_TIMEOUT) {
+    let status = match answer.recv_timeout(answer_timeout()) {
         Ok(Ok(r)) if r.websocket.is_some() => {
             // the worker only accepts when the request asked for it, so both are there
             let (Some(key), Some(pipe)) = (upgrade, ws_pipe) else {

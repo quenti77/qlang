@@ -1323,3 +1323,118 @@ end
         "{fine}"
     );
 }
+
+fn status_of(response: &str) -> u16 {
+    response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+#[test]
+fn a_request_that_runs_too_long_is_stopped_and_the_worker_goes_on() {
+    let source = r#"
+fun handle(req: Request) -> Response
+  if req.path == "/slow" then
+    let i = 0
+    while i < 4000000000 do
+      i += 1
+    end
+    return Response.text("never")
+  end
+  Response.text("quick")
+end
+"#;
+    let server = start(
+        "reqtimeout",
+        source,
+        &[
+            "--request-timeout",
+            "1",
+            "--max-steps",
+            "100000000000",
+            "--workers",
+            "1",
+        ],
+    );
+    let started = std::time::Instant::now();
+    let slow = exchange(
+        &server,
+        "GET /slow HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(status_of(&slow), 500, "{slow}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    // the same worker answers the next request
+    let quick = exchange(
+        &server,
+        "GET /quick HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(status_of(&quick), 200, "{quick}");
+}
+
+#[test]
+fn a_full_line_of_waiting_requests_is_answered_503_with_retry_after() {
+    let source = r#"
+fun handle(req: Request) -> Response
+  time.sleep(700)
+  Response.text("done")
+end
+"#;
+    let server = start(
+        "maxqueue",
+        source,
+        &["--workers", "1", "--max-queue", "1", "--no-access-log"],
+    );
+    let mut open = Vec::new();
+    for _ in 0..4 {
+        open.push(send_get(server.port, "/x"));
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    let mut statuses = Vec::new();
+    let mut retry_after = false;
+    for mut s in open {
+        let mut text = String::new();
+        let _ = s.read_to_string(&mut text);
+        statuses.push(status_of(&text));
+        retry_after |= text.contains("Retry-After: 1");
+    }
+    statuses.sort();
+    assert_eq!(statuses, vec![200, 200, 503, 503], "{statuses:?}");
+    assert!(retry_after);
+}
+
+#[test]
+fn shared_numbers_are_the_same_for_every_worker() {
+    let source = r#"
+fun handle(req: Request) -> Response
+  Response.text("{Shared.add("hits", 1).unwrap()}")
+end
+"#;
+    let server = start(
+        "sharednumbers",
+        source,
+        &["--workers", "4", "--no-access-log"],
+    );
+    let mut seen = Vec::new();
+    for _ in 0..24 {
+        let r = exchange(
+            &server,
+            "GET /x HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+        );
+        seen.push(
+            r.rsplit("\r\n\r\n")
+                .next()
+                .unwrap_or("")
+                .trim()
+                .parse::<i64>()
+                .unwrap(),
+        );
+    }
+    // one counter for all the workers: 1, 2, 3... with no repetition
+    assert_eq!(seen, (1..=24).collect::<Vec<i64>>());
+}

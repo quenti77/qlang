@@ -28,7 +28,7 @@ Aujourd'hui rien n'est « garanti 1.0 » : *stable* veut dire « nous le traiter
 | `datetime`, `uuid`, `ulid`, `regex`, `Hash`, `Base64`, `Hex`, `Url`, `Crypto`, `Password`, `Format`, `Path` | provisoire |
 | `fs`, `env`, `http`, `Db`, `Redis`, `Process`, `Log` | provisoire |
 | Opérateurs surchargés, alias de type, annotations (`#[annotation]`), `Any` | provisoire |
-| `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard` | provisoire (récents) |
+| `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard`, `Shared` | provisoire (récents) |
 | `Reflect` (constructeurs, `callable`), `extern fun` et fournisseurs, `Term` | **expérimental** |
 | Mots réservés (`step`, `from`, `then`, `catch`, `public`, `end`…) | on peut en **ajouter** (annoncé en « Cassant ») |
 | Texte des messages d'erreur | **non promis** |

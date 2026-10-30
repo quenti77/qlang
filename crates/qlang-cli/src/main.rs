@@ -20,6 +20,7 @@ mod providers;
 mod redis;
 mod selfupdate;
 mod serve;
+mod shared;
 mod signature;
 mod stop;
 mod term;
@@ -70,7 +71,7 @@ USAGE:
                                          serve the JSON protocol over HTTP (POST /run)
     qlang serve <app.q> [--port 8080] [--bind 127.0.0.1] [--static DIR] [--workers N]
                         [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev] [--compress]
-                        [--max-connections N] [--db-pool N] [--max-body SIZE] [--max-headers SIZE]
+                        [--max-connections N] [--max-queue N] [--request-timeout S] [--db-pool N] [--max-body SIZE] [--max-headers SIZE]
                         [--read-timeout S] [--idle-timeout S] [--no-access-log] [--dev-public]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
@@ -615,6 +616,7 @@ impl Host for TerminalHost {
             || name == "process_stopping"
             || term::TERM_EXTERNS.contains(&name)
             || archive::ARCHIVE_EXTERNS.contains(&name)
+            || shared::SHARED_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -640,6 +642,9 @@ impl Host for TerminalHost {
         }
         if archive::ARCHIVE_EXTERNS.contains(&name) {
             return archive::call(name, &args);
+        }
+        if shared::SHARED_EXTERNS.contains(&name) {
+            return shared::call(name, &args);
         }
         if name == "process_stopping" {
             return Ok(HostValue::Bool(stop::stopping(serve::is_stopping())));

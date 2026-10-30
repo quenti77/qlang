@@ -48,3 +48,12 @@ fn a_host_without_the_extras_refuses_them_when_compiling() {
         );
     }
 }
+
+#[test]
+fn shared_numbers_need_the_qlang_command_too() {
+    let out = exec("print(Shared.add(\"n\", 1).is_ok())");
+    assert!(
+        out.starts_with("COMPILE: T250") && out.contains("only offered by the `qlang` command"),
+        "{out}"
+    );
+}

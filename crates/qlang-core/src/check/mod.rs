@@ -2612,6 +2612,193 @@ impl Process
     end
 end
 
+-- The `qlang` command provides compression and the time zone database.
+extern fun archive_gzip(data: bytes, level: int) -> bytes
+extern fun archive_gunzip(data: bytes, max: int) -> Result<bytes, Error>
+extern fun archive_read(kind: string, data: bytes, max: int) -> Result<array<bytes>, Error>
+extern fun archive_write(kind: string, parts: array<bytes>) -> Result<bytes, Error>
+extern fun tz_offset(zone: string, ms: int) -> Result<array<string>, Error>
+extern fun tz_resolve(zone: string, wall: int) -> Result<int, Error>
+
+--" A file of an archive: its path inside the archive (`docs/a.txt`, never absolute and never with
+`..`) and its content. --"
+struct ArchiveEntry
+    public name: string
+    public data: bytes
+end
+
+fun archive_entries(read: Result<array<bytes>, Error>) -> Result<array<ArchiveEntry>, Error>
+    if read.is_err() then
+        return Result<array<ArchiveEntry>, Error>.Err(read.unwrap_err())
+    end
+    let parts = read.unwrap()
+    let out: array<ArchiveEntry> = []
+    let i = 0
+    while i + 1 < parts.len() do
+        out.push(ArchiveEntry { name: parts[i].to_string() ?? "", data: parts[i + 1] })
+        i += 2
+    end
+    Result<array<ArchiveEntry>, Error>.Ok(out)
+end
+
+fun archive_parts(entries: array<ArchiveEntry>) -> array<bytes>
+    let parts: array<bytes> = []
+    for e in entries do
+        parts.push(e.name.to_bytes())
+        parts.push(e.data)
+    end
+    parts
+end
+
+--" gzip compression of bytes (`.gz` files, `Content-Encoding: gzip`). Needs the `qlang` command.
+
+```
+let packed = Gzip.compress("hello".to_bytes())
+let text = Gzip.decompress(packed).unwrap().to_string()      -- "hello"
+```
+
+`decompress` refuses to produce more than 256 MB (a small file can expand into gigabytes);
+`decompress_max` chooses the limit. --"
+struct Gzip
+end
+
+impl Gzip
+    --" Compresses `data` (level 6). --"
+    public fun compress(data: bytes) -> bytes
+        archive_gzip(data, 6)
+    end
+
+    --" Compresses with a level from 0 (none) to 9 (smallest). --"
+    public fun compress_level(data: bytes, level: int) -> bytes
+        archive_gzip(data, level)
+    end
+
+    --" Decompresses; `err` for data that is not gzip or that is over 256 MB once decompressed. --"
+    public fun decompress(data: bytes) -> Result<bytes, Error>
+        archive_gunzip(data, 268435456)
+    end
+
+    --" Like `decompress`, with the largest size you accept, in bytes. --"
+    public fun decompress_max(data: bytes, max: int) -> Result<bytes, Error>
+        archive_gunzip(data, max)
+    end
+end
+
+--" `.zip` archives, in memory. Needs the `qlang` command. A name that would leave the folder it is
+extracted into (`../x`, `/etc/passwd`) is refused when reading and when writing, and the content
+is limited to 256 MB once decompressed (`read_max` chooses).
+
+```
+let packed = Zip.write([ArchiveEntry { name: "hello.txt", data: "hi".to_bytes() }]).unwrap()
+for e in Zip.read(packed).unwrap() do
+  print("{e.name}: {e.data.len()} bytes")
+end
+```
+--"
+struct Zip
+end
+
+impl Zip
+    --" The files of a zip archive (folders are left out). --"
+    public fun read(data: bytes) -> Result<array<ArchiveEntry>, Error>
+        archive_entries(archive_read("zip", data, 268435456))
+    end
+
+    --" Like `read`, with the largest total size you accept, in bytes. --"
+    public fun read_max(data: bytes, max: int) -> Result<array<ArchiveEntry>, Error>
+        archive_entries(archive_read("zip", data, max))
+    end
+
+    --" A zip archive of these files. --"
+    public fun write(entries: array<ArchiveEntry>) -> Result<bytes, Error>
+        archive_write("zip", archive_parts(entries))
+    end
+end
+
+--" `.tar` and `.tar.gz` archives, in memory. Needs the `qlang` command. `read` recognises a gzip
+file by its first bytes, so it reads both. Same rules on names and size as `Zip`. --"
+struct Tar
+end
+
+impl Tar
+    --" The files of a tar archive, gzipped or not (folders and links are left out). --"
+    public fun read(data: bytes) -> Result<array<ArchiveEntry>, Error>
+        archive_entries(archive_read("tar", data, 268435456))
+    end
+
+    --" Like `read`, with the largest total size you accept, in bytes. --"
+    public fun read_max(data: bytes, max: int) -> Result<array<ArchiveEntry>, Error>
+        archive_entries(archive_read("tar", data, max))
+    end
+
+    --" A tar archive of these files. --"
+    public fun write(entries: array<ArchiveEntry>) -> Result<bytes, Error>
+        archive_write("tar", archive_parts(entries))
+    end
+
+    --" A gzipped tar archive (`.tar.gz`) of these files. --"
+    public fun write_gz(entries: array<ArchiveEntry>) -> Result<bytes, Error>
+        archive_write("tar.gz", archive_parts(entries))
+    end
+end
+
+--" A time zone of the IANA database (`Europe/Paris`, `America/New_York`, `UTC`), with its summer
+time rules. A `datetime` is always an instant in UTC; a `Zone` tells what a clock on the wall of that
+place reads at that instant, and the other way round. Needs the `qlang` command.
+
+```
+let paris = Zone.of("Europe/Paris").unwrap()
+let t = datetime.of(2026, 7, 1, 12, 0, 0)               -- 12:00 UTC
+print(paris.format(t, "YYYY-MM-DD HH:mm"))             -- 2026-07-01 14:00
+print(paris.abbreviation(t))                           -- CEST
+let opening = paris.local(2026, 10, 11, 9, 0, 0)       -- 9:00 in Paris, as an instant
+```
+
+An hour that does not exist (clocks go forward) is read with the offset before the change; an
+hour that happens twice (clocks go back) is the first one. --"
+struct Zone
+    public name: string
+end
+
+impl Zone
+    --" The zone called `name`, or `err` for a name that is not in the database. --"
+    public fun of(name: string) -> Result<Zone, Error>
+        let probe = tz_offset(name, 0)
+        if probe.is_err() then
+            return Result<Zone, Error>.Err(probe.unwrap_err())
+        end
+        Result<Zone, Error>.Ok(Zone { name: name })
+    end
+
+    --" The offset from UTC at this instant, in seconds (7200 for Paris in summer). --"
+    public fun offset_seconds(self, at: datetime) -> int
+        int.parse(tz_offset(self.name, at.ms()).unwrap()[0]) ?? 0
+    end
+
+    --" The abbreviation at this instant (`CET`, `CEST`, `EST`...; a number such as `+03` for zones
+    without one). --"
+    public fun abbreviation(self, at: datetime) -> string
+        tz_offset(self.name, at.ms()).unwrap()[1]
+    end
+
+    --" What a clock on the wall reads at this instant, as a `datetime` whose fields are the wall
+    clock (`wall(t).hour()` is the local hour). It is not the instant itself: do not compare it
+    with instants. --"
+    public fun wall(self, at: datetime) -> datetime
+        datetime.at(at.ms() + self.offset_seconds(at) * 1000)
+    end
+
+    --" The instant at which a clock in this zone reads this date and time. --"
+    public fun local(self, year: int, month: int, day: int, hour: int, minute: int, second: int) -> datetime
+        datetime.at(tz_resolve(self.name, datetime.of(year, month, day, hour, minute, second).ms()).unwrap())
+    end
+
+    --" `at` written with the clock of this zone, with the patterns of `datetime.format`. --"
+    public fun format(self, at: datetime, pattern: string) -> string
+        self.wall(at).format(pattern)
+    end
+end
+
 -- The `qlang` command provides the terminal: these are the `extern fun` it implements.
 extern fun term_is_tty(which: int) -> bool
 extern fun term_size() -> array<int>

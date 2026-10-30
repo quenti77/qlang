@@ -89,14 +89,29 @@ fn release(version: &str, program: &[u8], sum_of: Option<&str>) -> HashMap<Strin
     files
 }
 
+/// Runs a command; a program that was copied a moment ago may still be "busy" in a test that runs
+/// at the same time (Linux), so it is tried again.
+fn output(cmd: &mut Command) -> std::process::Output {
+    for _ in 0..50 {
+        match cmd.output() {
+            Ok(o) => return o,
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+            Err(e) => panic!("{e}"),
+        }
+    }
+    cmd.output().unwrap()
+}
+
 fn update(exe: &std::path::Path, base: &str, args: &[&str]) -> std::process::Output {
-    Command::new(exe)
-        .arg("self-update")
-        .args(args)
-        .env("QLANG_BASE_URL", base)
-        .env("QLANG_API_URL", format!("{base}/api"))
-        .output()
-        .unwrap()
+    output(
+        Command::new(exe)
+            .arg("self-update")
+            .args(args)
+            .env("QLANG_BASE_URL", base)
+            .env("QLANG_API_URL", format!("{base}/api")),
+    )
 }
 
 #[test]
@@ -111,7 +126,7 @@ fn self_update_replaces_the_program_after_checking_its_checksum() {
         String::from_utf8_lossy(&o.stderr)
     );
     assert!(text.contains("-> qlang 9.9.9"), "{text}");
-    let out = Command::new(&exe).output().unwrap();
+    let out = output(&mut Command::new(&exe));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "qlang nine\n");
     assert!(!exe.with_extension("old").exists() && !exe.with_extension("new").exists());
 }
@@ -127,7 +142,7 @@ fn a_wrong_checksum_leaves_the_program_alone() {
     let o = update(&exe, &base, &[]);
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("checksum mismatch"));
-    let version = Command::new(&exe).arg("--version").output().unwrap();
+    let version = output(Command::new(&exe).arg("--version"));
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("qlang 0."));
 }
 
@@ -137,7 +152,7 @@ fn check_only_says_what_exists() {
     let exe = copy_of_qlang("check");
     let o = update(&exe, &base, &["--check"]);
     assert!(String::from_utf8_lossy(&o.stdout).contains("qlang 9.9.9 is available"));
-    let version = Command::new(&exe).arg("--version").output().unwrap();
+    let version = output(Command::new(&exe).arg("--version"));
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("qlang 0."));
 }
 

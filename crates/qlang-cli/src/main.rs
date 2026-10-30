@@ -1,6 +1,7 @@
 //! The `qlang` command line tool: runs programs in a terminal, speaks JSON
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
+mod archive;
 mod db;
 mod devpage;
 mod docgen;
@@ -610,6 +611,7 @@ impl Host for TerminalHost {
             || signature::SIGNATURE_EXTERNS.contains(&name)
             || name == "process_stopping"
             || term::TERM_EXTERNS.contains(&name)
+            || archive::ARCHIVE_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
     }
@@ -632,6 +634,9 @@ impl Host for TerminalHost {
         }
         if term::TERM_EXTERNS.contains(&name) {
             return term::call(name, &args);
+        }
+        if archive::ARCHIVE_EXTERNS.contains(&name) {
+            return archive::call(name, &args);
         }
         if name == "process_stopping" {
             return Ok(HostValue::Bool(stop::stopping(serve::is_stopping())));

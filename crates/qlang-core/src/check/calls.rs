@@ -1227,6 +1227,8 @@ impl Checker {
                     ("fs", "write") => Some(("fs_write", "there is no disk access")),
                     ("fs", "read_bytes") => Some(("fs_read_bytes", "there is no disk access")),
                     ("fs", "write_bytes") => Some(("fs_write_bytes", "there is no disk access")),
+                    ("fs", "create_dir") => Some(("fs_create_dir", "there is no disk access")),
+                    ("fs", "exists") => Some(("fs_exists", "there is no disk access")),
                     ("env", "get") => Some(("env_get", "there is no process environment")),
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),

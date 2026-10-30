@@ -1492,6 +1492,8 @@ extern fun fs_read(path: string) -> Result<string, Error>
 extern fun fs_write(path: string, content: string) -> Result<bool, Error>
 extern fun fs_read_bytes(path: string) -> Result<bytes, Error>
 extern fun fs_write_bytes(path: string, content: bytes) -> Result<bool, Error>
+extern fun fs_create_dir(path: string) -> Result<bool, Error>
+extern fun fs_exists(path: string) -> Result<bool, Error>
 extern fun env_get(name: string) -> string?
 extern fun env_args() -> array<string>
 extern fun http_send(req: Request) -> Result<Response, Error>
@@ -1520,6 +1522,17 @@ impl fs
     --" Writes bytes to a file, replacing it entirely (creating it if needed). Needs disk access. --"
     public fun write_bytes(path: string, content: bytes) -> Result<bool, Error>
         fs_write_bytes(path, content)
+    end
+
+    --" Creates a folder, and the folders above it that are missing; nothing happens if it is already
+    there. Needs disk access (and stays inside `--root`). --"
+    public fun create_dir(path: string) -> Result<bool, Error>
+        fs_create_dir(path)
+    end
+
+    --" Whether a file or a folder is there. Needs disk access. --"
+    public fun exists(path: string) -> Result<bool, Error>
+        fs_exists(path)
     end
 end
 

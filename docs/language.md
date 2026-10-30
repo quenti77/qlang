@@ -2799,6 +2799,9 @@ contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
 `Result` : un fichier absent ou une erreur de permission donnent un
 `Result::err`, jamais un arrêt du programme. `fs.read_bytes(chemin)` et `fs.write_bytes(chemin,
 octets)` font de même avec des [`bytes`](#octets--bytes) (une image, une archive).
+`fs.create_dir(dossier)` crée un dossier et ceux qui manquent au-dessus (rien ne se passe s'il existe) ;
+`fs.exists(chemin)` dit si un fichier ou un dossier est là (`Result<bool, Error>`). Avec `--root`, ils
+restent dans le dossier : un `..` après un dossier qui n'existe pas encore est refusé.
 
 ```
 let r = fs.read("config.json")

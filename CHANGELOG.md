@@ -1,5 +1,16 @@
 # Journal des changements
 
+## 0.60.0
+
+- **`qlang init --web [dossier]`** : un projet web prêt à lancer (`main.q`, `app.q`, `providers.q`, `controllers.q`, `app_test.q`, `qlang.toml`, `.gitignore`), qui installe le paquet `std` (`--no-install` pour ne pas le télécharger). `qlang serve main.q --watch --dev`, `qlang test`.
+- **`Reflect.declared(module)`** : les fonctions puis les structures d'un module, en `Callable` (`callables` puis `constructors`). **`Reflect.bound_callables_of(valeur)`** : les méthodes publiques de la structure qu'un `Any` contient, liées à elle, sans connaître son type. C'est ce qui permet à `App.boot` de `qlang-std` de trouver les routes et les contrôleurs d'un module.
+- **`fs.create_dir(dossier)`** et **`fs.exists(chemin)`**, qui respectent `--root` (un `..` après un dossier manquant est refusé).
+- **Le plus petit entier** s'écrit en littéral : `-9223372036854775808` (aussi dans un `case`). Les chiffres sans le `-` restent une erreur (`L005`).
+- **Super-traits** : `trait B extends A, C`. Qui implémente `B` doit implémenter `A` et `C` (`T136`) ; une valeur de type `B`, ou un `T: B`, a leurs méthodes et passe là où un `A` est attendu.
+- **`qlang doc`** met en forme `@param nom texte` et `@return texte` des commentaires de documentation.
+- `qlang-std` 0.12.0 : `App.boot(Reflect.declared(a).concat(Reflect.declared(b)))`, `discover`, `declare` (un contrôleur déclaré mais jamais enregistré est signalé par `validate()`) ; `web/upload.q` (`receive` avec `Rules` : taille, nombre, type lu dans le contenu ; `Upload.save`) ; sessions qui expirent (`Options`, `sessions_using`), `regenerate()`, `flash_input` / `old`, `csrf_field`, `csrf_protect_except`, `protect`, le jeton CSRF d'un formulaire avec fichiers ; `Client.post_multipart`.
+- La section « Points encore ouverts » de la référence ne cite plus ni le plus petit entier, ni les super-traits, ni le format des commentaires de documentation.
+
 ## 0.59.0
 
 - **Serveur HTTP** : les bornes se règlent. `--max-connections N` (64), `--max-body TAILLE` (1 Mo), `--max-headers TAILLE` (64 Ko, `431` au-delà), `--read-timeout S` (20 s pour envoyer toute la requête) et `--idle-timeout S` (5 s de silence sur une connexion persistante), pour `qlang serve app.q` comme pour `qlang serve`. Un client trop lent reçoit maintenant `408` au lieu d'une connexion fermée sans réponse. Les en-têtes trop gros donnent `431` (c'était `400`).

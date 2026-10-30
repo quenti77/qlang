@@ -80,7 +80,8 @@ pub trait SqlBackend {
 /// and `http.send` (`http_send`). Whether a host has them follows its [`Capabilities`].
 pub fn std_has(caps: Capabilities, name: &str) -> bool {
     match name {
-        "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" => caps.fs,
+        "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" | "fs_create_dir"
+        | "fs_exists" => caps.fs,
         "env_get" | "env_args" => caps.env,
         "secure_random_bytes" => caps.random,
         // pure functions, and the log: every host has them
@@ -109,6 +110,10 @@ pub fn std_call<H: Host + ?Sized>(
         ("fs_write_bytes", [HostValue::Str(path), HostValue::Bytes(content)]) => host
             .write_file_bytes(path, content)
             .map(|()| HostValue::Bool(true)),
+        ("fs_create_dir", [HostValue::Str(path)]) => {
+            host.create_dir(path).map(|()| HostValue::Bool(true))
+        }
+        ("fs_exists", [HostValue::Str(path)]) => host.path_exists(path).map(HostValue::Bool),
         ("secure_random_bytes", [HostValue::Int(n)]) => {
             if !(0..=1_048_576).contains(n) {
                 return Some(Err(HostError::Other(
@@ -174,6 +179,8 @@ pub fn std_call<H: Host + ?Sized>(
             | "fs_write"
             | "fs_read_bytes"
             | "fs_write_bytes"
+            | "fs_create_dir"
+            | "fs_exists"
             | "env_get"
             | "env_args"
             | "http_send"
@@ -429,6 +436,16 @@ pub trait Host {
 
     /// Write `content` to a file, replacing it entirely (creating it if needed).
     fn write_file(&mut self, _path: &str, _content: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Create a folder and the ones above it that are missing (nothing to do if it exists).
+    fn create_dir(&mut self, _path: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Whether a file or a folder is there.
+    fn path_exists(&mut self, _path: &str) -> Result<bool, HostError> {
         Err(HostError::Unsupported("fs"))
     }
 

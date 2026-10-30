@@ -438,6 +438,48 @@ impl Host for TerminalHost {
         std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
     }
 
+    fn create_dir(&mut self, path: &str) -> Result<(), HostError> {
+        // the folder may not exist yet: check the nearest one that does, and refuse `..` in
+        // what is still to be made (it could climb out of `--root` after the check)
+        let mut existing = Path::new(path);
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        while !existing.exists() {
+            let Some(name) = existing.file_name() else {
+                return Err(HostError::Other(format!(
+                    "\"{path}\" is not a valid folder"
+                )));
+            };
+            if name == ".." {
+                return Err(HostError::Other(format!(
+                    "\"{path}\": `..` after a missing folder"
+                )));
+            }
+            tail.push(name);
+            existing = existing
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+        }
+        let mut full = existing
+            .canonicalize()
+            .map_err(|e| HostError::Other(e.to_string()))?;
+        for name in tail.iter().rev() {
+            full.push(name);
+        }
+        self.check_fs_root(&full)?;
+        std::fs::create_dir_all(&full).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn path_exists(&mut self, path: &str) -> Result<bool, HostError> {
+        match Path::new(path).canonicalize() {
+            Ok(full) => {
+                self.check_fs_root(&full)?;
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     fn env_var(&mut self, name: &str) -> Result<Option<String>, HostError> {
         Ok(std::env::var(name).ok())
     }

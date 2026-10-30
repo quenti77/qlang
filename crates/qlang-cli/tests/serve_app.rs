@@ -1239,7 +1239,7 @@ fun handle(req: Request) -> Response
   Response.text("ok")
 end
 "#,
-        d = dir.display()
+        d = dir.display().to_string().replace('\\', "/")
     );
     let server = start("sendfile", &source, &[]);
     let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
@@ -1303,8 +1303,8 @@ fun handle(req: Request) -> Response
   Response.file("{i}/ok.txt")
 end
 "#,
-        b = base.display(),
-        i = inside.display()
+        b = base.display().to_string().replace('\\', "/"),
+        i = inside.display().to_string().replace('\\', "/")
     );
     let root = inside.display().to_string();
     let server = start("fileroot", &source, &["--root", &root]);

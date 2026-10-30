@@ -122,7 +122,8 @@ fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>, String> {
             .map_err(|e| format!("{name}: {e}"))?;
         for i in 0..zip.len() {
             let mut file = zip.by_index(i).map_err(|e| format!("{name}: {e}"))?;
-            if file.name().ends_with(&format!("/{exe}")) || file.name() == exe {
+            let entry = file.name().map(|n| n.to_string()).unwrap_or_default();
+            if entry.ends_with(&format!("/{exe}")) || entry == exe {
                 file.read_to_end(&mut out)
                     .map_err(|e| format!("{name}: {e}"))?;
                 return Ok(out);
@@ -289,5 +290,20 @@ mod tests {
         assert!(!requirement_met("=0.64.2", "0.64.3").unwrap());
         assert!(requirement_met("0.100", "0.99.0").is_ok_and(|ok| !ok));
         assert!(requirement_met("soon", "0.64.0").is_err());
+    }
+
+    #[test]
+    fn the_program_is_found_in_a_zip() {
+        use std::io::Write;
+        let exe = if cfg!(windows) { "qlang.exe" } else { "qlang" };
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("qlang/README.md", options).unwrap();
+        zip.write_all(b"readme").unwrap();
+        zip.start_file(format!("qlang/{exe}"), options).unwrap();
+        zip.write_all(b"the program").unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        assert_eq!(extract(&bytes, "qlang-x.zip").unwrap(), b"the program");
+        assert!(extract(&bytes[..10], "qlang-x.zip").is_err());
     }
 }

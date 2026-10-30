@@ -2594,6 +2594,203 @@ impl Process
     end
 end
 
+-- The `qlang` command provides the terminal: these are the `extern fun` it implements.
+extern fun term_is_tty(which: int) -> bool
+extern fun term_size() -> array<int>
+extern fun term_colors() -> int
+extern fun term_raw(on: bool) -> Result<bool, Error>
+extern fun term_mode(name: string, on: bool) -> Result<bool, Error>
+extern fun term_write(text: string) -> Result<bool, Error>
+extern fun term_event(timeout_ms: int) -> Result<array<string>, Error>
+
+--" The size of the terminal, in characters. --"
+struct Size
+    public cols: int = 80
+    public rows: int = 24
+end
+
+--" Something that happened at the terminal, read by `Term.event`. `kind` says what:
+
+- `"key"`: `key` is the character (`"a"`, `"A"`, `" "`) or the name of the key (`"Enter"`, `"Tab"`,
+  `"Esc"`, `"Backspace"`, `"Delete"`, `"Insert"`, `"Up"`, `"Down"`, `"Left"`, `"Right"`, `"Home"`,
+  `"End"`, `"PageUp"`, `"PageDown"`, `"F1"`... `"F12"`), with `ctrl`, `alt` and `shift`;
+- `"mouse"`: `action` is `"down"`, `"up"`, `"drag"`, `"move"`, `"scroll_up"`, `"scroll_down"`,
+  `"scroll_left"` or `"scroll_right"`, `button` is `"left"`, `"right"`, `"middle"` or `"none"`, and `x`
+  and `y` are the column and the row (from 0);
+- `"resize"`: `x` and `y` are the new number of columns and rows;
+- `"paste"`: `text` is what was pasted (after `Term.paste(true)`);
+- `"focus"`: `text` is `"in"` or `"out"` (after `Term.focus(true)`);
+- `"timeout"`: nothing happened within the time asked. --"
+struct Event
+    public kind: string = "timeout"
+    public key: string = ""
+    public text: string = ""
+    public ctrl: bool = false
+    public alt: bool = false
+    public shift: bool = false
+    public x: int = 0
+    public y: int = 0
+    public button: string = "none"
+    public action: string = ""
+end
+
+fun term_parse_event(parts: array<string>) -> Event
+    let kind = parts[0]
+    if kind == "key" then
+        let mods = parts[2]
+        return Event { kind: "key", key: parts[1], ctrl: mods.contains("ctrl"), alt: mods.contains("alt"), shift: mods.contains("shift") }
+    end
+    if kind == "mouse" then
+        let mods = parts[5]
+        return Event { kind: "mouse", action: parts[1], button: parts[2], x: int.parse(parts[3]) ?? 0, y: int.parse(parts[4]) ?? 0, ctrl: mods.contains("ctrl"), alt: mods.contains("alt"), shift: mods.contains("shift") }
+    end
+    if kind == "resize" then
+        return Event { kind: "resize", x: int.parse(parts[1]) ?? 0, y: int.parse(parts[2]) ?? 0 }
+    end
+    if kind == "paste" or kind == "focus" then
+        return Event { kind: kind, text: parts[1] }
+    end
+    Event { kind: "timeout" }
+end
+
+fun term_enter() -> Result<bool, Error>
+    let raw = term_raw(true)
+    if raw.is_err() then
+        return raw
+    end
+    let alt = term_mode("alt", true)
+    if alt.is_err() then
+        term_raw(false)
+        return alt
+    end
+    term_mode("hide_cursor", true)
+end
+
+fun term_leave()
+    term_mode("mouse", false)
+    term_mode("paste", false)
+    term_mode("focus", false)
+    term_mode("hide_cursor", false)
+    term_mode("alt", false)
+    term_raw(false)
+end
+
+--" The terminal, for programs that draw a screen. Needs the `qlang` command, run from a terminal
+(`Term.is_tty()`); the size and the number of colours are answered anywhere (80 by 24, no colour).
+
+```
+Term.session(fun() -> bool
+    Term.write("\e[1;1HHello, press q")
+    while true do
+        let event = Term.event(250).unwrap()
+        if event.kind == "key" and event.key == "q" then
+            break
+        end
+    end
+    true
+end)
+```
+
+Writing is done in one piece per `Term.write` (build the whole screen as a string, write it once).
+`Term.session` puts the terminal back as it was when the function ends, and the `qlang` command does
+it too if the program fails or stops in the middle. --"
+struct Term
+end
+
+impl Term
+    --" Whether the input and the output are a terminal (not a pipe or a file). --"
+    public fun is_tty() -> bool
+        term_is_tty(0) and term_is_tty(1)
+    end
+
+    --" The size of the terminal (the `COLUMNS` and `LINES` variables, else 80 by 24, when it is not one). --"
+    public fun size() -> Size
+        let s = term_size()
+        Size { cols: s[0], rows: s[1] }
+    end
+
+    --" How many colours the terminal shows: 0 (none: not a terminal, `NO_COLOR`), 16, 256 or 16777216
+    (true colour). --"
+    public fun colors() -> int
+        term_colors()
+    end
+
+    --" Raw mode: the keys reach the program as they are pressed, without being shown (`false` goes
+    back to the usual line mode). --"
+    public fun raw(on: bool) -> Result<bool, Error>
+        term_raw(on)
+    end
+
+    --" Writes text as it is, without a newline, and shows it at once. --"
+    public fun write(text: string) -> Result<bool, Error>
+        term_write(text)
+    end
+
+    --" Writes a whole screen so that the terminal shows it in one piece (no flicker). --"
+    public fun frame(text: string) -> Result<bool, Error>
+        term_write("\e[?2026h" + text + "\e[?2026l")
+    end
+
+    --" Erases the screen and puts the cursor at the top left. --"
+    public fun clear() -> Result<bool, Error>
+        term_write("\e[2J\e[H")
+    end
+
+    --" Sets the title of the window. --"
+    public fun title(text: string) -> Result<bool, Error>
+        term_write("\e]0;" + text + "\e\\")
+    end
+
+    --" The alternate screen: what is drawn there disappears when it is left, and the terminal shows
+    again what it showed before. --"
+    public fun alt_screen(on: bool) -> Result<bool, Error>
+        term_mode("alt", on)
+    end
+
+    --" Hides the cursor (`false` shows it). --"
+    public fun hide_cursor(on: bool) -> Result<bool, Error>
+        term_mode("hide_cursor", on)
+    end
+
+    --" Reports the mouse as `"mouse"` events. --"
+    public fun mouse(on: bool) -> Result<bool, Error>
+        term_mode("mouse", on)
+    end
+
+    --" Reports what is pasted as a `"paste"` event, instead of as keys. --"
+    public fun paste(on: bool) -> Result<bool, Error>
+        term_mode("paste", on)
+    end
+
+    --" Reports when the window gains or loses the focus, as `"focus"` events. --"
+    public fun focus(on: bool) -> Result<bool, Error>
+        term_mode("focus", on)
+    end
+
+    --" The next event, waiting at most `timeout_ms` milliseconds (`0` does not wait, a negative number
+    waits for ever). An event of kind `"timeout"` says that nothing happened. --"
+    public fun event(timeout_ms: int) -> Result<Event, Error>
+        let found = term_event(timeout_ms)
+        if found.is_err() then
+            return Result<Event, Error>.Err(found.unwrap_err())
+        end
+        Result<Event, Error>.Ok(term_parse_event(found.unwrap()))
+    end
+
+    --" Runs `body` with the terminal ready for a full screen: raw mode, the alternate screen and no
+    cursor. Whatever happens, the terminal is put back as it was when it ends. Its result is the one
+    of `body`. --"
+    public fun session<T>(body: fun() -> T) -> Result<T, Error>
+        let entered = term_enter()
+        if entered.is_err() then
+            return Result<T, Error>.Err(entered.unwrap_err())
+        end
+        let result = body()
+        term_leave()
+        Result<T, Error>.Ok(result)
+    end
+end
+
 -- The `qlang` command provides Redis: these are the `extern fun` it implements.
 extern fun redis_connect(url: string) -> Result<int, Error>
 extern fun redis_command(conn: int, args: array<string>) -> Result<Json, Error>

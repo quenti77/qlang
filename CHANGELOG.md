@@ -1,5 +1,9 @@
 # Journal des changements
 
+## 0.63.0
+
+- **`Term`** : le terminal pour écrire une interface en terminal. `Term.session(f)` (mode brut, écran alternatif, curseur caché, tout remis en fin), `Term.event(attente_ms)` (touches avec `ctrl`/`alt`/`shift`, souris, collage, redimensionnement, focus, délai), `Term.size()`, `Term.colors()` (`NO_COLOR` respecté), `Term.write`, `Term.frame` (mise à jour synchronisée), `Term.clear`, `Term.title`, `Term.mouse`, `Term.paste`, `Term.focus`, `Term.alt_screen`, `Term.hide_cursor`, `Term.raw`. Linux, macOS et Windows. Hors terminal, seuls la taille, les couleurs et `write` répondent ; hors de la commande `qlang`, c'est une erreur de compilation (`T250`). Le terminal est remis en état même si le programme plante, avant l'affichage de l'erreur.
+- **Échappement `\e`** dans les chaînes : le caractère ESC (`"\e[1mgras\e[0m"`).
 ## 0.62.0
 
 - **`Path`** : `join`, `join_all`, `normalize`, `base`, `dir`, `ext`, `stem`, `with_ext`, `is_absolute` et `matches` (le motif de `fs.glob`), sur des chemins écrits en texte avec `/`.

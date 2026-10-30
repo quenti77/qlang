@@ -34,26 +34,20 @@ impl Interp<'_> {
                     .collect();
                 Value::array(infos)
             }
+            ReflectOp::BoundCallablesOf => {
+                let Some(Value::Any(held)) = args.first() else {
+                    return Ok(Value::array(Vec::new()));
+                };
+                let ty = held.ty.clone();
+                let obj = held.value.clone();
+                self.bound_callables_of(&ty, &obj)
+            }
             ReflectOp::BoundCallables(ty) => {
                 let ty = &self.runtime_ty(ty);
                 let Some(obj) = args.first() else {
                     return Ok(Value::array(Vec::new()));
                 };
-                let fids: Vec<FnId> = self
-                    .methods_of(ty)
-                    .into_iter()
-                    .filter(|&fid| {
-                        let def = &self.prog.defs.fns[fid];
-                        def.has_self
-                            && def.vis == Visibility::Public
-                            && def.decl.as_ref().is_some_and(|d| d.tparams.is_empty())
-                    })
-                    .collect();
-                Value::array(
-                    fids.into_iter()
-                        .map(|fid| self.callable_of_bound(fid, obj.clone()))
-                        .collect(),
-                )
+                self.bound_callables_of(ty, obj)
             }
             ReflectOp::FindMethod(ty, f) => {
                 let (Ty::Fn(params, ret), Some(obj), Some(Value::Str(name))) =
@@ -105,6 +99,25 @@ impl Interp<'_> {
                         .is_some_and(|d| d.body.is_some() && !d.external)
             })
             .map(|(fid, _)| fid)
+    }
+
+    /// The public methods of `ty` that take `self`, bound to `obj`, as `Callable`s.
+    fn bound_callables_of(&self, ty: &Ty, obj: &Value) -> Value {
+        let fids: Vec<FnId> = self
+            .methods_of(ty)
+            .into_iter()
+            .filter(|&fid| {
+                let def = &self.prog.defs.fns[fid];
+                def.has_self
+                    && def.vis == Visibility::Public
+                    && def.decl.as_ref().is_some_and(|d| d.tparams.is_empty())
+            })
+            .collect();
+        Value::array(
+            fids.into_iter()
+                .map(|fid| self.callable_of_bound(fid, obj.clone()))
+                .collect(),
+        )
     }
 
     /// The methods of the impls whose target is the struct or enum `ty` (whatever its type

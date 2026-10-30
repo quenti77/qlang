@@ -187,6 +187,20 @@ struct TerminalHost {
     assume_externs: bool,
     /// `Process.run` may start programs (`--allow-process`).
     allow_process: bool,
+    /// Files opened by `fs.lines`.
+    lines: LineFiles,
+}
+
+/// The longest line `fs.lines` reads: a file without line breaks must not fill the memory.
+const MAX_LINE: u64 = 16 << 20;
+/// How many files `fs.lines` keeps open at once.
+const MAX_OPEN_LINES: usize = 64;
+
+/// Text files being read one line at a time, by handle.
+#[derive(Default)]
+struct LineFiles {
+    next: u64,
+    open: std::collections::HashMap<u64, (std::io::BufReader<std::fs::File>, u64)>,
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
@@ -437,6 +451,96 @@ impl Host for TerminalHost {
             return std::fs::write(real, content).map_err(|e| HostError::Other(e.to_string()));
         }
         std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn is_dir(&mut self, path: &str) -> Result<bool, HostError> {
+        match Path::new(path).canonicalize() {
+            Ok(full) => {
+                self.check_fs_root(&full)?;
+                Ok(full.is_dir())
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
+    fn list_dir(&mut self, path: &str) -> Result<Vec<String>, HostError> {
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full)?;
+        let entries = std::fs::read_dir(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        let mut names: Vec<String> = entries
+            .flatten()
+            .take(100_000)
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
+    fn open_lines(&mut self, path: &str) -> Result<u64, HostError> {
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full)?;
+        let meta = std::fs::metadata(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        if !meta.is_file() {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is not a regular file"
+            )));
+        }
+        if self.lines.open.len() >= MAX_OPEN_LINES {
+            return Err(HostError::Other(format!(
+                "too many files open for reading ({MAX_OPEN_LINES}): close some with `lines.close()`"
+            )));
+        }
+        let file = std::fs::File::open(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        self.lines.next += 1;
+        let id = self.lines.next;
+        self.lines
+            .open
+            .insert(id, (std::io::BufReader::new(file), 0));
+        Ok(id)
+    }
+
+    fn read_file_line(&mut self, handle: u64) -> Result<Option<String>, HostError> {
+        use std::io::{BufRead, Read};
+        let Some((reader, count)) = self.lines.open.get_mut(&handle) else {
+            return Err(HostError::Other("this file is closed".to_string()));
+        };
+        let mut buf = Vec::new();
+        let n = reader
+            .by_ref()
+            .take(MAX_LINE + 1)
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| HostError::Other(e.to_string()))?;
+        if n == 0 {
+            self.lines.open.remove(&handle);
+            return Ok(None);
+        }
+        *count += 1;
+        let number = *count;
+        if buf.len() as u64 > MAX_LINE {
+            self.lines.open.remove(&handle);
+            return Err(HostError::Other(format!(
+                "line {number} is longer than {} MB",
+                MAX_LINE >> 20
+            )));
+        }
+        if buf.last() == Some(&b'\n') {
+            buf.pop();
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+        }
+        String::from_utf8(buf)
+            .map(Some)
+            .map_err(|_| HostError::Other(format!("line {number} is not valid UTF-8")))
+    }
+
+    fn close_lines(&mut self, handle: u64) -> Result<(), HostError> {
+        self.lines.open.remove(&handle);
+        Ok(())
     }
 
     fn create_dir(&mut self, path: &str) -> Result<(), HostError> {
@@ -839,6 +943,7 @@ fn new_host_with(
         packages,
         assume_externs: !run,
         allow_process: false,
+        lines: LineFiles::default(),
     })
 }
 

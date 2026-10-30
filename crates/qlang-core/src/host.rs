@@ -81,7 +81,8 @@ pub trait SqlBackend {
 pub fn std_has(caps: Capabilities, name: &str) -> bool {
     match name {
         "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" | "fs_create_dir"
-        | "fs_exists" => caps.fs,
+        | "fs_exists" | "fs_list" | "fs_is_dir" | "fs_open_lines" | "fs_read_line"
+        | "fs_close_lines" => caps.fs,
         "env_get" | "env_args" => caps.env,
         "secure_random_bytes" => caps.random,
         // pure functions, and the log: every host has them
@@ -114,6 +115,19 @@ pub fn std_call<H: Host + ?Sized>(
             host.create_dir(path).map(|()| HostValue::Bool(true))
         }
         ("fs_exists", [HostValue::Str(path)]) => host.path_exists(path).map(HostValue::Bool),
+        ("fs_is_dir", [HostValue::Str(path)]) => host.is_dir(path).map(HostValue::Bool),
+        ("fs_list", [HostValue::Str(path)]) => host
+            .list_dir(path)
+            .map(|names| HostValue::Array(names.into_iter().map(HostValue::Str).collect())),
+        ("fs_open_lines", [HostValue::Str(path)]) => {
+            host.open_lines(path).map(|id| HostValue::Int(id as i64))
+        }
+        ("fs_read_line", [HostValue::Int(id)]) => host
+            .read_file_line(*id as u64)
+            .map(|line| line.map_or(HostValue::Null, HostValue::Str)),
+        ("fs_close_lines", [HostValue::Int(id)]) => {
+            host.close_lines(*id as u64).map(|()| HostValue::Bool(true))
+        }
         ("secure_random_bytes", [HostValue::Int(n)]) => {
             if !(0..=1_048_576).contains(n) {
                 return Some(Err(HostError::Other(
@@ -181,6 +195,11 @@ pub fn std_call<H: Host + ?Sized>(
             | "fs_write_bytes"
             | "fs_create_dir"
             | "fs_exists"
+            | "fs_list"
+            | "fs_is_dir"
+            | "fs_open_lines"
+            | "fs_read_line"
+            | "fs_close_lines"
             | "env_get"
             | "env_args"
             | "http_send"
@@ -446,6 +465,32 @@ pub trait Host {
 
     /// Whether a file or a folder is there.
     fn path_exists(&mut self, _path: &str) -> Result<bool, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Whether `path` is a folder.
+    fn is_dir(&mut self, _path: &str) -> Result<bool, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// The names (not the paths) of what a folder holds, sorted.
+    fn list_dir(&mut self, _path: &str) -> Result<Vec<String>, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Opens a text file to be read one line at a time; the handle goes to `read_file_line`.
+    fn open_lines(&mut self, _path: &str) -> Result<u64, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// The next line of an open file without its line break, `None` at the end (the file is then
+    /// closed).
+    fn read_file_line(&mut self, _handle: u64) -> Result<Option<String>, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Closes a file opened by `open_lines` (nothing happens if it is already closed).
+    fn close_lines(&mut self, _handle: u64) -> Result<(), HostError> {
         Err(HostError::Unsupported("fs"))
     }
 

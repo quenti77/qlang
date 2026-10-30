@@ -2652,7 +2652,8 @@ Options de `qlang serve app.q` :
 | `--max-steps N`  | le nombre d'étapes d'évaluation **par requête**                                           |
 | `--static DOSSIER` | sert les fichiers de ce dossier tels quels, **avant** d'appeler le programme            |
 | `--compress`     | compresse en gzip les réponses de texte pour les clients qui l'acceptent               |
-| `--dev`          | le détail d'une erreur du programme est dans la réponse 500 (jamais en production)    |
+| `--dev`          | une erreur du programme donne une page détaillée (voir plus bas) ; refusé hors `localhost` (jamais en production) |
+| `--dev-public`   | autorise `--dev` sur une adresse qui n'est pas locale (le serveur n'est joignable que par vous) |
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
@@ -2672,6 +2673,19 @@ Options de `qlang serve app.q` :
   propres variables, et prend les requêtes dans une file commune : une requête lente ne bloque
   plus les autres. Ce qui doit être partagé (un compteur, des données) va dans une base de
   données ou des fichiers, pas dans une variable.
+- **La page d'erreur de `--dev`** : quand le programme échoue pendant une requête, le serveur répond `500`
+  avec le message et le code de l'erreur, la ligne de code et celles autour, la pile des appels, la
+  requête (sans les en-têtes `Cookie`, `Authorization`, `X-CSRF-Token`, `X-API-Key`) et le SQL exécuté avec la
+  durée de chaque requête. Le format suit l'en-tête `Accept` : une page **HTML** pour un navigateur, du
+  **JSON** (`error`, `request`, `queries`) pour un client qui demande `application/json`, du texte sinon.
+  Si une requête SQL est exécutée au moins trois fois avec le même texte (le signe d'un « N+1 »), une
+  ligne `N+1? GET /posts ran the same statement 12 times ...` est écrite dans la sortie d'erreur, et une réponse
+  réussie porte `Server-Timing: db;dur=...`. Comme la page montre le code du programme,
+  `--dev` est **refusé** si `--bind` n'est pas une adresse locale (sauf `--dev-public`) et sans `--dev` la
+  réponse ne dit rien de plus que `Internal Server Error`.
+- **Le journal d'une erreur** (sans `--dev` aussi) : en texte, le diagnostic avec sa pile (`called from ...`) ; avec
+  `--log-format json`, **une seule ligne** `{"level":"error","message":...,"context":{"code","location","stack":[...],"method","url"}}`,
+  sans le code source, que l'on peut chercher et regrouper.
 - **Arrêt** : Ctrl-C ou un signal `TERM` arrête proprement le serveur : les requêtes déjà
   acceptées reçoivent leur réponse (5 secondes au plus), les nouvelles reçoivent `503`.
 - **Le serveur** est simple : HTTP/1.1 sans TLS, 64 connexions en même temps au plus, corps
@@ -2729,7 +2743,11 @@ un certificat auto-signé ou une autorité privée ne sont pas acceptés sans
 configuration côté hôte. Un serveur qui n'est pas sur la machine (autre chose que
 `localhost`, `127.0.0.1`, `::1` ou un socket) **exige** un `sslmode` dans l'URL : sans lui, la
 connexion est refusée plutôt que d'envoyer le mot de passe en clair par accident
-(`?sslmode=disable` confirme qu'on le veut). Avec `--root`, le fichier d'une base `sqlite://`
+(`?sslmode=disable` confirme qu'on le veut). **Une connexion que le serveur de base de données coupe**
+(redémarrage, délai d'inactivité, répartiteur de charge) est **rouverte toute seule** depuis la même URL, et
+l'instruction qui l'a révélée est rejouée une fois ; dans une transaction (`begin` ... `commit`) elle ne l'est pas
+(ce qui y a été fait est perdu) : l'erreur le dit. Chaque worker de `qlang serve` a sa propre connexion par
+`Db.connect` : `--workers 8` ouvre 8 connexions vers la base. Avec `--root`, le fichier d'une base `sqlite://`
 doit être dans le dossier ; le SQL lui-même n'est pas confiné (`ATTACH DATABASE` atteint
 n'importe quel fichier lisible).
 

@@ -578,7 +578,7 @@ pub fn repeated(queries: &[LoggedQuery]) -> Vec<(String, usize, f64)> {
         }
     }
     groups.retain(|g| g.1 >= 3);
-    groups.sort_by(|a, b| b.1.cmp(&a.1));
+    groups.sort_by_key(|a| std::cmp::Reverse(a.1));
     groups
 }
 

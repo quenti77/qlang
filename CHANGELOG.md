@@ -1,5 +1,14 @@
 # Journal des changements
 
+> À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
+
+## 0.69.0
+
+- **Dépréciation** : `#[deprecated("utilise X")]` sur une fonction ou une méthode. Un appel venant d'un autre module produit l'avertissement `W001` à l'endroit de l'appel (dans `qlang check`, `run`, le serveur de langage et le protocole JSON), sans arrêter le programme. Un `#[deprecated]` sans texte est l'erreur `T292`.
+- **`--deny-warnings`** pour `qlang check`, `run` et `test` : un avertissement fait échouer la commande (pour la CI d'un projet).
+- **Déprécié** : `Log.warn`, un autre nom de `Log.warning`. Retrait au plus tôt en 0.72.
+- **Documents** : [docs/stability.md](docs/stability.md) (trois niveaux, classement du langage, des commandes, de `qlang-std`, cycle de dépréciation, ce que la 1.0 promettra) et [docs/migration.md](docs/migration.md).
+
 ## 0.68.0
 
 - **`Panic.guard(f)`** : lance une fonction sans qu'un échec (`panic`, `assert`, `unwrap` d'une erreur, index hors limites) arrête le programme. Elle rend `none` si `f` a fini, sinon un `Caught` avec `code`, `message` et `places` (`fichier:ligne`, du plus proche au plus lointain). Les limites de pas et de mémoire ne sont pas attrapées. C'est ce qu'il fallait à l'interpréteur pour un lanceur de tests comme `qlang-test` (voir #129).

@@ -59,7 +59,10 @@ USAGE:
                                          do the [externs] of a qlang.toml near the program,
                                          once you agreed to them: --trust-externs says yes;
                                          --allow-process lets the program start programs)
-    qlang check [file.q] [--extern CMD]  check a program without running it (no file: the `entry`
+    qlang check [file.q] [--extern CMD] [--deny-warnings]
+                                         check a program without running it (--deny-warnings: a
+                                         warning, like a use of something deprecated, fails it; also
+                                         accepted by run and test) (no file: the `entry`
                                          of qlang.toml's [package], for run too)
     qlang check --json                   same, with a JSON request on stdin (used by editors)
     qlang run --json                     read a JSON request on stdin, write a JSON response
@@ -973,6 +976,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     let mut externs: Vec<String> = Vec::new();
     let mut trust = false;
     let mut allow_process = false;
+    let mut deny_warnings = false;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -1002,6 +1006,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
             }
             "--trust-externs" => trust = true,
             "--allow-process" => allow_process = true,
+            "--deny-warnings" => deny_warnings = true,
             "--extern" => {
                 i += 1;
                 match args.get(i) {
@@ -1081,6 +1086,13 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
     };
     for w in &program.warnings {
         eprint!("{}", w.render(&program.sources));
+    }
+    if deny_warnings && !program.warnings.is_empty() {
+        eprintln!(
+            "\n{} warning(s), and --deny-warnings is on",
+            program.warnings.len()
+        );
+        return ExitCode::from(1);
     }
     if !execute {
         eprintln!("ok");

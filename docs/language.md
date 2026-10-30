@@ -1742,6 +1742,23 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 chaînes dans un tableau sont entre guillemets. `read()` renvoie toujours une
 `string` ; pour un nombre : `int.parse(read())`.
 
+#### Nombres partagés entre les workers : `Shared`
+
+Les workers de `qlang serve` ne partagent rien, mais `Shared` donne des **entiers que tous les workers du
+processus voient et changent de façon atomique** : des compteurs exacts (requêtes servies, tâches en cours, une
+limite commune) sans passer par Redis.
+
+| Appel | Résultat |
+| --- | --- |
+| `Shared.add("hits", 1)` | ajoute (négatif permis) et rend la nouvelle valeur : `Result<int, Error>` |
+| `Shared.get("hits")` | la valeur (`0` pour un nom jamais écrit) |
+| `Shared.set("limite", 100)` | fixe la valeur : `Result<int, Error>` |
+| `Shared.compare_set("chef", 0, 1)` | fixe `1` seulement si la valeur est `0`, en une seule étape : `Result<bool, Error>` (un seul worker obtient `true`) |
+
+Les nombres vivent dans la mémoire du processus : perdus à l'arrêt, **non partagés entre machines** (pour cela,
+Redis). Un nom fait de 1 à 128 octets, au plus 10 000 noms ; un dépassement d'entier est une erreur. Il faut la
+commande `qlang` (`T250` ailleurs).
+
 #### Sortie et sortie d'erreur
 
 Un programme a deux sorties. La **sortie** (`print`, `write`) porte ce que le programme
@@ -2750,6 +2767,8 @@ Options de `qlang serve app.q` :
 | `--workers N`    | N interpréteurs (de 1 à 64) qui répondent en parallèle                                    |
 | `--root DOSSIER` | limite `import` et `fs` à ce dossier                                                      |
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
+| `--request-timeout S` | temps qu'une requête peut durer avant d'être arrêtée par l'erreur `R905` (30 par défaut ; `0` : aucune limite). L'horloge est lue tous les quelques milliers de pas : un programme qui ne fait qu'attendre (`time.sleep`, une requête SQL lente) s'arrête quand il reprend la main. Ne vaut ni pour le flux d'une réponse ni pour les WebSockets |
+| `--max-queue N` | combien de requêtes peuvent attendre qu'un worker se libère (`0` par défaut : seul `--max-connections` borne). Au-delà, la réponse est `503` avec `Retry-After: 1` tout de suite, au lieu de laisser la file grandir |
 | `--db-pool N` | au plus N connexions réelles à PostgreSQL ou MySQL pour tout le processus, partagées par les workers (par défaut : une connexion par `Db.connect` et par worker). Un `Db` en prend une pour chaque requête SQL et la rend ; pendant une transaction (`begin` jusqu'à `commit`/`rollback`) il garde la même. Si les N sont occupées, la requête attend jusqu'à 30 s, puis échoue. Les réglages de session (`SET`, tables temporaires) ne survivent pas d'une requête à l'autre hors transaction. SQLite n'est pas concerné |
 | `--max-connections N` | connexions ouvertes en même temps (64 par défaut, de 1 à 10000) ; les suivantes reçoivent `503` |
 | `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |

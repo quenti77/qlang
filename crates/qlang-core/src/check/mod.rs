@@ -2648,6 +2648,51 @@ impl Panic
     end
 end
 
+-- The `qlang` command provides the numbers shared by the workers.
+extern fun shared_add(name: string, delta: int) -> Result<int, Error>
+extern fun shared_get(name: string) -> int
+extern fun shared_set(name: string, value: int) -> Result<int, Error>
+extern fun shared_cas(name: string, expected: int, new: int) -> Result<bool, Error>
+
+--" Whole numbers that **every worker** of the process sees and changes atomically: exact counters
+(requests served, jobs in progress, a limit shared by all the workers) without going through Redis.
+They live in the memory of the process, so they are lost when it stops and they are not shared between
+machines (for that, use Redis). A name is from 1 to 128 bytes, at most 10 000 names; a name never written
+holds 0. Needs the `qlang` command.
+
+```
+let n = Shared.add("requests", 1).unwrap()          -- 1, 2, 3... even with 8 workers
+Shared.set("limit", 100).unwrap()
+if Shared.compare_set("leader", 0, 1).unwrap() then   -- only one worker gets true
+  print("I start the cleaning")
+end
+```
+--"
+struct Shared
+end
+
+impl Shared
+    --" Adds `delta` (it can be negative) and gives the new value. --"
+    public fun add(name: string, delta: int) -> Result<int, Error>
+        shared_add(name, delta)
+    end
+
+    --" The value (0 for a name never written). --"
+    public fun get(name: string) -> int
+        shared_get(name)
+    end
+
+    --" Sets the value and gives it. --"
+    public fun set(name: string, value: int) -> Result<int, Error>
+        shared_set(name, value)
+    end
+
+    --" Sets `new` only if the value is `expected`, in one step: `true` when it did. --"
+    public fun compare_set(name: string, expected: int, new: int) -> Result<bool, Error>
+        shared_cas(name, expected, new)
+    end
+end
+
 -- The `qlang` command provides compression and the time zone database.
 extern fun archive_gzip(data: bytes, level: int) -> bytes
 extern fun archive_gunzip(data: bytes, max: int) -> Result<bytes, Error>

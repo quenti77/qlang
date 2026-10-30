@@ -153,6 +153,7 @@ pub enum WsOut {
 pub struct App<'a> {
     it: Interp<'a>,
     handler: FnId,
+    timeout: Option<std::time::Duration>,
 }
 
 impl Program {
@@ -197,7 +198,11 @@ impl Program {
         let mut it = Interp::new(self, host, limits);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
         match outcome {
-            Ok(Ok(())) => Ok(App { it, handler }),
+            Ok(Ok(())) => Ok(App {
+                it,
+                handler,
+                timeout: None,
+            }),
             Ok(Err(Ctrl::Exit(_))) => Err(Box::new(Diagnostic::error(
                 "R090",
                 "`exit` cannot be used in a program that serves requests (it would stop the server)",
@@ -207,13 +212,24 @@ impl Program {
                 d.resolve(&self.sources);
                 Err(d)
             }
-            Ok(Err(_)) => Ok(App { it, handler }),
+            Ok(Err(_)) => Ok(App {
+                it,
+                handler,
+                timeout: None,
+            }),
             Err(payload) => Err(Box::new(crate::check::internal_error(&payload))),
         }
     }
 }
 
 impl App<'_> {
+    /// How long one request may run before it is stopped with `R905` (`None`: no limit). The clock
+    /// is read every few thousand steps, so a program that only waits (`time.sleep`, a slow query) is
+    /// stopped when it is running again.
+    pub fn set_request_timeout(&mut self, timeout: Option<std::time::Duration>) {
+        self.timeout = timeout;
+    }
+
     /// Answer one request. An error (a runtime error in `handle`, the step limit...) is
     /// returned for the caller to turn into a 500; the program stays usable.
     pub fn handle(&mut self, req: AppRequest) -> Result<AppResponse, Box<Diagnostic>> {
@@ -225,12 +241,16 @@ impl App<'_> {
         it.frames.clear();
         it.fmt_depth = 0;
         it.fmt_nodes = 0;
+        it.deadline = self.timeout.map(|d| std::time::Instant::now() + d);
+        it.deadline_secs = self.timeout.map(|d| d.as_secs()).unwrap_or(0);
         let prog = it.prog;
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let value = it.request_value(&req);
             it.cur_request = Some(value.clone());
             it.call_fid(handler, None, vec![value], Default::default())
         }));
+        // the stream of an answer and the events of a WebSocket are not bound by it
+        it.deadline = None;
         match outcome {
             Ok(Ok(v)) => it.response_of(&v).map_err(|e| match e {
                 Ctrl::Error(mut d) => {
@@ -618,6 +638,9 @@ struct Interp<'a> {
     ws_sessions: Vec<(u64, ws::WsSession)>,
     /// Nesting and size of the value being converted to text (cycles, huge values).
     fmt_depth: usize,
+    /// The moment a request must be over (`App::set_request_timeout`); `R905` after it.
+    deadline: Option<std::time::Instant>,
+    deadline_secs: u64,
     fmt_nodes: usize,
     /// The last `ulid` made by `ulid.new()`, to keep the next ones in order.
     last_ulid: u128,
@@ -667,6 +690,8 @@ impl<'a> Interp<'a> {
             pending_ws: None,
             ws_sessions: Vec::new(),
             fmt_depth: 0,
+            deadline: None,
+            deadline_secs: 0,
             fmt_nodes: 0,
             last_ulid: 0,
             slots: Vec::new(),
@@ -747,6 +772,18 @@ impl<'a> Interp<'a> {
             return self.fail(
                 "R904",
                 "the program uses too much memory (memory limit reached)",
+                span,
+            );
+        }
+        if let Some(d) = self.deadline
+            && std::time::Instant::now() > d
+        {
+            return self.fail(
+                "R905",
+                format!(
+                    "the request took more than {} s (--request-timeout)",
+                    self.deadline_secs
+                ),
                 span,
             );
         }

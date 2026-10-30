@@ -6,6 +6,8 @@ use crate::ast::*;
 
 /// Why `Term` is not there: only the terminal host has it.
 /// Why compression and time zones are not there.
+/// Why `Shared` is not there.
+const SHARED_ONLY: &str = "shared numbers are only offered by the `qlang` command";
 const ARCHIVE_ONLY: &str = "compression and time zones are only offered by the `qlang` command";
 const TERM_ONLY: &str = "the terminal is only offered by the `qlang` command";
 
@@ -1301,6 +1303,10 @@ impl Checker {
                         Some(("term_mode", TERM_ONLY))
                     }
                     ("Term", "event") => Some(("term_event", TERM_ONLY)),
+                    ("Shared", "add") => Some(("shared_add", SHARED_ONLY)),
+                    ("Shared", "get") => Some(("shared_get", SHARED_ONLY)),
+                    ("Shared", "set") => Some(("shared_set", SHARED_ONLY)),
+                    ("Shared", "compare_set") => Some(("shared_cas", SHARED_ONLY)),
                     ("Gzip", "compress" | "compress_level") => Some(("archive_gzip", ARCHIVE_ONLY)),
                     ("Gzip", "decompress" | "decompress_max") => {
                         Some(("archive_gunzip", ARCHIVE_ONLY))

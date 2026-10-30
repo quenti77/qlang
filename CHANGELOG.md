@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.70.0
+
+- **Délai par requête** : `qlang serve --request-timeout S` (30 par défaut, `0` pour aucun). Une requête qui dure plus longtemps est arrêtée par `R905` et le worker sert la suivante. L'horloge est lue tous les quelques milliers de pas (comme la mémoire) : un programme qui attend dans `time.sleep` ou une requête SQL lente s'arrête quand il reprend la main.
+- **File d'attente bornée** : `--max-queue N`. Quand N requêtes attendent déjà un worker, la suivante reçoit `503` avec `Retry-After: 1` tout de suite. Par défaut (`0`) rien ne change : `--max-connections` borne.
+- **`Shared`** : des entiers que tous les workers du processus voient et changent de façon atomique (`add`, `get`, `set`, `compare_set`), pour des compteurs exacts sans Redis.
+
 ## 0.69.0
 
 - **Dépréciation** : `#[deprecated("utilise X")]` sur une fonction ou une méthode. Un appel venant d'un autre module produit l'avertissement `W001` à l'endroit de l'appel (dans `qlang check`, `run`, le serveur de langage et le protocole JSON), sans arrêter le programme. Un `#[deprecated]` sans texte est l'erreur `T292`.

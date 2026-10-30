@@ -2447,6 +2447,19 @@ impl Checker {
                 }
                 (ReflectOp::Get, Ty::nullable(Ty::Any))
             }
+            "bound_callables_of" => {
+                if !arity(self, 0, 1) {
+                    return Ty::Error;
+                }
+                let t = self.expr(&args[0].value, &Want::Exp(Ty::Any));
+                if !self.assignable(&t, &Ty::Any) {
+                    self.mismatch(args[0].value.span, &Ty::Any, &t);
+                }
+                (
+                    ReflectOp::BoundCallablesOf,
+                    Ty::Array(Box::new(self.prelude_ty("Callable"))),
+                )
+            }
             "info_of" | "items" => {
                 if !arity(self, 0, 1) {
                     return Ty::Error;
@@ -2577,7 +2590,7 @@ impl Checker {
             other => {
                 self.err(
                     "T302",
-                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `constructors`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method`, `bound_callables`, `type_info` and `type_info_of`)"),
+                    format!("`Reflect` has no `{other}` (it has `struct_info`, `enum_info`, `functions`, `structs`, `callable`, `callables`, `constructors`, `invoke`, `decode`, `parse_text`, `parts`, `info_of`, `items`, `get`, `construct`, `type_name`, `find`, `methods`, `find_method`, `bound_callables`, `bound_callables_of`, `type_info` and `type_info_of`)"),
                     name.span,
                 );
                 self.check_args_loose(args);

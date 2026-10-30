@@ -597,6 +597,8 @@ pub enum ReflectOp {
     Constructors(ModId),
     /// `Reflect.bound_callables<T>(value)`: the methods of `T`, bound to `value`, as `Callable`s.
     BoundCallables(Ty),
+    /// `Reflect.bound_callables_of(value)`: the same for an `Any`, whatever struct it holds.
+    BoundCallablesOf,
     /// `Reflect.decode(ty, json)`: a `Json` read as the type held by an `Any`.
     Decode,
     /// `Reflect.parse_text(ty, text)`: a text read as the (scalar) type held by an `Any`.

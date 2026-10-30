@@ -57,7 +57,7 @@ niveau de leur partie : une clé ajoutée n'est pas un changement cassant, une c
 | `csv.q`, `toml.q`, `yaml.q`, `xml.q`, `template.q`, `jwt.q`, `i18n.q`, `cli.q` | provisoire |
 | `web/app.q`, `web/session.q`, `web/validate.q`, `web/migrate.q`, `web/query.q`, `web/cache.q`, `web/middleware.q`, `web/health.q`, `web/limit.q`, `web/auth.q`, `web/upload.q`, `web/testing.q` | provisoire |
 | `queue.q`, `schedule.q`, `mail.q`, `notify.q`, `s3.q` | provisoire |
-| `web/container.q` (injection), `web/openapi.q`, `web/ws.q`, `web/relations.q`, `web/policy.q`, `web/resource.q`, `web/seed.q`, `web/queue_admin.q`, `web/metrics.q`, `web/events.q`, `web/commands.q`, `web/locale.q`, `web/refresh.q`, `web/proxy.q` | **expérimental** |
+| `web/container.q` (injection), `web/openapi.q`, `web/ws.q`, `web/relations.q`, `web/policy.q`, `web/resource.q`, `web/seed.q`, `web/queue_admin.q`, `web/metrics.q`, `web/events.q`, `web/commands.q`, `web/locale.q`, `web/refresh.q`, `web/proxy.q`, `web/accounts.q` | **expérimental** |
 | `qlang-test` (paquet), `kit` | **expérimental** (0.1.x) |
 
 Tant que la std est en 0.x, aucun de ses modules n'est *stable* ; un changement cassant d'un module *provisoire* est

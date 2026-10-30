@@ -45,6 +45,14 @@ fn target() -> &'static str {
 fn archive(program: &[u8]) -> Vec<u8> {
     let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
     let mut tar = tar::Builder::new(gz);
+    // like the real archives: the folder first, then the files
+    let mut dir = tar::Header::new_gnu();
+    dir.set_entry_type(tar::EntryType::Directory);
+    dir.set_size(0);
+    dir.set_mode(0o755);
+    dir.set_cksum();
+    tar.append_data(&mut dir, "qlang/", std::io::empty())
+        .unwrap();
     let mut header = tar::Header::new_gnu();
     header.set_size(program.len() as u64);
     header.set_mode(0o755);
@@ -70,6 +78,16 @@ fn copy_of_qlang(name: &str) -> std::path::PathBuf {
     let exe = dir.join("qlang");
     std::fs::copy(env!("CARGO_BIN_EXE_qlang"), &exe).unwrap();
     exe
+}
+
+/// A "program" that answers `--version` like qlang and otherwise says its name; padded so it
+/// is not mistaken for an empty file.
+fn fake_program(name: &str) -> Vec<u8> {
+    let mut text = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo qlang 9.9.9; exit 0; fi\necho qlang {name}\n"
+    );
+    text.push_str(&"#".repeat(2000));
+    text.into_bytes()
 }
 
 fn release(version: &str, program: &[u8], sum_of: Option<&str>) -> HashMap<String, Vec<u8>> {
@@ -116,7 +134,7 @@ fn update(exe: &std::path::Path, base: &str, args: &[&str]) -> std::process::Out
 
 #[test]
 fn self_update_replaces_the_program_after_checking_its_checksum() {
-    let base = serve(release("9.9.9", b"#!/bin/sh\necho qlang nine\n", None));
+    let base = serve(release("9.9.9", &fake_program("nine"), None));
     let exe = copy_of_qlang("ok");
     let o = update(&exe, &base, &[]);
     let text = String::from_utf8_lossy(&o.stdout);
@@ -128,6 +146,7 @@ fn self_update_replaces_the_program_after_checking_its_checksum() {
     assert!(text.contains("-> qlang 9.9.9"), "{text}");
     let out = output(&mut Command::new(&exe));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "qlang nine\n");
+    assert!(std::fs::metadata(&exe).unwrap().len() > 1024);
     assert!(!exe.with_extension("old").exists() && !exe.with_extension("new").exists());
 }
 
@@ -135,7 +154,7 @@ fn self_update_replaces_the_program_after_checking_its_checksum() {
 fn a_wrong_checksum_leaves_the_program_alone() {
     let base = serve(release(
         "9.9.9",
-        b"#!/bin/sh\necho evil\n",
+        &fake_program("evil"),
         Some(&"0".repeat(64)),
     ));
     let exe = copy_of_qlang("bad");
@@ -148,7 +167,7 @@ fn a_wrong_checksum_leaves_the_program_alone() {
 
 #[test]
 fn check_only_says_what_exists() {
-    let base = serve(release("9.9.9", b"x", None));
+    let base = serve(release("9.9.9", &fake_program("x"), None));
     let exe = copy_of_qlang("check");
     let o = update(&exe, &base, &["--check"]);
     assert!(String::from_utf8_lossy(&o.stdout).contains("qlang 9.9.9 is available"));

@@ -1,5 +1,10 @@
 # Journal des changements
 
+## 0.67.1
+
+- **Correction de `qlang self-update`** : avec les archives réelles des versions 0.64.0 à 0.67.0, il remplaçait le programme par un **fichier vide** (l'entrée du dossier `qlang/` de l'archive a le même nom de fichier que le programme). Il ne prend plus que les vrais fichiers, refuse un programme de moins de 1 Ko, et lance le programme téléchargé (`--version`) avant de remplacer l'ancien : s'il ne tourne pas, rien n'est changé. **Si un `self-update` a laissé un `qlang` vide, relancer `install.sh` (ou `install.ps1`) ; depuis 0.64–0.67, le plus simple pour passer à 0.67.1 est aussi `install.sh`.**
+- Le test de `self-update` utilise maintenant une archive faite comme les vraies (dossier d'abord).
+
 ## 0.67.0
 
 - **Compression et archives en mémoire** : `Gzip` (`compress`, `compress_level`, `decompress`, `decompress_max`), `Zip` et `Tar` (`read`, `read_max`, `write`, et `write_gz` pour `.tar.gz`) avec `ArchiveEntry { name, data }`. Un nom qui sort du dossier (`../x`, chemin absolu) est refusé, et le contenu décompressé est borné à 256 Mo par défaut.

@@ -1,0 +1,19 @@
+# Maintainer: quenti77
+pkgname=qlang-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="A small, readable, statically typed language with a built-in web server"
+arch=('x86_64' 'aarch64')
+url="https://github.com/quenti77/qlang"
+license=('MIT')
+provides=('qlang')
+conflicts=('qlang')
+source_x86_64=("qlang-$pkgver-x86_64.tar.gz::https://github.com/quenti77/qlang/releases/download/v$pkgver/qlang-x86_64-unknown-linux-musl.tar.gz")
+source_aarch64=("qlang-$pkgver-aarch64.tar.gz::https://github.com/quenti77/qlang/releases/download/v$pkgver/qlang-aarch64-unknown-linux-musl.tar.gz")
+sha256sums_x86_64=('@SHA_X86_64_UNKNOWN_LINUX_MUSL@')
+sha256sums_aarch64=('@SHA_AARCH64_UNKNOWN_LINUX_MUSL@')
+
+package() {
+  install -Dm755 "$srcdir/qlang/qlang" "$pkgdir/usr/bin/qlang"
+  install -Dm644 "$srcdir/qlang/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

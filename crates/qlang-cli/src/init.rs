@@ -194,7 +194,11 @@ fn create(dir: &Path, web: bool) -> Result<Vec<String>, String> {
     };
     write(
         "qlang.toml",
-        &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nentry = \"main.q\"\n"),
+        &format!(
+            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nentry = \"main.q\"\nqlang = \"{}.{}\"\n",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR")
+        ),
     )?;
     if web {
         write("main.q", WEB_MAIN)?;

@@ -1,9 +1,9 @@
 name: Release
 
-# Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux and macOS, their
-# checksums, the browser build (qlang.wasm) and the VS Code extension. (No Windows build for now: it is compiled from the
-# sources, but the tests still run on Windows in ci.yml.) Changes to the release files
-# build everything on the pull request too (nothing is published then).
+# Push a tag `vX.Y.Z` to publish a release: prebuilt programs for Linux, macOS and Windows,
+# their checksums, the browser build (qlang.wasm), the VS Code extension, the manifests for
+# Homebrew / Scoop / the AUR, and the Docker image (ghcr.io/quenti77/qlang). Changes to the
+# release files build everything on the pull request too (nothing is published then).
 on:
   push:
     tags: ["v*"]
@@ -15,6 +15,9 @@ on:
       - .cargo/**
       - install.sh
       - Cargo.toml
+      - Dockerfile
+      - packaging/**
+      - install.ps1
       - editors/vscode/package.json
 
 permissions:
@@ -55,6 +58,7 @@ jobs:
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
           - { target: aarch64-apple-darwin, os: macos-14 }
           - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -144,11 +148,19 @@ jobs:
           pattern: dist-*
           merge-multiple: true
           path: dist
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
       - name: Checksums
         working-directory: dist
         run: |
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+      - name: Manifests for the package managers
+        run: |
+          source/scripts/render-packaging.sh "$GITHUB_REF_NAME" dist/SHA256SUMS dist
+          cp source/install.sh source/install.ps1 dist/
+          (cd dist && sha256sum qlang.rb qlang.json PKGBUILD install.sh install.ps1 >> SHA256SUMS)
       - name: Attest where the files come from
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -161,3 +173,45 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "qlang ${GITHUB_REF_NAME#v}" \
             --generate-notes
+
+  docker:
+    name: Docker image
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*linux*
+          merge-multiple: true
+          path: archives
+      - name: The two Linux programs
+        run: |
+          mkdir -p dist/linux-amd64 dist/linux-arm64
+          tar -xzf archives/qlang-x86_64-unknown-linux-musl.tar.gz -C archives
+          cp archives/qlang/qlang dist/linux-amd64/qlang
+          rm -rf archives/qlang
+          tar -xzf archives/qlang-aarch64-unknown-linux-musl.tar.gz -C archives
+          cp archives/qlang/qlang dist/linux-arm64/qlang
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to ghcr.io
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and push on a tag)
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.version.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          provenance: mode=max

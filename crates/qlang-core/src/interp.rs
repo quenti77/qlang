@@ -116,6 +116,8 @@ pub struct AppResponse {
     /// The answer is written piece by piece: the caller asks [`App::next_chunk`] until it
     /// gives `None` (`body` is not used).
     pub stream: bool,
+    /// A file sent as the body (`Response.file`): the server reads it from the disk.
+    pub file: Option<String>,
     /// The program turned the connection into a WebSocket: the caller does the handshake, then
     /// drives the connection with [`App::ws_accept`] and the other `ws_` methods.
     pub websocket: Option<WsInfo>,
@@ -539,6 +541,10 @@ impl Interp<'_> {
             Some(h @ Value::Struct(_)) => Some(h.clone()),
             _ => None,
         };
+        let file = match fields.get("file") {
+            Some(Value::Str(f)) => Some(f.to_string()),
+            _ => None,
+        };
         drop(fields);
         let ws_info = match websocket {
             Some(handler) => {
@@ -557,6 +563,7 @@ impl Interp<'_> {
             body,
             raw,
             stream: streaming,
+            file,
             websocket: ws_info,
         })
     }

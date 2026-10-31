@@ -24,6 +24,8 @@ enum Mode {
 }
 
 struct State {
+    /// The folder of the program: file names of imported modules are relative to it.
+    base: PathBuf,
     breakpoints: HashMap<PathBuf, HashSet<u32>>,
     pause: bool,
     mode: Mode,
@@ -261,6 +263,7 @@ pub fn run() -> ExitCode {
     let stdout: Box<dyn Write + Send> = Box::new(std::io::stdout());
     let shared = Arc::new(Shared {
         state: Mutex::new(State {
+            base: PathBuf::new(),
             breakpoints: HashMap::new(),
             pause: false,
             mode: Mode::Run,
@@ -317,6 +320,8 @@ pub fn run() -> ExitCode {
                 };
                 let program = PathBuf::from(program);
                 let program = canonical(&program);
+                shared.state.lock().unwrap().base =
+                    program.parent().map(Path::to_path_buf).unwrap_or_default();
                 launch = Some(Launch {
                     program,
                     args: args["args"]
@@ -381,11 +386,12 @@ pub fn run() -> ExitCode {
                             .iter()
                             .enumerate()
                             .map(|(i, f)| {
-                                let path = Path::new(&f.file);
+                                let full = canonical(&st.base.join(&f.file));
+                                let path = full.as_path();
                                 json!({
                                     "id": i,
                                     "name": f.name,
-                                    "source": {"name": path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "path": f.file},
+                                    "source": {"name": path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "path": full.to_string_lossy()},
                                     "line": f.line,
                                     "column": f.column,
                                 })

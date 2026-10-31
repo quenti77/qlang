@@ -91,6 +91,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
     let mut bind = "127.0.0.1".to_string();
     let mut app = AppOptions {
         workers: 1,
+        max_workers: 0,
         ..AppOptions::default()
     };
     let mut tune = Tuning::default();
@@ -283,6 +284,16 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            "--max-workers" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<usize>().ok()) {
+                    Some(n) if (1..=256).contains(&n) => app.max_workers = n,
+                    _ => {
+                        eprintln!("--max-workers needs a number from 1 to 256");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
             "--port" => {
                 i += 1;
                 match args.get(i).and_then(|s| s.parse().ok()) {
@@ -324,6 +335,13 @@ pub fn serve(args: &[&str]) -> ExitCode {
         );
         return ExitCode::from(64);
     }
+    if app.max_workers != 0 && app.max_workers < app.workers {
+        eprintln!(
+            "--max-workers ({}) is smaller than --workers ({})",
+            app.max_workers, app.workers
+        );
+        return ExitCode::from(64);
+    }
     let _ = TUNING.set(tune);
     crate::trace::init(otlp_endpoint, service_name);
     if let Some(n) = app.max_steps {
@@ -355,13 +373,14 @@ pub fn serve(args: &[&str]) -> ExitCode {
         || app.root.is_some()
         || app.static_dir.is_some()
         || app.workers != 1
+        || app.max_workers != 0
         || !app.script_args.is_empty()
         || !app.extern_commands.is_empty()
         || app.trust_externs
         || app.allow_process
     {
         eprintln!(
-            "--max-steps, --seed, --root, --static, --workers and `--` only apply to `qlang serve <file.q>`"
+            "--max-steps, --seed, --root, --static, --workers, --max-workers and `--` only apply to `qlang serve <file.q>`"
         );
         return ExitCode::from(64);
     }
@@ -913,6 +932,8 @@ struct AppOptions {
     static_dir: Option<PathBuf>,
     /// Interpreters answering requests, each with its own copy of the program.
     workers: usize,
+    /// With more than `workers`: interpreters are added while all are busy, up to this many (`--max-workers`); 0: no.
+    max_workers: usize,
     script_args: Vec<String>,
     /// `--extern` commands, and the providers they and `qlang.toml` declare.
     extern_commands: Vec<String>,
@@ -943,6 +964,72 @@ enum Msg {
 }
 
 /// How long a connection waits for the program before answering 504.
+/// Workers waiting for a request (an elastic server adds one when this is 0 and a request arrives).
+static IDLE: AtomicUsize = AtomicUsize::new(0);
+/// Workers alive.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// How long an added worker waits for a request before it ends (`QLANG_WORKER_IDLE_MS` changes it).
+fn worker_idle() -> Duration {
+    let ms = std::env::var("QLANG_WORKER_IDLE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30_000u64);
+    Duration::from_millis(ms.max(10))
+}
+
+/// What it takes to start one more worker while the server runs (`--max-workers`).
+struct Elastic {
+    queue: Arc<Mutex<mpsc::Receiver<Msg>>>,
+    file: String,
+    source: String,
+    opts: Arc<AppOptions>,
+    next_index: AtomicUsize,
+}
+
+static ELASTIC: std::sync::OnceLock<Elastic> = std::sync::OnceLock::new();
+
+/// A request was queued: if every worker is busy and the limit is not reached, start one more.
+fn maybe_grow() {
+    let Some(e) = ELASTIC.get() else {
+        return;
+    };
+    if IDLE.load(Ordering::SeqCst) > 0 {
+        return;
+    }
+    loop {
+        let live = LIVE.load(Ordering::SeqCst);
+        if live >= e.opts.max_workers {
+            return;
+        }
+        if LIVE
+            .compare_exchange(live, live + 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            break;
+        }
+    }
+    let index = e.next_index.fetch_add(1, Ordering::SeqCst);
+    let (queue, opts, file, source) = (
+        e.queue.clone(),
+        e.opts.clone(),
+        e.file.clone(),
+        e.source.clone(),
+    );
+    let started = std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(move || {
+            log(&format!("worker {index} started (every worker was busy)\n"));
+            if worker(index, &file, &source, &opts, &queue, || Ok(())).is_err() {
+                log(&format!("worker {index} could not start\n"));
+                LIVE.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+    if started.is_err() {
+        LIVE.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Requests sent to the workers and not started yet.
 static QUEUED: AtomicUsize = AtomicUsize::new(0);
 
@@ -1046,10 +1133,25 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
                 }
             };
             let workers = opts.workers;
+            LIVE.store(workers, Ordering::SeqCst);
+            if opts.max_workers > workers {
+                let _ = ELASTIC.set(Elastic {
+                    queue: queue.clone(),
+                    file: file.clone(),
+                    source: source.clone(),
+                    opts: opts.clone(),
+                    next_index: AtomicUsize::new(workers),
+                });
+            }
             let more = if workers == 1 {
                 String::new()
             } else {
                 format!(" ({workers} workers)")
+            };
+            let more = if opts.max_workers > workers {
+                format!("{more} (up to {} while they are busy)", opts.max_workers)
+            } else {
+                more
             };
             log(&format!(
                 "qlang serving {file} on http://{bind}:{port}{more}\n"
@@ -1071,9 +1173,10 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
             }
             // stop on Ctrl-C or `kill`: the requests already queued are still answered
             let stop = jobs.clone();
+            let max_workers = opts.max_workers;
             let _ = ctrlc::set_handler(move || {
                 STOPPING.store(true, Ordering::SeqCst);
-                for _ in 0..workers {
+                for _ in 0..workers.max(max_workers) {
                     let _ = stop.send(Msg::Stop);
                 }
             });
@@ -1302,10 +1405,53 @@ fn worker(
             // only one worker waits on the queue at a time, the others wait for their turn
             let msg = match pending.take() {
                 Some(job) => Ok(Msg::Job(job)),
-                None if conns.is_empty() => match queue.lock() {
-                    Ok(q) => q.recv(),
-                    Err(_) => return Ok(()),
-                },
+                None if conns.is_empty() => {
+                    IDLE.fetch_add(1, Ordering::SeqCst);
+                    let got = if index >= opts.workers {
+                        // a worker added by `--max-workers` leaves when nothing came for a while: it must not
+                        // wait for the turn longer than that either, so it asks for the turn again and again
+                        let deadline = Instant::now() + worker_idle();
+                        loop {
+                            match queue.try_lock() {
+                                Ok(q) => {
+                                    let left = deadline.saturating_duration_since(Instant::now());
+                                    break match q.recv_timeout(left) {
+                                        Ok(m) => Some(Ok(m)),
+                                        Err(mpsc::RecvTimeoutError::Timeout) => None,
+                                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                            Some(Err(mpsc::RecvError))
+                                        }
+                                    };
+                                }
+                                Err(std::sync::TryLockError::WouldBlock) => {
+                                    if Instant::now() >= deadline {
+                                        break None;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(10));
+                                }
+                                Err(std::sync::TryLockError::Poisoned(_)) => {
+                                    IDLE.fetch_sub(1, Ordering::SeqCst);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        .unwrap_or_else(|| {
+                            LIVE.fetch_sub(1, Ordering::SeqCst);
+                            log(&format!("worker {index} stopped (idle)\n"));
+                            Err(mpsc::RecvError)
+                        })
+                    } else {
+                        match queue.lock() {
+                            Ok(q) => q.recv(),
+                            Err(_) => {
+                                IDLE.fetch_sub(1, Ordering::SeqCst);
+                                return Ok(());
+                            }
+                        }
+                    };
+                    IDLE.fetch_sub(1, Ordering::SeqCst);
+                    got
+                }
                 None => match ws_round(&mut app, &mut conns, queue, &program.sources) {
                     Some(m) => Ok(m),
                     None => continue,
@@ -1773,6 +1919,7 @@ fn serve_one(
         let _ = write_to(stream, 503, &[], b"server stopping", false, false);
         return false;
     }
+    maybe_grow();
     let text_plain = [(
         "Content-Type".to_string(),
         "text/plain; charset=utf-8".to_string(),

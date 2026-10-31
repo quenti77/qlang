@@ -2006,7 +2006,7 @@ print(a.filter(fun(k: string, v: int) -> bool v > 1 end)) -- {"y": 2}
 - **Pourquoi pas de clés tableau ou structure ?** Une clé doit désigner toujours
   la même entrée, mais un tableau ou une structure est une référence partagée
   qu'on peut modifier après l'avoir rangée (`k[0] = 99`). Pour des coordonnées,
-  utilise une chaîne (`m["{x},{y}"]`) ou des dictionnaires imbriqués. Un
+  utilise un **tuple** (`m[(x, y)]`, comparé par valeur), ou une chaîne. Un
   `float` est en revanche autorisé comme clé : il est comparé par ses bits
   (`0.0` et `-0.0` comptent comme la même clé).
 - Un littéral vide `{}` demande une annotation de type : `let m = {}` est une
@@ -3255,7 +3255,8 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
   `Set`, tuples, maths, encodages, fichiers, réseau, processus, tests). Le reste vit en
   paquets : voir `qlang-std` (CSV, gabarits, TOML, YAML, XML, mail, S3, conteneur de services).
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
-  haut), et pas de comparaison `<`.
+  haut ; un tuple convient), et pas de comparaison `<` (deux dictionnaires n'ont pas d'ordre naturel :
+  trie `keys()`).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les
   chaînes et commentaires acceptent tous les caractères Unicode.
-- **Fonctions anonymes génériques :** non prévues.
+- **Fonctions anonymes génériques :** non prévues (une fonction nommée `fun f<T>(…)` couvre le besoin, et une fonction anonyme prend ses types du contexte).

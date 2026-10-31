@@ -4,6 +4,21 @@ Ce fichier garde, pour chaque changement cassant, ce qui change et comment s'ada
 [stability.md](stability.md) : à partir de la 0.69, chaque version du CHANGELOG qui casse quelque chose a une
 rubrique **Cassant**, et le changement figure ici.
 
+## `qlang migrate`
+
+`qlang migrate` réécrit la partie **mécanique** d'un changement cassant : un renommage de `Type.nom`. Il lit les
+fichiers `.q` du projet (ou ceux donnés), remplace les noms **dans le code** (jamais dans une chaîne ni un commentaire),
+et vérifie que le résultat a exactement les mêmes jetons, aux noms renommés près, avant d'écrire.
+
+```sh
+qlang migrate --rules     # les renommages connus (version qui l'annonce)
+qlang migrate --check     # liste les fichiers qui changeraient, sans les toucher (code 1 : pour la CI)
+qlang migrate             # réécrit
+```
+
+Aujourd'hui une règle : `Log.warn` → `Log.warning` (0.69). Ce qui n'est pas un renommage (un comportement qui change)
+reste décrit ici, à la main.
+
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
@@ -11,7 +26,7 @@ Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qla
 
 - **Avant** : `Log.warn("message")`.
 - **Après** : `Log.warning("message")`. `Log.warn` marche encore, avec l'avertissement `W001`. Retrait au plus tôt en 0.72.
-- **S'adapter** : remplacer `Log.warn(` par `Log.warning(` (recherche et remplacement dans le projet).
+- **S'adapter** : `qlang migrate` fait le remplacement pour vous (voir ci-dessous), ou recherche et remplacement de `Log.warn(` par `Log.warning(` dans le projet.
 
 ## 0.61 : `--dev` est refusé hors `localhost`
 

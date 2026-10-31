@@ -15,6 +15,7 @@ mod lint;
 mod logging;
 mod lsp;
 mod mem;
+mod migrate;
 mod packages;
 mod password;
 mod process;
@@ -50,6 +51,8 @@ USAGE:
                                          the `std` package (--no-install: do not fetch it)
     qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
                                          project's files (or of the paths given)
+    qlang migrate [path...] [--check]    rewrite what a breaking change renamed (Log.warn -> Log.warning...);
+                                         --check lists the files, --rules the renamings known
     qlang lint [path...] [--max-complexity N]
                                          unused variables, functions and imports, unreachable
                                          code, functions with too many paths (exit 1 if any)
@@ -170,6 +173,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
         Some("fmt") => fmtcmd::run(&it.collect::<Vec<_>>()),
+        Some("migrate") => migrate::run(&it.collect::<Vec<_>>()),
         Some("dap") => dap::run(),
         Some("lint") => lint::run(&it.collect::<Vec<_>>()),
         Some("repl") => repl::run(&it.collect::<Vec<_>>()),

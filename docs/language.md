@@ -1809,6 +1809,25 @@ elle exécute de nouveau le haut de son fichier ; une tâche en attente dans un 
 requête lente) s'arrête quand l'appel rend la main. Un `print` dans une tâche écrit sur la même sortie que le
 programme.
 
+#### Attendre une réponse lente : le modèle et ses choix
+
+Un programme qlang attend une réponse (`http.send`, `Db.query`, `Redis.get`, `Process.run`, `time.sleep`) **en bloquant son
+interpréteur** : il n'y a pas de `async` / `await`. Les valeurs de l'interpréteur ne sont pas partageables entre fils
+(voir `Worker`), donc rendre la main pendant l'attente voudrait dire réécrire l'évaluation en continuations ; le choix
+fait est de **multiplier les interpréteurs** plutôt que de les rendre non bloquants :
+
+- **Plusieurs appels à la fois dans une requête** : `http.send_all(requêtes)` les envoie ensemble ; un `Worker`
+  (fichier lancé dans un interpréteur à part) peut faire une requête SQL ou Redis pendant que le programme continue,
+  puis `wait(ms)` en prend le résultat.
+- **Le serveur ne se laisse pas bloquer par quelques requêtes lentes** : `qlang serve --workers 4 --max-workers 32`
+  démarre 4 interpréteurs et en ajoute (jusqu'à 32) tant que tous sont occupés et que des requêtes attendent ; les
+  ajoutés partent après 30 s d'inactivité. Chacun a sa copie du programme, ses connexions et son état de modules, comme
+  les workers de départ ; `--db-pool N` borne les connexions réelles à la base, `--max-queue N` refuse les requêtes
+  quand la file est pleine, `--request-timeout S` arrête une requête trop longue (quand elle reprend la main).
+- **Ce qui reste bloquant, et que c'est voulu** : `Process.run` (une minute au plus) occupe son interpréteur ; un
+  `Redis.subscribe` aussi, tant qu'il écoute ; un WebSocket est servi par l'interpréteur qui l'a accepté, entre deux
+  requêtes. Pour ces cas, un `Worker` dédié ou un processus à part (`qlang run` d'une boucle) est la bonne forme.
+
 #### Traces distribuées : `Trace` et OpenTelemetry
 
 *Niveau : expérimental.*
@@ -2886,6 +2905,7 @@ Options de `qlang serve app.q` :
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
 | `--request-timeout S` | temps qu'une requête peut durer avant d'être arrêtée par l'erreur `R905` (30 par défaut ; `0` : aucune limite). L'horloge est lue tous les quelques milliers de pas : un programme qui ne fait qu'attendre (`time.sleep`, une requête SQL lente) s'arrête quand il reprend la main. Ne vaut ni pour le flux d'une réponse ni pour les WebSockets |
 | `--max-queue N` | combien de requêtes peuvent attendre qu'un worker se libère (`0` par défaut : seul `--max-connections` borne). Au-delà, la réponse est `503` avec `Retry-After: 1` tout de suite, au lieu de laisser la file grandir |
+| `--max-workers N` | avec `--workers W` (W de départ), jusqu'à N interpréteurs (de W à 256) : un de plus est démarré quand une requête arrive et que tous sont occupés, et il s'arrête après 30 s sans rien à faire (`QLANG_WORKER_IDLE_MS` change ce délai). Par défaut N = W : rien ne change |
 | `--otlp-endpoint URL` | envoie les traces des requêtes à un collecteur OpenTelemetry (voir « Traces distribuées ») ; `--service-name NOM` nomme le service |
 | `--db-pool N` | au plus N connexions réelles à PostgreSQL ou MySQL pour tout le processus, partagées par les workers (par défaut : une connexion par `Db.connect` et par worker). Un `Db` en prend une pour chaque requête SQL et la rend ; pendant une transaction (`begin` jusqu'à `commit`/`rollback`) il garde la même. Si les N sont occupées, la requête attend jusqu'à 30 s, puis échoue. Les réglages de session (`SET`, tables temporaires) ne survivent pas d'une requête à l'autre hors transaction. SQLite n'est pas concerné |
 | `--max-connections N` | connexions ouvertes en même temps (64 par défaut, de 1 à 10000) ; les suivantes reçoivent `503` |

@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.81.0
+
+- **`qlang serve --max-workers N`** : avec `--workers W`, des interpréteurs sont ajoutés (jusqu'à N) tant que tous sont occupés et qu'une requête attend, et ils s'arrêtent après 30 secondes d'inactivité. Une base ou un service lent n'immobilise plus tout le serveur ; sans l'option, rien ne change. Le modèle (interpréteurs multiples plutôt que E/S asynchrones) et ce qui reste bloquant (`Process.run`, `Redis.subscribe`, WebSocket) sont décrits dans `docs/language.md`.
+
 ## 0.80.0
 
 - **`qlang doc --prelude`** : tout ce que le langage fournit sans `import`, en JSON : les fonctions globales, les méthodes des types prédéfinis (`string`, `int`, `float`, `array`, `map`, `Set`, `uuid`, `ulid`, `datetime`, `bytes`) avec leur signature et leur explication, les fonctions de `Hash`, `Url`, `Reflect`…, et les types du prélude avec leurs champs, variantes et méthodes. Chaque release l'attache sous le nom `reference.json` ; le site en fait sa référence du prélude.

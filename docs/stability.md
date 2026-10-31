@@ -48,7 +48,7 @@ niveau de leur partie : une clé ajoutée n'est pas un changement cassant, une c
 | Partie | Niveau |
 | --- | --- |
 | `qlang run`, `check`, `fmt`, `test` (options existantes) | **stable** (on ajoute des options, on n'en retire pas sans cycle) |
-| `qlang serve` (options, protocole de `handle`) | provisoire ; `Response.stream` / `sse` / `file` provisoires ; WebSocket **expérimental** |
+| `qlang serve` (options, protocole de `handle`) | provisoire (`--max-workers` : expérimental) ; `Response.stream` / `sse` / `file` provisoires ; WebSocket **expérimental** |
 | `qlang install`, `add`, `update`, `remove`, `search`, `lsp`, `doc`, `self-update` | provisoire |
 | `qlang info`, `publish`, `verify`, `migrate`, les contraintes `version = "…"`, `signed`, `token_env`, l'index (`packages.json`) | **expérimental** |
 | `qlang init --web`, `qlang test --coverage` / `--group`, `qlang lint`, `qlang repl`, `qlang dap`, `qlang fmt --stdin` | **expérimental** |

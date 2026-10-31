@@ -220,15 +220,20 @@ exécutée une fois et sa valeur est affichée. Chaque entrée est compilée ave
 ### Paquets
 
 ```sh
-qlang search [texte]     # les paquets de l'index (nom, description, dépôt git)
-qlang add std            # ajoute un paquet de l'index : son dépôt, à sa dernière version taguée
-qlang add x --git URL --tag v1.0.0   # ou un dépôt à toi
+qlang search [texte]     # les paquets de l'index (nom, description, licence, dépôt git)
+qlang info std           # licence, versions disponibles, comment l'ajouter
+qlang add std            # ajoute un paquet de l'index, dans l'intervalle de sa dernière version (^0.19)
+qlang add x --git URL --version "^1.2"   # ou un dépôt à toi, avec une contrainte (--tag, --rev, --branch aussi)
+qlang verify             # les paquets installés sont-ils ceux de qlang.lock ?
+qlang publish            # ce paquet peut-il être listé dans l'index ?
 ```
 
-L'index est un petit fichier `packages.json` (`{"nom": {"git": URL, "description": TEXTE}}`) du dépôt
+L'index est un petit fichier `packages.json` (`{"nom": {"git": URL, "description": TEXTE, "license": SPDX}}`) du dépôt
 de qlang ; `QLANG_INDEX_URL` en désigne un autre (une URL ou un chemin), et sans réseau les paquets
 connus du binaire sont utilisés. L'index ne fait que dire quel dépôt git porte un nom : le paquet est
-ensuite récupéré et figé dans `qlang.lock` comme n'importe quel autre.
+ensuite récupéré et figé dans `qlang.lock` comme n'importe quel autre. Contraintes de version (`^1.2`, `~1.2.3`,
+`>=1.2, <2`), versions retirées, signatures (`signed = true`), paquets privés (`token_env`) et comment publier :
+[docs/registry.md](docs/registry.md).
 
 ### Tests
 

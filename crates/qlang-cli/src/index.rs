@@ -16,6 +16,23 @@ pub struct Entry {
     pub name: String,
     pub git: String,
     pub description: String,
+    pub license: String,
+    pub keywords: Vec<String>,
+    /// Version tags that must not be chosen any more (a flaw was found): installs that already have
+    /// them locked keep working, a new resolution skips them.
+    pub yanked: Vec<String>,
+    /// Set when the package is withdrawn from the index: why. `qlang add` refuses it.
+    pub removed: Option<String>,
+}
+
+fn strings(v: &serde_json::Value) -> Vec<String> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn parse(text: &str) -> Result<Vec<Entry>, String> {
@@ -36,6 +53,10 @@ fn parse(text: &str) -> Result<Vec<Entry>, String> {
             name: name.clone(),
             git: git.to_string(),
             description: v["description"].as_str().unwrap_or("").to_string(),
+            license: v["license"].as_str().unwrap_or("").to_string(),
+            keywords: strings(&v["keywords"]),
+            yanked: strings(&v["yanked"]),
+            removed: v["removed"].as_str().map(str::to_string),
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -65,6 +86,20 @@ fn read(location: &str) -> Result<String, String> {
     }
 }
 
+/// The yanked versions of the package at `git_url`, if the index knows it (read once).
+pub fn yanked_for(git_url: &str) -> Vec<String> {
+    static ENTRIES: std::sync::OnceLock<Vec<Entry>> = std::sync::OnceLock::new();
+    ENTRIES
+        .get_or_init(entries)
+        .iter()
+        .find(|e| {
+            e.git.trim_end_matches('/').trim_end_matches(".git")
+                == git_url.trim_end_matches('/').trim_end_matches(".git")
+        })
+        .map(|e| e.yanked.clone())
+        .unwrap_or_default()
+}
+
 /// Every package the index knows (the built-in ones when it cannot be read).
 pub fn entries() -> Vec<Entry> {
     let location = std::env::var("QLANG_INDEX_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
@@ -78,19 +113,8 @@ pub fn find(name: &str) -> Option<Entry> {
     entries().into_iter().find(|e| e.name == name)
 }
 
-/// `1.2.3` from `v1.2.3` (or `1.2.3`); `None` for any other tag.
-fn version_of(tag: &str) -> Option<(u64, u64, u64)> {
-    let t = tag.strip_prefix('v').unwrap_or(tag);
-    let mut it = t.split('.');
-    let (a, b, c) = (it.next()?, it.next()?, it.next()?);
-    if it.next().is_some() {
-        return None;
-    }
-    Some((a.parse().ok()?, b.parse().ok()?, c.parse().ok()?))
-}
-
-/// The highest `vX.Y.Z` tag of a git repository.
-pub fn latest_tag(git_url: &str) -> Option<String> {
+/// Every version tag (`vX.Y.Z`, optionally with a pre-release) of a git repository, highest first.
+pub fn tags(git_url: &str) -> Option<Vec<String>> {
     let out = Command::new("git")
         .args(["ls-remote", "--tags", "--refs", git_url])
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -101,12 +125,79 @@ pub fn latest_tag(git_url: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&out.stdout)
+    let mut found: Vec<(crate::semver::Version, String)> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| l.split("refs/tags/").nth(1))
-        .filter_map(|t| version_of(t).map(|v| (v, t.to_string())))
-        .max()
-        .map(|(_, t)| t)
+        .filter_map(|t| crate::semver::Version::parse(t).map(|v| (v, t.to_string())))
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    Some(found.into_iter().map(|(_, t)| t).collect())
+}
+
+/// The highest release tag (no pre-release) of a git repository.
+pub fn latest_tag(git_url: &str) -> Option<String> {
+    tags(git_url)?
+        .into_iter()
+        .find(|t| crate::semver::Version::parse(t).is_some_and(|v| v.pre.is_none()))
+}
+
+/// `qlang info <name>`.
+pub fn info(name: Option<&str>) -> std::process::ExitCode {
+    let Some(name) = name else {
+        eprintln!("usage: qlang info <name>");
+        return std::process::ExitCode::from(64);
+    };
+    let Some(e) = find(name) else {
+        eprintln!("`{name}` is not in the package index (see `qlang search`)");
+        return std::process::ExitCode::from(1);
+    };
+    println!("{}  {}", e.name, e.description);
+    println!("repository: {}", e.git);
+    println!(
+        "license:    {}",
+        if e.license.is_empty() {
+            "(not said)"
+        } else {
+            &e.license
+        }
+    );
+    if !e.keywords.is_empty() {
+        println!("keywords:   {}", e.keywords.join(", "));
+    }
+    if let Some(why) = &e.removed {
+        println!("REMOVED from the index: {why}");
+    }
+    match tags(&e.git) {
+        Some(t) if !t.is_empty() => {
+            let shown: Vec<String> = t
+                .iter()
+                .take(8)
+                .map(|v| {
+                    if e.yanked.contains(v) {
+                        format!("{v} (yanked)")
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect();
+            let more = if t.len() > 8 {
+                format!(", and {} older", t.len() - 8)
+            } else {
+                String::new()
+            };
+            println!("versions:   {}{more}", shown.join(", "));
+            if let Some(latest) = latest_tag(&e.git) {
+                println!(
+                    "add it:     qlang add {} --git {} --version \"^{}\"",
+                    e.name,
+                    e.git,
+                    latest.trim_start_matches('v')
+                );
+            }
+        }
+        _ => println!("versions:   (cannot reach the repository, or it has no version tag)"),
+    }
+    std::process::ExitCode::SUCCESS
 }
 
 /// `qlang search [text]`.
@@ -118,7 +209,18 @@ pub fn search(text: Option<&str>) -> std::process::ExitCode {
             || e.name.to_lowercase().contains(&wanted)
             || e.description.to_lowercase().contains(&wanted)
         {
-            println!("{:<16} {}\n{:<16} {}", e.name, e.description, "", e.git);
+            if e.removed.is_some() {
+                continue;
+            }
+            let license = if e.license.is_empty() {
+                String::new()
+            } else {
+                format!("  [{}]", e.license)
+            };
+            println!(
+                "{:<16} {}{license}\n{:<16} {}",
+                e.name, e.description, "", e.git
+            );
             shown += 1;
         }
     }
@@ -132,15 +234,6 @@ pub fn search(text: Option<&str>) -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tags_are_compared_as_numbers() {
-        assert_eq!(version_of("v0.10.0"), Some((0, 10, 0)));
-        assert!(version_of("v0.10.0") > version_of("v0.9.0"));
-        assert_eq!(version_of("latest"), None);
-        assert_eq!(version_of("v1.2"), None);
-        assert_eq!(version_of("v1.2.3.4"), None);
-    }
 
     #[test]
     fn the_index_is_read_and_bad_entries_are_skipped() {

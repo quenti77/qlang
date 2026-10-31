@@ -98,10 +98,70 @@ fn remove_dir(dir: &Path) -> std::io::Result<()> {
     })
 }
 
+/// Credentials for one private repository: the token comes from the environment variable the dependency names
+/// (`token_env`), is given to git only for the commands about that repository, and only over https. It goes in
+/// git's own environment configuration, not on the command line (where `ps` would show it).
+#[derive(Clone, Default)]
+pub(crate) struct Auth {
+    header: Option<String>,
+}
+
+impl Auth {
+    pub(crate) fn for_dependency(url: &str, token_env: Option<&str>) -> Result<Auth, String> {
+        let Some(var) = token_env else {
+            return Ok(Auth::default());
+        };
+        if !url.starts_with("https://") {
+            return Err(format!(
+                "`token_env` is only for https repositories ({url} is not one): a token must not travel in the clear"
+            ));
+        }
+        let token = std::env::var(var).map_err(|_| {
+            format!("the environment variable {var} (token_env of {url}) is not set")
+        })?;
+        if token.is_empty() || token.contains(['\r', '\n']) {
+            return Err(format!("{var} does not hold a usable token"));
+        }
+        Ok(Auth {
+            header: Some(format!(
+                "Authorization: Basic {}",
+                base64(format!("x-access-token:{token}").as_bytes())
+            )),
+        })
+    }
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
+    git_as(dir, args, &Auth::default())
+}
+
+fn git_as(dir: Option<&Path>, args: &[&str], auth: &Auth) -> Result<String, String> {
     let mut cmd = Command::new("git");
     if let Some(d) = dir {
         cmd.arg("-C").arg(d);
+    }
+    if let Some(h) = &auth.header {
+        cmd.env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+            .env("GIT_CONFIG_VALUE_0", h);
     }
     let out = cmd
         .args(args)
@@ -134,9 +194,37 @@ fn commit_of(dir: &Path, rev: &str) -> Option<String> {
     .ok()
 }
 
+/// What `fetch` settled on.
+pub(crate) struct Fetched {
+    pub commit: String,
+    /// For `version = "..."`: the tag chosen.
+    pub tag: Option<String>,
+}
+
+/// The tag a constraint picks among `tags`, ignoring the yanked ones.
+fn pick_version(
+    constraint: &crate::semver::Constraint,
+    tags: &[String],
+    yanked: &[String],
+) -> Option<String> {
+    let parsed: Vec<(crate::semver::Version, &String)> = tags
+        .iter()
+        .filter(|t| !yanked.contains(t))
+        .filter_map(|t| crate::semver::Version::parse(t).map(|v| (v, t)))
+        .collect();
+    constraint.best(parsed.iter().map(|(v, t)| (v, (*t).clone())))
+}
+
 /// Makes `.qlang/packages/<name>` a checkout of `url`, and returns the commit it wants:
 /// `locked` if given, else what `spec` points to now.
-fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<String, String> {
+fn fetch(
+    dest: &Path,
+    url: &str,
+    spec: &GitRef,
+    locked: Option<&str>,
+    signed: bool,
+    auth: &Auth,
+) -> Result<Fetched, String> {
     let same_origin = dest.join(".git").is_dir()
         && git(Some(dest), &["remote", "get-url", "origin"])
             .ok()
@@ -152,13 +240,16 @@ fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<
             && git(Some(dest), &["rev-parse", "HEAD"]).ok().as_deref() == Some(c)
             && git(Some(dest), &["status", "--porcelain"]).is_ok_and(|s| s.is_empty())
         {
-            return Ok(c.to_string());
+            return Ok(Fetched {
+                commit: c.to_string(),
+                tag: tag_at(dest, c),
+            });
         }
     }
     if !dest.exists() {
         std::fs::create_dir_all(dest.parent().expect("a package has a parent"))
             .map_err(|e| e.to_string())?;
-        git(
+        git_as(
             None,
             &[
                 "clone",
@@ -168,13 +259,16 @@ fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<
                 url,
                 &dest.to_string_lossy(),
             ],
+            auth,
         )?;
     } else {
-        git(
+        git_as(
             Some(dest),
             &["fetch", "--quiet", "--tags", "--force", "origin"],
+            auth,
         )?;
     }
+    let mut chosen_tag = None;
     let commit = match locked {
         Some(c) => commit_of(dest, c).ok_or_else(|| {
             format!("{url} no longer has the locked commit {c} (run `qlang update`)")
@@ -185,6 +279,26 @@ fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<
                 GitRef::Tag(t) => format!("refs/tags/{t}"),
                 GitRef::Rev(r) => r.clone(),
                 GitRef::Branch(b) => format!("refs/remotes/origin/{b}"),
+                GitRef::Version(c) => {
+                    let tags: Vec<String> = git(Some(dest), &["tag", "--list"])?
+                        .lines()
+                        .map(str::to_string)
+                        .collect();
+                    let yanked = crate::index::yanked_for(url);
+                    let tag = pick_version(c, &tags, &yanked).ok_or_else(|| {
+                        let skipped = if yanked.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (yanked versions are skipped: {})", yanked.join(", "))
+                        };
+                        format!(
+                            "{url} has no version tag satisfying `{}`{skipped}",
+                            c.text()
+                        )
+                    })?;
+                    chosen_tag = Some(tag.clone());
+                    format!("refs/tags/{tag}")
+                }
             };
             commit_of(dest, &rev).ok_or_else(|| format!("{url} has no {} ({rev})", spec.label()))?
         }
@@ -193,7 +307,46 @@ fn fetch(dest: &Path, url: &str, spec: &GitRef, locked: Option<&str>) -> Result<
         Some(dest),
         &["checkout", "--quiet", "--detach", "--force", &commit],
     )?;
-    Ok(commit)
+    if signed {
+        verify_signature(
+            dest,
+            url,
+            &commit,
+            chosen_tag.as_deref().or(match spec {
+                GitRef::Tag(t) => Some(t.as_str()),
+                _ => None,
+            }),
+        )?;
+    }
+    let tag = chosen_tag.or_else(|| tag_at(dest, &commit));
+    Ok(Fetched { commit, tag })
+}
+
+/// A version tag that points at `commit`, if there is one.
+fn tag_at(dest: &Path, commit: &str) -> Option<String> {
+    git(Some(dest), &["tag", "--points-at", commit])
+        .ok()?
+        .lines()
+        .filter(|t| crate::semver::Version::parse(t).is_some())
+        .max_by_key(|t| crate::semver::Version::parse(t))
+        .map(str::to_string)
+}
+
+/// `signed = true`: the commit (or the annotated tag that names it) must carry a signature that git can verify
+/// with the keys the user trusts (`gpg`, or `gpg.ssh.allowedSignersFile`).
+fn verify_signature(dest: &Path, url: &str, commit: &str, tag: Option<&str>) -> Result<(), String> {
+    if git(Some(dest), &["verify-commit", commit]).is_ok() {
+        return Ok(());
+    }
+    if let Some(t) = tag
+        && git(Some(dest), &["verify-tag", &format!("refs/tags/{t}")]).is_ok()
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "{url}: commit {} has no signature git can verify (`signed = true`); trust the author's key first (gpg, or gpg.ssh.allowedSignersFile)",
+        &commit[..commit.len().min(10)]
+    ))
 }
 
 /// What to refresh: everything, or the named packages.
@@ -211,7 +364,8 @@ pub fn install(project: &Path, refresh: &Refresh) -> Result<(), String> {
     let manifest = manifest_of(project)?;
     let lock = read_lock(project)?;
     let mut new_lock: BTreeMap<String, Locked> = BTreeMap::new();
-    let mut seen: HashMap<String, Source> = HashMap::new();
+    // what each package was asked for, and the version tag chosen for it
+    let mut seen: HashMap<String, (Source, Option<String>, String)> = HashMap::new();
     let mut queue: Vec<(String, Source, String, bool)> = Vec::new();
     if let Some(m) = &manifest {
         for (n, s) in parse_dependencies(m, project, "this project")?
@@ -221,16 +375,62 @@ pub fn install(project: &Path, refresh: &Refresh) -> Result<(), String> {
             queue.push((n, s, "this project".to_string(), true));
         }
     }
-    while let Some((name, source, owner, local_ok)) = queue.pop() {
-        if let Some(known) = seen.get(&name) {
-            if *known == source {
+    while let Some((name, mut source, owner, local_ok)) = queue.pop() {
+        let mut forced_fresh = false;
+        if let Some((known, chosen, first_owner)) = seen.get(&name).cloned() {
+            if known == source {
                 continue;
             }
-            return Err(format!(
-                "{owner}: dependency `{name}` asks for a different source than elsewhere (one version of each package per project)"
-            ));
+            // two asks for the same package at a version: one tag has to suit both
+            match (&known, &source) {
+                (
+                    Source::Git {
+                        url: u1,
+                        spec: GitRef::Version(c1),
+                        signed: s1,
+                        token_env: t1,
+                    },
+                    Source::Git {
+                        url: u2,
+                        spec: GitRef::Version(c2),
+                        signed: s2,
+                        token_env: t2,
+                    },
+                ) if u1 == u2 => {
+                    let both = c1.and(c2);
+                    let suits = chosen
+                        .as_deref()
+                        .and_then(crate::semver::Version::parse)
+                        .is_some_and(|v| both.matches(&v));
+                    let merged = Source::Git {
+                        url: u1.clone(),
+                        spec: GitRef::Version(both),
+                        signed: *s1 || *s2,
+                        token_env: t1.clone().or_else(|| t2.clone()),
+                    };
+                    if suits {
+                        let keep = chosen.clone();
+                        if let Some(l) = new_lock.get_mut(&name)
+                            && let Source::Git { spec, .. } = &merged
+                        {
+                            l.spec = spec.label();
+                        }
+                        seen.insert(name.clone(), (merged, keep, first_owner));
+                        continue;
+                    }
+                    // the tag chosen first does not suit the second ask: choose again for both
+                    source = merged;
+                    forced_fresh = true;
+                    let _ = &owner;
+                }
+                _ => {
+                    return Err(format!(
+                        "{owner}: dependency `{name}` asks for a different source than {first_owner} (one version of each package per project)"
+                    ));
+                }
+            }
         }
-        seen.insert(name.clone(), source.clone());
+        let mut chosen_tag = None;
         let (dir, nested_local) = match &source {
             Source::Path(dir) => {
                 if !local_ok {
@@ -248,34 +448,65 @@ pub fn install(project: &Path, refresh: &Refresh) -> Result<(), String> {
                     true,
                 )
             }
-            Source::Git { url, spec } => {
-                let refreshed = match refresh {
-                    Refresh::Nothing => false,
-                    Refresh::All => true,
-                    Refresh::Some(names) => names.contains(&name),
-                };
+            Source::Git {
+                url,
+                spec,
+                signed,
+                token_env,
+            } => {
+                let refreshed = forced_fresh
+                    || match refresh {
+                        Refresh::Nothing => false,
+                        Refresh::All => true,
+                        Refresh::Some(names) => names.contains(&name),
+                    };
                 let locked = lock
                     .get(&name)
                     .filter(|l| !refreshed && l.git == *url && l.spec == spec.label())
                     .map(|l| l.commit.as_str());
                 let dest = packages_dir(project).join(&name);
-                let commit = fetch(&dest, url, spec, locked)?;
-                println!(
-                    "{name} {} -> {}",
-                    spec.label(),
-                    &commit[..commit.len().min(10)]
-                );
+                let auth = Auth::for_dependency(url, token_env.as_deref())
+                    .map_err(|e| format!("{owner}: dependency `{name}`: {e}"))?;
+                let fetched = fetch(&dest, url, spec, locked, *signed, &auth).map_err(|e| {
+                    if forced_fresh {
+                        let asked = seen.get(&name).map(|(k, _, _)| k.clone());
+                        match asked {
+                            Some(Source::Git { spec: GitRef::Version(c1), .. }) => format!(
+                                "{owner}: dependency `{name}`: {e}; {} asks for `{}` and {owner} for another range, and no version suits both",
+                                seen[&name].2,
+                                c1.text()
+                            ),
+                            _ => e,
+                        }
+                    } else {
+                        e
+                    }
+                })?;
+                match &fetched.tag {
+                    Some(t) if matches!(spec, GitRef::Version(_)) => println!(
+                        "{name} {} -> {t} ({})",
+                        spec.label(),
+                        &fetched.commit[..fetched.commit.len().min(10)]
+                    ),
+                    _ => println!(
+                        "{name} {} -> {}",
+                        spec.label(),
+                        &fetched.commit[..fetched.commit.len().min(10)]
+                    ),
+                }
+                chosen_tag = fetched.tag.clone();
                 new_lock.insert(
                     name.clone(),
                     Locked {
                         git: url.clone(),
                         spec: spec.label(),
-                        commit,
+                        commit: fetched.commit,
                     },
                 );
                 (dest, false)
             }
         };
+        seen.insert(name.clone(), (source.clone(), chosen_tag, owner.clone()));
         let owner = format!("package `{name}`");
         if let Some(m) = manifest_of(&dir)? {
             for (n, s) in parse_dependencies(&m, &dir, &owner)?.into_iter().rev() {
@@ -320,10 +551,26 @@ pub fn add(cwd: &Path, name: &str, options: &[(&str, &str)]) -> Result<PathBuf, 
     let mut doc = edit(&file)?;
     let mut dep = toml_edit::InlineTable::new();
     for (key, value) in options {
-        if !["git", "tag", "rev", "branch", "path"].contains(key) {
+        if ![
+            "git",
+            "tag",
+            "rev",
+            "branch",
+            "path",
+            "version",
+            "signed",
+            "token_env",
+        ]
+        .contains(key)
+        {
             return Err(format!("unknown option --{key}"));
         }
-        dep.insert(*key, (*value).into());
+        // `signed` is a boolean in the file, the other options are texts
+        if *key == "signed" {
+            dep.insert(*key, (*value == "true").into());
+        } else {
+            dep.insert(*key, (*value).into());
+        }
     }
     if !(dep.contains_key("git") ^ dep.contains_key("path")) {
         return Err("give the package a source: --git URL or --path DIR".to_string());
@@ -356,4 +603,28 @@ pub fn remove(cwd: &Path, name: &str) -> Result<PathBuf, String> {
     std::fs::write(&file, doc.to_string())
         .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     Ok(file.parent().expect("a file has a parent").to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_the_standard_alphabet_and_padding() {
+        assert_eq!(base64(b"x-access-token:abc"), "eC1hY2Nlc3MtdG9rZW46YWJj");
+        assert_eq!(base64(b"a"), "YQ==");
+        assert_eq!(base64(b"ab"), "YWI=");
+        assert_eq!(base64(b""), "");
+    }
+
+    #[test]
+    fn a_token_is_refused_for_anything_but_https() {
+        assert!(Auth::for_dependency("ssh://git@host/x/y", Some("ANY")).is_err());
+        assert!(
+            Auth::for_dependency("https://host/x/y", None)
+                .unwrap()
+                .header
+                .is_none()
+        );
+    }
 }

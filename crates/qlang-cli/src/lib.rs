@@ -21,8 +21,10 @@ mod password;
 mod process;
 mod providers;
 mod redis;
+mod registry;
 mod repl;
 mod selfupdate;
+mod semver;
 pub mod serve;
 mod shared;
 mod signature;
@@ -53,6 +55,9 @@ USAGE:
                                          project's files (or of the paths given)
     qlang migrate [path...] [--check]    rewrite what a breaking change renamed (Log.warn -> Log.warning...);
                                          --check lists the files, --rules the renamings known
+    qlang info <name>                    a package of the index: licence, versions, how to add it
+    qlang publish                        check that this package can be listed in the index
+    qlang verify                         are the installed packages what qlang.lock says?
     qlang lint [path...] [--max-complexity N]
                                          unused variables, functions and imports, unreachable
                                          code, functions with too many paths (exit 1 if any)
@@ -179,6 +184,9 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("repl") => repl::run(&it.collect::<Vec<_>>()),
         Some("self-update") => selfupdate::run(&it.collect::<Vec<_>>()),
         Some("search") => index::search(it.next()),
+        Some("info") => index::info(it.next()),
+        Some("publish") => registry::publish(&it.collect::<Vec<_>>()),
+        Some("verify") => registry::verify(),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {
             package_command(cmd, &it.collect::<Vec<_>>())
         }
@@ -922,12 +930,22 @@ fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
             let mut from_index: Vec<(String, String)> = Vec::new();
             if options.is_empty() {
                 match index::find(name) {
+                    Some(entry) if entry.removed.is_some() => {
+                        return fail(format!(
+                            "`{name}` was removed from the package index: {}",
+                            entry.removed.unwrap_or_default()
+                        ));
+                    }
                     Some(entry) => {
                         from_index.push(("git".into(), entry.git.clone()));
                         match index::latest_tag(&entry.git) {
                             Some(tag) => {
-                                println!("{name}: {} at {tag} (from the package index)", entry.git);
-                                from_index.push(("tag".into(), tag));
+                                let range = format!("^{}", tag.trim_start_matches('v'));
+                                println!(
+                                    "{name}: {} at {tag}, kept in the range {range} (from the package index)",
+                                    entry.git
+                                );
+                                from_index.push(("version".into(), range));
                             }
                             None => println!(
                                 "{name}: {} (from the package index; no version tag found, the default branch is used)",

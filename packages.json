@@ -1,10 +1,26 @@
 {
   "std": {
     "git": "https://github.com/quenti77/qlang-std",
-    "description": "Web framework pieces, queue, mail, S3, scheduler, JWT, CSV, TOML, templates, CLI helpers"
+    "description": "Web framework pieces, queue, mail, S3, scheduler, JWT, CSV, TOML, templates, CLI helpers",
+    "license": "MIT",
+    "keywords": [
+      "web",
+      "framework",
+      "queue",
+      "mail",
+      "csv",
+      "jwt"
+    ]
   },
   "test": {
     "git": "https://github.com/quenti77/qlang-test",
-    "description": "Tests that read like sentences: describe / it / expect, hooks, datasets, spies, snapshots, JUnit and TAP"
+    "description": "Tests that read like sentences: describe / it / expect, hooks, datasets, spies, snapshots, JUnit and TAP",
+    "license": "MIT",
+    "keywords": [
+      "testing",
+      "bdd",
+      "snapshots",
+      "spies"
+    ]
   }
 }

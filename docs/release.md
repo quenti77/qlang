@@ -35,6 +35,7 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 | `install.sh`, `install.ps1`               | scripts d'installation                   |
 | `qlang.rb`, `qlang.json`, `PKGBUILD`      | Homebrew, Scoop, AUR                     |
 | `quenti77.qlang*.yaml`                    | winget                                   |
+| `reference.json`                          | `qlang doc --prelude`, pour la référence du site |
 | `qlang_*.deb`, `qlang-*.rpm`              | Debian/Ubuntu, Fedora/openSUSE (fichiers) |
 | `qlang.wasm`, `qlang.mjs`                 | qlang pour le navigateur (WebAssembly)   |
 | `qlang.vsix`                              | extension VS Code                        |

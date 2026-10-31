@@ -104,10 +104,127 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     go(pattern.as_bytes(), text.as_bytes())
 }
 
+/// The types whose methods the language provides itself, as the checker names them in a probe program, and
+/// the name they are documented under.
+const BUILTIN_TYPES: [(&str, &str); 10] = [
+    ("string", "string"),
+    ("int", "int"),
+    ("float", "float"),
+    ("array<T>", "array"),
+    ("map<K, V>", "map"),
+    ("Set<T>", "Set"),
+    ("uuid", "uuid"),
+    ("ulid", "ulid"),
+    ("datetime", "datetime"),
+    ("bytes", "bytes"),
+];
+
+const PROBE: &str = "fun probe<T, K, V>(a: array<T>, m: map<K, V>, s: string, i: int, f: float, u: uuid, l: ulid, d: datetime, b: bytes, set: Set<T>)\n  a\n  m\n  s\n  i\n  f\n  u\n  l\n  d\n  b\n  set\nend\n";
+
+/// `qlang doc --prelude`: everything the language provides without an import, as JSON for the reference of the
+/// site: the global functions, the methods of the built-in types, the `Type.function` names, and the types of the
+/// prelude with their fields and methods. The explanations are the ones editors show.
+fn prelude_reference() -> Result<String, String> {
+    use qlang_core::check::catalog;
+    let mut host = crate::new_host_with(
+        Path::new("probe.q"),
+        None,
+        Some(0),
+        Vec::new(),
+        &[],
+        true,
+        false,
+    )?;
+    let program = compile_with("probe.q", PROBE, &mut host, &CompileOptions { info: true })
+        .map_err(|e| format!("the probe does not compile:\n{}", e.render()))?;
+    let info = program.info.ok_or("no information from the compiler")?;
+    let entry = |name: &str, signature: &str, doc: &str| serde_json::json!({"name": name, "signature": signature, "doc": doc});
+    let functions: Vec<_> = info
+        .functions
+        .iter()
+        .map(|f| entry(&f.name, &f.detail, f.doc.as_deref().unwrap_or("")))
+        .collect();
+    let builtin: Vec<_> = BUILTIN_TYPES
+        .iter()
+        .map(|(key, name)| {
+            let methods: Vec<_> = info
+                .members
+                .get(*key)
+                .map(|ms| {
+                    ms.iter()
+                        .filter(|m| m.kind == "method")
+                        .map(|m| entry(&m.name, &m.detail, m.doc.as_deref().unwrap_or("")))
+                        .collect()
+                })
+                .unwrap_or_default();
+            serde_json::json!({"name": name, "methods": methods})
+        })
+        .collect();
+    let mut owners: Vec<&str> = Vec::new();
+    for (owner, ..) in catalog::STATICS {
+        if !owners.contains(owner) {
+            owners.push(owner);
+        }
+    }
+    let namespaces: Vec<_> = owners
+        .iter()
+        .map(|o| {
+            let list: Vec<_> = catalog::STATICS
+                .iter()
+                .filter(|(owner, ..)| owner == o)
+                .map(|(_, kind, name, detail, doc)| {
+                    serde_json::json!({"kind": kind, "name": name, "signature": detail, "doc": doc})
+                })
+                .collect();
+            serde_json::json!({"name": o, "entries": list})
+        })
+        .collect();
+    let items: Vec<&ItemInfo> = info
+        .items
+        .iter()
+        .filter(|it| it.loc.file == "<prelude>")
+        .collect();
+    let types: Vec<_> = items
+        .iter()
+        .filter(|it| it.owner.is_none() && matches!(it.kind, "struct" | "enum" | "trait"))
+        .map(|top| {
+            let of = |kind: &str| -> Vec<serde_json::Value> {
+                items
+                    .iter()
+                    .filter(|m| {
+                        // a generic impl names its owner `Result<T, E>`
+                        m.kind == kind
+                            && m.owner.as_deref().map(|o| o.split('<').next().unwrap_or(o))
+                                == Some(top.name.as_str())
+                    })
+                    .map(|m| serde_json::json!({"name": m.name, "signature": m.label, "doc": m.doc.clone().unwrap_or_default()}))
+                    .collect()
+            };
+            serde_json::json!({
+                "name": top.name,
+                "kind": top.kind,
+                "doc": top.doc.clone().unwrap_or_default(),
+                "fields": of("field"),
+                "variants": of("variant"),
+                "methods": of("method"),
+            })
+        })
+        .collect();
+    let all = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "functions": functions,
+        "builtin": builtin,
+        "namespaces": namespaces,
+        "types": types,
+    });
+    serde_json::to_string_pretty(&all).map_err(|e| e.to_string())
+}
+
 pub fn run(args: &[&str]) -> ExitCode {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut out_file: Option<PathBuf> = None;
     let mut require_levels = false;
+    let mut prelude = false;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -119,10 +236,31 @@ pub fn run(args: &[&str]) -> ExitCode {
                 }
             }
             "--require-levels" => require_levels = true,
+            "--prelude" => prelude = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
         i += 1;
+    }
+    if prelude {
+        return match prelude_reference() {
+            Ok(text) => {
+                match &out_file {
+                    Some(f) => {
+                        if let Err(e) = std::fs::write(f, text + "\n") {
+                            eprintln!("cannot write {}: {e}", f.display());
+                            return ExitCode::from(1);
+                        }
+                    }
+                    None => println!("{text}"),
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(1)
+            }
+        };
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut files: Vec<PathBuf> = Vec::new();
@@ -191,7 +329,9 @@ pub fn run(args: &[&str]) -> ExitCode {
 }
 
 fn usage(why: &str) -> ExitCode {
-    eprintln!("{why}\nusage: qlang doc [path...] [-o FILE] [--require-levels]");
+    eprintln!(
+        "{why}\nusage: qlang doc [path...] [-o FILE] [--require-levels] | qlang doc --prelude [-o FILE]"
+    );
     ExitCode::from(64)
 }
 

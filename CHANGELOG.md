@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.80.0
+
+- **`qlang doc --prelude`** : tout ce que le langage fournit sans `import`, en JSON : les fonctions globales, les méthodes des types prédéfinis (`string`, `int`, `float`, `array`, `map`, `Set`, `uuid`, `ulid`, `datetime`, `bytes`) avec leur signature et leur explication, les fonctions de `Hash`, `Url`, `Reflect`…, et les types du prélude avec leurs champs, variantes et méthodes. Chaque release l'attache sous le nom `reference.json` ; le site en fait sa référence du prélude.
+
 ## 0.79.0
 
 - **Contraintes de version** : `version = "^1.2"` (aussi `~1.2.3`, `>=1.2, <2`, `=1.2.3`, `*`) sur une dépendance git choisit la plus haute étiquette `vX.Y.Z` qui la satisfait ; `qlang.lock` garde la contrainte et le commit, `qlang update` choisit de nouveau. Si deux paquets demandent des intervalles différents du même dépôt, une étiquette qui suit les deux est cherchée, sinon l'erreur dit qui demande quoi. `qlang add std` pose maintenant `version = "^0.19"` (l'intervalle de la dernière version) au lieu d'une étiquette exacte.

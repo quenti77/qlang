@@ -654,6 +654,8 @@ struct Interp<'a> {
     vm_codes: Vec<Rc<vm::Code>>,
     vm_stack: Vec<i64>,
     vm_enabled: bool,
+    /// Record the statements that run (`qlang test --coverage`); the register machine is then off.
+    coverage: bool,
     /// Loop statements compiled for the machine (by address), `None` for those it refused.
     vm_loops: HashMap<usize, Option<u32>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
@@ -699,7 +701,8 @@ impl<'a> Interp<'a> {
             vm_state: Vec::new(),
             vm_codes: Vec::new(),
             vm_stack: Vec::new(),
-            vm_enabled: true,
+            vm_enabled: !crate::coverage::enabled(),
+            coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
             vm_ostack: Vec::new(),
             vm_result: Value::Unit,
@@ -928,6 +931,9 @@ impl<'a> Interp<'a> {
 
     fn exec_stmt(&mut self, s: &Stmt, env: &Env) -> R<Value> {
         self.tick(s.span)?;
+        if self.coverage {
+            crate::coverage::hit(s.span);
+        }
         match &s.kind {
             StmtKind::Expr(e) => self.eval(e, env),
             StmtKind::Let { name, init, .. } => {

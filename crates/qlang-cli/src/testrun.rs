@@ -5,7 +5,9 @@
 //! passes unless it stops with an error (a failed `assert` / `assert_eq`, a `panic`...).
 
 use qlang_core::check::compile;
+use qlang_core::coverage::FileLines;
 use qlang_core::host::Limits;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -49,6 +51,10 @@ pub fn run(args: &[&str]) -> ExitCode {
     let mut trust = false;
     let mut allow_process = false;
     let mut deny_warnings = false;
+    let mut coverage = false;
+    let mut lcov: Option<String> = None;
+    let mut groups: Option<String> = None;
+    let mut skip_groups: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -76,6 +82,31 @@ pub fn run(args: &[&str]) -> ExitCode {
             "--trust-externs" => trust = true,
             "--allow-process" => allow_process = true,
             "--deny-warnings" => deny_warnings = true,
+            "--coverage" => coverage = true,
+            "--coverage-lcov" => {
+                i += 1;
+                match args.get(i) {
+                    Some(f) => {
+                        coverage = true;
+                        lcov = Some(f.to_string());
+                    }
+                    None => return usage("--coverage-lcov needs a file"),
+                }
+            }
+            "--group" => {
+                i += 1;
+                match args.get(i) {
+                    Some(g) => groups = Some(g.to_string()),
+                    None => return usage("--group needs a tag (or tags separated by commas)"),
+                }
+            }
+            "--skip-group" => {
+                i += 1;
+                match args.get(i) {
+                    Some(g) => skip_groups = Some(g.to_string()),
+                    None => return usage("--skip-group needs a tag (or tags separated by commas)"),
+                }
+            }
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
@@ -98,6 +129,16 @@ pub fn run(args: &[&str]) -> ExitCode {
         }
     }
 
+    // `qlang-test` reads these two variables to keep or leave out the groups of its cases
+    // (set while the program is still on one thread)
+    if let Some(g) = &groups {
+        unsafe { std::env::set_var("QLANG_TEST_GROUP", g) };
+    }
+    if let Some(g) = &skip_groups {
+        unsafe { std::env::set_var("QLANG_TEST_SKIP_GROUP", g) };
+    }
+    qlang_core::coverage::enable(coverage);
+    let mut covered: BTreeMap<String, FileLines> = BTreeMap::new();
     let (mut passed, mut failed) = (0usize, 0usize);
     let cwd = std::env::current_dir()
         .ok()
@@ -164,6 +205,12 @@ pub fn run(args: &[&str]) -> ExitCode {
                 }
             }
         }
+        if coverage {
+            merge(&mut covered, qlang_core::coverage::take(&program.sources));
+        }
+    }
+    if coverage {
+        report(&covered, lcov.as_deref());
     }
     if passed + failed == 0 {
         println!("no tests found (files named *_test.q or test_*.q, with `fun test_...()`)");
@@ -174,6 +221,61 @@ pub fn run(args: &[&str]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// Add what one test file's run covered to the total.
+fn merge(total: &mut BTreeMap<String, FileLines>, part: BTreeMap<String, FileLines>) {
+    for (name, f) in part {
+        let e = total.entry(name).or_default();
+        e.lines.extend(f.lines);
+        e.hit.extend(f.hit);
+    }
+}
+
+/// The share of statement lines that ran, per source file (the test files themselves are left out),
+/// and an LCOV file when asked.
+fn report(covered: &BTreeMap<String, FileLines>, lcov: Option<&str>) {
+    println!("\ncoverage (lines with a statement)");
+    let (mut all, mut hit) = (0usize, 0usize);
+    let mut out = String::new();
+    for (name, f) in covered {
+        if is_test_file(Path::new(name)) {
+            continue;
+        }
+        let h = f.hit.len();
+        let n = f.lines.len();
+        all += n;
+        hit += h;
+        let pct = if n == 0 {
+            100.0
+        } else {
+            h as f64 * 100.0 / n as f64
+        };
+        let missing: Vec<String> = f.lines.difference(&f.hit).map(|l| l.to_string()).collect();
+        let tail = if missing.is_empty() {
+            String::new()
+        } else {
+            format!("  not run: {}", missing.join(", "))
+        };
+        println!("  {pct:5.1}%  {name} ({h}/{n}){tail}");
+        out.push_str(&format!("SF:{name}\n"));
+        for l in &f.lines {
+            out.push_str(&format!("DA:{l},{}\n", u32::from(f.hit.contains(l))));
+        }
+        out.push_str(&format!("LF:{n}\nLH:{h}\nend_of_record\n"));
+    }
+    let pct = if all == 0 {
+        100.0
+    } else {
+        hit as f64 * 100.0 / all as f64
+    };
+    println!("  {pct:5.1}%  total ({hit}/{all})");
+    if let Some(path) = lcov {
+        match std::fs::write(path, out) {
+            Ok(()) => println!("  LCOV written to {path}"),
+            Err(e) => eprintln!("{path}: {e}"),
+        }
     }
 }
 
@@ -191,6 +293,8 @@ fn indent(text: &str) -> String {
 }
 
 fn usage(why: &str) -> ExitCode {
-    eprintln!("{why}\nusage: qlang test [path...] [--filter TEXT] [--seed N] [--max-steps N]");
+    eprintln!(
+        "{why}\nusage: qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N]"
+    );
     ExitCode::from(64)
 }

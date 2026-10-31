@@ -3,8 +3,9 @@
 #
 #   scripts/render-packaging.sh <version> <SHA256SUMS> <out-dir>
 #
-# Writes qlang.rb (Homebrew), qlang.json (Scoop) and PKGBUILD (AUR) in <out-dir>. They are
-# attached to the release; copy them into the tap / bucket / AUR repository.
+# Writes qlang.rb (Homebrew), qlang.json (Scoop), PKGBUILD (AUR) and the three winget manifests
+# (quenti77.qlang*.yaml) in <out-dir>. They are attached to the release; copy them into the tap /
+# bucket / AUR repository, or the winget manifests into a pull request on microsoft/winget-pkgs.
 set -euo pipefail
 
 version="${1:?usage: render-packaging.sh <version> <SHA256SUMS> <out-dir>}"
@@ -26,4 +27,7 @@ done
 sed "${sed_args[@]}" "$root/packaging/qlang.rb.in" > "$out/qlang.rb"
 sed "${sed_args[@]}" "$root/packaging/qlang.scoop.json.in" > "$out/qlang.json"
 sed "${sed_args[@]}" "$root/packaging/PKGBUILD.in" > "$out/PKGBUILD"
-echo "rendered $out/qlang.rb $out/qlang.json $out/PKGBUILD"
+for name in quenti77.qlang quenti77.qlang.installer quenti77.qlang.locale.en-US; do
+  sed "${sed_args[@]}" "$root/packaging/winget/$name.yaml.in" > "$out/$name.yaml"
+done
+echo "rendered $out/qlang.rb $out/qlang.json $out/PKGBUILD and the winget manifests"

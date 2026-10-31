@@ -58,8 +58,11 @@ docker run --rm -v "$PWD":/app -p 8080:8080 ghcr.io/quenti77/qlang:latest serve 
 ```
 
 **Gestionnaires de paquets** : chaque release publie aussi `qlang.rb` (Homebrew), `qlang.json` (Scoop)
-et `PKGBUILD` (AUR), prêts à copier dans un tap, un bucket ou un dépôt AUR ; ces dépôts ne sont pas
-encore créés, donc `brew install` et `scoop install` ne sont pas encore possibles.
+et `PKGBUILD` (AUR), les trois manifestes `quenti77.qlang*.yaml` (winget), prêts à copier dans un tap, un
+bucket, un dépôt AUR ou `winget-pkgs` ; ces dépôts ne sont pas encore créés, donc `brew install`, `scoop install` et
+`winget install` ne sont pas encore possibles. Les paquets **`.deb`** et **`.rpm`** (programme statique, sans
+dépendance) sont des fichiers de la release : `sudo dpkg -i qlang_X.Y.Z_amd64.deb`, `sudo rpm -i qlang-X.Y.Z-1.x86_64.rpm`
+(il n'y a pas encore de dépôt apt ou yum).
 
 **Mettre à jour** : `qlang self-update` (ou relancer la même commande d'installation). Il télécharge la
 dernière version, vérifie la somme de contrôle et remplace le programme ; `qlang self-update --version 0.63.0`

@@ -34,6 +34,8 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 | `qlang-x86_64-pc-windows-msvc.zip`        | Windows x86_64                           |
 | `install.sh`, `install.ps1`               | scripts d'installation                   |
 | `qlang.rb`, `qlang.json`, `PKGBUILD`      | Homebrew, Scoop, AUR                     |
+| `quenti77.qlang*.yaml`                    | winget                                   |
+| `qlang_*.deb`, `qlang-*.rpm`              | Debian/Ubuntu, Fedora/openSUSE (fichiers) |
 | `qlang.wasm`, `qlang.mjs`                 | qlang pour le navigateur (WebAssembly)   |
 | `qlang.vsix`                              | extension VS Code                        |
 | `SHA256SUMS`                              | sommes de contrôle de tous les fichiers  |
@@ -66,7 +68,16 @@ cargo build --release && scripts/test-install.sh
   les sommes de contrôle (`scripts/render-packaging.sh`, modèles dans `packaging/`). Pour les
   proposer : créer les dépôts `homebrew-qlang` (tap), `scoop-qlang` (bucket) et le paquet AUR
   `qlang-bin`, et y copier ces fichiers à chaque version (à automatiser avec un jeton ensuite).
-  apt et rpm ne sont pas faits.
+- **winget** : la release contient aussi `quenti77.qlang.yaml`, `quenti77.qlang.installer.yaml` et
+  `quenti77.qlang.locale.en-US.yaml` (zip contenant un programme portable). Pour les proposer : les copier dans
+  `manifests/q/quenti77/qlang/X.Y.Z/` d'une copie de `microsoft/winget-pkgs` et ouvrir une pull request ; ou
+  `wingetcreate update quenti77.qlang --version X.Y.Z --urls <le zip> --submit`.
+- **apt et rpm** : le job `packages` construit (`scripts/build-packages.sh`, avec `dpkg-deb` et `rpmbuild`)
+  `qlang_X.Y.Z_amd64.deb`, `_arm64.deb`, `qlang-X.Y.Z-1.x86_64.rpm` et `.aarch64.rpm` : le programme statique,
+  sans dépendance, et la licence. Il installe le `.deb` amd64 sur le runner et vérifie `qlang --version`, et lit les
+  `.rpm` avec `rpm -qpi`. Ce sont des **fichiers de la release** (`sudo dpkg -i qlang_*.deb`,
+  `sudo rpm -i qlang-*.rpm`), pas un dépôt apt/yum : en héberger un demande une clé de signature et un endroit
+  (GitHub Pages, un seau S3…), à décider par le propriétaire.
 - **`qlang self-update`** télécharge `SHA256SUMS` et l'archive de la release, vérifie la somme et remplace
   le programme (`QLANG_BASE_URL` et `QLANG_API_URL` pointent vers un faux serveur dans les tests).
 

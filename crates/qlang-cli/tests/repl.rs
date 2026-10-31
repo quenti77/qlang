@@ -30,7 +30,7 @@ fn definitions_stay_and_expressions_show_their_value() {
     let (out, err) = repl(
         "let x = 2\nx * 21\nfun double(n: int) -> int\n  n * 2\nend\ndouble(x)\nprint(\"hi\")\n",
     );
-    let lines: Vec<&str> = out.lines().skip(1).collect();
+    let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines, ["42", "4", "hi"], "{out}\n{err}");
 }
 

@@ -15,6 +15,11 @@ le CHANGELOG pour savoir si une mise à jour va casser quelque chose.
 | **Provisoire** | Peut changer d'une version à l'autre, avec une ligne « Cassant » dans le CHANGELOG et, quand c'est possible, un avertissement avant. |
 | **Expérimental** | Peut changer sans avertissement ou disparaître. À n'utiliser que si vous suivez le projet. |
 
+Un paquet dit le niveau de ses fichiers dans son `qlang.toml` : `[stability]` avec `stable`, `provisional` et
+`experimental`, chacun une liste de fichiers ou de motifs (`"web/*.q"`, `"**/*.q"` ; un nom exact l'emporte sur un
+motif). `qlang doc` l'écrit sous le titre de chaque fichier de la documentation, et `qlang doc --require-levels` échoue
+pour un fichier qui n'en a pas (à mettre dans la CI du paquet).
+
 Aujourd'hui rien n'est « garanti 1.0 » : *stable* veut dire « nous le traiterons comme si la 1.0 était là ».
 
 ## Le langage
@@ -95,8 +100,27 @@ CHANGELOG lui-même.
 
 ## Ce que la 1.0 promettra (proposition)
 
-Le sous-ensemble figé serait : la syntaxe et la sémantique du langage, les types de base et les collections,
-`Result`/`Error`, `Json.of/to`, les modules et `import`/`export`, les commandes `run`/`check`/`fmt`/`test`, et les
-codes d'erreur. Resteraient hors de la promesse : la réflexion, `extern`, le serveur HTTP et sa bibliothèque web, `Term`,
-et tout ce qui est jeune. La définition *exécutable* de cette promesse serait la suite de conformité du langage
-(voir l'issue #128) : **une ligne n'est promise que quand un test de conformité la couvre**.
+La 1.0 figera un **sous-ensemble** dont la définition exécutable est la suite de conformité
+([qlang-conformance](https://github.com/quenti77/qlang-conformance)) : **une ligne n'est promise que quand des cas de
+conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/`).
+
+| Promesse | Cas de conformance |
+| --- | --- |
+| Variables, constantes, opérateurs, nombres, commentaires, expressions sur plusieurs lignes | `variables_and_const`, `arithmetic`, `comparisons_and_logic`, `number_formatting`, `number_methods_and_constants`, `div_and_mod_assignment`, `comments`, `multiline_expressions`, `conversions` |
+| `if` / `elseif` / `else`, `while`, `for` (intervalles, tableaux, dictionnaires), `break`, `continue`, `match` | `control_flow`, `for_with_two_variables`, `match_expressions` |
+| Fonctions, fermetures, paramètres nommés, génériques et contraintes | `functions_and_closures`, `closures`, `named_arguments`, `generics`, `compile_generics`, `compile_functions` |
+| Chaînes (interpolation, méthodes) | `strings`, `string_library`, `string_prefix_suffix_and_case_conversions` |
+| Tableaux et leurs méthodes | `arrays`, `array_higher_order_functions`, `array_sort_min_max_sum_slice` |
+| Dictionnaires, ensembles, tuples | `maps`, `maps_basics`, `maps_methods`, `maps_are_shared_and_typed`, `map_equality`, `sets`, `tuples` |
+| Valeurs optionnelles (`T?`, `??`, rétrécissement) | `nullables`, `optionals`, `narrowing_follows_assignments`, `compile_nullable_flow` |
+| `Result`, `Error` et l'opérateur `?` | `results` |
+| Structures, méthodes, traits, énumérations, héritage | `structs`, `structs_and_methods`, `traits`, `traits_as_types`, `traits_and_operators`, `enums`, `compile_structs`, `compile_traits_and_ops`, `compile_inheritance` |
+| `Json.parse`, `Json.of`, `Json.to` | `json` |
+| Modules : `import` / `export`, alias | `modules` |
+| Les **codes** des erreurs de compilation et d'exécution les plus courantes | les dossiers `compile_*`, `runtime_errors`, `runtime_failures`, `arithmetic_errors` |
+| Les commandes `run`, `check`, `fmt`, `test` (leurs options actuelles) | **pas dans la suite de conformité** (qui ne couvre que le langage) : tests d'intégration de `qlang` (`crates/qlang-cli/tests`) |
+
+Hors de la promesse : la réflexion (`Reflect`), `extern`, le serveur HTTP et la bibliothèque web, `Term`, les tâches et
+traces, et tout ce qui est marqué provisoire ou expérimental plus haut. Quand la 1.0 sortira, le tag
+`v1.0.0` du dépôt de conformité fixera ce que ces lignes veulent dire ; avant, chaque version de qlang a son tag
+(`v0.X.Y` = la suite de qlang `0.X.Y`) et un cas ne change que si le `CHANGELOG` du dépôt de conformité le dit.

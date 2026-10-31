@@ -1716,6 +1716,8 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 
 ### Fonctions prédéfinies
 
+*Niveau : stable.*
+
 | Fonction                 | Rôle                                                                  |
 | ------------------------ | --------------------------------------------------------------------- |
 | `print(x)`               | affiche `x` suivi d'un retour à la ligne (`print()` : une ligne vide) |
@@ -1746,6 +1748,8 @@ chaînes dans un tableau sont entre guillemets. `read()` renvoie toujours une
 
 #### Nombres partagés entre les workers : `Shared`
 
+*Niveau : provisoire.*
+
 Les workers de `qlang serve` ne partagent rien, mais `Shared` donne des **entiers que tous les workers du
 processus voient et changent de façon atomique** : des compteurs exacts (requêtes servies, tâches en cours, une
 limite commune) sans passer par Redis.
@@ -1762,6 +1766,8 @@ Redis). Un nom fait de 1 à 128 octets, au plus 10 000 noms ; un dépassement d'
 commande `qlang` (`T250` ailleurs).
 
 #### Travail en parallèle : `Worker`
+
+*Niveau : expérimental.*
 
 Une **tâche** est un fichier de ton projet qu'un interpréteur à part exécute en même temps que le programme. Elle ne
 partage rien avec lui (même modèle que les workers de `qlang serve`) : les deux se parlent en s'envoyant des valeurs
@@ -1803,6 +1809,8 @@ programme.
 
 #### Traces distribuées : `Trace` et OpenTelemetry
 
+*Niveau : expérimental.*
+
 `qlang serve --otlp-endpoint http://collecteur:4318` (ou la variable `OTEL_EXPORTER_OTLP_ENDPOINT`) envoie les **traces**
 des requêtes à un collecteur OpenTelemetry (OTLP sur HTTP, JSON ; `--service-name` ou `OTEL_SERVICE_NAME` donne le nom
 du service, `qlang` par défaut) :
@@ -1826,6 +1834,8 @@ drapeau d'échantillonnage reçu est respecté (un appelant qui n'échantillonne
 
 #### Sortie et sortie d'erreur
 
+*Niveau : stable.*
+
 Un programme a deux sorties. La **sortie** (`print`, `write`) porte ce que le programme
 *produit* : c'est elle qu'on redirige vers un fichier ou qu'on passe à un autre programme
 (`qlang run x.q | jq`). La **sortie d'erreur** (`eprint`, `ewrite`, et le journal `Log`) porte
@@ -1842,6 +1852,8 @@ Docker, systemd et Kubernetes lisent les deux flux : un programme qui journalise
 d'erreur n'a ni fichier ni rotation à gérer.
 
 ### Méthodes prédéfinies
+
+*Niveau : stable.*
 
 La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 
@@ -1962,6 +1974,8 @@ pas réserver de noms globaux (`PI`, `min`…) que tu voudrais utiliser toi-mêm
 
 ### Dictionnaires
 
+*Niveau : stable.*
+
 Un dictionnaire (`map<K, V>`) associe des valeurs à des **clés**. Les clés sont
 des `int`, des `float`, des `string`, des `bool` ou des valeurs d'une
 énumération : des types qui se comparent par valeur. Les clés gardent leur
@@ -2045,6 +2059,8 @@ d'exécution.
 
 ### Ensembles
 
+*Niveau : stable.*
+
 Un `Set<T>` est un ensemble de valeurs **sans doublon**, qui garde l'ordre d'ajout. C'est un
 type du prélude (sans `import`) :
 
@@ -2085,6 +2101,8 @@ départ). Il s'affiche `Set(1, 2, 3)`.
 
 ### Heure et aléatoire
 
+*Niveau : provisoire.*
+
 Le cœur du langage ne lit ni l'horloge ni le hasard : comme `read`, ils viennent
 de l'**environnement**. Un programme qui les appelle alors qu'ils manquent est
 refusé **avant** d'être exécuté (erreur `T250`).
@@ -2116,6 +2134,8 @@ du même nom reste possible : `let time = 5` fonctionne, et `time` désigne alor
 cette variable.
 
 ### Identifiants : `uuid` et `ulid`
+
+*Niveau : provisoire.*
 
 Deux types pour identifier une chose de façon unique. Tous deux font 128 bits et
 sont distincts de `string` : on ne peut pas passer l'un pour l'autre.
@@ -2158,6 +2178,8 @@ s'affichent et s'interpolent sous leur forme texte (`id as string` donne cette
 chaîne). Pour l'inverse, `uuid.parse` et `ulid.parse` vérifient le texte.
 
 ### Dates et heures : `datetime`
+
+*Niveau : provisoire.*
 
 Un `datetime` est un **instant** : une date et une heure, toujours en **UTC** (pas de fuseau
 horaire, donc les mêmes résultats partout). Il va de l'an 1 à l'an 9999. C'est un type à part,
@@ -2210,6 +2232,8 @@ end
 
 ### Fuseaux horaires : `Zone`
 
+*Niveau : provisoire.*
+
 Un `datetime` est toujours un instant en UTC. Une `Zone` de la base IANA (`Europe/Paris`,
 `America/New_York`, `UTC`...) dit ce que lit une horloge murale de cet endroit à cet instant, heure d'été
 comprise, et l'inverse. Elle a besoin de la commande `qlang` (`T250` ailleurs, dans le navigateur par exemple).
@@ -2234,6 +2258,8 @@ Une heure qui n'existe pas (passage à l'heure d'été : 02:30 le 29 mars 2026 �
 décalage d'avant le changement ; une heure qui existe deux fois (retour à l'heure d'hiver) est la première.
 
 ### Expressions régulières
+
+*Niveau : provisoire.*
 
 L'espace de noms `regex` propose les opérations courantes sur les expressions
 régulières, à partir de deux chaînes (`text`, `pattern`) :
@@ -2270,6 +2296,8 @@ condition à récupérer avec `Result`.
 
 ### Encodages et hachages
 
+*Niveau : provisoire.*
+
 Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; un décodage en texte renvoie
 `none` si le résultat n'est pas du texte UTF-8 valide. Pour des données quelconques, voir
 [`bytes`](#octets--bytes) : chaque fonction a une variante `*_bytes` :
@@ -2291,6 +2319,8 @@ print(Base64.decode("TWFu"))     -- Man
 Ces noms commencent par une majuscule pour ne pas être masqués par une variable `url` ou `hash`.
 
 ### Octets : `bytes`
+
+*Niveau : provisoire.*
 
 `bytes` est une suite d'octets qui ne change jamais : un fichier, un corps de requête, une
 empreinte. Ce n'est pas du texte (un texte est de l'UTF-8 valide) et pas un tableau d'entiers.
@@ -2330,6 +2360,8 @@ print(b.at(1))               -- 195 (none hors des octets)
 
 ### Chemins et mise en forme : `Path` et `Format`
 
+*Niveau : provisoire.*
+
 `Path` manipule des chemins **écrits en texte**, avec `/` entre les parties (aussi sous Windows) ; il ne touche pas
 au disque.
 
@@ -2358,6 +2390,8 @@ une largeur et `.précision` (décimales pour `%f`, longueur maximale pour `%s`)
 manquante ou en trop, est un arrêt (`panic`) qui dit laquelle : c'est une erreur du programme, comme un mauvais indice.
 
 ### Secrets : `Crypto` et `Password`
+
+*Niveau : provisoire.*
 
 `random` est un générateur qu'on peut fixer (`--seed`) : bien pour les tests, **jamais** pour un
 secret. `Crypto` demande des octets à la source sécurisée du système.
@@ -2389,6 +2423,8 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 
 ### Compression et archives : `Gzip`, `Zip`, `Tar`
 
+*Niveau : provisoire.*
+
 Compresser et décompresser des octets, et lire ou écrire des archives **en mémoire** (le disque
 passe par `fs.read_bytes` / `fs.write_bytes`). Il faut la commande `qlang` (`T250` ailleurs).
 
@@ -2417,6 +2453,8 @@ contenir des gigaoctets). Pas de mot de passe ni de chiffrement dans les zip.
 ## 16. Prélude : `Result`, `Error` et JSON
 
 ### Prélude : `Result` et `Error`
+
+*Niveau : stable.*
 
 Deux types sont disponibles dans tout fichier, **sans `import`** :
 
@@ -2465,6 +2503,8 @@ end
 
 #### Propager une erreur avec `?`
 
+*Niveau : stable.*
+
 Dans une fonction qui renvoie elle-même un `Result`, `expr?` donne la valeur d'un `Ok`, et
 **quitte la fonction avec l'erreur** si c'est un `Err` :
 
@@ -2486,6 +2526,8 @@ end
   (`T281`). Dans une fonction anonyme, c'est elle seule qui est quittée.
 
 ### Prélude : JSON
+
+*Niveau : stable.*
 
 **Encoder.** Le trait `ToJson` décrit un type qui sait se transformer en texte
 JSON :
@@ -2570,6 +2612,8 @@ aussi `ToJson`, donc il peut entrer dans un `json_object`.
 
 ### Convertir : `Json.of` et `Json.to`
 
+*Niveau : stable.*
+
 Pas besoin d'écrire `to_json` et `from_json` à la main pour les cas courants : deux fonctions
 lisent la **forme du type**.
 
@@ -2616,6 +2660,8 @@ print(r.unwrap().name)    -- Bob
 ## 17. Prélude : réseau, bases de données et système
 
 ### Prélude : `http`
+
+*Niveau : provisoire.*
 
 `http.send(req)` envoie une requête HTTP et attend la réponse. `Request` et
 `Response` sont fournis par le prélude (pas besoin de les déclarer) :
@@ -2690,6 +2736,8 @@ end
 ```
 
 ### Répondre à des requêtes HTTP
+
+*Niveau : provisoire.*
 
 Un programme peut aussi **servir** des requêtes : `qlang serve app.q` écoute sur un port
 (8080 par défaut, sur `127.0.0.1`), exécute le code du fichier **une fois**, puis appelle
@@ -2780,6 +2828,8 @@ rechargement. C'est fait pour le développement, pas pour la production.
   fichiers et les imports à un dossier). `--seed N` fixe le hasard.
 
 #### Le routeur
+
+*Niveau : provisoire.*
 
 Quand il y a plusieurs pages, un `Router` évite un grand `match` sur le chemin : on déclare les
 routes, puis `handle` lui passe la requête.
@@ -2918,6 +2968,8 @@ Options de `qlang serve app.q` :
 
 ### Prélude : `Db`
 
+*Niveau : provisoire.*
+
 `Db.connect(url)` ouvre une connexion à une base de données ; le schéma de
 l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`,
 `postgres://utilisateur:mot_de_passe@hôte/base` ou `mysql://utilisateur:mot_de_passe@hôte/base`
@@ -3002,6 +3054,8 @@ end
 
 ### Prélude : fichiers et environnement
 
+*Niveau : provisoire.*
+
 `fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
 contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
 `Result` : un fichier absent ou une erreur de permission donnent un
@@ -3066,6 +3120,8 @@ comme les imports.
 
 ### Prélude : `Redis`
 
+*Niveau : provisoire.*
+
 `Redis.connect(url)` ouvre une connexion à un serveur Redis (protocole RESP2) : `redis://[utilisateur:mot_de_passe@]hôte[:port][/base]`, ou `rediss://` pour TLS (le certificat est vérifié avec les racines de Mozilla, comme pour Postgres). Un serveur qui n'est pas sur cette machine demande `rediss://`, ou `?tls=disable` pour confirmer que tu le veux en clair. Seule la commande `qlang` l'offre (un autre hôte : erreur `T250`).
 
 | Appel | Résultat |
@@ -3081,6 +3137,8 @@ comme les imports.
 Une connexion fait une chose à la fois (chaque commande attend sa réponse, 30 s au plus, sauf `BLPOP` qui attend ce qu'on lui demande) : prends-en une pour les commandes et une autre pour écouter. Un `Subscription` ne lance pas de commandes. Les nombres reviennent en `float`, comme pour `Db`.
 
 ### Prélude : le journal `Log`
+
+*Niveau : provisoire.*
 
 `Log` écrit le journal du programme avec les niveaux de PSR-3 (PHP), du plus bas au plus haut :
 `debug`, `info`, `notice`, `warning` (ou `warn`), `error`, `critical`, `alert`, `emergency`. Chaque
@@ -3135,6 +3193,8 @@ Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, 
 
 ### Prélude : lancer un programme
 
+*Niveau : provisoire.*
+
 `Process.run(commande, arguments)` lance un programme de la machine, attend sa fin et renvoie un
 `Result<ProcessOutput, Error>` ; `ProcessOutput` a trois champs publics : `status` (le code de
 sortie, −1 si un signal l'a arrêté), `stdout` et `stderr` (ce qu'il a écrit, en texte).
@@ -3167,6 +3227,8 @@ end
   il est arrêté s'il tourne plus d'une minute, et on garde au plus 16 Mo de chaque flux.
 
 ### Prélude : le terminal
+
+*Niveau : expérimental.*
 
 `Term` sert aux programmes qui dessinent un écran (une interface en terminal). Il faut la commande
 `qlang` lancée depuis un terminal : ailleurs (protocole JSON, navigateur) l'emploi est une erreur de

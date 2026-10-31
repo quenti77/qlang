@@ -149,6 +149,7 @@ utilisé comme paquet.)
 ```sh
 qlang doc                  # Markdown de tout le projet, sur la sortie standard
 qlang doc lib.q -o API.md  # un fichier, écrit dans API.md
+qlang doc --require-levels # échoue pour un fichier sans niveau de stabilité (`[stability]` de qlang.toml)
 ```
 
 Elle est tirée des commentaires `--" … --"` placés juste au-dessus des déclarations : les
@@ -173,6 +174,12 @@ Seuls les **espaces au début et à la fin des lignes** changent (deux espaces p
 résultat ne contenait plus exactement les mêmes jetons). Les chaînes et commentaires sur plusieurs
 lignes ne sont pas touchés. L'extension VS Code propose « Mettre en forme le document » (le serveur
 de langage répond à `textDocument/formatting`).
+
+### Changements cassants : `qlang migrate`
+
+`qlang migrate` réécrit les renommages mécaniques annoncés par le CHANGELOG (`Log.warn` → `Log.warning`), en vérifiant
+que seuls les noms ont changé ; `--check` liste sans toucher (pour la CI), `--rules` donne les règles. Voir
+[docs/migration.md](docs/migration.md).
 
 ### Analyse statique : `qlang lint`
 

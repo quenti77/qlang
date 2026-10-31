@@ -41,9 +41,73 @@ fn find(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// `[stability]` of `qlang.toml`: the level of each file, by glob (`provisional = ["csv.q", "web/*.q"]`).
+struct Levels(Vec<(&'static str, Vec<String>)>);
+
+impl Levels {
+    fn load(dir: &Path) -> Levels {
+        let table = match crate::packages::read_manifest(dir) {
+            Ok(Some(m)) => m.get("stability").and_then(|s| s.as_table().cloned()),
+            _ => None,
+        };
+        let mut out = Vec::new();
+        for level in ["stable", "provisional", "experimental"] {
+            let patterns: Vec<String> = table
+                .as_ref()
+                .and_then(|t| t.get(level))
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.push((level, patterns));
+        }
+        Levels(out)
+    }
+
+    /// The first level whose patterns match, in the order stable, provisional, experimental... except that
+    /// an exact name wins over a pattern, so that `web/*.q = provisional` can have `web/ws.q = experimental`.
+    fn of(&self, file: &str) -> Option<&'static str> {
+        let exact = self
+            .0
+            .iter()
+            .find(|(_, ps)| ps.iter().any(|p| p == file))
+            .map(|(l, _)| *l);
+        exact.or_else(|| {
+            self.0
+                .iter()
+                .find(|(_, ps)| ps.iter().any(|p| glob_match(p, file)))
+                .map(|(l, _)| *l)
+        })
+    }
+}
+
+/// `*` (anything but `/`), `**` (anything), `?` (one character).
+fn glob_match(pattern: &str, text: &str) -> bool {
+    fn go(p: &[u8], t: &[u8]) -> bool {
+        match p.first() {
+            None => t.is_empty(),
+            Some(b'*') if p.get(1) == Some(&b'*') => {
+                let rest = &p[2..];
+                (0..=t.len()).any(|i| go(rest, &t[i..]))
+            }
+            Some(b'*') => {
+                let rest = &p[1..];
+                (0..=t.len()).any(|i| go(rest, &t[i..]) && !t[..i].contains(&b'/'))
+            }
+            Some(b'?') => !t.is_empty() && t[0] != b'/' && go(&p[1..], &t[1..]),
+            Some(c) => t.first() == Some(c) && go(&p[1..], &t[1..]),
+        }
+    }
+    go(pattern.as_bytes(), text.as_bytes())
+}
+
 pub fn run(args: &[&str]) -> ExitCode {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut out_file: Option<PathBuf> = None;
+    let mut require_levels = false;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -54,6 +118,7 @@ pub fn run(args: &[&str]) -> ExitCode {
                     None => return usage("-o needs a file"),
                 }
             }
+            "--require-levels" => require_levels = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
@@ -75,6 +140,7 @@ pub fn run(args: &[&str]) -> ExitCode {
         }
     }
     let canonical_cwd = cwd.canonicalize().ok();
+    let levels = Levels::load(&crate::project_dir(&cwd).unwrap_or(cwd.clone()));
     let mut markdown = String::new();
     let mut failed = false;
     for file in &files {
@@ -89,7 +155,14 @@ pub fn run(args: &[&str]) -> ExitCode {
             .unwrap_or_else(|| file.clone())
             .to_string_lossy()
             .replace('\\', "/");
-        match document(file, &shown) {
+        let level = levels.of(&shown);
+        if require_levels && level.is_none() {
+            eprintln!(
+                "{shown}: no stability level (add it to `[stability]` in qlang.toml: stable, provisional or experimental)"
+            );
+            failed = true;
+        }
+        match document(file, &shown, level) {
             Ok(text) => markdown.push_str(&text),
             Err(e) => {
                 eprintln!("{e}");
@@ -118,12 +191,12 @@ pub fn run(args: &[&str]) -> ExitCode {
 }
 
 fn usage(why: &str) -> ExitCode {
-    eprintln!("{why}\nusage: qlang doc [path...] [-o FILE]");
+    eprintln!("{why}\nusage: qlang doc [path...] [-o FILE] [--require-levels]");
     ExitCode::from(64)
 }
 
 /// The Markdown section of one file.
-fn document(file: &Path, shown: &str) -> Result<String, String> {
+fn document(file: &Path, shown: &str, level: Option<&str>) -> Result<String, String> {
     let source = std::fs::read_to_string(file).map_err(|e| format!("cannot read {shown}: {e}"))?;
     let mut host = crate::new_host_with(file, None, Some(0), Vec::new(), &[], true, false)?;
     let program = compile_with(shown, &source, &mut host, &CompileOptions { info: true })
@@ -134,7 +207,7 @@ fn document(file: &Path, shown: &str) -> Result<String, String> {
         .iter()
         .filter(|it| it.loc.file == shown && it.public)
         .collect();
-    Ok(render(shown, &items))
+    Ok(render(shown, level, &items))
 }
 
 /// A documentation comment split at its tags: `@param name text` and `@return text` (also
@@ -204,8 +277,11 @@ fn is_top_level(it: &ItemInfo) -> bool {
     it.owner.is_none()
 }
 
-fn render(file: &str, items: &[&ItemInfo]) -> String {
+fn render(file: &str, level: Option<&str>, items: &[&ItemInfo]) -> String {
     let mut out = format!("# {file}\n\n");
+    if let Some(level) = level {
+        out.push_str(&format!("_Stability: **{level}**._\n\n"));
+    }
     let tops: Vec<&&ItemInfo> = items.iter().filter(|it| is_top_level(it)).collect();
     if tops.is_empty() {
         out.push_str("_Nothing documented here._\n\n");

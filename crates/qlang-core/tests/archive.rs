@@ -69,6 +69,12 @@ fn tracing_needs_the_qlang_command_too() {
 }
 
 #[test]
+fn a_scripted_terminal_needs_the_qlang_command_too() {
+    let out = exec("print(Term.script([], 80, 24).is_ok())");
+    assert!(out.starts_with("COMPILE: T250"), "{out}");
+}
+
+#[test]
 fn workers_need_the_qlang_command_too() {
     let out = exec("print(Worker.spawn(\"a.q\", Json.null()).is_ok())");
     assert!(

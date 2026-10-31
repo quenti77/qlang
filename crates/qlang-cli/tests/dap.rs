@@ -4,10 +4,36 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+fn read_message(from: &mut BufReader<ChildStdout>) -> Option<Value> {
+    let mut length = 0usize;
+    loop {
+        let mut line = String::new();
+        if from.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let line = line.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(v) = line.strip_prefix("Content-Length:") {
+            length = v.trim().parse().ok()?;
+        }
+    }
+    let mut body = vec![0u8; length];
+    from.read_exact(&mut body).ok()?;
+    serde_json::from_slice(&body).ok()
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
 struct Client {
     child: Child,
     to: ChildStdin,
-    from: BufReader<ChildStdout>,
+    from: std::sync::mpsc::Receiver<Value>,
     seq: i64,
     /// Events read while waiting for something else.
     events: Vec<Value>,
@@ -21,9 +47,19 @@ impl Client {
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
+        let (send, from) = std::sync::mpsc::channel();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        // a thread reads the messages, so that a silent adapter fails the test instead of hanging it
+        std::thread::spawn(move || {
+            while let Some(m) = read_message(&mut stdout) {
+                if send.send(m).is_err() {
+                    break;
+                }
+            }
+        });
         Client {
             to: child.stdin.take().unwrap(),
-            from: BufReader::new(child.stdout.take().unwrap()),
+            from,
             child,
             seq: 0,
             events: Vec::new(),
@@ -31,24 +67,13 @@ impl Client {
     }
 
     fn read(&mut self) -> Value {
-        let mut length = 0usize;
-        loop {
-            let mut line = String::new();
-            assert!(
-                self.from.read_line(&mut line).unwrap() > 0,
-                "the adapter closed its output"
-            );
-            let line = line.trim_end();
-            if line.is_empty() {
-                break;
-            }
-            if let Some(v) = line.strip_prefix("Content-Length:") {
-                length = v.trim().parse().unwrap();
-            }
+        match self.from.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(m) => m,
+            Err(e) => panic!(
+                "the adapter said nothing for 30 s ({e}); read so far: {:?}",
+                self.events
+            ),
         }
-        let mut body = vec![0u8; length];
-        self.from.read_exact(&mut body).unwrap();
-        serde_json::from_slice(&body).unwrap()
     }
 
     fn request(&mut self, command: &str, arguments: Value) -> Value {

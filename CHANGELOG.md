@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.75.0
+
+- **Distribution** : la release contient des paquets `.deb` (amd64, arm64) et `.rpm` (x86_64, aarch64) du programme statique, construits et essayés par le workflow (le `.deb` est installé sur le runner), et les trois manifestes **winget** (`quenti77.qlang*.yaml`) à côté de `qlang.rb`, `qlang.json` et `PKGBUILD`. Publier dans un dépôt apt/yum, un tap, un bucket, AUR ou `winget-pkgs` reste à faire par le propriétaire (voir docs/release.md).
+
 ## 0.74.0
 
 - **Débogueur : `qlang dap`** (Debug Adapter Protocol, entrée et sortie standard). Points d'arrêt par fichier et ligne (aussi dans les fichiers importés), pas à pas (`next`, `stepIn`, `stepOut`), pause, pile d'appels, variables dépliables (tableaux, dictionnaires, structures, énumérations, tuples) et `evaluate` d'un nom de variable. Le programme tourne dans l'interpréteur « simple » ; son `print` arrive dans la console de l'éditeur. L'extension VS Code déclare le débogueur (F5).

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: quenti77.qlang
+PackageVersion: @VERSION@
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: qlang\qlang.exe
+    PortableCommandAlias: qlang
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/quenti77/qlang/releases/download/v@VERSION@/qlang-x86_64-pc-windows-msvc.zip
+    InstallerSha256: @SHA_X86_64_PC_WINDOWS_MSVC@
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: quenti77.qlang
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: quenti77
+PublisherUrl: https://github.com/quenti77
+PackageName: qlang
+PackageUrl: https://github.com/quenti77/qlang
+License: MIT
+LicenseUrl: https://github.com/quenti77/qlang/blob/main/LICENSE
+ShortDescription: A small, readable, statically typed language with a built-in web server
+Tags:
+  - language
+  - interpreter
+  - web
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

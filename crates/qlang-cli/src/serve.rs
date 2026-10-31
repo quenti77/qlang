@@ -326,6 +326,9 @@ pub fn serve(args: &[&str]) -> ExitCode {
     }
     let _ = TUNING.set(tune);
     crate::trace::init(otlp_endpoint, service_name);
+    if let Some(n) = app.max_steps {
+        crate::task::set_max_steps(n);
+    }
     if let Some(file) = &app.file {
         match crate::providers::specs_for(Path::new(file), &app.extern_commands).and_then(|specs| {
             crate::providers::ensure_trusted(&specs, app.trust_externs).map(|()| specs)

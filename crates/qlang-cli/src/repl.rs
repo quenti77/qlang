@@ -14,6 +14,7 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
+use std::io::{BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -271,6 +272,29 @@ pub fn run(args: &[&str]) -> ExitCode {
         allow_process,
         limits,
     };
+    if !std::io::stdin().is_terminal() {
+        // a pipe or a file: no line editor, no banner, one line after the other
+        let mut chunk = String::new();
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if chunk.is_empty() && line.trim().is_empty() {
+                continue;
+            }
+            chunk.push_str(&line);
+            chunk.push('\n');
+            if unfinished(&session.defined, &chunk) {
+                continue;
+            }
+            if let Err(e) = session.eval(&chunk) {
+                eprint!("{e}");
+                if !e.ends_with('\n') {
+                    eprintln!();
+                }
+            }
+            chunk.clear();
+        }
+        return ExitCode::SUCCESS;
+    }
     let mut editor: Editor<Completion, rustyline::history::FileHistory> = match Editor::new() {
         Ok(e) => e,
         Err(e) => {

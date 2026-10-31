@@ -54,7 +54,6 @@ Release:    1
 Summary:    $desc
 License:    MIT
 URL:        https://github.com/quenti77/qlang
-BuildArch:  $rpm_arch
 AutoReqProv: no
 
 %global debug_package %{nil}

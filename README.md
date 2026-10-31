@@ -581,6 +581,15 @@ seulement si le fichier ne peut pas être analysé (erreur de syntaxe) ou si les
 fausses. La documentation des méthodes prédéfinies vient du compilateur ; celle de vos fonctions,
 structures et méthodes est lue dans les commentaires `--" … --"` qui les précèdent.
 
+## Tests de conformité
+
+Ce que le langage promet est aussi écrit sous forme de programmes `.q` et de résultats attendus dans le dépôt
+[`qlang-conformance`](https://github.com/quenti77/qlang-conformance), indépendamment de l'interpréteur : sortie exacte,
+ou code d'erreur (`T…`, `R…`, jamais le texte des messages). La CI de ce dépôt-ci lance, avec le programme qu'elle
+vient de compiler, la version des cas nommée dans `conformance.ref` (un tag du même numéro que la version de qlang) ;
+la CI du dépôt de conformité lance sa branche principale contre la dernière release. Un cas change quand une version
+le dit dans `CHANGELOG.md` (un code publié ne change pas de sens : voir [docs/stability.md](docs/stability.md)).
+
 ## Développement
 
 ```sh

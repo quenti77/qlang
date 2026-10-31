@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.77.0
+
+- **Traces distribuées (OpenTelemetry)** : `qlang serve --otlp-endpoint URL` (ou `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` / `--service-name`) envoie à un collecteur OTLP/HTTP un span par requête (enfant du `traceparent` reçu, ou racine), un span par appel `http.send` du programme (qui part avec `traceparent`) et ceux de `Trace.span(nom, f)` ; chaque ligne de log de la requête porte `trace_id` et `span_id`. `Trace.attr`, `Trace.id()` et `Trace.traceparent()`. Sans collecteur, un `traceparent` reçu est quand même transmis. Voir [docs/language.md](docs/language.md).
+
 ## 0.76.0
 
 - **Fuzzing guidé par la couverture** (`cargo-fuzz`, dossier `fuzz/`) : huit cibles (lexer, parser, compilateur, formateur, interpréteur sous petites limites, requêtes HTTP de `qlang serve`, chemins de `--static`, trames WebSocket) et un job `Fuzz` du workflow du même nom. Voir [docs/security.md](docs/security.md#fuzzing).

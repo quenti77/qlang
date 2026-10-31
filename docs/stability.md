@@ -29,7 +29,7 @@ Aujourd'hui rien n'est « garanti 1.0 » : *stable* veut dire « nous le traiter
 | `fs`, `env`, `http`, `Db`, `Redis`, `Process`, `Log` | provisoire |
 | Opérateurs surchargés, alias de type, annotations (`#[annotation]`), `Any` | provisoire |
 | `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard`, `Shared` | provisoire (récents) |
-| `Worker` (tâches) | **expérimental** |
+| `Worker` (tâches), `Trace` (traces OpenTelemetry) | **expérimental** |
 | `Reflect` (constructeurs, `callable`), `extern fun` et fournisseurs, `Term` | **expérimental** |
 | Mots réservés (`step`, `from`, `then`, `catch`, `public`, `end`…) | on peut en **ajouter** (annoncé en « Cassant ») |
 | Texte des messages d'erreur | **non promis** |

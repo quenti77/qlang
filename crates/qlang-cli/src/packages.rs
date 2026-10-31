@@ -63,6 +63,10 @@ pub enum Source {
     Git {
         url: String,
         spec: GitRef,
+        /// `signed = true`: the commit must carry a signature `git verify-commit` accepts.
+        signed: bool,
+        /// `token_env = "NAME"`: the environment variable that holds an access token for a private https repository.
+        token_env: Option<String>,
     },
 }
 
@@ -74,6 +78,8 @@ pub enum GitRef {
     Tag(String),
     Rev(String),
     Branch(String),
+    /// `version = "^1.2"`: the highest tag `vX.Y.Z` that satisfies it.
+    Version(crate::semver::Constraint),
 }
 
 impl GitRef {
@@ -84,6 +90,7 @@ impl GitRef {
             GitRef::Tag(t) => format!("tag:{t}"),
             GitRef::Rev(r) => format!("rev:{r}"),
             GitRef::Branch(b) => format!("branch:{b}"),
+            GitRef::Version(c) => format!("version:{}", c.text()),
         }
     }
 }
@@ -123,10 +130,18 @@ pub fn parse_dependencies(
         let source = match (text("path")?, text("git")?) {
             (Some(path), None) => Source::Path(base.join(path)),
             (None, Some(url)) => {
+                let version = match text("version")? {
+                    Some(v) => Some(GitRef::Version(
+                        crate::semver::Constraint::parse(&v)
+                            .map_err(|e| format!("{owner}: dependency `{name}`: {e}"))?,
+                    )),
+                    None => None,
+                };
                 let refs: Vec<GitRef> = [
                     text("tag")?.map(GitRef::Tag),
                     text("rev")?.map(GitRef::Rev),
                     text("branch")?.map(GitRef::Branch),
+                    version,
                 ]
                 .into_iter()
                 .flatten()
@@ -144,12 +159,28 @@ pub fn parse_dependencies(
                 }
                 if refs.len() > 1 {
                     return Err(format!(
-                        "{owner}: dependency `{name}`: choose one of `tag`, `rev` and `branch`"
+                        "{owner}: dependency `{name}`: choose one of `version`, `tag`, `rev` and `branch`"
+                    ));
+                }
+                let signed = match spec.get("signed") {
+                    None => false,
+                    Some(v) => v.as_bool().ok_or_else(|| {
+                        format!("{owner}: `{name}`: `signed` must be true or false")
+                    })?,
+                };
+                let token_env = text("token_env")?;
+                if let Some(t) = &token_env
+                    && (t.is_empty() || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                {
+                    return Err(format!(
+                        "{owner}: dependency `{name}`: `token_env` is the name of an environment variable"
                     ));
                 }
                 Source::Git {
                     url,
                     spec: refs.into_iter().next().unwrap_or(GitRef::Default),
+                    signed,
+                    token_env,
                 }
             }
             _ => {

@@ -1623,8 +1623,10 @@ mail  = { path = "../mail" }                                      -- un dossier 
 text  = { git = "https://github.com/x/text", tag = "v1.2.0" }     -- un dépôt git
 ```
 
-Un dépôt git se désigne par `tag`, `rev` (un commit) ou `branch` (sans rien : la branche par
-défaut). `qlang install` le récupère dans `.qlang/packages/<nom>` (à mettre dans le
+Un dépôt git se désigne par `tag`, `rev` (un commit), `branch` (sans rien : la branche par
+défaut) ou `version = "^1.2"` (la plus haute étiquette `vX.Y.Z` de l'intervalle ; voir
+[docs/registry.md](registry.md), qui parle aussi de `signed = true`, de `token_env` pour un dépôt privé et de
+`qlang publish`). `qlang install` le récupère dans `.qlang/packages/<nom>` (à mettre dans le
 `.gitignore`) au commit noté dans `qlang.lock`, qu'il écrit s'il n'existe pas et qu'on
 versionne : tout le monde obtient les mêmes fichiers. `qlang update [nom…]` avance les
 paquets à ce que leur tag ou branche désigne maintenant ; `qlang add nom --git URL --tag T`

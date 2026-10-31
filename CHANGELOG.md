@@ -2,6 +2,14 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.79.0
+
+- **Contraintes de version** : `version = "^1.2"` (aussi `~1.2.3`, `>=1.2, <2`, `=1.2.3`, `*`) sur une dépendance git choisit la plus haute étiquette `vX.Y.Z` qui la satisfait ; `qlang.lock` garde la contrainte et le commit, `qlang update` choisit de nouveau. Si deux paquets demandent des intervalles différents du même dépôt, une étiquette qui suit les deux est cherchée, sinon l'erreur dit qui demande quoi. `qlang add std` pose maintenant `version = "^0.19"` (l'intervalle de la dernière version) au lieu d'une étiquette exacte.
+- **`qlang info nom`**, `qlang search` (licence) ; l'index peut dire `license`, `keywords`, `yanked` (versions que plus aucune résolution ne choisit) et `removed` (le paquet disparaît de la recherche, `qlang add` le refuse).
+- **`qlang publish`** : contrôle qu'un paquet peut être listé (nom, version, description, licence, README, compile, arbre propre, étiquette sur `HEAD`, `origin` en https) et écrit l'entrée à proposer.
+- **`qlang verify`** : les paquets installés sont à leur commit de `qlang.lock`, sans fichier modifié. **`signed = true`** : le commit doit porter une signature que git vérifie. **`token_env = "VAR"`** : jeton d'un dépôt https privé, donné à git pour cette seule dépendance.
+- [docs/registry.md](docs/registry.md) : utiliser, publier, ce que l'index promet et comment un retrait se décide.
+
 ## 0.78.0
 
 - **`qlang migrate`** : réécrit les renommages mécaniques d'un changement cassant (aujourd'hui `Log.warn` → `Log.warning`), par jetons (jamais dans une chaîne ni un commentaire), en vérifiant que seuls les noms ont changé ; `--check`, `--rules`.

@@ -149,6 +149,7 @@ utilisé comme paquet.)
 ```sh
 qlang doc                  # Markdown de tout le projet, sur la sortie standard
 qlang doc lib.q -o API.md  # un fichier, écrit dans API.md
+qlang doc --prelude        # JSON : les fonctions, méthodes et types que le langage fournit (la référence du site)
 qlang doc --require-levels # échoue pour un fichier sans niveau de stabilité (`[stability]` de qlang.toml)
 ```
 

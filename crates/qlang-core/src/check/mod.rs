@@ -5,7 +5,7 @@ mod annotations;
 mod body;
 mod calls;
 mod captured;
-mod catalog;
+pub mod catalog;
 mod decls;
 mod exhaust;
 mod expr;

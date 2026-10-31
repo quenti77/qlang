@@ -196,7 +196,11 @@ jobs:
         run: |
           source/scripts/render-packaging.sh "$GITHUB_REF_NAME" dist/SHA256SUMS dist
           cp source/install.sh source/install.ps1 dist/
-          (cd dist && sha256sum qlang.rb qlang.json PKGBUILD quenti77.qlang*.yaml install.sh install.ps1 >> SHA256SUMS)
+          # the reference of what the language provides (functions, methods, prelude types), for the site
+          mkdir -p reference-tool
+          tar -xzf dist/qlang-x86_64-unknown-linux-musl.tar.gz -C reference-tool
+          reference-tool/qlang/qlang doc --prelude -o dist/reference.json
+          (cd dist && sha256sum qlang.rb qlang.json PKGBUILD quenti77.qlang*.yaml install.sh install.ps1 reference.json >> SHA256SUMS)
       - name: Attest where the files come from
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

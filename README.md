@@ -158,7 +158,11 @@ champs, méthodes et variantes `public` de leurs types. Les fichiers de test son
 qlang fmt              # remet en forme tous les fichiers .q du projet
 qlang fmt lib.q        # un fichier (ou un dossier)
 qlang fmt --check      # liste ceux qui changeraient, sans les toucher (code de sortie 1 : pour la CI)
+qlang fmt --stdin      # un programme sur l'entrée, mis en forme sur la sortie (éditeur, pre-commit)
 ```
+
+Dossiers ou fichiers à laisser tels quels : `[fmt] exclude = ["vendor", "gen/api.q"]` dans `qlang.toml`
+(chemins relatifs au projet). La mise en forme elle-même n'a pas de réglage : deux espaces par niveau.
 
 Seuls les **espaces au début et à la fin des lignes** changent (deux espaces par niveau, les
 `case` d'un `match` un niveau plus loin que lui) : les jetons, les commentaires et les espaces
@@ -166,6 +170,35 @@ Seuls les **espaces au début et à la fin des lignes** changent (deux espaces p
 résultat ne contenait plus exactement les mêmes jetons). Les chaînes et commentaires sur plusieurs
 lignes ne sont pas touchés. L'extension VS Code propose « Mettre en forme le document » (le serveur
 de langage répond à `textDocument/formatting`).
+
+### Analyse statique : `qlang lint`
+
+```sh
+qlang lint                         # tous les fichiers .q du projet
+qlang lint lib.q --max-complexity 10
+```
+
+Ce que le vérificateur de types ne dit pas (code de sortie 1 s'il y a quelque chose, pour la CI) :
+
+| Code | Signalé |
+| --- | --- |
+| `L001` | une variable jamais utilisée (un nom qui commence par `_` est gardé exprès) |
+| `L002` | une fonction privée que rien n'appelle (dans un fichier qui a un `export`) ; `test_…`, `run`, `handle`, `main`, `setup` et les fonctions annotées sont exemptés |
+| `L003` | un nom importé (`import a, b from "x.q"`) qui n'est jamais écrit |
+| `L004` | du code après `return`, `break` ou `continue` |
+| `L005` | une fonction avec trop de chemins (1 + `if`, `elseif`, `while`, `for`, `case`, `and`, `or` ; 15 par défaut) |
+
+`#[used]` devant une fonction dit au lint qu'elle sert par un chemin qu'il ne voit pas (retrouvée par son nom,
+par réflexion) ; l'annotation n'a aucun autre effet.
+
+### Session interactive : `qlang repl`
+
+`qlang repl` lit une entrée à la fois, avec historique (`~/.qlang_history`) et complétion (mots-clés, noms
+visibles, membres après `Type.`). Une entrée inachevée (un `end` manquant) continue sur la ligne suivante. Les
+définitions (`fun`, `struct`, `import`, `let`…) restent d'une entrée à l'autre ; une expression est
+exécutée une fois et sa valeur est affichée. Chaque entrée est compilée avec les définitions précédentes, donc
+**l'initialisation d'un `let` est rejouée** à chaque entrée : pas d'effet de bord dedans. `--allow-process` et
+`--max-steps N` comme pour `qlang run`.
 
 ### Paquets
 
@@ -519,8 +552,8 @@ curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh
 (le programme `qlang` et l'extension ; ou, depuis les sources : `cargo install --path crates/qlang-cli`,
 puis `cd editors/vscode && npm install && npm run package` et `code --install-extension qlang-*.vsix`).
 
-Pour un autre éditeur, il suffit de lancer `qlang lsp` pour les fichiers `.q` (Neovim :
-`vim.lsp.start({ name = "qlang", cmd = { "qlang", "lsp" }, root_dir = vim.fn.getcwd() })`).
+Pour un autre éditeur, il suffit de lancer `qlang lsp` pour les fichiers `.q`. Réglages Neovim, Helix, Emacs,
+Sublime Text, JetBrains et Zed : [docs/editors.md](docs/editors.md).
 
 Pour les éditeurs, `qlang packages` affiche en JSON les paquets du projet courant (nom,
 dossier, fichier principal) ; une requête JSON peut ensuite contenir leurs fichiers sous

@@ -33,7 +33,7 @@ pub struct Packages {
     by_name: HashMap<String, Package>,
 }
 
-fn read_manifest(dir: &Path) -> Result<Option<toml::Table>, String> {
+pub(crate) fn read_manifest(dir: &Path) -> Result<Option<toml::Table>, String> {
     let file = dir.join("qlang.toml");
     if !file.is_file() {
         return Ok(None);

@@ -27,24 +27,45 @@ fn find(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn usage(why: &str) -> ExitCode {
-    eprintln!("qlang fmt: {why}\nusage: qlang fmt [path...] [--check]");
+    eprintln!("qlang fmt: {why}\nusage: qlang fmt [path...] [--check] | qlang fmt --stdin");
     ExitCode::from(64)
 }
 
 pub fn run(args: &[&str]) -> ExitCode {
     let mut check = false;
+    let mut stdin = false;
     let mut paths: Vec<PathBuf> = Vec::new();
     for a in args {
         match *a {
             "--check" => check = true,
+            "--stdin" => stdin = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
     }
+    if stdin {
+        // for an editor or a pre-commit hook: the program on the standard input, laid out on the output
+        let mut src = String::new();
+        if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut src) {
+            eprintln!("cannot read the standard input: {e}");
+            return ExitCode::from(66);
+        }
+        return match qlang_core::fmt::format(&src) {
+            Ok(out) => {
+                print!("{out}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(65)
+            }
+        };
+    }
     let mut files: Vec<PathBuf> = Vec::new();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let base = crate::project_dir(&cwd).unwrap_or_else(|| cwd.clone());
     if paths.is_empty() {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        find(&crate::project_dir(&cwd).unwrap_or(cwd), &mut files);
+        find(&base, &mut files);
     }
     for p in paths {
         if p.is_dir() {
@@ -56,6 +77,12 @@ pub fn run(args: &[&str]) -> ExitCode {
             return ExitCode::from(66);
         }
     }
+    // `[fmt] exclude = ["vendor", "generated/api.q"]` in qlang.toml: folders or files left as they are
+    let excluded = excluded_paths(&base);
+    files.retain(|f| {
+        let abs = f.canonicalize().unwrap_or_else(|_| f.clone());
+        !excluded.iter().any(|e| abs.starts_with(e))
+    });
     let mut changed = 0usize;
     let mut failed = false;
     for f in &files {
@@ -91,4 +118,25 @@ pub fn run(args: &[&str]) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The paths named by `[fmt] exclude` of the `qlang.toml` in `base`, made absolute.
+fn excluded_paths(base: &Path) -> Vec<PathBuf> {
+    let Ok(Some(manifest)) = crate::packages::read_manifest(base) else {
+        return Vec::new();
+    };
+    manifest
+        .get("fmt")
+        .and_then(|f| f.get("exclude"))
+        .and_then(|e| e.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|v| v.as_str())
+                .map(|p| {
+                    let path = base.join(p);
+                    path.canonicalize().unwrap_or(path)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

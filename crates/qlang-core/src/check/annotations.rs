@@ -106,6 +106,12 @@ impl Checker {
                 }
                 continue;
             }
+            if is_used_marker(a) {
+                if !a.args.is_empty() {
+                    self.err("T292", "`#[used]` takes no arguments", a.span);
+                }
+                continue;
+            }
             if let (Some(data), Some(key)) = (self.check_annotation(a), key) {
                 self.res.annotations.entry(key).or_default().push(data);
             }
@@ -257,6 +263,12 @@ fn literal_of(e: &ast::Expr) -> Option<Lit> {
         ExprKind::Array(items) => Lit::Array(items.iter().map(literal_of).collect::<Option<_>>()?),
         _ => return None,
     })
+}
+
+/// `#[used]`: built in, no effect on the program; it tells `qlang lint` that something is reached
+/// in a way it cannot see (by name, through reflection).
+pub(crate) fn is_used_marker(a: &Annotation) -> bool {
+    a.path.len() == 1 && a.path[0].name == "used"
 }
 
 /// `#[deprecated("use X")]`: built in, not a struct. Calls to what carries it get a warning.

@@ -10,6 +10,7 @@ mod index;
 mod init;
 mod install;
 mod json;
+mod lint;
 mod logging;
 mod lsp;
 mod mem;
@@ -18,6 +19,7 @@ mod password;
 mod process;
 mod providers;
 mod redis;
+mod repl;
 mod selfupdate;
 mod serve;
 mod shared;
@@ -46,7 +48,11 @@ USAGE:
                                          the `std` package (--no-install: do not fetch it)
     qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
                                          project's files (or of the paths given)
-    qlang fmt [path...] [--check]        lay the files out (two spaces per level; only the white
+    qlang lint [path...] [--max-complexity N]
+                                         unused variables, functions and imports, unreachable
+                                         code, functions with too many paths (exit 1 if any)
+    qlang repl [--allow-process]         an interactive session, with history and completion
+    qlang fmt [path...] [--check|--stdin] lay the files out (two spaces per level; only the white
                                          space at the start and end of lines changes); --check
                                          lists the files that would change and exits 1
     qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N] [--trust-externs]
@@ -158,6 +164,8 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
         Some("fmt") => fmtcmd::run(&it.collect::<Vec<_>>()),
+        Some("lint") => lint::run(&it.collect::<Vec<_>>()),
+        Some("repl") => repl::run(&it.collect::<Vec<_>>()),
         Some("self-update") => selfupdate::run(&it.collect::<Vec<_>>()),
         Some("search") => index::search(it.next()),
         Some(cmd @ ("install" | "update" | "add" | "remove")) => {

@@ -1381,7 +1381,7 @@ end
 fn a_full_line_of_waiting_requests_is_answered_503_with_retry_after() {
     let source = r#"
 fun handle(req: Request) -> Response
-  time.sleep(700)
+  time.sleep(2000)
   Response.text("done")
 end
 "#;
@@ -1393,7 +1393,7 @@ end
     let mut open = Vec::new();
     for _ in 0..4 {
         open.push(send_get(server.port, "/x"));
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
     let mut statuses = Vec::new();
     let mut retry_after = false;

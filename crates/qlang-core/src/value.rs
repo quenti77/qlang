@@ -242,6 +242,19 @@ impl Scope {
         self.vars.borrow_mut().insert(name, v);
     }
 
+    /// The variables of this scope alone, in the order they were defined (for the debugger).
+    pub fn entries(&self) -> Vec<(String, Value)> {
+        self.vars
+            .borrow()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    pub fn parent(&self) -> Option<&Env> {
+        self.parent.as_ref()
+    }
+
     pub fn get(&self, name: &str) -> Option<Value> {
         let mut cur: &Scope = self;
         loop {

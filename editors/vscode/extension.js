@@ -77,6 +77,17 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('qlang.run', runFile),
     vscode.commands.registerCommand('qlang.restart', restart),
+    // the debugger is `qlang dap` (breakpoints, steps, variables); a launch without a configuration debugs the open file
+    vscode.debug.registerDebugAdapterDescriptorFactory('qlang', {
+      createDebugAdapterDescriptor: () => new vscode.DebugAdapterExecutable(executable(), ['dap']),
+    }),
+    vscode.debug.registerDebugConfigurationProvider('qlang', {
+      resolveDebugConfiguration: (_folder, config) => {
+        if (!config.type) Object.assign(config, { type: 'qlang', request: 'launch', name: 'Debug the current file' });
+        if (!config.program) config.program = '${file}';
+        return config;
+      },
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('qlang.path') || e.affectsConfiguration('qlang.diagnostics.enabled')) restart();
     }),

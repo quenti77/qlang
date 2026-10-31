@@ -2,6 +2,11 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.74.0
+
+- **Débogueur : `qlang dap`** (Debug Adapter Protocol, entrée et sortie standard). Points d'arrêt par fichier et ligne (aussi dans les fichiers importés), pas à pas (`next`, `stepIn`, `stepOut`), pause, pile d'appels, variables dépliables (tableaux, dictionnaires, structures, énumérations, tuples) et `evaluate` d'un nom de variable. Le programme tourne dans l'interpréteur « simple » ; son `print` arrive dans la console de l'éditeur. L'extension VS Code déclare le débogueur (F5).
+- Dans `qlang-core` : `qlang_core::debug` (un crochet appelé avant chaque instruction, un instantané fait de texte) ; erreur `R907` quand la session de débogage se termine.
+
 ## 0.73.0
 
 - **`qlang lint`** : variables inutilisées (`L001`), fonctions privées que rien n'appelle (`L002`), noms importés jamais écrits (`L003`), code après `return`/`break`/`continue` (`L004`), fonctions avec trop de chemins (`L005`, `--max-complexity N`, 15 par défaut). Code de sortie 1 s'il y a quelque chose. `#[used]` (annotation prédéfinie, sans effet à l'exécution) dit qu'une fonction sert par un chemin que le lint ne voit pas.

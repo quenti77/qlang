@@ -1159,6 +1159,7 @@ fn reload_check(file: &str, opts: &AppOptions, version: u64) -> Option<String> {
         assume_externs: true,
         allow_process: opts.allow_process,
         lines: Default::default(),
+        sink: None,
     };
     match compile(file, &source, &mut host) {
         Ok(_) => {
@@ -1223,6 +1224,7 @@ fn worker(
             assume_externs: false,
             allow_process: opts.allow_process,
             lines: Default::default(),
+            sink: None,
         };
         let program = match compile(file, &source, &mut host) {
             Ok(p) => p,

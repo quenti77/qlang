@@ -4,6 +4,7 @@
 //! bounded by [`Limits`] so that a runaway program cannot hang its host.
 
 mod bytes;
+mod debugging;
 mod dynamic;
 mod externs;
 mod reflect;
@@ -53,7 +54,7 @@ impl Program {
 
 pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> RunResult {
     let mut it = Interp::new(prog, host, limits);
-    it.vm_enabled = vm;
+    it.vm_enabled = vm && it.dbg.is_none();
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| it.run_all()));
     let mut exit_code = None;
@@ -622,6 +623,10 @@ struct Interp<'a> {
     envs: Vec<Env>,
     statics: HashMap<(StructId, String), Value>,
     frames: Vec<(Name, Span)>,
+    /// With a debugger: the debugger, and for the program and each call in progress the last statement
+    /// it ran and the scope it ran in.
+    dbg: Option<Box<dyn crate::debug::Hook>>,
+    dbg_stack: Vec<(Span, Option<Env>)>,
     /// The call expression being evaluated (for `sum()` on empty float arrays).
     cur_call: NodeId,
     /// The type arguments of the generic functions being run that read their type parameters.
@@ -674,6 +679,8 @@ const MAX_FMT_DEPTH: usize = 64;
 
 impl<'a> Interp<'a> {
     fn new(prog: &'a Program, host: &'a mut dyn Host, limits: Limits) -> Interp<'a> {
+        let dbg = crate::debug::take();
+        let dbg_on = dbg.is_some();
         Interp {
             prog,
             host,
@@ -684,6 +691,12 @@ impl<'a> Interp<'a> {
             envs: Vec::new(),
             statics: HashMap::new(),
             frames: Vec::new(),
+            dbg_stack: if dbg.is_some() {
+                vec![(Span::default(), None)]
+            } else {
+                Vec::new()
+            },
+            dbg,
             cur_call: 0,
             tenv: Vec::new(),
             pending_targs: None,
@@ -701,7 +714,7 @@ impl<'a> Interp<'a> {
             vm_state: Vec::new(),
             vm_codes: Vec::new(),
             vm_stack: Vec::new(),
-            vm_enabled: !crate::coverage::enabled(),
+            vm_enabled: !crate::coverage::enabled() && !dbg_on,
             coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
             vm_ostack: Vec::new(),
@@ -931,6 +944,9 @@ impl<'a> Interp<'a> {
 
     fn exec_stmt(&mut self, s: &Stmt, env: &Env) -> R<Value> {
         self.tick(s.span)?;
+        if self.dbg.is_some() {
+            self.debug_statement(s.span, env)?;
+        }
         if self.coverage {
             crate::coverage::hit(s.span);
         }
@@ -1743,6 +1759,9 @@ impl<'a> Interp<'a> {
         }
         self.depth += 1;
         self.frames.push((Name::new(name), span));
+        if self.dbg.is_some() {
+            self.dbg_stack.push((span, None));
+        }
         let scope = Scope::with_capacity(Some(parent.clone()), decl.params.len() + 3);
         if let Some(s) = this {
             scope.define_new("self", s);
@@ -1755,6 +1774,9 @@ impl<'a> Interp<'a> {
             None => Ok(Value::Unit),
         };
         self.frames.pop();
+        if self.dbg.is_some() {
+            self.dbg_stack.pop();
+        }
         self.depth -= 1;
         match r {
             Ok(v) => Ok(v),

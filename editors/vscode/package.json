@@ -2,7 +2,7 @@
   "name": "qlang",
   "displayName": "qlang",
   "description": "Language support for qlang: syntax highlighting, errors as you type, hovers, completion, go to definition, references, rename, symbols, snippets and a Run command.",
-  "version": "0.73.0",
+  "version": "0.74.0",
   "publisher": "qlang",
   "license": "MIT",
   "engines": { "vscode": "^1.82.0" },
@@ -47,6 +47,78 @@
         { "command": "qlang.restart", "when": "editorLangId == qlang" }
       ]
     },
+    "breakpoints": [
+      {
+        "language": "qlang"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "qlang",
+        "label": "qlang",
+        "languages": [
+          "qlang"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The program to debug.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments for the program (env.args()).",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "The folder the program runs in.",
+                "default": "${workspaceFolder}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop before the first statement.",
+                "default": false
+              },
+              "allowProcess": {
+                "type": "boolean",
+                "description": "Allow Process.run (as --allow-process).",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "qlang",
+            "request": "launch",
+            "name": "Debug the current file",
+            "program": "${file}",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "qlang: Debug a file",
+            "description": "Launch a qlang program under the debugger",
+            "body": {
+              "type": "qlang",
+              "request": "launch",
+              "name": "Debug ${1:main.q}",
+              "program": "^\"\\${workspaceFolder}/${1:main.q}\""
+            }
+          }
+        ]
+      }
+    ],
     "configurationDefaults": {
       "[qlang]": {
         "editor.quickSuggestions": { "other": "on", "comments": "off", "strings": "on" }

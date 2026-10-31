@@ -2,6 +2,7 @@
 //! for other programs (PHP, Python...), and can serve that JSON over HTTP.
 
 mod archive;
+mod dap;
 mod db;
 mod devpage;
 mod docgen;
@@ -51,6 +52,8 @@ USAGE:
     qlang lint [path...] [--max-complexity N]
                                          unused variables, functions and imports, unreachable
                                          code, functions with too many paths (exit 1 if any)
+    qlang dap                            a debugger for editors (Debug Adapter Protocol, on the
+                                         standard input and output)
     qlang repl [--allow-process]         an interactive session, with history and completion
     qlang fmt [path...] [--check|--stdin] lay the files out (two spaces per level; only the white
                                          space at the start and end of lines changes); --check
@@ -164,6 +167,7 @@ fn real_main(args: Vec<String>) -> ExitCode {
         Some("test") => testrun::run(&it.collect::<Vec<_>>()),
         Some("doc") => docgen::run(&it.collect::<Vec<_>>()),
         Some("fmt") => fmtcmd::run(&it.collect::<Vec<_>>()),
+        Some("dap") => dap::run(),
         Some("lint") => lint::run(&it.collect::<Vec<_>>()),
         Some("repl") => repl::run(&it.collect::<Vec<_>>()),
         Some("self-update") => selfupdate::run(&it.collect::<Vec<_>>()),
@@ -191,6 +195,9 @@ const MAX_FS_READ: u64 = 64 << 20;
 
 /// A host connected to the terminal and the disk. Imports can reach any `.q` file the
 /// user can read (like `require` in Node), unless `--root` confines them to a directory.
+/// Receives the program's output (`true` for the error output) in place of the terminal.
+type OutputSink = std::sync::Arc<dyn Fn(bool, &str) + Send + Sync>;
+
 struct TerminalHost {
     root: Option<PathBuf>,
     /// State of the random generator: `--seed N`, or taken from the system.
@@ -211,6 +218,8 @@ struct TerminalHost {
     allow_process: bool,
     /// Files opened by `fs.lines`.
     lines: LineFiles,
+    /// Where the program's output goes instead of the terminal (`qlang dap`): `true` for the error output.
+    sink: Option<OutputSink>,
 }
 
 /// The longest line `fs.lines` reads: a file without line breaks must not fill the memory.
@@ -306,16 +315,28 @@ impl SqlBackend for TerminalHost {
 
 impl Host for TerminalHost {
     fn print(&mut self, text: &str) {
+        if let Some(sink) = &self.sink {
+            sink(false, text);
+            return;
+        }
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(text.as_bytes());
     }
 
     fn eprint(&mut self, text: &str) {
+        if let Some(sink) = &self.sink {
+            sink(true, text);
+            return;
+        }
         let mut err = std::io::stderr().lock();
         let _ = err.write_all(text.as_bytes());
     }
 
     fn read_line(&mut self) -> Result<Option<String>, HostError> {
+        if self.sink.is_some() {
+            // the standard input carries the debugger's messages
+            return Ok(None);
+        }
         let _ = std::io::stdout().flush();
         let mut line = String::new();
         match std::io::stdin().lock().read_line(&mut line) {
@@ -986,6 +1007,7 @@ fn new_host_with(
         assume_externs: !run,
         allow_process: false,
         lines: LineFiles::default(),
+        sink: None,
     })
 }
 

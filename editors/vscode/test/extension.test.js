@@ -6,7 +6,7 @@ const Module = require('node:module');
 
 /** A fake `vscode` module, recording what the extension does. */
 function fakeVscode(config) {
-  const log = { commands: {}, terminals: [], warnings: [], messages: [], opened: [], listeners: {} };
+  const log = { commands: {}, terminals: [], warnings: [], messages: [], opened: [], listeners: {}, adapters: {}, debugConfigs: {} };
   const on = (name) => (fn) => {
     (log.listeners[name] = log.listeners[name] || []).push(fn);
     return { dispose() {} };
@@ -35,6 +35,21 @@ function fakeVscode(config) {
         log.terminals.push(t);
         return t;
       },
+    },
+    debug: {
+      registerDebugAdapterDescriptorFactory: (type, factory) => {
+        log.adapters[type] = factory;
+        return { dispose() {} };
+      },
+      registerDebugConfigurationProvider: (type, provider) => {
+        log.debugConfigs[type] = provider;
+        return { dispose() {} };
+      },
+    },
+    DebugAdapterExecutable: class {
+      constructor(command, args) {
+        Object.assign(this, { command, args });
+      }
     },
     workspace: {
       getConfiguration: () => ({ get: (key, dflt) => (key in config ? config[key] : dflt) }),
@@ -165,5 +180,18 @@ test('the Run command saves the file and starts it in a terminal', async () => {
   );
   await log.commands['qlang.run']();
   assert.strictEqual(log.terminals.length, 1, 'the terminal is reused');
+  await ext.deactivate();
+});
+
+test('the debugger is `qlang dap`, and a bare launch debugs the open file', async () => {
+  const { vscode, log } = fakeVscode({ path: '/opt/qlang' });
+  const ext = loadExtension(vscode, fakeClient().module);
+  await ext.activate({ subscriptions: [] });
+  const d = log.adapters.qlang.createDebugAdapterDescriptor();
+  assert.deepStrictEqual({ command: d.command, args: d.args }, { command: '/opt/qlang', args: ['dap'] });
+  const config = log.debugConfigs.qlang.resolveDebugConfiguration(undefined, {});
+  assert.deepStrictEqual(config, { type: 'qlang', request: 'launch', name: 'Debug the current file', program: '${file}' });
+  const own = log.debugConfigs.qlang.resolveDebugConfiguration(undefined, { type: 'qlang', program: 'a.q' });
+  assert.strictEqual(own.program, 'a.q');
   await ext.deactivate();
 });

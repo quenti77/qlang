@@ -191,6 +191,13 @@ Ce que le vérificateur de types ne dit pas (code de sortie 1 s'il y a quelque c
 `#[used]` devant une fonction dit au lint qu'elle sert par un chemin qu'il ne voit pas (retrouvée par son nom,
 par réflexion) ; l'annotation n'a aucun autre effet.
 
+### Débogueur : `qlang dap`
+
+`qlang dap` est un adaptateur de débogage ([DAP](https://microsoft.github.io/debug-adapter-protocol/)) : points d'arrêt,
+pas à pas, pause, pile d'appels et variables dans l'éditeur. Dans VS Code (extension du dépôt), **F5** sur un fichier
+`.q` suffit ; pour les autres éditeurs, voir [docs/editors.md](docs/editors.md). Le programme tourne sans l'optimisation à
+registres (plus lent) et sans entrée au clavier.
+
 ### Session interactive : `qlang repl`
 
 `qlang repl` lit une entrée à la fois, avec historique (`~/.qlang_history`) et complétion (mots-clés, noms

@@ -86,6 +86,47 @@ commande `qlang lsp`, et dans *Mappings* l'extension de fichier `*.q`. La gramma
 Zed déclare un langage par une extension (grammaire + serveur). Il n'y en a pas encore pour qlang : tant que ce n'est
 pas fait, utilisez `qlang fmt --stdin` comme formateur externe et `qlang check` dans le terminal.
 
+## Débogueur (DAP)
+
+`qlang dap` est un adaptateur de débogage ([Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)) sur
+l'entrée et la sortie standard : points d'arrêt, pas à pas (entrer, sauter, sortir), pause, pile d'appels, variables
+(tableaux, dictionnaires, structures, énumérations dépliables) et `evaluate` pour un nom de variable (`a`, `a.champ`,
+`a.0`). La configuration de lancement prend `program` (obligatoire), `args`, `cwd`, `stopOnEntry` et `allowProcess`.
+VS Code : l'extension du dépôt le branche (touche F5 sur un fichier `.q`).
+
+Autres éditeurs (même réserve que plus haut : réglages d'après leur documentation) :
+
+```lua
+-- Neovim, avec nvim-dap
+local dap = require("dap")
+dap.adapters.qlang = { type = "executable", command = "qlang", args = { "dap" } }
+dap.configurations.qlang = {
+  { type = "qlang", request = "launch", name = "Debug the file", program = "${file}" },
+}
+```
+
+```toml
+# Helix, dans languages.toml (dans le bloc [[language]] de qlang)
+[language.debugger]
+name = "qlang"
+transport = "stdio"
+command = "qlang"
+args = ["dap"]
+
+[[language.debugger.templates]]
+name = "file"
+request = "launch"
+completion = [ { name = "program", completion = "filename" } ]
+args = { program = "{0}" }
+```
+
+Emacs : `dape` ou `dap-mode` avec la commande `qlang dap` et `:program` ; JetBrains : LSP4IJ gère aussi un adaptateur DAP
+(*Debug Adapter Protocol* dans les réglages).
+
+À savoir : le programme tourne dans l'interpréteur « simple » (comme `--coverage`), donc plus lentement ; son
+`print` va dans la console de l'éditeur ; la lecture au clavier (`read()`) n'est pas disponible (l'entrée est celle du
+protocole) ; un point d'arrêt sur une ligne sans instruction (blanche, commentaire, `end`) ne s'arrête jamais.
+
 ## Mise en forme et analyse depuis n'importe quel éditeur
 
 - `qlang fmt --stdin` : le programme sur l'entrée, mis en forme sur la sortie (code 65 si le fichier ne s'analyse pas).

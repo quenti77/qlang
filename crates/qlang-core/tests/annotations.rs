@@ -85,6 +85,9 @@ fn a_doc_comment_above_an_annotation_still_documents() {
 
 #[test]
 fn mistakes_are_reported() {
+    // `#[used]` is built in and takes nothing
+    assert_eq!(run("#[used]\nfun f()\nend\n"), "");
+    assert_eq!(run("#[used(1)]\nfun f()\nend\n"), "T292");
     // unknown annotation
     assert_eq!(run("#[Nope]\nfun f()\nend\n"), "T001");
     // a struct that is not an annotation

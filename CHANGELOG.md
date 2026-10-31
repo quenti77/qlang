@@ -2,6 +2,13 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.73.0
+
+- **`qlang lint`** : variables inutilisées (`L001`), fonctions privées que rien n'appelle (`L002`), noms importés jamais écrits (`L003`), code après `return`/`break`/`continue` (`L004`), fonctions avec trop de chemins (`L005`, `--max-complexity N`, 15 par défaut). Code de sortie 1 s'il y a quelque chose. `#[used]` (annotation prédéfinie, sans effet à l'exécution) dit qu'une fonction sert par un chemin que le lint ne voit pas.
+- **`qlang repl`** : session interactive avec historique (`~/.qlang_history`), complétion (mots-clés, noms visibles, membres après `Type.`) et entrées sur plusieurs lignes. Les définitions restent ; une expression est exécutée et sa valeur affichée ; l'initialisation d'un `let` est rejouée à chaque entrée.
+- **`qlang fmt --stdin`** (programme sur l'entrée, mis en forme sur la sortie) et **`[fmt] exclude = [...]`** dans `qlang.toml`.
+- **Autres éditeurs** : [docs/editors.md](docs/editors.md) (Neovim, Helix, Emacs, Sublime Text, JetBrains, Zed) autour de `qlang lsp`.
+
 ## 0.72.0
 
 - **Couverture de code** : `qlang test --coverage` dit, par fichier source, quelles lignes portant une instruction ont été exécutées par les tests (et lesquelles non) ; `--coverage-lcov FICHIER` écrit un fichier LCOV. Couverture de lignes, sans l'optimisation à registres pour que chaque instruction soit comptée ; rien ne change (ni ne coûte) sans l'option.

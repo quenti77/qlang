@@ -1126,6 +1126,8 @@ fonction ou une méthode comme dépréciée. Un appel venant d'un **autre module
 `qlang check`, `run` ou `test` en fait une erreur. Sans texte, c'est l'erreur `T292`. Le cycle complet
 (annoncer, avertir, retirer) est dans [stability.md](stability.md).
 
+**`#[used]`** est aussi prédéfinie et sans effet sur le programme : devant une fonction, elle dit à `qlang lint` qu'elle sert par un chemin qu'il ne voit pas (trouvée par son nom, par réflexion). Elle ne prend pas d'argument (`T292`).
+
 ### Réflexion
 
 `Reflect` décrit, pendant l'exécution, ce que la vérification connaît : une structure, une

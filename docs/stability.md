@@ -45,7 +45,7 @@ niveau de leur partie : une clé ajoutée n'est pas un changement cassant, une c
 | `qlang run`, `check`, `fmt`, `test` (options existantes) | **stable** (on ajoute des options, on n'en retire pas sans cycle) |
 | `qlang serve` (options, protocole de `handle`) | provisoire ; `Response.stream` / `sse` / `file` provisoires ; WebSocket **expérimental** |
 | `qlang install`, `add`, `update`, `remove`, `search`, `lsp`, `doc`, `self-update` | provisoire |
-| `qlang init --web`, `qlang test --coverage` / `--group` | **expérimental** |
+| `qlang init --web`, `qlang test --coverage` / `--group`, `qlang lint`, `qlang repl`, `qlang fmt --stdin` | **expérimental** |
 | `qlang.toml` : `[package]` (`name`, `version`, `entry`, `main`, `qlang`) et `[dependencies]` | provisoire |
 | `qlang.toml` : `[externs]` | **expérimental** |
 | `qlang.lock` | provisoire (format lisible, ne pas l'éditer) |

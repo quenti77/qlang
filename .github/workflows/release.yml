@@ -213,6 +213,20 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "qlang ${GITHUB_REF_NAME#v}" \
             --generate-notes
+      # the formula and the manifest go to their repositories (docs/packaging.md); nothing happens without the
+      # secret, and a failure here never undoes the release
+      - name: Update the Homebrew tap and the Scoop bucket
+        continue-on-error: true
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          if [ -z "$PACKAGES_TOKEN" ]; then
+            echo "PACKAGES_TOKEN is not set: the tap and the bucket are not updated"
+            exit 0
+          fi
+          export TAP_REPO="https://x-access-token:${PACKAGES_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/homebrew-qlang.git"
+          export BUCKET_REPO="https://x-access-token:${PACKAGES_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/scoop-qlang.git"
+          source/scripts/update-package-repos.sh "$GITHUB_REF_NAME" dist
 
   docker:
     name: Docker image

@@ -1943,6 +1943,38 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+// ---------------------------------------------------------------- entry points for the fuzz targets
+
+/// Bytes a client could send, through the reader of a real connection (a loopback socket pair): the
+/// request line, the headers, the body and the chunked coding. It must never panic.
+pub fn fuzz_request(bytes: &[u8]) {
+    static LISTENER: std::sync::OnceLock<TcpListener> = std::sync::OnceLock::new();
+    let listener =
+        LISTENER.get_or_init(|| TcpListener::bind("127.0.0.1:0").expect("a loopback port"));
+    let addr = listener.local_addr().expect("its address");
+    let mut client = TcpStream::connect(addr).expect("connect to the loopback listener");
+    let _ = client.write_all(bytes);
+    let _ = client.shutdown(std::net::Shutdown::Write);
+    let (mut server, _) = listener.accept().expect("accept");
+    let _ = server.set_read_timeout(Some(Duration::from_millis(200)));
+    let mut carry = Vec::new();
+    if let Ok(parsed) = read_request(&mut server, &mut carry, 1 << 20, None) {
+        let _ = split_target(&parsed.target);
+        let _ = refuse_browser(&parsed, true);
+        let _ = parsed.header("host");
+    }
+}
+
+/// A request target and a path under a folder: the folder served with `--static` must stay closed.
+/// `true` when the answer is acceptable (nothing, or a file below `dir`).
+pub fn fuzz_static_path(dir: &Path, path: &str) -> bool {
+    let (decoded, _) = split_target(path);
+    match static_file(dir, &decoded) {
+        None => true,
+        Some(file) => file.starts_with(dir),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

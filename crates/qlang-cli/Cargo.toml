@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+name = "qlang_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "qlang"
 path = "src/main.rs"

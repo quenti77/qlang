@@ -8,6 +8,7 @@
 - **`qlang info nom`**, `qlang search` (licence) ; l'index peut dire `license`, `keywords`, `yanked` (versions que plus aucune résolution ne choisit) et `removed` (le paquet disparaît de la recherche, `qlang add` le refuse).
 - **`qlang publish`** : contrôle qu'un paquet peut être listé (nom, version, description, licence, README, compile, arbre propre, étiquette sur `HEAD`, `origin` en https) et écrit l'entrée à proposer.
 - **`qlang verify`** : les paquets installés sont à leur commit de `qlang.lock`, sans fichier modifié. **`signed = true`** : le commit doit porter une signature que git vérifie. **`token_env = "VAR"`** : jeton d'un dépôt https privé, donné à git pour cette seule dépendance.
+- **Corrigé** : une tâche (`Worker`) est tenue à la même limite de pas que le programme qui l'a lancée (`--max-steps`) ; avant, elle avait la limite par défaut, qu'une boucle active atteignait en quelques centaines de millisecondes sur une machine rapide.
 - [docs/registry.md](docs/registry.md) : utiliser, publier, ce que l'index promet et comment un retrait se décide.
 
 ## 0.78.0

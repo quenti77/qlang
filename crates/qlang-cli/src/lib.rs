@@ -1123,6 +1123,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         }
         i += 1;
     }
+    task::set_max_steps(limits.max_steps);
     let entry;
     let file = match file {
         Some(f) => f,

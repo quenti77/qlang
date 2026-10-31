@@ -11,6 +11,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+/// The step limit tasks get (0: the default one).
+static MAX_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `--max-steps` of the program, passed on to its tasks.
+pub fn set_max_steps(n: u64) {
+    MAX_STEPS.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub const TASK_EXTERNS: &[&str] = &[
     "task_spawn",
     "task_send",
@@ -154,7 +162,15 @@ fn run_file(path: &Path, root: Option<PathBuf>, allow_process: bool) -> Result<(
     let shown = path.display().to_string();
     let program = compile(&shown, &source, &mut host).map_err(|e| e.render())?;
     program
-        .run_test("run", &mut host, Limits::default())
+        .run_test("run", &mut host, {
+            let mut limits = Limits::default();
+            // a task is held to the same step limit as the program that started it (`--max-steps`)
+            let steps = MAX_STEPS.load(std::sync::atomic::Ordering::Relaxed);
+            if steps > 0 {
+                limits.max_steps = steps;
+            }
+            limits
+        })
         .map_err(|d| {
             if d.code == "R070" {
                 format!("{shown} has no `fun run()` (the function a task starts with)")

@@ -24,6 +24,15 @@ fn read_message(from: &mut BufReader<ChildStdout>) -> Option<Value> {
     serde_json::from_slice(&body).ok()
 }
 
+/// The canonical form the adapter reports (without Windows' `\\?\` prefix).
+fn plain(path: std::path::PathBuf) -> std::path::PathBuf {
+    let text = path.to_string_lossy().into_owned();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => path,
+    }
+}
+
 impl Drop for Client {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -139,7 +148,7 @@ fn a_breakpoint_stops_the_program_and_the_steps_move_through_it() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.q");
     std::fs::write(&file, PROGRAM).unwrap();
-    let file = file.canonicalize().unwrap();
+    let file = file.canonicalize().map(plain).unwrap();
 
     let mut c = Client::start();
     let caps = c.request("initialize", json!({"adapterID": "qlang"}));
@@ -192,7 +201,7 @@ fn stop_on_entry_and_step_in_follow_a_call() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.q");
     std::fs::write(&file, PROGRAM).unwrap();
-    let file = file.canonicalize().unwrap();
+    let file = file.canonicalize().map(plain).unwrap();
 
     let mut c = Client::start();
     c.request("initialize", json!({}));
@@ -245,8 +254,8 @@ fn a_breakpoint_works_in_an_imported_file() {
         "import twice from \"sub/lib.q\"\nlet items = [1, 2]\nfor i in items do\n  print(twice(i))\nend\n",
     )
     .unwrap();
-    let main = dir.join("main.q").canonicalize().unwrap();
-    let lib = dir.join("sub/lib.q").canonicalize().unwrap();
+    let main = dir.join("main.q").canonicalize().map(plain).unwrap();
+    let lib = dir.join("sub/lib.q").canonicalize().map(plain).unwrap();
     let mut c = Client::start();
     c.request("initialize", json!({}));
     c.event("initialized");

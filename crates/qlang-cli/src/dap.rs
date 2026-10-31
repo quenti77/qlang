@@ -36,6 +36,19 @@ struct State {
     quit: bool,
 }
 
+/// A path without the `\\?\` prefix Windows gives to canonical paths (it breaks the way modules are looked up).
+fn plain(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    plain(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
+}
+
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
@@ -77,7 +90,7 @@ impl DebugHook {
         } else {
             self.base.join(raw)
         };
-        let full = full.canonicalize().unwrap_or(full);
+        let full = canonical(&full);
         self.paths.insert(file.to_string(), full.clone());
         full
     }
@@ -303,7 +316,7 @@ pub fn run() -> ExitCode {
                     continue;
                 };
                 let program = PathBuf::from(program);
-                let program = program.canonicalize().unwrap_or(program);
+                let program = canonical(&program);
                 launch = Some(Launch {
                     program,
                     args: args["args"]
@@ -324,9 +337,7 @@ pub fn run() -> ExitCode {
             }
             "setBreakpoints" => {
                 let path = args["source"]["path"].as_str().unwrap_or("");
-                let path = Path::new(path)
-                    .canonicalize()
-                    .unwrap_or_else(|_| PathBuf::from(path));
+                let path = canonical(Path::new(path));
                 let lines: Vec<u32> = args["breakpoints"]
                     .as_array()
                     .map(|b| {

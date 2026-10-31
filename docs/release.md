@@ -65,6 +65,8 @@ cargo build --release && scripts/test-install.sh
   avec les deux programmes Linux déjà compilés et publie `ghcr.io/quenti77/qlang:X.Y.Z` et `:latest`
   (amd64 et arm64). Après la **première** publication, rendre le paquet public (GitHub > Packages
   > qlang > Package settings > Change visibility).
+- **Pas à pas pour créer les dépôts** (image publique, tap, bucket, AUR, winget, apt/yum, mise à jour automatique) :
+  [packaging.md](packaging.md).
 - **Homebrew, Scoop, AUR** : la release contient `qlang.rb`, `qlang.json` et `PKGBUILD`, remplis avec
   les sommes de contrôle (`scripts/render-packaging.sh`, modèles dans `packaging/`). Pour les
   proposer : créer les dépôts `homebrew-qlang` (tap), `scoop-qlang` (bucket) et le paquet AUR

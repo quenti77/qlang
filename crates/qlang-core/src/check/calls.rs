@@ -9,6 +9,7 @@ use crate::ast::*;
 /// Why `Shared` is not there.
 /// Why `Worker` is not there.
 const TASK_ONLY: &str = "tasks are only offered by the `qlang` command";
+const TRACE_ONLY: &str = "tracing is only offered by the `qlang` command";
 const SHARED_ONLY: &str = "shared numbers are only offered by the `qlang` command";
 const ARCHIVE_ONLY: &str = "compression and time zones are only offered by the `qlang` command";
 const TERM_ONLY: &str = "the terminal is only offered by the `qlang` command";
@@ -1316,6 +1317,11 @@ impl Checker {
                     ("Worker", "next") => Some(("task_next", TASK_ONLY)),
                     ("Worker", "cancelled") => Some(("task_cancelled", TASK_ONLY)),
                     ("Worker", "finish") => Some(("task_finish", TASK_ONLY)),
+                    ("Trace", "start") => Some(("trace_start", TRACE_ONLY)),
+                    ("Trace", "end") => Some(("trace_end", TRACE_ONLY)),
+                    ("Trace", "id") => Some(("trace_id", TRACE_ONLY)),
+                    ("Trace", "traceparent") => Some(("trace_traceparent", TRACE_ONLY)),
+                    ("Trace", "attr") => Some(("trace_attr", TRACE_ONLY)),
                     ("Shared", "add") => Some(("shared_add", SHARED_ONLY)),
                     ("Shared", "get") => Some(("shared_get", SHARED_ONLY)),
                     ("Shared", "set") => Some(("shared_set", SHARED_ONLY)),

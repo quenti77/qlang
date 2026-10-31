@@ -2840,6 +2840,46 @@ impl Shared
     end
 end
 
+--" Distributed tracing (OpenTelemetry) of `qlang serve --otlp-endpoint URL`: the request is a span of a
+trace (it continues the `traceparent` the client sent), the HTTP calls the program makes are spans too and carry
+`traceparent`, and every log line of the request has `trace_id` and `span_id`. `Trace.span(name, f)` makes a
+span of your own around `f`; `Trace.attr` adds a note to the span being run; `Trace.id()` is the trace id (to show
+on an error page, for instance). Outside a traced request all of these do nothing (`id()` is the empty text).
+Needs the `qlang` command. --"
+struct Trace
+end
+
+impl Trace
+    --" Runs `f` as a span called `name` and gives what it gives. --"
+    public fun span<T>(name: string, f: fun() -> T) -> T
+        let handle = trace_start(name)
+        let result = f()
+        trace_end(handle, false)
+        result
+    end
+
+    --" Adds `key = value` to the span being run. --"
+    public fun attr(key: string, value: string)
+        trace_attr(key, value)
+    end
+
+    --" The id of the trace of this request (32 hexadecimal digits), or "" outside a traced request. --"
+    public fun id() -> string
+        trace_id()
+    end
+
+    --" The `traceparent` header value to give to a service called by other means than `http` (a queue message, for example). --"
+    public fun traceparent() -> string
+        trace_traceparent()
+    end
+end
+
+extern fun trace_start(name: string) -> int
+extern fun trace_end(handle: int, failed: bool)
+extern fun trace_id() -> string
+extern fun trace_traceparent() -> string
+extern fun trace_attr(key: string, value: string)
+
 -- The `qlang` command provides compression and the time zone database.
 extern fun archive_gzip(data: bytes, level: int) -> bytes
 extern fun archive_gunzip(data: bytes, max: int) -> Result<bytes, Error>

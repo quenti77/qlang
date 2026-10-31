@@ -1801,6 +1801,29 @@ elle exécute de nouveau le haut de son fichier ; une tâche en attente dans un 
 requête lente) s'arrête quand l'appel rend la main. Un `print` dans une tâche écrit sur la même sortie que le
 programme.
 
+#### Traces distribuées : `Trace` et OpenTelemetry
+
+`qlang serve --otlp-endpoint http://collecteur:4318` (ou la variable `OTEL_EXPORTER_OTLP_ENDPOINT`) envoie les **traces**
+des requêtes à un collecteur OpenTelemetry (OTLP sur HTTP, JSON ; `--service-name` ou `OTEL_SERVICE_NAME` donne le nom
+du service, `qlang` par défaut) :
+
+- chaque requête est un **span** serveur (`GET /chemin`), enfant de l'appelant quand la requête porte un en-tête
+  `traceparent` ([W3C Trace Context](https://www.w3.org/TR/trace-context/)), racine d'une nouvelle trace sinon ;
+- chaque appel `http.send` / `http.send_all` du programme est un span client **et part avec un `traceparent`** (sauf si
+  le programme en a mis un lui-même), donc la chaîne de services reste une seule trace ; l'adresse notée n'a ni
+  paramètres de requête ni identifiants ;
+- chaque ligne de `Log.*` de la requête porte `trace_id` et `span_id` (en JSON comme en texte) ;
+- `Trace.span("nom", fun() ... end)` entoure un morceau de programme d'un span à vous, `Trace.attr("clé", "valeur")` note
+  quelque chose sur le span en cours, `Trace.id()` donne l'identifiant de la trace (pour une page d'erreur : « donnez-nous
+  cet identifiant »), `Trace.traceparent()` la valeur d'en-tête à donner à un service appelé autrement que par `http`
+  (un message de file, par exemple).
+
+Les spans partent par lots, en arrière-plan, toutes les secondes ; un collecteur absent ne ralentit ni ne casse
+aucune requête (un avertissement, une seule fois). Sans `--otlp-endpoint`, rien n'est exporté, mais un `traceparent`
+reçu est quand même transmis aux appels et aux logs : un service au milieu d'une chaîne ne la coupe pas. Le
+drapeau d'échantillonnage reçu est respecté (un appelant qui n'échantillonne pas : rien n'est envoyé) ; sinon tout est
+échantillonné. Au plus 1000 spans par requête. Il faut la commande `qlang` (`T250` ailleurs).
+
 #### Sortie et sortie d'erreur
 
 Un programme a deux sorties. La **sortie** (`print`, `write`) porte ce que le programme
@@ -2811,6 +2834,7 @@ Options de `qlang serve app.q` :
 | `--seed N`       | fixe le hasard (chaque worker prend `N` plus son numéro)                                  |
 | `--request-timeout S` | temps qu'une requête peut durer avant d'être arrêtée par l'erreur `R905` (30 par défaut ; `0` : aucune limite). L'horloge est lue tous les quelques milliers de pas : un programme qui ne fait qu'attendre (`time.sleep`, une requête SQL lente) s'arrête quand il reprend la main. Ne vaut ni pour le flux d'une réponse ni pour les WebSockets |
 | `--max-queue N` | combien de requêtes peuvent attendre qu'un worker se libère (`0` par défaut : seul `--max-connections` borne). Au-delà, la réponse est `503` avec `Retry-After: 1` tout de suite, au lieu de laisser la file grandir |
+| `--otlp-endpoint URL` | envoie les traces des requêtes à un collecteur OpenTelemetry (voir « Traces distribuées ») ; `--service-name NOM` nomme le service |
 | `--db-pool N` | au plus N connexions réelles à PostgreSQL ou MySQL pour tout le processus, partagées par les workers (par défaut : une connexion par `Db.connect` et par worker). Un `Db` en prend une pour chaque requête SQL et la rend ; pendant une transaction (`begin` jusqu'à `commit`/`rollback`) il garde la même. Si les N sont occupées, la requête attend jusqu'à 30 s, puis échoue. Les réglages de session (`SET`, tables temporaires) ne survivent pas d'une requête à l'autre hors transaction. SQLite n'est pas concerné |
 | `--max-connections N` | connexions ouvertes en même temps (64 par défaut, de 1 à 10000) ; les suivantes reçoivent `503` |
 | `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |

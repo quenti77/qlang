@@ -59,6 +59,16 @@ fn shared_numbers_need_the_qlang_command_too() {
 }
 
 #[test]
+fn tracing_needs_the_qlang_command_too() {
+    let out = exec("print(Trace.id())");
+    assert!(
+        out.starts_with("COMPILE: T250")
+            && out.contains("tracing is only offered by the `qlang` command"),
+        "{out}"
+    );
+}
+
+#[test]
 fn workers_need_the_qlang_command_too() {
     let out = exec("print(Worker.spawn(\"a.q\", Json.null()).is_ok())");
     assert!(

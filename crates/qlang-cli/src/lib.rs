@@ -29,6 +29,7 @@ mod stop;
 mod task;
 mod term;
 mod testrun;
+mod trace;
 pub mod ws;
 
 use qlang_core::check::compile;
@@ -237,7 +238,7 @@ struct LineFiles {
 }
 
 /// Random bits from the system (`/dev/urandom`, or the keys std picks for its hash tables).
-fn system_entropy() -> u64 {
+pub(crate) fn system_entropy() -> u64 {
     use std::io::Read;
     let mut bytes = [0u8; 8];
     if std::fs::File::open("/dev/urandom")
@@ -649,6 +650,7 @@ impl Host for TerminalHost {
             || term::TERM_EXTERNS.contains(&name)
             || archive::ARCHIVE_EXTERNS.contains(&name)
             || shared::SHARED_EXTERNS.contains(&name)
+            || trace::TRACE_EXTERNS.contains(&name)
             || task::TASK_EXTERNS.contains(&name)
             || self.providers.has(name)
             || qlang_core::host::std_has(self.capabilities(), name)
@@ -679,6 +681,9 @@ impl Host for TerminalHost {
         if shared::SHARED_EXTERNS.contains(&name) {
             return shared::call(name, &args);
         }
+        if trace::TRACE_EXTERNS.contains(&name) {
+            return trace::call(name, &args);
+        }
         if task::TASK_EXTERNS.contains(&name) {
             let parent = task::Parent {
                 root: self.root.clone(),
@@ -696,13 +701,25 @@ impl Host for TerminalHost {
             .unwrap_or(Err(HostError::Unsupported("extern")))
     }
 
-    fn http_send(&mut self, req: HttpRequest) -> Result<HttpResponse, HostError> {
-        send_http(req)
+    fn http_send(&mut self, mut req: HttpRequest) -> Result<HttpResponse, HostError> {
+        let span = trace::client_call(&mut req);
+        let result = send_http(req);
+        trace::finish_client(span, &result);
+        result
     }
 
     fn http_send_all(&mut self, reqs: Vec<HttpRequest>) -> Vec<Result<HttpResponse, HostError>> {
         // at most 16 at a time, the answers in the order of the requests
         let mut out = Vec::with_capacity(reqs.len());
+        // each call gets its span (and `traceparent`) here, where the request's context is
+        let mut spans = Vec::with_capacity(reqs.len());
+        let reqs: Vec<HttpRequest> = reqs
+            .into_iter()
+            .map(|mut r| {
+                spans.push(trace::client_call(&mut r));
+                r
+            })
+            .collect();
         let mut reqs = reqs.into_iter();
         loop {
             let batch: Vec<HttpRequest> = reqs.by_ref().take(16).collect();
@@ -722,6 +739,9 @@ impl Host for TerminalHost {
                     );
                 }
             });
+        }
+        for (span, result) in spans.into_iter().zip(out.iter()) {
+            trace::finish_client(span, result);
         }
         out
     }

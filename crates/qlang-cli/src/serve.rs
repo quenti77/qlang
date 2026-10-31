@@ -95,6 +95,8 @@ pub fn serve(args: &[&str]) -> ExitCode {
     };
     let mut tune = Tuning::default();
     let mut dev_public = false;
+    let mut otlp_endpoint: Option<String> = None;
+    let mut service_name: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--" {
@@ -204,6 +206,26 @@ pub fn serve(args: &[&str]) -> ExitCode {
                     None => return ExitCode::from(64),
                 }
             }
+            "--otlp-endpoint" => {
+                i += 1;
+                match args.get(i) {
+                    Some(url) => otlp_endpoint = Some(url.to_string()),
+                    None => {
+                        eprintln!("--otlp-endpoint needs the address of a collector");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
+            "--service-name" => {
+                i += 1;
+                match args.get(i) {
+                    Some(name) => service_name = Some(name.to_string()),
+                    None => {
+                        eprintln!("--service-name needs a name");
+                        return ExitCode::from(64);
+                    }
+                }
+            }
             "--no-access-log" => ACCESS_LOG.store(false, Ordering::SeqCst),
             "--watch" => app.watch = true,
             "--compress" => app.compress = true,
@@ -303,6 +325,7 @@ pub fn serve(args: &[&str]) -> ExitCode {
         return ExitCode::from(64);
     }
     let _ = TUNING.set(tune);
+    crate::trace::init(otlp_endpoint, service_name);
     if let Some(file) = &app.file {
         match crate::providers::specs_for(Path::new(file), &app.extern_commands).and_then(|specs| {
             crate::providers::ensure_trusted(&specs, app.trust_externs).map(|()| specs)
@@ -1085,6 +1108,8 @@ fn serve_app(bind: &str, port: u16, opts: AppOptions) -> ExitCode {
     while active.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
+    // the spans of the last requests leave before the process does
+    crate::trace::flush();
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => code,
@@ -1312,9 +1337,15 @@ fn worker(
                     if dev {
                         crate::db::start_query_log();
                     }
+                    crate::trace::begin_request(
+                        &job.request.headers,
+                        &job.request.method,
+                        &job.request.url,
+                    );
                     let mut answer = app
                         .handle(job.request)
                         .map_err(|d| Box::new(devpage::Failure::new(&d, &program.sources)));
+                    crate::trace::end_request(answer.as_ref().map_or(500, |r| r.status as u16));
                     if dev {
                         let queries = crate::db::take_query_log();
                         if let Some(line) =

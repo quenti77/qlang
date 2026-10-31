@@ -83,6 +83,17 @@ pub fn write(time_ms: Option<i64>, level: &str, message: &str, fields: &[(String
     if n < LEVEL.load(Ordering::SeqCst) {
         return;
     }
+    // inside a traced request, every line says which trace and span it belongs to
+    let mut with_ids: Vec<(String, String)>;
+    let fields = match crate::trace::current_ids() {
+        Some((trace_id, span_id)) => {
+            with_ids = fields.to_vec();
+            with_ids.push(("trace_id".into(), trace_id));
+            with_ids.push(("span_id".into(), span_id));
+            &with_ids[..]
+        }
+        None => fields,
+    };
     let when = time_ms.map(qlang_core::datetime::to_iso);
     let line = if JSON.load(Ordering::SeqCst) {
         let mut obj = serde_json::Map::new();

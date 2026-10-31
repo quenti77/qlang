@@ -49,7 +49,7 @@ USAGE:
     qlang fmt [path...] [--check]        lay the files out (two spaces per level; only the white
                                          space at the start and end of lines changes); --check
                                          lists the files that would change and exits 1
-    qlang test [path...] [--filter TEXT] [--seed N] [--max-steps N] [--trust-externs]
+    qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N] [--trust-externs]
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
     qlang run [file.q] [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]

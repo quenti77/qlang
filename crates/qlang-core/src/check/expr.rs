@@ -255,6 +255,7 @@ impl Checker {
     }
 
     pub fn check_stmt(&mut self, s: &Stmt, want: &Want) -> Ty {
+        crate::coverage::declare(s.span);
         match &s.kind {
             StmtKind::Expr(e) => self.expr(e, want),
             StmtKind::Let {

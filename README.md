@@ -186,6 +186,9 @@ ensuite récupéré et figé dans `qlang.lock` comme n'importe quel autre.
 qlang test                       # tous les tests du projet
 qlang test math_test.q           # un fichier (ou un dossier)
 qlang test --filter double       # les tests dont le nom contient « double »
+qlang test --coverage            # + les lignes de code que les tests n'ont pas exécutées
+qlang test --coverage-lcov c.info  # + un fichier LCOV pour un outil de couverture
+qlang test --group db --skip-group slow   # avec qlang-test : certains groupes seulement
 ```
 
 Les fichiers de test se nomment `*_test.q` ou `test_*.q` ; dans chacun, toute fonction
@@ -216,6 +219,13 @@ Les autres assertions : `assert_err`, `assert_some`, `assert_none`, `assert_cont
 `assert_not_contains`, `assert_starts_with`, `assert_ends_with`,
 `assert_within` (tolérance donnée). Un échec est montré à la ligne de votre test, pas dans
 la bibliothèque.
+
+**Couverture** : `--coverage` exécute les tests avec l'interpréteur « simple » (plus lent, sans la machine à
+registres) et note chaque ligne qui porte une instruction et qu'un test a exécutée ; le rapport donne, par fichier
+source (les fichiers de test sont exclus), la part exécutée et les lignes qui ne l'ont pas été.
+C'est de la couverture de **lignes** (pas de branches). `--coverage-lcov FICHIER` écrit le format LCOV.
+**Groupes** : `--group a,b` et `--skip-group c` posent `QLANG_TEST_GROUP` / `QLANG_TEST_SKIP_GROUP`, que le paquet
+[`qlang-test`](https://github.com/quenti77/qlang-test) lit pour ne lancer que les cas des groupes demandés.
 
 Code de sortie : `0` si tout passe (ou s'il n'y a aucun test), `1` sinon. `--seed N` fixe les
 nombres aléatoires, `--max-steps N` limite chaque test.

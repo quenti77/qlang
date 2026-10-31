@@ -2,6 +2,11 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.72.0
+
+- **Couverture de code** : `qlang test --coverage` dit, par fichier source, quelles lignes portant une instruction ont été exécutées par les tests (et lesquelles non) ; `--coverage-lcov FICHIER` écrit un fichier LCOV. Couverture de lignes, sans l'optimisation à registres pour que chaque instruction soit comptée ; rien ne change (ni ne coûte) sans l'option.
+- **`qlang test --group TAGS` et `--skip-group TAGS`** : posent `QLANG_TEST_GROUP` / `QLANG_TEST_SKIP_GROUP`, lus par `qlang-test` (`group(tag, f)`) pour ne lancer que certains groupes.
+
 ## 0.71.0
 
 - **Tâches : `Worker`**. `Worker.spawn("fichier.q", entrée)` lance le `fun run()` d'un fichier dans un interpréteur à part, en même temps que le programme ; rien n'est partagé, on s'envoie des `Json` (`send`/`recv` côté programme, `Worker.emit`/`Worker.next`/`Worker.input` côté tâche). `wait(ms)` rend le résultat (`Worker.finish`) avec un délai, ou l'erreur de la tâche ; `cancel()` demande l'arrêt et **arrête** la tâche (`R906`) au prochain contrôle, même dans une boucle qui ne regarde pas `Worker.cancelled()` (vrai aussi quand le serveur s'arrête). 64 tâches au plus, permissions du programme, dans `--root`.

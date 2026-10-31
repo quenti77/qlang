@@ -3075,6 +3075,9 @@ extern fun term_raw(on: bool) -> Result<bool, Error>
 extern fun term_mode(name: string, on: bool) -> Result<bool, Error>
 extern fun term_write(text: string) -> Result<bool, Error>
 extern fun term_event(timeout_ms: int) -> Result<array<string>, Error>
+extern fun term_script(events: array<array<string>>, cols: int, rows: int) -> Result<bool, Error>
+extern fun term_screen() -> Result<string, Error>
+extern fun term_script_end() -> bool
 
 --" The size of the terminal, in characters. --"
 struct Size
@@ -3124,6 +3127,34 @@ fun term_parse_event(parts: array<string>) -> Event
         return Event { kind: kind, text: parts[1] }
     end
     Event { kind: "timeout" }
+end
+
+-- an event as the array of texts the host exchanges (the inverse of `term_parse_event`)
+fun term_unparse_event(e: Event) -> array<string>
+    let mods: array<string> = []
+    if e.ctrl then
+        mods.push("ctrl")
+    end
+    if e.alt then
+        mods.push("alt")
+    end
+    if e.shift then
+        mods.push("shift")
+    end
+    let m = mods.join("+")
+    if e.kind == "key" then
+        return ["key", e.key, m]
+    end
+    if e.kind == "mouse" then
+        return ["mouse", e.action, e.button, "{e.x}", "{e.y}", m]
+    end
+    if e.kind == "resize" then
+        return ["resize", "{e.x}", "{e.y}"]
+    end
+    if e.kind == "paste" or e.kind == "focus" then
+        return [e.kind, e.text]
+    end
+    ["timeout"]
 end
 
 fun term_enter() -> Result<bool, Error>
@@ -3248,6 +3279,29 @@ impl Term
             return Result<Event, Error>.Err(found.unwrap_err())
         end
         Result<Event, Error>.Ok(term_parse_event(found.unwrap()))
+    end
+
+    --" A **scripted terminal** for tests (`qlang test`, run with the `qlang` command): from now on the program
+    thinks it is in a terminal of `cols` by `rows` where the keys, mouse movements and pastes of `events` arrive
+    one after the other (`Event { kind: "key", key: "q" }`); when they are used up, `Term.event` answers
+    `"timeout"` at once, never waits. Nothing reaches the real terminal: what the program writes is kept, and
+    `Term.screen()` gives it. `Term.end_script()` goes back to the real terminal. --"
+    public fun script(events: array<Event>, cols: int, rows: int) -> Result<bool, Error>
+        let parts: array<array<string>> = []
+        for e in events do
+            parts.push(term_unparse_event(e))
+        end
+        term_script(parts, cols, rows)
+    end
+
+    --" Everything the program wrote since `Term.script`, escape sequences included. --"
+    public fun screen() -> Result<string, Error>
+        term_screen()
+    end
+
+    --" Ends the scripted terminal. Gives whether there was one. --"
+    public fun end_script() -> bool
+        term_script_end()
     end
 
     --" Runs `body` with the terminal ready for a full screen: raw mode, the alternate screen and no

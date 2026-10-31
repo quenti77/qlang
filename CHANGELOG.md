@@ -2,6 +2,11 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.82.0
+
+- **`Term.script(événements, colonnes, lignes)`** : un terminal joué pour les tests de programmes en terminal (`qlang test`). `Term.event` donne les événements de la liste puis `"timeout"` sans attendre, `Term.screen()` rend tout ce qui a été écrit, `Term.end_script()` revient au vrai terminal. Rien n'atteint le vrai terminal.
+- **Windows** : les séquences d'échappement écrites par `Term.write` sont activées sur la console de Windows (traitement des séquences virtuelles) avant la première écriture ou le mode brut. Toujours pas essayé sur une vraie console.
+
 ## 0.81.0
 
 - **`qlang serve --max-workers N`** : avec `--workers W`, des interpréteurs sont ajoutés (jusqu'à N) tant que tous sont occupés et qu'une requête attend, et ils s'arrêtent après 30 secondes d'inactivité. Une base ou un service lent n'immobilise plus tout le serveur ; sans l'option, rien ne change. Le modèle (interpréteurs multiples plutôt que E/S asynchrones) et ce qui reste bloquant (`Process.run`, `Redis.subscribe`, WebSocket) sont décrits dans `docs/language.md`.

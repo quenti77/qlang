@@ -1306,6 +1306,9 @@ impl Checker {
                         Some(("term_mode", TERM_ONLY))
                     }
                     ("Term", "event") => Some(("term_event", TERM_ONLY)),
+                    ("Term", "script") => Some(("term_script", TERM_ONLY)),
+                    ("Term", "screen") => Some(("term_screen", TERM_ONLY)),
+                    ("Term", "end_script") => Some(("term_script_end", TERM_ONLY)),
                     ("Worker", "spawn") => Some(("task_spawn", TASK_ONLY)),
                     ("Worker", "send") => Some(("task_send", TASK_ONLY)),
                     ("Worker", "recv") => Some(("task_recv", TASK_ONLY)),

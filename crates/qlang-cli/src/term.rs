@@ -28,7 +28,60 @@ pub const TERM_EXTERNS: &[&str] = &[
     "term_mode",
     "term_write",
     "term_event",
+    "term_script",
+    "term_screen",
+    "term_script_end",
 ];
+
+/// A terminal played by a test: the events it will be given, the size it reports and what was written
+/// to it. While one is set (`Term.script`), nothing touches the real terminal and nothing ever waits.
+struct Script {
+    events: std::collections::VecDeque<HostValue>,
+    cols: i64,
+    rows: i64,
+    screen: String,
+}
+
+thread_local! {
+    static SCRIPT: std::cell::RefCell<Option<Script>> = const { std::cell::RefCell::new(None) };
+}
+
+/// On Windows the escape sequences of `Term.write` only work once the console has virtual terminal
+/// processing on (crossterm does that for its own commands, not for text written as it is).
+#[cfg(windows)]
+fn enable_escape_codes() {
+    let _ = crossterm::ansi_support::supports_ansi();
+}
+
+#[cfg(not(windows))]
+fn enable_escape_codes() {}
+
+fn scripted(name: &str, args: &[HostValue]) -> Option<Result<HostValue, HostError>> {
+    SCRIPT.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let script = guard.as_mut()?;
+        Some(match (name, args) {
+            ("term_is_tty", [_]) => Ok(HostValue::Bool(true)),
+            ("term_size", []) => Ok(HostValue::Array(vec![
+                HostValue::Int(script.cols),
+                HostValue::Int(script.rows),
+            ])),
+            ("term_colors", []) => Ok(HostValue::Int(256)),
+            ("term_raw", [HostValue::Bool(_)])
+            | ("term_mode", [HostValue::Str(_), HostValue::Bool(_)]) => Ok(HostValue::Bool(true)),
+            ("term_write", [HostValue::Str(text)]) => {
+                script.screen.push_str(text);
+                Ok(HostValue::Bool(true))
+            }
+            ("term_event", [HostValue::Int(_)]) => Ok(script
+                .events
+                .pop_front()
+                .unwrap_or_else(|| strings(&["timeout"]))),
+            ("term_screen", []) => Ok(HostValue::Str(script.screen.clone())),
+            _ => return None,
+        })
+    })
+}
 
 static RAW: AtomicBool = AtomicBool::new(false);
 /// The modes that were switched on (bits of `MODE_*`), to switch them off at the end.
@@ -233,6 +286,7 @@ fn set_raw(on: bool) -> Result<(), HostError> {
         need_terminal()?;
         enable_raw_mode()
             .map_err(|e| fail(format!("cannot switch the terminal to raw mode: {e}")))?;
+        enable_escape_codes();
         RAW.store(true, Ordering::SeqCst);
     } else if RAW.swap(false, Ordering::SeqCst) {
         disable_raw_mode().map_err(|e| fail(format!("cannot leave raw mode: {e}")))?;
@@ -300,7 +354,37 @@ fn next_event(timeout_ms: i64) -> Result<HostValue, HostError> {
 /// Runs one of the `TERM_EXTERNS`.
 pub fn call(name: &str, args: &[HostValue]) -> Result<HostValue, HostError> {
     let wrong = || fail(format!("`{name}` was called with the wrong arguments"));
+    if let Some(answer) = scripted(name, args) {
+        return answer;
+    }
     match (name, args) {
+        (
+            "term_script",
+            [
+                HostValue::Array(events),
+                HostValue::Int(cols),
+                HostValue::Int(rows),
+            ],
+        ) => {
+            if *cols < 1 || *rows < 1 || *cols > 10_000 || *rows > 10_000 {
+                return Err(fail(
+                    "a scripted terminal has from 1 to 10000 columns and rows",
+                ));
+            }
+            SCRIPT.with(|cell| {
+                *cell.borrow_mut() = Some(Script {
+                    events: events.iter().cloned().collect(),
+                    cols: *cols,
+                    rows: *rows,
+                    screen: String::new(),
+                })
+            });
+            Ok(HostValue::Bool(true))
+        }
+        ("term_script_end", []) => Ok(HostValue::Bool(
+            SCRIPT.with(|c| c.borrow_mut().take().is_some()),
+        )),
+        ("term_screen", []) => Err(fail("there is no scripted terminal (see `Term.script`)")),
         ("term_is_tty", [HostValue::Int(which)]) => Ok(HostValue::Bool(match which {
             0 => std::io::stdin().is_terminal(),
             _ => std::io::stdout().is_terminal(),
@@ -318,6 +402,7 @@ pub fn call(name: &str, args: &[HostValue]) -> Result<HostValue, HostError> {
             set_mode(mode, *on).map(|()| HostValue::Bool(true))
         }
         ("term_write", [HostValue::Str(text)]) => {
+            enable_escape_codes();
             let mut out = std::io::stdout().lock();
             out.write_all(text.as_bytes())
                 .and_then(|()| out.flush())

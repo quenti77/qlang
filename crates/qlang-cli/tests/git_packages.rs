@@ -312,9 +312,10 @@ fn add_without_a_source_asks_the_index_and_takes_the_highest_tag() {
     assert!(!run(&["search", "zzz"]).2);
     let (out, err, ok) = run(&["add", "mail"]);
     assert!(ok, "{out}{err}");
-    // v1.10.0 is higher than v1.2.0 (numbers, not text), and a tag that is no version is ignored
+    // v1.10.0 is higher than v1.2.0 (numbers, not text), a tag that is no version is ignored, and the package
+    // is kept in the range of that release (^1.10.0)
     assert!(
-        d.read("app/qlang.toml").contains("tag = \"v1.10.0\""),
+        d.read("app/qlang.toml").contains("version = \"^1.10.0\""),
         "{}",
         d.read("app/qlang.toml")
     );

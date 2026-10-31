@@ -58,3 +58,34 @@ Un programme qlang ne peut que ce que son hôte lui laisse :
   `--allow-process`, c'est accorder l'accès à la machine.
 - `--root` ne limite pas les paquets (`qlang.toml`) : c'est le projet qui les choisit.
 - Le serveur n'a pas de TLS ni d'authentification propres : voir `docs/language.md`, « Le serveur ».
+
+## Fuzzing
+
+Deux familles de tests cherchent ce qu'un humain n'écrit pas :
+
+- **Mutation** (`crates/qlang-core/tests/mutation_fuzz.rs`, workflow `Fuzz`, chaque semaine) : des programmes abîmés
+  doivent être refusés, jamais faire paniquer le compilateur ni le formateur.
+- **Guidé par la couverture** (`cargo-fuzz` / libFuzzer, dossier `fuzz/`, compilateur nightly) : huit cibles, avec des
+  graines dans `fuzz/seeds/`.
+
+| Cible | Ce qu'elle lit | Ce qu'elle exige |
+| --- | --- | --- |
+| `lexer`, `parser` | du texte quelconque | jamais de panique |
+| `compile` | tout l'avant de l'interpréteur | jamais l'erreur interne `X999` |
+| `format` | du texte quelconque | formater deux fois = formater une fois |
+| `run` | un programme qui compile, sous de petites limites | jamais `X999` (un bug de l'interpréteur) |
+| `http_request` | ce qu'un client envoie à `qlang serve` (ligne, en-têtes, corps, morceaux) | jamais de panique |
+| `http_static` | un chemin demandé sous `--static` | jamais un fichier hors du dossier |
+| `ws_frame` | des trames WebSocket | jamais de panique |
+
+```sh
+cd fuzz && mkdir -p corpus/lexer
+cargo +nightly fuzz run lexer corpus/lexer seeds/lang          # jusqu'à Ctrl-C
+ASAN_OPTIONS=detect_leaks=0 cargo +nightly fuzz run run corpus/run seeds/lang -- -max_len=1024
+```
+
+(l'interpréteur garde des cycles de références pour toujours : d'où `detect_leaks=0`). Le workflow `Fuzz` lance chaque
+cible 10 minutes chaque semaine (ou à la demande), et 20 secondes sur une pull request qui touche les cibles ou le
+code lu ; un plantage est gardé comme artefact. Premières exécutions locales (de 45 s à 2 min par cible) : aucun
+plantage. `compile` et `run` font une dizaine d'exécutions par seconde (le prélude est vérifié à chaque programme),
+les autres des milliers.

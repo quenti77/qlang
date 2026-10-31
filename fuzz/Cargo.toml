@@ -1,0 +1,72 @@
+[package]
+name = "qlang-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+qlang-core = { path = "../crates/qlang-core" }
+qlang-cli = { path = "../crates/qlang-cli" }
+
+# not part of the workspace of the language: it needs the nightly compiler
+[workspace]
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compile"
+path = "fuzz_targets/compile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "format"
+path = "fuzz_targets/format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "run"
+path = "fuzz_targets/run.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_request"
+path = "fuzz_targets/http_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_static"
+path = "fuzz_targets/http_static.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ws_frame"
+path = "fuzz_targets/ws_frame.rs"
+test = false
+doc = false
+bench = false

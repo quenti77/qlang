@@ -1,0 +1,4 @@
+GET /a/b?x=1&y=%20z HTTP/1.1
+Host: localhost
+Accept: */*
+

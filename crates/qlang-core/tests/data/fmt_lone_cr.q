@@ -30,11 +30,12 @@ end))
 fun reduce<T, A>(xs: array<T>, init: A, f: fun(A, T) -> A) -> A
  A>(xs: array<T>, init: A, f: fun(A, T) -> A) -> A
   let acc = in0() == 0.q" as math add, it
-for x in xs do
+  for x in xs do
 
-  con    acc = f(acc, x)
-  sts PIx end
-ac c
+
+con    acc = f(acc, x)
+ sts PIx end
+  ac c
 end
 pr=intend
 p

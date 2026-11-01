@@ -67,9 +67,9 @@ USAGE:
                                          standard input and output)
     qlang repl [--allow-process] [--max-steps N]
                                          an interactive session, with history and completion
-    qlang fmt [path...] [--check|--stdin] lay the files out (two spaces per level; only the white
-                                         space at the start and end of lines changes); --check
-                                         lists the files that would change and exits 1
+    qlang fmt [path...] [--check|--stdin] lay the files out (four spaces per level, one space between
+                                         the elements of a line; only white space changes);
+                                         --check lists the files that would change and exits 1
     qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N]
                 [--trust-externs] [--allow-process] [--deny-warnings]
                                          run the `fun test_...()` of the *_test.q / test_*.q

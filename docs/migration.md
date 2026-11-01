@@ -22,6 +22,15 @@ reste décrit ici, à la main.
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
+## 1.0 : `qlang fmt` écrit quatre espaces et met en ordre les espaces d'une ligne
+
+- **Avant** : deux espaces par niveau ; seuls les espaces en début et fin de ligne changeaient.
+- **Après** : quatre espaces par niveau ; un seul espace entre deux éléments d'une ligne, aucun dans les parenthèses et
+  les crochets, avant une virgule ou un point, ni entre un nom et la `(` de son appel ; un espace après chaque virgule.
+  Un espace absent n'est jamais ajouté, sauf après une virgule.
+- **S'adapter** : `qlang fmt` une fois sur le projet, puis commiter. Une CI qui lance `qlang fmt --check` échoue
+  tant que ce n'est pas fait. Le sens des programmes ne change pas (le résultat a exactement les mêmes jetons).
+
 ## 0.83 : `Log.warn` est retiré
 
 Déprécié en 0.69 (avertissement `W001`), retiré après quatorze versions mineures.

@@ -10,90 +10,90 @@ let count = 0
 let hex = 0xFF_FF + 0b0101_0101 + 1_000
 let name: string? = none
 let xs: array<int> = [1, 2,
-  3]
+    3]
 
 struct Account
-  protected balance: int = 0
-  private static total: int = 0
+    protected balance: int = 0
+    private static total: int = 0
 end
 
 struct Savings extends Account
-  public rate: float = 0.02
+    public rate: float = 0.02
 end
 
 struct Box<T>
-  public value: T
+    public value: T
 end
 
 impl<T> Box<T>
-  public fun new(value: T) -> Box<T>
-    Box { value: value }
-  end
+    public fun new(value: T) -> Box<T>
+        Box { value: value }
+    end
 end
 
 struct Pair<A, B>
-  public first: A
-  public second: B
+    public first: A
+    public second: B
 end
 
 trait Shape
-  fun area(self) -> float
+    fun area(self) -> float
 end
 
 enum Color
-  Red
-  Green
+    Red
+    Green
 end
 
 fun sum<T: Add + Eq>(a: T, b: T) -> T
-  a + b
+    a + b
 end
 
 impl Account
-  public fun new() -> Account
-    Account {}
-  end
-  public fun describe(self) -> string
-    "account"
-  end
+    public fun new() -> Account
+        Account {}
+    end
+    public fun describe(self) -> string
+        "account"
+    end
 end
 
 impl Savings
-  public fun new(id: int) -> Savings
-    Savings { ..Account.new(), rate: 0.05 }
-  end
-  public override fun describe(self) -> string
-    super.describe() + " (savings)"
-  end
+    public fun new(id: int) -> Savings
+        Savings { ..Account.new(), rate: 0.05 }
+    end
+    public override fun describe(self) -> string
+        super.describe() + " (savings)"
+    end
 end
 
 impl Add for Account
-  public fun add(self, o: Account) -> Account
-    o
-  end
+    public fun add(self, o: Account) -> Account
+        o
+    end
 end
 
 let f = fun(x: int) -> int
-  x * 2
+    x * 2
 end
 
 let label = match count
-  case 0 then "zero"
-  case 1..=9 then "small"
-  case x if x > 100 then "big"
-  else "other"
+    case 0 then "zero"
+    case 1..=9 then "small"
+    case x if x > 100 then "big"
+    else "other"
 end
 
 if count > 0 then print("a") elseif count < 0 then print("b") else print("c") end
 
 for i in 0..10 step 2 do
-  count += i
-  if i == 4 then continue end
-  if i == 8 then break end
+    count += i
+    if i == 4 then continue end
+    if i == 8 then break end
 end
 
 while true do
-  return
+    return
 end
 
 print("x = {count}, total = {count + 1} \{lit\}")

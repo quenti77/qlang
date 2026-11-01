@@ -504,13 +504,13 @@ fn formatting_returns_the_document_laid_out_and_nothing_when_it_already_is() {
     );
     let r = c.request(
         "textDocument/formatting",
-        json!({ "textDocument": { "uri": uri(&main) }, "options": { "tabSize": 2, "insertSpaces": true } }),
+        json!({ "textDocument": { "uri": uri(&main) }, "options": { "tabSize": 4, "insertSpaces": true } }),
     );
     let edits = r.as_array().unwrap();
     assert_eq!(edits.len(), 1, "{r}");
     assert_eq!(
         edits[0]["newText"],
-        "fun f(x: int) -> int\n  if x > 0 then\n    return 1\n  end\n  0\nend\n"
+        "fun f(x: int) -> int\n    if x > 0 then\n        return 1\n    end\n    0\nend\n"
     );
     assert_eq!(edits[0]["range"]["start"]["line"], 0);
     // a document that is already laid out needs no edit

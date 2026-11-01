@@ -16,7 +16,7 @@ let app = site.build()
 app.use(mw.logging())
 
 fun handle(req: Request) -> Response
-  app.handle(req)
+    app.handle(req)
 end
 "#;
 
@@ -31,7 +31,7 @@ import "providers.q" as providers
 import "controllers.q" as controllers
 
 fun build() -> web.App
-  web.App.boot(Reflect.declared(providers).concat(Reflect.declared(controllers)))
+    web.App.boot(Reflect.declared(providers).concat(Reflect.declared(controllers)))
 end
 
 export build
@@ -41,11 +41,11 @@ const WEB_PROVIDERS: &str = r#"-- Services: each function gives the service of i
 -- once per request, `#[di.Transient]`: each time). A handler or another provider asks for one by
 -- adding a parameter of that type.
 struct Config
-  public greeting: string
+    public greeting: string
 end
 
 fun make_config() -> Config
-  Config { greeting: env.get("GREETING") ?? "Hello" }
+    Config { greeting: env.get("GREETING") ?? "Hello" }
 end
 
 export Config
@@ -59,12 +59,12 @@ import Config from "providers.q"
 
 #[web.Get("/")]
 fun home(config: Config) -> string
-  "{config.greeting}, qlang!"
+    "{config.greeting}, qlang!"
 end
 
 #[web.Get("/hello/:name")]
 fun hello(#[web.Path] name: string, config: Config) -> string
-  "{config.greeting}, {name}!"
+    "{config.greeting}, {name}!"
 end
 "#;
 
@@ -73,17 +73,17 @@ import "app.q" as site
 import "@std/web/testing.q" as testing
 
 fun test_the_home_page_answers()
-  let client = testing.Client.new(site.build())
-  client.get("/").expect_status(200).expect_body_contains("qlang")
+    let client = testing.Client.new(site.build())
+    client.get("/").expect_status(200).expect_body_contains("qlang")
 end
 
 fun test_a_name_in_the_path()
-  let client = testing.Client.new(site.build())
-  client.get("/hello/Ada").expect_body_contains("Ada")
+    let client = testing.Client.new(site.build())
+    client.get("/hello/Ada").expect_body_contains("Ada")
 end
 
 fun test_an_unknown_route_is_a_404()
-  testing.Client.new(site.build()).get("/nothing").expect_status(404)
+    testing.Client.new(site.build()).get("/nothing").expect_status(404)
 end
 "#;
 

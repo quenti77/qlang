@@ -168,11 +168,13 @@ qlang fmt --stdin      # un programme sur l'entrée, mis en forme sur la sortie 
 ```
 
 Dossiers ou fichiers à laisser tels quels : `[fmt] exclude = ["vendor", "gen/api.q"]` dans `qlang.toml`
-(chemins relatifs au projet). La mise en forme elle-même n'a pas de réglage : deux espaces par niveau.
+(chemins relatifs au projet). La mise en forme elle-même n'a pas de réglage : quatre espaces par niveau.
 
-Seuls les **espaces au début et à la fin des lignes** changent (deux espaces par niveau, les
-`case` d'un `match` un niveau plus loin que lui) : les jetons, les commentaires et les espaces
-à l'intérieur d'une ligne restent tels quels, et c'est vérifié à chaque passage (rien n'est écrit si le
+Seuls les **espaces** changent : au début des lignes (quatre espaces par niveau, les `case` d'un `match`
+un niveau plus loin que lui), à leur fin, et entre deux éléments d'une ligne (un seul espace, aucun
+dans les parenthèses et les crochets, avant une virgule ou un point, ni entre un nom et la `(` de son
+appel ; un espace après chaque virgule). Un espace absent n'est jamais ajouté, sauf après une virgule. Les
+jetons et les commentaires restent tels quels, et c'est vérifié à chaque passage (rien n'est écrit si le
 résultat ne contenait plus exactement les mêmes jetons). Les chaînes et commentaires sur plusieurs
 lignes ne sont pas touchés. L'extension VS Code propose « Mettre en forme le document » (le serveur
 de langage répond à `textDocument/formatting`).

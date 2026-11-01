@@ -183,6 +183,18 @@ impl Host for LspHost {
     fn has_extern(&self, _name: &str) -> bool {
         true
     }
+
+    // ... and neither what the standard library may use: the program is only checked here
+    fn capabilities(&self) -> qlang_core::host::Capabilities {
+        qlang_core::host::Capabilities {
+            read: true,
+            time: true,
+            random: true,
+            http: true,
+            fs: true,
+            env: true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------- server

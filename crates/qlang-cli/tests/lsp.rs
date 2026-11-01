@@ -731,3 +731,15 @@ fn a_parameter_with_a_default_is_shown_and_left_out_of_the_snippet() {
         "{n}"
     );
 }
+
+#[test]
+fn the_clock_and_the_other_capabilities_are_not_reported_as_missing() {
+    let dir = project("capabilities");
+    let file = dir.join("a.q");
+    let text = "let t = time.now()\nlet r = random.int(1, 6)\nlet line = read()\nprint(t)\nprint(r)\nprint(line)\n";
+    std::fs::write(&file, text).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&file, text);
+    let d = c.diagnostics("a.q");
+    assert!(d.is_empty(), "{d:?}");
+}

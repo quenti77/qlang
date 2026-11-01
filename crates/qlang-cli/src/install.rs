@@ -307,8 +307,8 @@ fn fetch(
         Some(dest),
         &["checkout", "--quiet", "--detach", "--force", &commit],
     )?;
-    if signed {
-        verify_signature(
+    if signed
+        && let Err(e) = verify_signature(
             dest,
             url,
             &commit,
@@ -316,7 +316,11 @@ fn fetch(
                 GitRef::Tag(t) => Some(t.as_str()),
                 _ => None,
             }),
-        )?;
+        )
+    {
+        // the code just fetched must not stay where `qlang run` finds it: nothing vouches for it
+        let _ = remove_dir(dest);
+        return Err(e);
     }
     let tag = chosen_tag.or_else(|| tag_at(dest, &commit));
     Ok(Fetched { commit, tag })

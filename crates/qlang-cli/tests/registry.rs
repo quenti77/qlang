@@ -340,6 +340,8 @@ fn signed_true_needs_a_signature_git_can_verify() {
     let (_, err, code) = qlang(&app, &["install"], &env);
     assert_eq!(code, 1);
     assert!(err.contains("no signature git can verify"), "{err}");
+    // the code that was refused is not left behind for `qlang run` to find
+    assert!(!app.join(".qlang/packages/lib").exists());
 }
 
 #[test]

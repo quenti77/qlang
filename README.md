@@ -57,10 +57,11 @@ dis-le si quelque chose coince. L'extension VS Code (`qlang.vsix`, sur la page
 docker run --rm -v "$PWD":/app -p 8080:8080 ghcr.io/quenti77/qlang:latest serve app.q --bind 0.0.0.0
 ```
 
-**Gestionnaires de paquets** : chaque release publie aussi `qlang.rb` (Homebrew), `qlang.json` (Scoop)
-et `PKGBUILD` (AUR), les trois manifestes `quenti77.qlang*.yaml` (winget), prêts à copier dans un tap, un
-bucket, un dépôt AUR ou `winget-pkgs` ; ces dépôts ne sont pas encore créés, donc `brew install`, `scoop install` et
-`winget install` ne sont pas encore possibles. Les paquets **`.deb`** et **`.rpm`** (programme statique, sans
+**Gestionnaires de paquets** : **Homebrew** (macOS et Linux) : `brew tap quenti77/qlang && brew install qlang` ;
+**Scoop** (Windows) : `scoop bucket add qlang https://github.com/quenti77/scoop-qlang && scoop install qlang`. Le tap et le
+bucket sont mis à jour à chaque release, mais n'ont pas encore été essayés sur une vraie machine. Chaque release publie aussi
+`PKGBUILD` (AUR) et les trois manifestes `quenti77.qlang*.yaml` (winget), pas encore proposés à leurs dépôts : `yay -S qlang-bin` et
+`winget install quenti77.qlang` ne sont pas encore possibles. Les paquets **`.deb`** et **`.rpm`** (programme statique, sans
 dépendance) sont des fichiers de la release : `sudo dpkg -i qlang_X.Y.Z_amd64.deb`, `sudo rpm -i qlang-X.Y.Z-1.x86_64.rpm`
 (il n'y a pas encore de dépôt apt ou yum).
 

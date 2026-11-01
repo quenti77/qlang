@@ -39,6 +39,27 @@ l'atteigne, et faire remplacer `X-Forwarded-For` / `X-Forwarded-Proto` par le pr
 (`is_https`, `client_ip`, `redirect_to_https()`) et les cookies de session prennent `Secure`.
 Un TLS intégré à `qlang serve` n'est pas fait.
 
+## Pages HTML, redirections, cookies, en-têtes
+
+Ce que le serveur fait pour vous, et ce qui reste à votre charge quand le programme répond à un navigateur :
+
+- **HTML** : `Response.html(texte)` envoie le texte **tel quel** (`text/html`). Si une valeur venue d'un utilisateur
+  (paramètre, formulaire, ligne de base de données) y entre sans être échappée, une page peut exécuter du script chez
+  un autre visiteur (XSS). Faire passer ces valeurs par `template.render_html` de `qlang-std`, qui échappe `<`, `>`,
+  `&`, `"` et `'` dans tout ce que `{{ ... }}` affiche ; `render_text` n'échappe rien (il est fait pour du texte,
+  pas du HTML). `Response.text` et `Response.json` ne sont pas interprétés comme du HTML par le navigateur.
+- **Redirection** : `Response.redirect(url)` envoie un `302` vers `url` **sans la vérifier**. Avec une adresse prise dans
+  la requête (`Response.redirect(req.query["next"])`), n'importe qui peut fabriquer un lien de votre site qui renvoie
+  vers un autre : n'accepter qu'un chemin du site (`url.starts_with("/") and not url.starts_with("//")`) ou choisir
+  l'adresse dans une liste.
+- **Cookies** : `Cookie { ... }` est `HttpOnly` et `SameSite=Lax` par défaut ; `Secure` est à demander
+  (`secure: true`) derrière HTTPS. Un nom ou un attribut qui contient `;` ou un caractère de contrôle est une erreur du
+  programme (500).
+- **En-têtes** : une valeur d'en-tête qui contient un retour à la ligne est ignorée (pas d'injection d'en-tête ni de
+  scission de réponse).
+- **Erreurs** : sans `--dev`, une erreur du programme donne un `500` sans détail ; le code, la pile et le SQL ne vont que
+  dans le journal du serveur.
+
 ## Permissions
 
 Un programme qlang ne peut que ce que son hôte lui laisse :

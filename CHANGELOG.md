@@ -5,6 +5,7 @@
 ## Non publié
 
 - **`qlang fmt` : un `\r` seul en fin de texte ne rend plus le résultat instable.** Trouvé par le fuzzing du 2026-11-01 : quand la dernière ligne, gardée telle quelle (dans une chaîne ou un commentaire sur plusieurs lignes), finissait par un `\r` sans `\n`, le saut de ligne ajouté par le formateur donnait `\r\n`, et un second passage réécrivait tout le fichier en fins de ligne Windows. Le texte est maintenant écrit d'emblée avec des fins de ligne `\r\n`. Aucun autre changement de comportement.
+- **formatted /home/quentin/Projects/qlang/crates/qlang-core/tests/data/fmt_lone_cr.q refuse un texte dont le  seul rendrait la mise en forme instable** (cas trouvé par le fuzzing une fois la correction précédente en place : plusieurs  seuls dans une chaîne). Il répond « nothing was written » au lieu d'écrire un texte qui change à chaque passage.
 
 ## 0.84.0
 

@@ -3306,7 +3306,7 @@ while for in step do break continue
 match case
 struct impl trait enum extends override
 public private protected static
-import export from as
+import export extern from as
 and or not div mod
 true false none self super
 ```

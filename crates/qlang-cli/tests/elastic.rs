@@ -20,7 +20,7 @@ impl Drop for Server {
 }
 
 const APP: &str =
-    "fun handle(req: Request) -> Response\n  time.sleep(600)\n  Response.text(\"done\")\nend\n";
+    "fun handle(req: Request) -> Response\n  time.sleep(1500)\n  Response.text(\"done\")\nend\n";
 
 fn start(name: &str, extra: &[&str]) -> Server {
     let dir = std::env::temp_dir().join(format!("qlang-elastic-{}-{name}", std::process::id()));
@@ -87,8 +87,8 @@ fn burst(port: u16, n: usize) -> Duration {
 fn slow_requests_overlap_when_workers_may_be_added_and_the_extra_ones_leave() {
     let server = start("grow", &["--workers", "1", "--max-workers", "4"]);
     let took = burst(server.port, 4);
-    // one interpreter would need 4 x 600 ms
-    assert!(took < Duration::from_millis(2000), "{took:?}");
+    // one interpreter would need 4 x 1500 ms; the margin is wide because a loaded runner starts interpreters slowly
+    assert!(took < Duration::from_millis(3600), "{took:?}");
     assert!(
         server
             .log
@@ -121,7 +121,7 @@ fn slow_requests_overlap_when_workers_may_be_added_and_the_extra_ones_leave() {
 fn without_max_workers_the_workers_stay_what_they_are() {
     let server = start("fixed", &["--workers", "1"]);
     let took = burst(server.port, 3);
-    assert!(took >= Duration::from_millis(1700), "{took:?}");
+    assert!(took >= Duration::from_millis(4000), "{took:?}");
     assert!(
         !server
             .log

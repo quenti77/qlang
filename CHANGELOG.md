@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.84.0
+
+- **Ce que la 1.0 promet pour les commandes est maintenant testé option par option** : `--max-steps` et `--seed` de `qlang run` et `qlang test` (nouveau `cli_options`), et le format de `qlang.toml` et de `qlang.lock` (nouveau `manifest_format` : le texte exact du verrou, un verrou écrit à la main qui est obéi, chaque clé du manifeste acceptée). `docs/stability.md` dit quel fichier de tests couvre quelle option. Aucun changement de comportement.
+
 ## 0.83.0
 
 - **Cassant : `Log.warn` est retiré.** Déprécié en 0.69, il n'était qu'un autre nom de `Log.warning`. Avant : `Log.warn("x")`. Après : `Log.warning("x")`. S'adapter : `qlang migrate` réécrit les appels (`--check` les liste). Le filtre `--log-level warn` et la valeur `warn` de `$QLANG_LOG` ne changent pas.

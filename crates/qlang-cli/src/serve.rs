@@ -989,12 +989,14 @@ struct Elastic {
 
 static ELASTIC: std::sync::OnceLock<Elastic> = std::sync::OnceLock::new();
 
-/// A request was queued: if every worker is busy and the limit is not reached, start one more.
+/// A request was queued: if there are more requests waiting than workers idle and the limit is not reached,
+/// start one more. An idle worker stays counted until it wakes and takes its request, so a burst that arrives
+/// before it does must not be taken for "an idle worker is there" each time.
 fn maybe_grow() {
     let Some(e) = ELASTIC.get() else {
         return;
     };
-    if IDLE.load(Ordering::SeqCst) > 0 {
+    if QUEUED.load(Ordering::SeqCst) <= IDLE.load(Ordering::SeqCst) {
         return;
     }
     loop {

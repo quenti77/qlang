@@ -206,3 +206,25 @@ fn extern_option_commands_need_no_agreement() {
     assert!(ok, "{err}");
     assert_eq!(out, "HI!\n42\nit broke\n");
 }
+
+#[test]
+fn a_provider_that_never_answers_ends_with_an_error_instead_of_a_hang() {
+    let Some(py) = python() else { return };
+    let d = Dir::new("silent");
+    d.write(
+        "silent.py",
+        "import sys, time\nsys.stdin.readline()\ntime.sleep(300)\n",
+    );
+    d.write("app.q", PROGRAM);
+    let started = std::time::Instant::now();
+    let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .env("QLANG_PROVIDER_TIMEOUT", "2")
+        .args(["run", "app.q", "--extern", &format!("{py} silent.py")])
+        .current_dir(&d.0)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success());
+    assert!(err.contains("did not answer within 2 seconds"), "{err}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}

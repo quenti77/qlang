@@ -395,7 +395,7 @@ impl SqlConn for PostgresConn {
         let rows = self
             .0
             .query(&rewrite_placeholders(sql), &refs)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| pg_error(&e))?;
         Ok(rows
             .iter()
             .map(|row| SqlRow {
@@ -417,7 +417,7 @@ impl SqlConn for PostgresConn {
             .collect();
         self.0
             .execute(&rewrite_placeholders(sql), &refs)
-            .map_err(|e| e.to_string())
+            .map_err(|e| pg_error(&e))
     }
 }
 
@@ -519,7 +519,7 @@ fn pg_connect(url: &str) -> Result<postgres::Client, HostError> {
     }
     if !wants_tls(url) {
         return postgres::Client::connect(url, postgres::NoTls)
-            .map_err(|e| HostError::Other(e.to_string()));
+            .map_err(|e| HostError::Other(pg_error(&e)));
     }
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -527,7 +527,25 @@ fn pg_connect(url: &str) -> Result<postgres::Client, HostError> {
         .with_root_certificates(roots)
         .with_no_client_auth();
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(config);
-    postgres::Client::connect(url, tls).map_err(|e| HostError::Other(e.to_string()))
+    postgres::Client::connect(url, tls).map_err(|e| HostError::Other(pg_error(&e)))
+}
+
+/// What went wrong, with the cause: the driver's own text is only `db error` or `error connecting to server`, and
+/// the server's message (`FATAL: password authentication failed for user ...`) or the system's (`Connection refused`)
+/// is what tells a person what to fix. The messages never hold the password.
+fn pg_error(e: &postgres::Error) -> String {
+    use std::error::Error as _;
+    let mut text = e.to_string();
+    if let Some(db) = e.as_db_error() {
+        text.push_str(&format!(": {}: {}", db.severity(), db.message()));
+    } else {
+        let mut cause = e.source();
+        while let Some(c) = cause {
+            text.push_str(&format!(": {c}"));
+            cause = c.source();
+        }
+    }
+    text
 }
 
 // --------------------------------------------------------------------- MySQL
@@ -1022,6 +1040,16 @@ mod reconnect_tests {
         assert!(format!("{e:?}").contains("inside a transaction"), "{e:?}");
         // the next statement starts afresh on a new connection
         assert!(conns.execute(id, "CREATE TABLE t (a INT)", vec![]).is_ok());
+    }
+
+    #[test]
+    fn a_refused_postgres_connection_says_why_and_never_shows_the_password() {
+        let e = match pg_connect("postgres://u:SEKRET@127.0.0.1:1/x") {
+            Ok(_) => panic!("nothing listens on port 1"),
+            Err(e) => format!("{e:?}"),
+        };
+        assert!(e.contains("refused"), "{e}");
+        assert!(!e.contains("SEKRET"), "{e}");
     }
 
     #[test]

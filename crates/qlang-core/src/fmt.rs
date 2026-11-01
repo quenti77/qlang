@@ -421,8 +421,10 @@ pub fn format(src: &str) -> Result<String, String> {
             "the layout would change the program: nothing was written (please report this)".into(),
         );
     }
-    if crlf {
-        result = result.replace('\n', "\r\n");
+    // A lone `\r` at the end of a line the layout kept as it was (inside a string or a comment) meets
+    // the line break written after it: the text is then a CRLF text, and is written as one.
+    if crlf || result.contains("\r\n") {
+        result = result.replace("\r\n", "\n").replace('\n', "\r\n");
     }
     Ok(result)
 }
@@ -626,6 +628,12 @@ mod tests {
     fn line_endings_are_kept() {
         let out = format("fun f()\r\nlet a = 1\r\nend\r\n").unwrap();
         assert_eq!(out, "fun f()\r\n  let a = 1\r\nend\r\n");
+    }
+
+    #[test]
+    fn a_lone_carriage_return_before_the_final_line_break_is_stable() {
+        let once = format("-- a\nfor i in 0(\"F\n\"x \r").unwrap();
+        assert_eq!(format(&once).unwrap(), once);
     }
 
     #[test]

@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## Non publié
+
+- **`qlang fmt` : un `\r` seul en fin de texte ne rend plus le résultat instable.** Trouvé par le fuzzing du 2026-11-01 : quand la dernière ligne, gardée telle quelle (dans une chaîne ou un commentaire sur plusieurs lignes), finissait par un `\r` sans `\n`, le saut de ligne ajouté par le formateur donnait `\r\n`, et un second passage réécrivait tout le fichier en fins de ligne Windows. Le texte est maintenant écrit d'emblée avec des fins de ligne `\r\n`. Aucun autre changement de comportement.
+
 ## 0.84.0
 
 - **Ce que la 1.0 promet pour les commandes est maintenant testé option par option** : `--max-steps` et `--seed` de `qlang run` et `qlang test` (nouveau `cli_options`), et le format de `qlang.toml` et de `qlang.lock` (nouveau `manifest_format` : le texte exact du verrou, un verrou écrit à la main qui est obéi, chaque clé du manifeste acceptée). `docs/stability.md` dit quel fichier de tests couvre quelle option. Aucun changement de comportement.

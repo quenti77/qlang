@@ -135,6 +135,9 @@ fn init_web_writes_a_web_application() {
     assert!(d.read("site/main.q").contains("fun handle(req: Request)"));
     assert!(d.read("site/app.q").contains("App.boot("));
     assert!(out.contains("qlang serve main.q"), "{out}");
+    // `std` is not in the manifest, and the user is told how to get it
+    assert!(!d.read("site/qlang.toml").contains("std"));
+    assert!(out.contains("run `qlang add std` in the project"), "{out}");
     // nothing is overwritten, and a second run in a project is refused
     let (_, err, code) = d.qlang(".", &["init", "--web", "--no-install", "site"]);
     assert_eq!(code, Some(1));

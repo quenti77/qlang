@@ -145,7 +145,7 @@ pub fn init(args: &[&str]) -> ExitCode {
                 println!("run it with: qlang run");
                 return ExitCode::SUCCESS;
             }
-            if install && !add_std(&dir) {
+            if !install || !add_std(&dir) {
                 println!("the `std` package was not installed: run `qlang add std` in the project");
             }
             println!("serve it with: qlang serve main.q --watch --dev   (tests: qlang test)");

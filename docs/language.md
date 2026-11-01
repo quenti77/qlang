@@ -3163,7 +3163,7 @@ Une connexion fait une chose à la fois (chaque commande attend sa réponse, 30 
 *Niveau : provisoire.*
 
 `Log` écrit le journal du programme avec les niveaux de PSR-3 (PHP), du plus bas au plus haut :
-`debug`, `info`, `notice`, `warning` (ou `warn`), `error`, `critical`, `alert`, `emergency`. Chaque
+`debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` (`Log.warn` a été retiré en 0.83 ; `warn` reste un nom accepté pour *filtrer* : `--log-level warn`). Chaque
 niveau est une fonction `Log.niveau(message, contexte)` ; le **contexte** est facultatif et peut être
 n'importe quelle valeur (table, structure, tableau...) : il est écrit en JSON.
 

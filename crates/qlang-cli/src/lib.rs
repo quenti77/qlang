@@ -119,6 +119,7 @@ USAGE:
     qlang add <name>                     the same, from the package index (the latest tag)
     qlang search [text]                  the packages of the index
     qlang remove <name>                  remove a dependency
+    qlang help [command]                 this text, or the part about one command (also: qlang <command> --help)
     qlang --help | --version
 
 OPTIONS FOR EVERY COMMAND:
@@ -158,8 +159,96 @@ pub fn run() -> ExitCode {
     code
 }
 
+/// The commands `qlang <command> --help` knows, taken from the entries of `USAGE`.
+const COMMANDS: &[&str] = &[
+    "init",
+    "doc",
+    "migrate",
+    "info",
+    "publish",
+    "verify",
+    "lint",
+    "dap",
+    "repl",
+    "fmt",
+    "test",
+    "run",
+    "check",
+    "serve",
+    "lsp",
+    "self-update",
+    "packages",
+    "install",
+    "update",
+    "add",
+    "search",
+    "remove",
+];
+
+/// The part of `USAGE` that describes `command`: its entries (a line starting with
+/// `    qlang <command>` and the lines under it, up to the next entry), then the options every
+/// command accepts.
+fn help_for(command: &str) -> Option<String> {
+    if !COMMANDS.contains(&command) {
+        return None;
+    }
+    let mut out = String::new();
+    let mut inside = false;
+    let mut common = false;
+    for line in USAGE.lines() {
+        if line.starts_with("OPTIONS FOR EVERY COMMAND") {
+            inside = false;
+            common = true;
+            out.push('\n');
+        } else if let Some(entry) = line.strip_prefix("    qlang ") {
+            inside = entry.split_whitespace().next() == Some(command);
+        } else if !line.starts_with(' ') && !common {
+            inside = false;
+        }
+        if inside || common {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    Some(out)
+}
+
+/// `qlang <command> --help` or `-h`, before any `--` (what follows belongs to the program).
+fn asks_for_help(rest: &[&str]) -> bool {
+    rest.iter()
+        .take_while(|a| **a != "--")
+        .any(|a| matches!(*a, "--help" | "-h"))
+}
+
 fn real_main(args: Vec<String>) -> ExitCode {
     let mut it = args.iter().map(String::as_str);
+    if let Some(command) = args.first().map(String::as_str) {
+        let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
+        if command == "help" {
+            return match rest.first() {
+                None => {
+                    print!("{USAGE}");
+                    ExitCode::SUCCESS
+                }
+                Some(name) => match help_for(name) {
+                    Some(text) => {
+                        print!("{text}");
+                        ExitCode::SUCCESS
+                    }
+                    None => {
+                        eprintln!("no command `{name}`\n\n{USAGE}");
+                        ExitCode::from(64)
+                    }
+                },
+            };
+        }
+        if asks_for_help(&rest)
+            && let Some(text) = help_for(command)
+        {
+            print!("{text}");
+            return ExitCode::SUCCESS;
+        }
+    }
     match it.next() {
         Some("run") => {
             let rest: Vec<&str> = it.collect();

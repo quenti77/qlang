@@ -52,7 +52,9 @@ USAGE:
     qlang init --web [dir]               start a web application: routes, services, a test, and
                                          the `std` package (--no-install: do not fetch it)
     qlang doc [path...] [-o FILE]        Markdown documentation of the `--\" ... --\"` comments of the
-                                         project's files (or of the paths given)
+                                         project's files (or of the paths given); --require-levels:
+                                         fail for a file without a [stability] level; --prelude: the
+                                         reference of the language as JSON
     qlang migrate [path...] [--check]    rewrite what a breaking change renamed (Log.warn -> Log.warning...);
                                          --check lists the files, --rules the renamings known
     qlang info <name>                    a package of the index: licence, versions, how to add it
@@ -63,11 +65,13 @@ USAGE:
                                          code, functions with too many paths (exit 1 if any)
     qlang dap                            a debugger for editors (Debug Adapter Protocol, on the
                                          standard input and output)
-    qlang repl [--allow-process]         an interactive session, with history and completion
+    qlang repl [--allow-process] [--max-steps N]
+                                         an interactive session, with history and completion
     qlang fmt [path...] [--check|--stdin] lay the files out (two spaces per level; only the white
                                          space at the start and end of lines changes); --check
                                          lists the files that would change and exits 1
-    qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N] [--trust-externs]
+    qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N]
+                [--trust-externs] [--allow-process] [--deny-warnings]
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
     qlang run [file.q] [--max-steps N] [--root DIR] [--seed N] [--extern CMD] [--trust-externs]
@@ -92,6 +96,8 @@ USAGE:
                         [--max-steps N] [--root DIR] [--seed N] [--watch] [--dev] [--compress]
                         [--max-connections N] [--max-queue N] [--request-timeout S] [--db-pool N] [--max-body SIZE] [--max-headers SIZE]
                         [--read-timeout S] [--idle-timeout S] [--no-access-log] [--dev-public]
+                        [--max-workers N] [--extern CMD] [--trust-externs] [--allow-process]
+                        [--otlp-endpoint URL] [--service-name NAME]
                                          serve a qlang program: its `handle(req: Request) ->
                                          Response` function answers every HTTP request
                                          (--watch: reload when a file of the program changes;
@@ -1133,7 +1139,7 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
                 entry.as_str()
             }
             Ok(None) => {
-                eprintln!("missing file (and no `entry` in a qlang.toml here)\n\n{USAGE}");
+                eprintln!("missing file (and no `entry` in a qlang.toml here); see `qlang --help`");
                 return ExitCode::from(64);
             }
             Err(e) => {

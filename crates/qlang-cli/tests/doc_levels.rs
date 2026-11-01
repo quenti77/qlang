@@ -70,3 +70,18 @@ fn require_levels_fails_for_a_file_without_one() {
     // without the flag it is only documentation
     assert_eq!(doc(&dir, &[]).2, 0);
 }
+
+#[test]
+fn a_recursive_pattern_reaches_the_files_at_the_root_too() {
+    let manifest = "[package]\nname = \"p\"\nversion = \"0.1.0\"\n\n[stability]\nexperimental = [\"**/*.q\"]\n";
+    let dir = project(
+        "recursive",
+        &[
+            ("qlang.toml", manifest),
+            ("top.q", MODULE),
+            ("deep/inner/leaf.q", MODULE),
+        ],
+    );
+    let (_, err, code) = doc(&dir, &["--require-levels"]);
+    assert_eq!(code, 0, "{err}");
+}

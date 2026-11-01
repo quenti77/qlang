@@ -958,6 +958,22 @@ fn the_limits_can_be_changed() {
 }
 
 #[test]
+fn a_read_timeout_longer_than_ten_seconds_is_honoured() {
+    let server = start("longread", APP, &["--read-timeout", "12"]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    s.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n").unwrap();
+    let started = std::time::Instant::now();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let waited = started.elapsed();
+    assert!(out.starts_with("HTTP/1.1 408"), "{out}");
+    assert!(
+        waited >= std::time::Duration::from_secs(11) && waited < std::time::Duration::from_secs(20),
+        "{waited:?}"
+    );
+}
+
+#[test]
 fn connections_are_limited_by_option() {
     let server = start("conns", APP, &["--max-connections", "1"]);
     // the first connection stays open and silent: it takes the only slot

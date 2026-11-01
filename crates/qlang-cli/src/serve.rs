@@ -641,12 +641,13 @@ impl Parsed {
 }
 
 /// Arms the read timeout with what is left before `deadline`; `false` when there is nothing left.
+/// The read must not give up sooner than that: a read that times out is answered with a 408.
 fn wait_for_data(stream: &TcpStream, deadline: Instant) -> bool {
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
         return false;
     }
-    let _ = stream.set_read_timeout(Some(left.min(Duration::from_secs(10))));
+    let _ = stream.set_read_timeout(Some(left));
     true
 }
 

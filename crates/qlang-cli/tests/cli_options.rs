@@ -39,7 +39,8 @@ impl Drop for Dir {
 }
 
 const LOOP: &str = "let n = 0\nwhile n < 1000000 do\n  n += 1\nend\nprint(n)\n";
-const DRAW: &str = "print(random.int(0, 1000000))\nprint(random.int(0, 1000000))\nprint(random.int(0, 1000000))\n";
+const DRAW: &str =
+    "print(random.int(0, 1000000))\nprint(random.int(0, 1000000))\nprint(random.int(0, 1000000))\n";
 
 #[test]
 fn run_stops_a_program_that_goes_past_max_steps() {

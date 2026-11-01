@@ -1914,11 +1914,11 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 
 ```
 let names = ["ana", "bob", "cy"]
-print(names.map(fun(s: string) -> int s.len() end))        // [3, 3, 2]
-print(names.filter(fun(s: string) -> bool s.len() > 2 end)) // ["ana", "bob"]
+print(names.map(fun(s: string) -> int s.len() end))        -- [3, 3, 2]
+print(names.filter(fun(s: string) -> bool s.len() > 2 end)) -- ["ana", "bob"]
 
 let total = [1, 2, 3, 4].reduce(0, fun(acc: int, x: int) -> int acc + x end)
-print(total) // 10
+print(total) -- 10
 ```
 
 `string` :

@@ -539,9 +539,10 @@ liste chaînée géante) sont libérées sans récursion et leur comparaison s'a
 erreur (`R092`). Il ne limite pas le temps réel (les étapes le bornent, pas l'horloge) :
 pour du code d'inconnus, lancez `qlang` dans un conteneur ou avec les limites du système
 (`ulimit`, cgroups) et un délai d'attente. Le serveur HTTP (`qlang serve`) est minimal :
-pas de TLS, pas de connexions persistantes, 16 connexions simultanées au plus, une requête
-doit arriver en 20 secondes, les fichiers cachés (`.env`, `.git`) ne sont jamais servis par
-`--static`. Placez-le derrière un proxy inverse et ne l'exposez pas directement à Internet.
+pas de TLS, 64 connexions simultanées au plus (`--max-connections`), une requête
+doit arriver en 20 secondes (`--read-timeout`), les fichiers cachés (`.env`, `.git`) ne sont jamais servis par
+`--static`. **Pour HTTPS, placez-le derrière un proxy inverse** (nginx, Caddy, Traefik…) qui porte le certificat, et ne
+l'exposez pas directement à Internet.
 
 ## Navigateur : WebAssembly
 

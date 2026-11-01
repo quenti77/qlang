@@ -1,9 +1,9 @@
-//! `qlang fmt`: the layout of a program, two spaces for each level of nesting.
+//! `qlang fmt`: the layout of a program, four spaces for each level of nesting.
 //!
-//! Only the **white space at the start of lines** (and at their end) changes: the tokens, the
-//! comments and the spacing inside a line stay as they are, so a formatted program means exactly
-//! what it meant. That is checked on every run: the tokens of the result must be the tokens of the
-//! source, or nothing is returned.
+//! Only **white space** changes: at the start of lines (the level), at their end, and between two
+//! tokens of a line (see [`gap`]). The tokens and the comments stay as they are, so a formatted
+//! program means exactly what it meant. That is checked on every run: the tokens of the result must
+//! be the tokens of the source, or nothing is returned.
 //!
 //! The level of a line is the number of lines that opened a block (`fun`, `if`, `match`, `struct`...)
 //! or a bracket that is still open, so `foo(fun(x: int) -> int` followed by its body and `end)`
@@ -362,7 +362,15 @@ fn layout(src: &str) -> Result<String, String> {
     let mut above = 0usize;
     let mut blanks = 0usize;
     for (n, line) in lines.iter().enumerate() {
-        let body = line.trim_start_matches([' ', '\t']);
+        let spaced = if verbatim[n] {
+            None
+        } else {
+            let on_line: Vec<&Token> = per_line[n].iter().map(|&k| real[k]).collect();
+            tighten(&text, starts[n], line, &on_line)
+        };
+        let body = spaced
+            .as_deref()
+            .unwrap_or_else(|| line.trim_start_matches([' ', '\t']));
         if verbatim[n] {
             out.push((*line).to_string());
             blanks = 0;
@@ -395,7 +403,7 @@ fn layout(src: &str) -> Result<String, String> {
                 }
             }
         };
-        let mut s = "  ".repeat(level);
+        let mut s = "    ".repeat(level);
         if level_of[n].is_none() && is_multiline_comment_start(&lines, n, &verbatim) {
             s.push_str(body);
         } else {
@@ -438,6 +446,56 @@ fn layout(src: &str) -> Result<String, String> {
         result = result.replace("\r\n", "\n").replace('\n', "\r\n");
     }
     Ok(result)
+}
+
+/// The line with the white space between its tokens put in order, or `None` when it has nothing
+/// to change: no token, a comment in front of the first one, or only gaps that are already right.
+/// What follows the last token (a comment, the rest of a string running over several lines) stays.
+fn tighten(text: &str, line_start: usize, line: &str, toks: &[&Token]) -> Option<String> {
+    let first = toks.first()?;
+    let line_end = line_start + line.len();
+    let begin = first.span.start as usize;
+    if !text[line_start..begin]
+        .trim_start_matches([' ', '\t'])
+        .is_empty()
+    {
+        return None;
+    }
+    let mut out = String::with_capacity(line.len());
+    for pair in toks.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let (end, next) = (a.span.end as usize, b.span.start as usize);
+        out.push_str(&text[a.span.start as usize..end]);
+        let old = &text[end..next];
+        if old.chars().all(|c| c == ' ' || c == '\t') {
+            out.push_str(gap(&a.tok, &b.tok, old.is_empty()));
+        } else {
+            out.push_str(old);
+        }
+    }
+    let last = toks[toks.len() - 1].span.start as usize;
+    out.push_str(&text[last..line_end]);
+    let before = &text[begin..line_end];
+    (out != before).then_some(out)
+}
+
+/// The white space between two tokens of a line. One space, except that nothing goes inside a
+/// bracket, before a `,` or a `.`, or between a name and the `(` or `[` of its call or index (and
+/// between `fun` and the `(` of a function without a name); a `,` is followed by a space. Where
+/// there was none, nothing is added, apart from after a `,`.
+fn gap(a: &Tok, b: &Tok, none_before: bool) -> &'static str {
+    let tight = matches!(a, Tok::LParen | Tok::LBracket | Tok::Dot)
+        || matches!(b, Tok::RParen | Tok::RBracket | Tok::Comma | Tok::Dot)
+        || (matches!(b, Tok::LParen | Tok::LBracket)
+            && matches!(
+                a,
+                Tok::Ident(_) | Tok::RParen | Tok::RBracket | Tok::Fun | Tok::SelfKw | Tok::Super
+            ));
+    if tight || (none_before && !matches!(a, Tok::Comma)) {
+        ""
+    } else {
+        " "
+    }
 }
 
 /// A comment line that starts a comment running over several lines keeps its own text.
@@ -569,33 +627,33 @@ mod tests {
     }
 
     #[test]
-    fn blocks_are_indented_by_two_spaces() {
+    fn blocks_are_indented_by_four_spaces() {
         let messy = "fun f(x: int) -> int\nif x > 0 then\nreturn 1\nelseif x < 0 then\nreturn -1\nelse\nreturn 0\nend\nend\n";
-        let tidy = "fun f(x: int) -> int\n  if x > 0 then\n    return 1\n  elseif x < 0 then\n    return -1\n  else\n    return 0\n  end\nend\n";
+        let tidy = "fun f(x: int) -> int\n    if x > 0 then\n        return 1\n    elseif x < 0 then\n        return -1\n    else\n        return 0\n    end\nend\n";
         assert_eq!(format(messy).unwrap(), tidy);
         same(tidy);
     }
 
     #[test]
     fn match_arms_are_one_level_in_and_their_bodies_one_more() {
-        let src = "fun f(n: int) -> string\n  match n\n    case 0 then \"zero\"\n    case x if x > 9 then\n      let s = \"big\"\n      s\n    else \"other\"\n  end\nend\n";
+        let src = "fun f(n: int) -> string\n    match n\n        case 0 then \"zero\"\n        case x if x > 9 then\n            let s = \"big\"\n            s\n        else \"other\"\n    end\nend\n";
         same(src);
         assert_eq!(
-            format(&src.replace("\n    ", "\n").replace("\n  ", "\n")).unwrap(),
+            format(&src.replace("\n        ", "\n").replace("\n    ", "\n")).unwrap(),
             src
         );
     }
 
     #[test]
     fn a_function_passed_as_an_argument_is_one_level_not_two() {
-        same("queue.handle<Mail>(fun(m: Mail) -> string?\n  send(m)\n  none\nend)\n");
-        same("let r = items.map(fun(x: int) -> int\n  x + 1\nend)\n");
+        same("queue.handle<Mail>(fun(m: Mail) -> string?\n    send(m)\n    none\nend)\n");
+        same("let r = items.map(fun(x: int) -> int\n    x + 1\nend)\n");
     }
 
     #[test]
     fn function_types_are_not_blocks() {
         same(
-            "struct Task\n  public run: fun() -> string?\n  public other: array<(string, fun(int) -> int)>\nend\n\ntype Handler = fun(Request) -> Response\n\nfun apply(f: fun(int) -> int, x: int) -> int\n  f(x)\nend\n",
+            "struct Task\n    public run: fun() -> string?\n    public other: array<(string, fun(int) -> int)>\nend\n\ntype Handler = fun(Request) -> Response\n\nfun apply(f: fun(int) -> int, x: int) -> int\n    f(x)\nend\n",
         );
         same("let found = Reflect.find<fun(Request) -> Response>(name)\nlet again = 1\n");
     }
@@ -603,20 +661,20 @@ mod tests {
     #[test]
     fn traits_have_signatures_without_end_and_impl_for_is_one_block() {
         same(
-            "trait Store\n  fun read(self, key: string) -> string?\n  fun write(self, key: string)\nend\n\nimpl Store for Memory\n  public fun read(self, key: string) -> string?\n    none\n  end\nend\n",
+            "trait Store\n    fun read(self, key: string) -> string?\n    fun write(self, key: string)\nend\n\nimpl Store for Memory\n    public fun read(self, key: string) -> string?\n        none\n    end\nend\n",
         );
     }
 
     #[test]
     fn brackets_hang_one_level() {
         same(
-            "let row = JobRow {\n  id: 1,\n  kind: \"a\",\n}\nlet xs = [\n  1,\n  2,\n]\nfoo(\n  a,\n  b\n)\n",
+            "let row = JobRow {\n    id: 1,\n    kind: \"a\",\n}\nlet xs = [\n    1,\n    2,\n]\nfoo(\n    a,\n    b\n)\n",
         );
     }
 
     #[test]
     fn comments_follow_the_code_and_docs_and_strings_are_not_touched() {
-        let src = "--\" A doc\n  with its own indentation\n--\"\nfun f() -> string\n  -- before a statement\n  let s = \"line one\n   line two\"\n  if true then\n    s\n    -- last of the block\n  end\n  s\nend\n";
+        let src = "--\" A doc\n  with its own indentation\n--\"\nfun f() -> string\n    -- before a statement\n    let s = \"line one\n   line two\"\n    if true then\n        s\n        -- last of the block\n    end\n    s\nend\n";
         same(src);
     }
 
@@ -632,13 +690,13 @@ mod tests {
 
     #[test]
     fn a_line_that_goes_on_from_an_operator_is_one_level_deeper() {
-        same("let total = a +\n  b +\n  c\nlet ok = x\n  and y\n");
+        same("let total = a +\n    b +\n    c\nlet ok = x\n    and y\n");
     }
 
     #[test]
     fn line_endings_are_kept() {
         let out = format("fun f()\r\nlet a = 1\r\nend\r\n").unwrap();
-        assert_eq!(out, "fun f()\r\n  let a = 1\r\nend\r\n");
+        assert_eq!(out, "fun f()\r\n    let a = 1\r\nend\r\n");
     }
 
     #[test]
@@ -662,6 +720,38 @@ mod tests {
         if let Ok(once) = format(&src) {
             assert_eq!(format(&once).unwrap(), once);
         }
+    }
+
+    #[test]
+    fn the_spaces_inside_a_line_are_put_in_order() {
+        let messy = "fun   f( )\n    print (xs . len ( ) , 1)\nlet  a =  [1,2 ,  3 ]\nend\n";
+        let tidy = "fun f()\n    print(xs.len(), 1)\n    let a = [1, 2, 3]\nend\n";
+        assert_eq!(format(messy).unwrap(), tidy);
+        same(tidy);
+    }
+
+    #[test]
+    fn keywords_keep_a_space_before_a_parenthesis_and_a_lambda_does_not() {
+        same("if (a) and (b) then\n    x\nend\nlet g = fun(x: int) -> int x * 2 end\n");
+        assert_eq!(
+            format("if(a)  and  (b) then\nx\nend\nlet g = fun (x: int) -> int x end\n").unwrap(),
+            "if(a) and (b) then\n    x\nend\nlet g = fun(x: int) -> int x end\n"
+        );
+    }
+
+    #[test]
+    fn a_space_is_never_added_except_after_a_comma() {
+        same("let a = x+1\nlet p = P { x:1 }\n");
+        assert_eq!(format("f(a,b,)\n").unwrap(), "f(a, b,)\n");
+    }
+
+    #[test]
+    fn strings_and_comments_keep_their_spaces() {
+        same("let s = \"a   b ( )\" -- keep   ( )  this\n");
+        assert_eq!(
+            format("print(  \"a   b\"  )   -- x   y\n").unwrap(),
+            "print(\"a   b\")   -- x   y\n"
+        );
     }
 
     #[test]

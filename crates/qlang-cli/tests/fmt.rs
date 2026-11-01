@@ -33,7 +33,7 @@ fn fmt_rewrites_files_and_check_lists_them_without_touching_them() {
     assert!(out.status.success());
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        "fun f()\n  let a = 1\nend\n"
+        "fun f()\n    let a = 1\nend\n"
     );
 
     // now it is laid out: --check is quiet and succeeds

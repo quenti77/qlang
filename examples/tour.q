@@ -22,24 +22,24 @@ print("a" + "b")
 
 -- nullables
 if name == none then
-  print("no name")
+    print("no name")
 end
 name = "Alice"
 if name != none then
-  print("name has {name.len()} letters")
+    print("name has {name.len()} letters")
 end
 
 -- control flow
 for i in 0..5 step 2 do
-  count += i
+    count += i
 end
 print(count)
 for i in 1..=3 do
-  write("{i} ")
+    write("{i} ")
 end
 print("")
 while count > 0 do
-  count -= 3
+    count -= 3
 end
 print(count)
 
@@ -48,12 +48,12 @@ print(sign)
 
 -- match
 fun describe(n: int) -> string
-  match n
-    case 0 then "zero"
-    case 1..=9 then "small"
-    case x if x > 100 then "huge {x}"
-    else "other"
-  end
+    match n
+        case 0 then "zero"
+        case 1..=9 then "small"
+        case x if x > 100 then "huge {x}"
+        else "other"
+    end
 end
 print(describe(0))
 print(describe(5))
@@ -62,28 +62,28 @@ print(describe(50))
 
 -- functions
 fun fact(n: int) -> int
-  if n <= 1 then
-    return 1
-  end
-  n * fact(n - 1)
+    if n <= 1 then
+        return 1
+    end
+    n * fact(n - 1)
 end
 print(fact(10))
 
 fun apply(f: fun(int) -> int, x: int) -> int
-  f(x)
+    f(x)
 end
 let double = fun(x: int) -> int
-  x * 2
+    x * 2
 end
 print(apply(double, 21))
 
 -- closures
 fun counter() -> fun() -> int
-  let n = 0
-  fun() -> int
-    n += 1
-    n
-  end
+    let n = 0
+    fun() -> int
+        n += 1
+        n
+    end
 end
 let next = counter()
 next()
@@ -92,14 +92,14 @@ print(next())
 
 -- generics
 fun first_of<T>(xs: array<T>) -> T?
-  if xs.len() == 0 then
-    return none
-  end
-  xs[0]
+    if xs.len() == 0 then
+        return none
+    end
+    xs[0]
 end
 print(first_of(numbers))
 fun biggest<T: Ord>(a: T, b: T) -> T
-  if a > b then a else b end
+    if a > b then a else b end
 end
 print(biggest(3, 9))
 print(biggest("pear", "apple"))
@@ -112,49 +112,49 @@ print(numbers.len())
 
 -- enums
 enum Color
-  Red
-  Green
+    Red
+    Green
 end
 let c = Color.Green
 print(match c
-  case Color.Red then "red"
-  case Color.Green then "green"
+    case Color.Red then "red"
+    case Color.Green then "green"
 end)
 
 -- structs, impl, inheritance
 struct Account
-  protected balance: int = 0
-  public owner: string
-  private static created: int = 0
+    protected balance: int = 0
+    public owner: string
+    private static created: int = 0
 end
 
 struct Savings extends Account
-  public rate: float = 0.5
+    public rate: float = 0.5
 end
 
 impl Account
-  public fun new(owner: string) -> Account
-    Account.created += 1
-    Account { owner }
-  end
-  public fun deposit(self, amount: int)
-    self.balance += amount
-  end
-  public fun describe(self) -> string
-    "{self.owner}: {self.balance}"
-  end
-  public fun total_created() -> int
-    Account.created
-  end
+    public fun new(owner: string) -> Account
+        Account.created += 1
+        Account { owner }
+    end
+    public fun deposit(self, amount: int)
+        self.balance += amount
+    end
+    public fun describe(self) -> string
+        "{self.owner}: {self.balance}"
+    end
+    public fun total_created() -> int
+        Account.created
+    end
 end
 
 impl Savings
-  public fun open(owner: string, rate: float) -> Savings
-    Savings { ..Account.new(owner), rate }
-  end
-  public override fun describe(self) -> string
-    super.describe() + " at {self.rate}"
-  end
+    public fun open(owner: string, rate: float) -> Savings
+        Savings { ..Account.new(owner), rate }
+    end
+    public override fun describe(self) -> string
+        super.describe() + " at {self.rate}"
+    end
 end
 
 let acc = Savings.open("Bob", 0.25)
@@ -164,32 +164,32 @@ print(Account.total_created())
 
 -- traits and operators
 struct Point
-  public x: int
-  public y: int
+    public x: int
+    public y: int
 end
 
 impl Add for Point
-  public fun add(self, o: Point) -> Point
-    Point { x: self.x + o.x, y: self.y + o.y }
-  end
+    public fun add(self, o: Point) -> Point
+        Point { x: self.x + o.x, y: self.y + o.y }
+    end
 end
 
 impl Mul<int> for Point
-  public fun mul(self, k: int) -> Point
-    Point { x: self.x * k, y: self.y * k }
-  end
+    public fun mul(self, k: int) -> Point
+        Point { x: self.x * k, y: self.y * k }
+    end
 end
 
 impl As<string> for Point
-  public fun convert(self) -> string
-    "({self.x}, {self.y})"
-  end
+    public fun convert(self) -> string
+        "({self.x}, {self.y})"
+    end
 end
 
 impl Eq for Point
-  public fun eq(self, o: Point) -> bool
-    self.x == o.x and self.y == o.y
-  end
+    public fun eq(self, o: Point) -> bool
+        self.x == o.x and self.y == o.y
+    end
 end
 
 let p = Point { x: 1, y: 2 } + Point { x: 10, y: 20 }
@@ -199,21 +199,21 @@ print(p == Point { x: 11, y: 22 })
 print(p as string)
 
 trait Shape
-  fun area(self) -> float
+    fun area(self) -> float
 end
 
 struct Square
-  public side: float
+    public side: float
 end
 
 impl Shape for Square
-  public fun area(self) -> float
-    self.side * self.side
-  end
+    public fun area(self) -> float
+        self.side * self.side
+    end
 end
 
 fun show_area(s: Shape)
-  print(s.area())
+    print(s.area())
 end
 show_area(Square { side: 3.0 })
 
@@ -229,19 +229,19 @@ let ages = { "ana": 31, "bob": 27 }
 ages["cleo"] = 45
 let bob = ages["bob"]
 if bob != none then
-  print("bob is {bob}")
+    print("bob is {bob}")
 end
 print(ages.get("zed", -1))
 for name in ages.keys() do
-  write("{name} ")
+    write("{name} ")
 end
 print("")
 for name, age in ages do
-  write("{name}={age} ")
+    write("{name}={age} ")
 end
 print("")
 for i, c in "abc" do
-  write("{i}{c} ")
+    write("{i}{c} ")
 end
 print("")
 let rest = 17

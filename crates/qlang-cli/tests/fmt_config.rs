@@ -15,7 +15,7 @@ fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 const UGLY: &str = "if true then\nprint(1)\nend\n";
-const NEAT: &str = "if true then\n  print(1)\nend\n";
+const NEAT: &str = "if true then\n    print(1)\nend\n";
 
 #[test]
 fn stdin_is_laid_out_on_the_output() {

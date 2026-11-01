@@ -112,19 +112,22 @@ pub fn configure(args: &mut Vec<String>) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The other tests of the binary allocate at the same time, so the bound is far above their noise and far below what
+    /// the lost balances added (about 300 MB here).
+    ///
     /// A short-lived thread (a connection's) frees what another thread allocated and ends with a negative balance:
     /// that balance used to be dropped with the thread, leaving the total higher for good, until a server that held
     /// 14 MB was stopped by `R904`.
     #[test]
     fn the_balance_of_a_thread_that_ends_is_not_lost() {
         let before = in_use();
-        for _ in 0..2000 {
+        for _ in 0..3000 {
             let block = vec![1u8; 100_000];
             std::thread::spawn(move || drop(block)).join().unwrap();
         }
         let after = in_use();
         assert!(
-            after < before + (16 << 20),
+            after < before + (128 << 20),
             "{before} bytes before, {after} after"
         );
     }

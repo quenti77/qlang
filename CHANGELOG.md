@@ -6,6 +6,7 @@
 
 - **`qlang serve --max-workers` : une rafale de requêtes fait maintenant grossir le pool.** Un worker inactif restait compté « inactif » jusqu'à ce qu'il se réveille et prenne sa requête ; si plusieurs requêtes arrivaient avant, aucun worker n'était ajouté et elles attendaient toutes le seul worker (quatre requêtes de 1,5 s : 6 s au lieu de 1,5 s). Le serveur ajoute un worker dès qu'il y a plus de requêtes en attente que de workers inactifs. Vu sur la CI macOS, où le réveil est plus lent ; le test `elastic` échouait trois fois sur quatre.
 - **`qlang fmt` : un `\r` seul en fin de texte ne rend plus le résultat instable.** Trouvé par le fuzzing du 2026-11-01 : quand la dernière ligne, gardée telle quelle (dans une chaîne ou un commentaire sur plusieurs lignes), finissait par un `\r` sans `\n`, le saut de ligne ajouté par le formateur donnait `\r\n`, et un second passage réécrivait tout le fichier en fins de ligne Windows. Le texte est maintenant écrit d'emblée avec des fins de ligne `\r\n`. Aucun autre changement de comportement.
+- **formatted /home/quentin/Projects/qlang/crates/qlang-core/tests/data/fmt_lone_cr.q refuse un texte dont le  seul rendrait la mise en forme instable** (cas trouvé par le fuzzing une fois la correction précédente en place : plusieurs  seuls dans une chaîne). Il répond « nothing was written » au lieu d'écrire un texte qui change à chaque passage.
 
 ## 0.84.0
 

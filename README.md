@@ -370,6 +370,8 @@ lancent aucun fournisseur : une vérification seule (`check --json`, ou `"mode":
 suppose donc toutes les `extern fun` fournies, comme elle suppose un clavier et une
 horloge, alors qu'un `run --json` les refuse (`T263`) ; `qlang serve app.q` en lance un par worker.
 
+Un fournisseur qui ne répond pas à un message dans les **60 secondes** (réglable avec `QLANG_PROVIDER_TIMEOUT`, en secondes) est arrêté, et l'appel donne l'erreur `the provider did not answer within N seconds` : un fournisseur planté ou bloqué ne fige pas le programme.
+
 ## Architecture
 
 Le langage est séparé de toute interface : le cœur ne lit, n'écrit et ne touche

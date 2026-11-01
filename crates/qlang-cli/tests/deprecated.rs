@@ -89,21 +89,17 @@ fn a_program_without_warnings_passes_deny_warnings() {
 }
 
 #[test]
-fn the_module_that_declares_it_may_still_use_it_and_log_warn_is_the_first_case() {
+fn the_module_that_declares_it_may_still_use_it() {
     let dir = project(
         "own",
         &[(
             "main.q",
-            "#[deprecated(\"old\")]\nfun a() -> int\n  1\nend\nprint(a())\nLog.warn(\"x\")\n",
+            "#[deprecated(\"old\")]\nfun a() -> int\n  1\nend\nprint(a())\n",
         )],
     );
     let (code, _, err) = qlang(&dir, &["run", "main.q"]);
     assert_eq!(code, 0);
     assert!(!err.contains("`a` is deprecated"), "{err}");
-    assert!(
-        err.contains("`warn` is deprecated: use Log.warning"),
-        "{err}"
-    );
 }
 
 #[test]

@@ -116,6 +116,7 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// checks the current module first).
 const PRELUDE_SOURCE: &str = r#"
 struct Error
+    --" What went wrong, for a person to read. --"
     public message: string
 end
 
@@ -123,7 +124,9 @@ end
 with `match` (`case Ok(v) then ... case Err(e) then ...`), or with `is_ok()`, `unwrap()`...
 Write `Ok(1)` / `Err(error)`, or `Result.Ok(1)` / `Result.Err(error)`. --"
 enum Result<T, E>
+    --" The success, with its value. --"
     Ok(value: T)
+    --" The failure, with its error. --"
     Err(error: E)
 end
 
@@ -234,48 +237,56 @@ fun json_merge(a: string, b: string) -> string
 end
 
 impl ToJson for int
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         self as string
     end
 end
 
 impl ToJson for float
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         self as string
     end
 end
 
 impl ToJson for bool
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         self as string
     end
 end
 
 impl ToJson for Json
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         self.to_text()
     end
 end
 
 impl ToJson for string
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         json_escape(self)
     end
 end
 
 impl ToJson for uuid
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         json_escape(self as string)
     end
 end
 
 impl ToJson for ulid
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         json_escape(self as string)
     end
 end
 
 impl ToJson for datetime
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         json_escape(self as string)
     end
@@ -295,7 +306,9 @@ end
 --" An annotation as reflection reads it: the `name` of its struct (`Route`) and its arguments
 by field name, as JSON values (numbers are floats). --"
 struct AnnotationInfo
+    --" The name of the annotation, without `#[` and `]`. --"
     public name: string
+    --" The arguments given to the annotation, by name. --"
     public args: map<string, Json>
 end
 
@@ -327,8 +340,11 @@ end
 
 --" A parameter of a function or a variant, as reflection describes it. --"
 struct ParamInfo
+    --" The name of the parameter. --"
     public name: string
+    --" The name of its type, as written. --"
     public type_name: string
+    --" The annotations of the parameter. --"
     public annotations: array<AnnotationInfo>
     ty: Any
 end
@@ -361,6 +377,7 @@ struct TypeInfo
     public kind: string
     --" The name of a struct or an enum, else the type as written. --"
     public name: string
+    --" `true` for a nullable type (`T?`). --"
     public nullable: bool
     --" The element of an array, the value of a map. --"
     public item: TypeInfo?
@@ -380,8 +397,11 @@ struct FieldType
     public name: string
     --" The name of the field. --"
     public field: string
+    --" The name of the type, as written. --"
     public type_name: string
+    --" The annotations of the type. --"
     public annotations: array<AnnotationInfo>
+    --" What `TypeInfo` says about the type. --"
     public info: TypeInfo
 end
 
@@ -394,38 +414,55 @@ end
 
 --" A field of a struct, as reflection describes it. --"
 struct FieldInfo
+    --" The name of the field. --"
     public name: string
+    --" The name of its type, as written. --"
     public type_name: string
+    --" The annotations of the field. --"
     public annotations: array<AnnotationInfo>
 end
 
 --" A struct, as `Reflect.struct_info<T>()` describes it. --"
 struct StructInfo
+    --" The name of the structure. --"
     public name: string
+    --" Its fields, in order. --"
     public fields: array<FieldInfo>
+    --" Its annotations. --"
     public annotations: array<AnnotationInfo>
 end
 
 --" A variant of an enum, as reflection describes it. --"
 struct VariantInfo
+    --" The name of the variant. --"
     public name: string
+    --" The data it carries, in order. --"
     public fields: array<ParamInfo>
+    --" Its annotations. --"
     public annotations: array<AnnotationInfo>
 end
 
 --" An enum, as `Reflect.enum_info<T>()` describes it. --"
 struct EnumInfo
+    --" The name of the enumeration. --"
     public name: string
+    --" Its variants, in order. --"
     public variants: array<VariantInfo>
+    --" Its annotations. --"
     public annotations: array<AnnotationInfo>
 end
 
 --" A function, as `Reflect.functions()` describes it. --"
 struct FunctionInfo
+    --" The name of the function. --"
     public name: string
+    --" `true` for a method (it takes `self`). --"
     public has_self: bool
+    --" Its parameters, `self` excluded. --"
     public params: array<ParamInfo>
+    --" The name of its return type, as written. --"
     public return_type: string
+    --" Its annotations. --"
     public annotations: array<AnnotationInfo>
 end
 
@@ -484,17 +521,24 @@ end
 --" The inside of an enumeration value, as `Reflect.parts` gives it: the name of the enum, of its
 variant and the data it carries (each as an `Any` with its own type). --"
 struct EnumParts
+    --" The name of the enumeration. --"
     public enum_name: string
+    --" The name of the variant. --"
     public variant: string
+    --" The data of the variant, in order. --"
     public values: array<Any>
 end
 
 --" A function found by `Reflect.callable(name)` (or `Reflect.callable(module, name)`), to call with
 `Any` values: `call` checks their number and types against `params`. --"
 struct Callable
+    --" The name of the function. --"
     public name: string
+    --" Its parameters. --"
     public params: array<ParamInfo>
+    --" The name of its return type, as written. --"
     public return_type: string
+    --" Its annotations. --"
     public annotations: array<AnnotationInfo>
     target: Any
     ret: Any
@@ -555,84 +599,103 @@ impl Json
         Reflect.json_text(self)
     end
 
+    --" The JSON `null`. --"
     public fun null() -> Json
         Json { kind: "null", str: none, num: none, bool_: none, arr: none, obj: none }
     end
 
+    --" A JSON string. --"
     public fun string(value: string) -> Json
         Json { kind: "string", str: value, num: none, bool_: none, arr: none, obj: none }
     end
 
+    --" A JSON number. --"
     public fun number(value: float) -> Json
         Json { kind: "number", str: none, num: value, bool_: none, arr: none, obj: none }
     end
 
+    --" A JSON `true` or `false`. --"
     public fun boolean(value: bool) -> Json
         Json { kind: "bool", str: none, num: none, bool_: value, arr: none, obj: none }
     end
 
+    --" A JSON array. --"
     public fun array(value: array<Json>) -> Json
         Json { kind: "array", str: none, num: none, bool_: none, arr: value, obj: none }
     end
 
+    --" A JSON object. --"
     public fun object(value: map<string, Json>) -> Json
         Json { kind: "object", str: none, num: none, bool_: none, arr: none, obj: value }
     end
 
+    --" `true` for the JSON `null`. --"
     public fun is_null(self) -> bool
         self.kind == "null"
     end
 
+    --" `true` for a JSON string. --"
     public fun is_string(self) -> bool
         self.kind == "string"
     end
 
+    --" `true` for a JSON number. --"
     public fun is_number(self) -> bool
         self.kind == "number"
     end
 
+    --" `true` for a JSON `true` or `false`. --"
     public fun is_bool(self) -> bool
         self.kind == "bool"
     end
 
+    --" `true` for a JSON array. --"
     public fun is_array(self) -> bool
         self.kind == "array"
     end
 
+    --" `true` for a JSON object. --"
     public fun is_object(self) -> bool
         self.kind == "object"
     end
 
+    --" The string; stops the program with an error if the value is not a string. --"
     public fun as_string(self) -> string
         let v = self.str
         if v != none then v else panic("Json: not a string") end
     end
 
+    --" The number; stops the program with an error if the value is not a number. --"
     public fun as_number(self) -> float
         let v = self.num
         if v != none then v else panic("Json: not a number") end
     end
 
+    --" The boolean; stops the program with an error if the value is not a boolean. --"
     public fun as_bool(self) -> bool
         let v = self.bool_
         if v != none then v else panic("Json: not a bool") end
     end
 
+    --" The elements; stops the program with an error if the value is not an array. --"
     public fun as_array(self) -> array<Json>
         let v = self.arr
         if v != none then v else panic("Json: not an array") end
     end
 
+    --" The members; stops the program with an error if the value is not an object. --"
     public fun as_object(self) -> map<string, Json>
         let v = self.obj
         if v != none then v else panic("Json: not an object") end
     end
 
+    --" The member `key` of an object, or `none` when there is none (or the value is not an object). --"
     public fun get(self, key: string) -> Json?
         let o = self.obj
         if o != none then o[key] else none end
     end
 
+    --" The element `i` of an array, or `none` when out of range (or the value is not an array). --"
     public fun at(self, i: int) -> Json?
         let a = self.arr
         if a != none and i >= 0 and i < a.len() then a[i] else none end
@@ -640,6 +703,7 @@ impl Json
 end
 
 impl ToJson for Json
+    --" The JSON text of the value. --"
     public fun to_json(self) -> string
         if self.kind == "null" then
             "null"
@@ -707,33 +771,40 @@ struct JsonParser
 end
 
 impl JsonParser
+    --" A parser for `text`, at its start. Use `Json.parse` rather than this. --"
     public fun new(text: string) -> JsonParser
         JsonParser { text, pos: 0 }
     end
 
+    --" The character at the current position (an empty string at the end). --"
     public fun peek(self) -> string
         if self.pos < self.text.len() then self.text.substring(self.pos, self.pos + 1) else "" end
     end
 
+    --" Move one character on. --"
     public fun advance(self)
         self.pos = self.pos + 1
     end
 
+    --" Skip the spaces, tabs and line breaks. --"
     public fun skip_ws(self)
         while self.peek() == " " or self.peek() == "\t" or self.peek() == "\n" or self.peek() == "\r" do
             self.advance()
         end
     end
 
+    --" `true` when the text continues with `word`. --"
     public fun looking_at(self, word: string) -> bool
         let end_ = (self.pos + word.len()).min(self.text.len())
         self.text.substring(self.pos, end_) == word
     end
 
+    --" An `err` that says `message` and where the parser is. --"
     public fun fail(self, message: string) -> Result<Json, Error>
         Result<Json, Error>.Err(Error { message: "JSON parse error at offset {self.pos}: {message}" })
     end
 
+    --" An error when something other than spaces follows the value, else `none`. --"
     public fun trailing_error(self) -> Error?
         self.skip_ws()
         if self.pos != self.text.len() then
@@ -743,6 +814,7 @@ impl JsonParser
         end
     end
 
+    --" Read the next JSON value. --"
     public fun parse_value(self) -> Result<Json, Error>
         self.skip_ws()
         let c = self.peek()
@@ -768,6 +840,7 @@ impl JsonParser
         end
     end
 
+    --" Read a string literal and return its content, escapes decoded. --"
     public fun parse_raw_string(self) -> Result<string, Error>
         self.advance()
         let out = ""
@@ -815,6 +888,7 @@ impl JsonParser
         Result<string, Error>.Ok(out)
     end
 
+    --" Read a string literal as a JSON value. --"
     public fun parse_string_value(self) -> Result<Json, Error>
         let r = self.parse_raw_string()
         if r.is_err() then
@@ -823,6 +897,7 @@ impl JsonParser
         Result<Json, Error>.Ok(Json.string(r.unwrap()))
     end
 
+    --" Read a number. --"
     public fun parse_number(self) -> Result<Json, Error>
         let start = self.pos
         if self.peek() == "-" then
@@ -854,6 +929,7 @@ impl JsonParser
         Result<Json, Error>.Ok(Json.number(n))
     end
 
+    --" Read an array. --"
     public fun parse_array(self) -> Result<Json, Error>
         self.advance()
         let items: array<Json> = []
@@ -881,6 +957,7 @@ impl JsonParser
         self.fail("unreachable")
     end
 
+    --" Read an object. --"
     public fun parse_object(self) -> Result<Json, Error>
         self.advance()
         let fields: map<string, Json> = {}
@@ -944,15 +1021,22 @@ end
 (`id` is `"3"`; the last one wins when a name is repeated); `headers` has lower-case names.
 `params` holds the parameters of the route a `Router` matched (`/items/:id`). --"
 struct Request
+    --" The HTTP method, in capitals (`GET`). --"
     public method: string
+    --" The target (`/items?id=3`) for a received request, the address to call for `http.send`. --"
     public url: string
+    --" The headers; for a received request the names are in lower case. --"
     public headers: map<string, string> = {}
+    --" The body as text, or `none` when there is none or it is not text. --"
     public body: string? = none
     --" The body as bytes, for a body that is not text (an upload, an image). For a received
     request it is the exact body; for `http.send` it wins over `body`. --"
     public raw: bytes? = none
+    --" The decoded path of a received request (`/items`). --"
     public path: string = ""
+    --" The decoded query parameters (the last one wins when a name is repeated). --"
     public query: map<string, string> = {}
+    --" The parameters of the route a `Router` matched (`/items/:id`). --"
     public params: map<string, string> = {}
     --" Every value of each query parameter, in order (`?a=1&a=2` gives `{"a": ["1", "2"]}`). --"
     public query_all: map<string, array<string>> = {}
@@ -967,10 +1051,13 @@ end
 
 --" One part of a `multipart/form-data` body: a field of the form or a file. --"
 struct Part
+    --" The name of the form field. --"
     public name: string
     --" The name of the uploaded file, or `none` for an ordinary field. --"
     public filename: string? = none
+    --" The type of the content (`image/png`), when the client said it. --"
     public content_type: string? = none
+    --" The content, as bytes. --"
     public data: bytes
 end
 
@@ -1115,8 +1202,11 @@ end
 --" An HTTP response: the one returned by `http.send`, and the one the `handle` function of
 a program run with `qlang serve` returns. --"
 struct Response
+    --" The HTTP status (`200`, `404`…). --"
     public status: int
+    --" The headers. --"
     public headers: map<string, string> = {}
+    --" The body. --"
     public body: string
     --" The exact bytes of the body when it is not text; `body` is then a lossy text. A
     program that answers with `raw` set sends these bytes instead of `body`. --"
@@ -1135,8 +1225,11 @@ end
 
 --" A message received on a WebSocket: `text` for a text message, `data` for a binary one. --"
 struct WsMessage
+    --" The text of a text message, or `none` for a binary one. --"
     public text: string? = none
+    --" The bytes of a binary message, or `none` for a text one. --"
     public data: bytes? = none
+    --" `true` for a binary message. --"
     public binary: bool = false
 end
 
@@ -1144,8 +1237,11 @@ end
 struct WsFrame
     --" `text`, `binary` or `close`. --"
     public kind: string
+    --" The text of a text frame. --"
     public text: string = ""
+    --" The bytes of a binary frame. --"
     public data: bytes = bytes.empty()
+    --" The code of a close frame (1000: normal). --"
     public code: int = 1000
 end
 
@@ -1190,6 +1286,7 @@ impl WebSocket
         end
     end
 
+    --" `true` until the connection is closed. --"
     public fun is_open(self) -> bool
         self.open
     end
@@ -1212,6 +1309,7 @@ struct WebSocketHandler
     public on_open: (fun(WebSocket))? = none
     --" Called every `tick_ms` while the connection is open: poll a database, send the news. --"
     public on_tick: (fun(WebSocket))? = none
+    --" How often, in milliseconds, `on_tick` is called (1000 by default; 0: never). --"
     public tick_ms: int = 1000
     --" The connection ended (the client left, or `close`). Nothing can be sent any more. --"
     public on_close: (fun(WebSocket))? = none
@@ -1219,9 +1317,13 @@ end
 
 --" One event of a server-sent events stream (`Response.sse`). --"
 struct SseEvent
+    --" The data of the event (several lines make several `data:` lines). --"
     public data: string
+    --" The name of the event (`event:`), or `none`. --"
     public event: string? = none
+    --" The identifier of the event (`id:`), or `none`. --"
     public id: string? = none
+    --" How long, in milliseconds, the client waits before reconnecting (`retry:`), or `none`. --"
     public retry: int? = none
 end
 
@@ -1250,19 +1352,29 @@ end
 it); `max_age` is in seconds (`none`: a cookie for the session); `same_site` is `"Lax"`,
 `"Strict"` or `"None"`. --"
 struct Cookie
+    --" The name of the cookie. --"
     public name: string
+    --" Its value. --"
     public value: string
+    --" The path it applies to. --"
     public path: string = "/"
+    --" The domain it applies to, or `none` for the server's own. --"
     public domain: string? = none
+    --" Its life in seconds, or `none` for a cookie that ends with the browser session. --"
     public max_age: int? = none
+    --" `true`: only sent over HTTPS. --"
     public secure: bool = false
+    --" `true`: not readable from the page's scripts. --"
     public http_only: bool = true
+    --" `Lax`, `Strict` or `None`. --"
     public same_site: string = "Lax"
 end
 
 --" An error that has an HTTP status: what a handler gives back when it wants more than a 500. --"
 struct HttpError
+    --" The HTTP status of the answer. --"
     public status: int
+    --" The message of the answer. --"
     public message: string
 end
 
@@ -1364,8 +1476,11 @@ end
 --" One route of a `Router`: the requests with this `method` (`"GET"`...) and a path matching
 `pattern` go to `handler`. --"
 struct Route
+    --" The method the route answers (`GET`). --"
     public method: string
+    --" The pattern of the path (`/items/:id`). --"
     public pattern: string
+    --" The function that answers. --"
     public handler: fun(Request) -> Response
 end
 
@@ -1618,6 +1733,7 @@ end
 
 --" A text file being read one line at a time (see `fs.lines`). --"
 struct Lines
+    --" The number of the open file. --"
     public handle: int
 end
 
@@ -2155,12 +2271,6 @@ impl Log
         Log.log("warning", message, context)
     end
 
-    --" The same as `warning`. Deprecated since 0.69: use `Log.warning`; it will be removed in 0.72. --"
-    #[deprecated("use Log.warning (Log.warn will be removed in 0.72)")]
-    public fun warn<C>(message: string, context: C? = none)
-        Log.log("warning", message, context)
-    end
-
     --" Something that failed, but the program goes on. --"
     public fun error<C>(message: string, context: C? = none)
         Log.log("error", message, context)
@@ -2495,6 +2605,7 @@ impl<T> Set<T>
 end
 
 impl<T> As<string> for Set<T>
+    --" The set as text: `Set(1, 2, 3)`. --"
     public fun convert(self) -> string
         let parts: array<string> = []
         for v in self do
@@ -2580,8 +2691,11 @@ extern fun process_run(command: string, args: array<string>, input: string?) -> 
 --" What a program wrote on its two output streams, and the code it ended with (-1 when a
 signal ended it). --"
 struct ProcessOutput
+    --" The exit code of the program. --"
     public status: int
+    --" What it wrote on its standard output. --"
     public stdout: string
+    --" What it wrote on its standard error. --"
     public stderr: string
 end
 
@@ -2617,8 +2731,11 @@ end
 range... `places` are `file:line` pieces, the innermost first: where it happened, then the calls that
 led there (up to 8). --"
 struct Caught
+    --" The code of the error (`R011`). --"
     public code: string
+    --" The message of the error. --"
     public message: string
+    --" Where it happened, innermost first (`file:line`). --"
     public places: array<string>
 end
 
@@ -2693,6 +2810,7 @@ permissions of the program (`--allow-process`...), its own memory and its own da
 runs the top of its file again. `wait` gives the result **once**: a task is forgotten after it. A task that
 fails (an error in its file, `R906`) makes `wait` an `err` with the message. --"
 struct Worker
+    --" The number of the task. --"
     public id: int
 end
 
@@ -2891,7 +3009,9 @@ extern fun tz_resolve(zone: string, wall: int) -> Result<int, Error>
 --" A file of an archive: its path inside the archive (`docs/a.txt`, never absolute and never with
 `..`) and its content. --"
 struct ArchiveEntry
+    --" The path of the entry in the archive. --"
     public name: string
+    --" Its content. --"
     public data: bytes
 end
 
@@ -3025,6 +3145,7 @@ let opening = paris.local(2026, 10, 11, 9, 0, 0)       -- 9:00 in Paris, as an i
 An hour that does not exist (clocks go forward) is read with the offset before the change; an
 hour that happens twice (clocks go back) is the first one. --"
 struct Zone
+    --" The name of the time zone (`Europe/Paris`). --"
     public name: string
 end
 
@@ -3081,7 +3202,9 @@ extern fun term_script_end() -> bool
 
 --" The size of the terminal, in characters. --"
 struct Size
+    --" The number of columns. --"
     public cols: int = 80
+    --" The number of rows. --"
     public rows: int = 24
 end
 
@@ -3098,15 +3221,25 @@ end
 - `"focus"`: `text` is `"in"` or `"out"` (after `Term.focus(true)`);
 - `"timeout"`: nothing happened within the time asked. --"
 struct Event
+    --" `"key"`, `"mouse"`, `"resize"`, `"paste"`, `"focus"` or `"timeout"`. --"
     public kind: string = "timeout"
+    --" The character (`"a"`) or the name of the key (`"Enter"`, `"Up"`, `"F1"`…) of a key event. --"
     public key: string = ""
+    --" What was pasted (`"paste"`), or `"in"` / `"out"` (`"focus"`). --"
     public text: string = ""
+    --" `true` when Ctrl was held. --"
     public ctrl: bool = false
+    --" `true` when Alt was held. --"
     public alt: bool = false
+    --" `true` when Shift was held. --"
     public shift: bool = false
+    --" The column of a mouse event, or the number of columns after a resize (from 0). --"
     public x: int = 0
+    --" The row of a mouse event, or the number of rows after a resize (from 0). --"
     public y: int = 0
+    --" `"left"`, `"right"`, `"middle"` or `"none"`, for a mouse event. --"
     public button: string = "none"
+    --" `"down"`, `"up"`, `"drag"`, `"move"` or `"scroll_up"`, `"scroll_down"`, `"scroll_left"`, `"scroll_right"`, for a mouse event. --"
     public action: string = ""
 end
 
@@ -3326,7 +3459,9 @@ extern fun redis_close(conn: int) -> Result<bool, Error>
 
 --" A message received on a Redis subscription. --"
 struct RedisMessage
+    --" The channel the message came from. --"
     public channel: string
+    --" The message. --"
     public payload: string
     --" The pattern that matched, for a `psubscribe`. --"
     public pattern: string? = none
@@ -3430,6 +3565,7 @@ impl Redis
         Redis.text_of(self.command(["GET", key]))
     end
 
+    --" Set the string `key` to `value`. --"
     public fun set(self, key: string, value: string) -> Result<bool, Error>
         Redis.ok_of(self.command(["SET", key, value]))
     end
@@ -3450,6 +3586,7 @@ impl Redis
         Redis.int_of(self.command(["DEL", key]))
     end
 
+    --" `true` when `key` exists. --"
     public fun exists(self, key: string) -> Result<bool, Error>
         let n = Redis.int_of(self.command(["EXISTS", key]))
         if n.is_err() then
@@ -3482,18 +3619,22 @@ impl Redis
         Redis.int_of(self.command(["RPUSH", key, value]))
     end
 
+    --" Remove and return the first element of the list `key`, or `none` when it is empty. --"
     public fun lpop(self, key: string) -> Result<string?, Error>
         Redis.text_of(self.command(["LPOP", key]))
     end
 
+    --" Remove and return the last element of the list `key`, or `none` when it is empty. --"
     public fun rpop(self, key: string) -> Result<string?, Error>
         Redis.text_of(self.command(["RPOP", key]))
     end
 
+    --" The length of the list `key`. --"
     public fun llen(self, key: string) -> Result<int, Error>
         Redis.int_of(self.command(["LLEN", key]))
     end
 
+    --" The elements of the list `key` from `start` to `stop` (inclusive; negative counts from the end). --"
     public fun lrange(self, key: string, start: int, stop: int) -> Result<array<string>, Error>
         Redis.texts_of(self.command(["LRANGE", key, "{start}", "{stop}"]))
     end
@@ -3526,10 +3667,12 @@ impl Redis
         Redis.int_of(self.command(["ZADD", key, "{score}", member]))
     end
 
+    --" Remove `member` from the sorted set `key`; the number removed. --"
     public fun zrem(self, key: string, member: string) -> Result<int, Error>
         Redis.int_of(self.command(["ZREM", key, member]))
     end
 
+    --" The number of members of the sorted set `key`. --"
     public fun zcard(self, key: string) -> Result<int, Error>
         Redis.int_of(self.command(["ZCARD", key]))
     end
@@ -3556,6 +3699,7 @@ impl Redis
         self.command(words)
     end
 
+    --" Close the connection. --"
     public fun close(self) -> Result<bool, Error>
         redis_close(self.conn)
     end
@@ -3563,6 +3707,7 @@ end
 
 --" A connection that listens to channels (`Redis.subscriber`). --"
 struct Subscription
+    --" The number of the connection. --"
     public conn: int
 end
 
@@ -3572,6 +3717,7 @@ impl Subscription
         self.send("SUBSCRIBE", channels)
     end
 
+    --" Stop listening to `channels`. --"
     public fun unsubscribe(self, channels: array<string>) -> Result<bool, Error>
         self.send("UNSUBSCRIBE", channels)
     end
@@ -3614,6 +3760,7 @@ impl Subscription
         Result<RedisMessage?, Error>.Ok(RedisMessage { channel: channel.as_string(), payload: payload.as_string(), pattern: p })
     end
 
+    --" Close the connection. --"
     public fun close(self) -> Result<bool, Error>
         redis_close(self.conn)
     end

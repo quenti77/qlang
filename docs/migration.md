@@ -16,16 +16,18 @@ qlang migrate --check     # liste les fichiers qui changeraient, sans les touche
 qlang migrate             # réécrit
 ```
 
-Aujourd'hui une règle : `Log.warn` → `Log.warning` (0.69). Ce qui n'est pas un renommage (un comportement qui change)
+Aujourd'hui une règle : `Log.warn` → `Log.warning` (déprécié en 0.69, retiré en 0.83). Ce qui n'est pas un renommage (un comportement qui change)
 reste décrit ici, à la main.
 
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
-## 0.69 : `Log.warn` est déprécié (pas encore retiré)
+## 0.83 : `Log.warn` est retiré
+
+Déprécié en 0.69 (avertissement `W001`), retiré après quatorze versions mineures.
 
 - **Avant** : `Log.warn("message")`.
-- **Après** : `Log.warning("message")`. `Log.warn` marche encore, avec l'avertissement `W001`. Retrait au plus tôt en 0.72.
+- **Après** : `Log.warning("message")`. `Log.warn` n'existe plus : l'appel est une erreur de compilation.
 - **S'adapter** : `qlang migrate` fait le remplacement pour vous (voir ci-dessous), ou recherche et remplacement de `Log.warn(` par `Log.warning(` dans le projet.
 
 ## 0.61 : `--dev` est refusé hors `localhost`

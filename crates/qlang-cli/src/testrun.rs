@@ -294,7 +294,7 @@ fn indent(text: &str) -> String {
 
 fn usage(why: &str) -> ExitCode {
     eprintln!(
-        "{why}\nusage: qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N]"
+        "{why}\nusage: qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N] [--trust-externs] [--allow-process] [--deny-warnings]"
     );
     ExitCode::from(64)
 }

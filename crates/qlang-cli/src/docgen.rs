@@ -84,7 +84,8 @@ impl Levels {
     }
 }
 
-/// `*` (anything but `/`), `**` (anything), `?` (one character).
+/// `*` (anything but `/`), `**` (anything; `**/` also matches no directory at all, so `**/*.q` reaches the
+/// files at the root), `?` (one character).
 fn glob_match(pattern: &str, text: &str) -> bool {
     fn go(p: &[u8], t: &[u8]) -> bool {
         match p.first() {
@@ -92,6 +93,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
             Some(b'*') if p.get(1) == Some(&b'*') => {
                 let rest = &p[2..];
                 (0..=t.len()).any(|i| go(rest, &t[i..]))
+                    || (rest.first() == Some(&b'/') && go(&rest[1..], t))
             }
             Some(b'*') => {
                 let rest = &p[1..];
@@ -193,7 +195,8 @@ fn prelude_reference() -> Result<String, String> {
                     .iter()
                     .filter(|m| {
                         // a generic impl names its owner `Result<T, E>`
-                        m.kind == kind
+                        m.public
+                            && m.kind == kind
                             && m.owner.as_deref().map(|o| o.split('<').next().unwrap_or(o))
                                 == Some(top.name.as_str())
                     })

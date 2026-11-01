@@ -90,7 +90,7 @@ public fun warn(...)
 
 Un module qui appelle sa propre fonction dépréciée n'est pas averti : l'avertissement vise les appelants.
 
-**Premier cas** : `Log.warn` (un autre nom de `Log.warning`) est déprécié en 0.69, retiré au plus tôt en 0.72.
+**Premier cas** : `Log.warn` (un autre nom de `Log.warning`) a été déprécié en 0.69 et retiré en 0.83. `qlang migrate` réécrit encore les appels qui restent.
 
 ## La rubrique « Cassant »
 

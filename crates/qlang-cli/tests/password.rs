@@ -39,7 +39,7 @@ fn the_log_is_written_on_the_error_output_from_a_level_up() {
     let file = dir.join("main.q");
     std::fs::write(
         &file,
-        "Log.debug(\"d\")\nLog.info(\"i\")\nLog.warn(\"w\")\nprint(\"out\")\n",
+        "Log.debug(\"d\")\nLog.info(\"i\")\nLog.warning(\"w\")\nprint(\"out\")\n",
     )
     .unwrap();
     let run = |extra: &[&str]| {

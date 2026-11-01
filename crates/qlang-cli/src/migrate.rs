@@ -24,7 +24,7 @@ const RULES: &[Rule] = &[Rule {
     owner: "Log",
     old: "warn",
     new: "warning",
-    why: "`Log.warn` is deprecated, `Log.warning` is the name",
+    why: "`Log.warn` was removed in 0.83, `Log.warning` is the name",
 }];
 
 struct Edit {

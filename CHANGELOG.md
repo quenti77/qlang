@@ -2,6 +2,14 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 0.83.0
+
+- **Cassant : `Log.warn` est retiré.** Déprécié en 0.69, il n'était qu'un autre nom de `Log.warning`. Avant : `Log.warn("x")`. Après : `Log.warning("x")`. S'adapter : `qlang migrate` réécrit les appels (`--check` les liste). Le filtre `--log-level warn` et la valeur `warn` de `$QLANG_LOG` ne changent pas.
+- **`qlang --help` complet** : `qlang test` annonce `--allow-process` et `--deny-warnings`, `qlang serve` `--max-workers`, `--extern`, `--trust-externs`, `--allow-process`, `--otlp-endpoint` et `--service-name`, `qlang doc` `--require-levels` et `--prelude`, `qlang repl` `--max-steps`.
+- `qlang check` et `qlang run` sans fichier ni `entry` ne répètent plus tout le texte d'aide : seulement l'erreur.
+- **`[stability]`** : `**/*.q` atteint aussi les fichiers à la racine du paquet (avant, il fallait ajouter `*.q`).
+- **`qlang doc --prelude`** : chaque champ, variante et méthode publics du prélude a maintenant une explication (la référence en avait 173 sans) ; les champs et méthodes non publics n'y figurent plus.
+
 ## 0.82.0
 
 - **`Term.script(événements, colonnes, lignes)`** : un terminal joué pour les tests de programmes en terminal (`qlang test`). `Term.event` donne les événements de la liste puis `"timeout"` sans attendre, `Term.screen()` rend tout ce qui a été écrit, `Term.end_script()` revient au vrai terminal. Rien n'atteint le vrai terminal.

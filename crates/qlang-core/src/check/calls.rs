@@ -1693,7 +1693,12 @@ impl Checker {
                     self.res.float_sums.insert(e.id);
                 }
                 _ => {
-                    if self.find_lang_impl(&t, Lang::Add, std::slice::from_ref(&t)).is_none() {
+                    // text is added with `join`, not with `sum`
+                    if matches!(t, Ty::Str)
+                        || self
+                            .find_lang_impl(&t, Lang::Add, std::slice::from_ref(&t))
+                            .is_none()
+                    {
                         let shown = self.show(&t);
                         self.err(
                             "T260",

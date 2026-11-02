@@ -176,7 +176,10 @@ print([1.5, 2.0].sum())
 
 #[test]
 fn sum_of_elements_that_cannot_be_added_is_refused_and_an_empty_one_has_no_zero() {
-    assert_eq!(run("struct V\n  public x: int\nend\nprint([V { x: 1 }].sum())\n"), "T260");
+    assert_eq!(
+        run("struct V\n  public x: int\nend\nprint([V { x: 1 }].sum())\n"),
+        "T260"
+    );
     let src = "struct V
     public x: int
 end

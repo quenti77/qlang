@@ -3808,7 +3808,10 @@ impl<'a> Interp<'a> {
                         }
                     }
                     Value::Int(total)
-                } else if items.iter().all(|v| matches!(v, Value::Int(_) | Value::Float(_))) {
+                } else if items
+                    .iter()
+                    .all(|v| matches!(v, Value::Int(_) | Value::Float(_)))
+                {
                     Value::Float(items.iter().filter_map(num).sum())
                 } else {
                     // elements that implement `Add`: added from left to right

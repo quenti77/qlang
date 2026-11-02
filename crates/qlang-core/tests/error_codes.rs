@@ -44,6 +44,12 @@ fn every_code_the_sources_emit_is_in_the_error_list_and_the_list_has_no_other() 
     let listed = codes_in(&doc, false);
     let missing: Vec<_> = emitted.difference(&listed).collect();
     let unknown: Vec<_> = listed.difference(&emitted).collect();
-    assert!(missing.is_empty(), "emitted but not in docs/errors.md: {missing:?}");
-    assert!(unknown.is_empty(), "in docs/errors.md but never emitted: {unknown:?}");
+    assert!(
+        missing.is_empty(),
+        "emitted but not in docs/errors.md: {missing:?}"
+    );
+    assert!(
+        unknown.is_empty(),
+        "in docs/errors.md but never emitted: {unknown:?}"
+    );
 }

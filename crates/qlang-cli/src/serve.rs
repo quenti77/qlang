@@ -1804,7 +1804,8 @@ fn serve_connection(mut stream: TcpStream, jobs: &mpsc::Sender<Msg>, opts: &AppO
     let mut carry: Vec<u8> = Vec::new();
     for n in 0..KEEP_ALIVE_REQUESTS {
         let idle = (n > 0).then(|| tuning().idle);
-        let more = serve_one(&mut stream, &mut carry, jobs, opts, idle);
+        let last = n + 1 == KEEP_ALIVE_REQUESTS;
+        let more = serve_one(&mut stream, &mut carry, jobs, opts, idle, last);
         if !more || STOPPING.load(Ordering::SeqCst) {
             break;
         }
@@ -1818,6 +1819,7 @@ fn serve_one(
     jobs: &mpsc::Sender<Msg>,
     opts: &AppOptions,
     idle: Option<Duration>,
+    last: bool,
 ) -> bool {
     let started = Instant::now();
     let request = match read_request(stream, carry, tuning().max_body, idle) {
@@ -1828,7 +1830,8 @@ fn serve_one(
         }
         Err(None) => return false,
     };
-    let keep = request.keeps_alive() && !STOPPING.load(Ordering::SeqCst);
+    // the last request a connection serves says so: `Connection: close`, not a silent reset
+    let keep = request.keeps_alive() && !last && !STOPPING.load(Ordering::SeqCst);
     let head_only = request.method == "HEAD";
     let line = format!("{} {}", request.method, request.target);
     let accepts_gzip = opts.compress

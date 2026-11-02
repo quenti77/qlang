@@ -24,10 +24,23 @@ use serde_json::Value as Json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::time::Duration;
 
 /// The longest answer (one line) a provider may give.
 const MAX_ANSWER: u64 = 64 << 20;
+
+/// How long a provider may take to answer one message, in seconds (`$QLANG_PROVIDER_TIMEOUT`).
+const ANSWER_SECONDS: u64 = 60;
+
+fn answer_seconds() -> u64 {
+    std::env::var("QLANG_PROVIDER_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(ANSWER_SECONDS)
+}
 
 /// One provider to start.
 #[derive(Clone, Debug)]
@@ -44,7 +57,8 @@ struct Provider {
     label: String,
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// The lines the provider writes, read by a thread of their own so that waiting for one can time out.
+    answers: Receiver<Result<String, String>>,
 }
 
 impl Provider {
@@ -67,12 +81,34 @@ impl Provider {
                 )
             })?;
         let stdin = child.stdin.take().expect("piped");
-        let stdout = BufReader::new(child.stdout.take().expect("piped"));
+        let mut stdout = BufReader::new(child.stdout.take().expect("piped"));
+        let (tx, answers) = channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut line = String::new();
+                // a provider that never ends its line must not fill the memory
+                let message =
+                    match std::io::Read::take(&mut stdout, MAX_ANSWER).read_line(&mut line) {
+                        Ok(0) | Err(_) => Err("the provider stopped".to_string()),
+                        Ok(_) if !line.ends_with('\n') && line.len() as u64 >= MAX_ANSWER => {
+                            Err(format!(
+                                "the provider's answer is longer than {} MB",
+                                MAX_ANSWER >> 20
+                            ))
+                        }
+                        Ok(_) => Ok(line),
+                    };
+                let last = message.is_err();
+                if tx.send(message).is_err() || last {
+                    break;
+                }
+            }
+        });
         let mut p = Provider {
             label: spec.label.clone(),
             child,
             stdin,
-            stdout,
+            answers,
         };
         let answer = p
             .request(&serde_json::json!({ "op": "list" }))
@@ -99,16 +135,19 @@ impl Provider {
             .write_all(line.as_bytes())
             .and_then(|()| self.stdin.flush())
             .map_err(|_| "the provider stopped".to_string())?;
-        let mut answer = String::new();
-        // a provider that never ends its line must not fill the memory
-        match std::io::Read::take(&mut self.stdout, MAX_ANSWER).read_line(&mut answer) {
-            Ok(0) | Err(_) => Err("the provider stopped".to_string()),
-            Ok(_) if !answer.ends_with('\n') && answer.len() as u64 >= MAX_ANSWER => Err(format!(
-                "the provider's answer is longer than {} MB",
-                MAX_ANSWER >> 20
-            )),
-            Ok(_) => serde_json::from_str(&answer)
+        let seconds = answer_seconds();
+        match self.answers.recv_timeout(Duration::from_secs(seconds)) {
+            Ok(Ok(answer)) => serde_json::from_str(&answer)
                 .map_err(|e| format!("the provider answered something that is not JSON ({e})")),
+            Ok(Err(why)) => Err(why),
+            Err(RecvTimeoutError::Timeout) => {
+                // it will not answer this one in time, and a late answer would be taken for the next question's
+                let _ = self.child.kill();
+                Err(format!(
+                    "the provider did not answer within {seconds} seconds"
+                ))
+            }
+            Err(RecvTimeoutError::Disconnected) => Err("the provider stopped".to_string()),
         }
     }
 }

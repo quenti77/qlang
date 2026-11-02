@@ -3045,7 +3045,8 @@ Options de `qlang serve app.q` :
     `WsMessage` a `text: string?`, `data: bytes?` et `binary`. Une `WebSocket` a `id` (unique),
     `request` (la requête qui l'a ouverte, avec ce que les gardes ont mis dans `attrs`), `data`
     (`map<string, Any>` à vous), `send(texte)`, `send_bytes(octets)`, `close()` et
-    `close_with(code, raison)` (1000 à 4999), `is_open()`. **Un worker sert beaucoup de
+    `close_with(code, raison)` (1000 à 4999), `is_open()` ; `send` et ses variantes fabriquent des `WsFrame` (`kind`
+    `text`, `binary` ou `close`, `text`, `data`, `code`) que le serveur écrit. **Un worker sert beaucoup de
     connexions** entre deux requêtes, une fonction de rappel à la fois, chacune avec son budget
     d'étapes : une fonction de rappel doit être courte et ne jamais attendre. Un worker ne voit pas
     les connexions des autres : pour parler à tout le monde, passe par une base de données
@@ -3162,7 +3163,7 @@ restent dans le dossier : un `..` après un dossier qui n'existe pas encore est 
 `fs.is_dir(chemin)` dit si c'est un dossier ; `fs.glob("src/**/*.q")` donne les chemins qui correspondent
 au motif (`*` : des caractères sauf `/`, `**` : des caractères y compris `/`, `**/` peut aussi correspondre à aucun
 dossier, `?` : un caractère, `[a-c]` / `[!a-c]` : un ensemble), triés, en partant du dossier qui précède le premier
-joker. Pour un gros fichier, **`fs.lines(chemin)`** l'ouvre sans le charger : `lignes.next()` rend chaque ligne
+joker. Pour un gros fichier, **`fs.lines(chemin)`** l'ouvre sans le charger : `lignes.next()` (un `Lines`) rend chaque ligne
 (sans son retour à la ligne, `\r\n` compris) puis `none` ; `lignes.close()` le referme avant la fin (à la fin, il se
 ferme seul). `fs.each_line(chemin, fun(ligne: string) ... end)` appelle une fonction pour chaque ligne et rend leur
 nombre ; `fs.read_lines(chemin)` donne toutes les lignes en tableau (le fichier est alors tout en mémoire). Une

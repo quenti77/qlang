@@ -145,6 +145,9 @@ sans fichier le cherchent depuis le dossier courant, vers le haut. (`main`, dans
 table, est autre chose : le fichier qu'`import "@mon-app"` charge quand le projet est
 utilisé comme paquet.)
 
+`qlang init --web mon-app` crée en plus une application web (le paquet `std` est installé tout de suite) ;
+`--no-install` ne l'installe pas, et `qlang add std` le fait ensuite.
+
 ### Documentation
 
 ```sh
@@ -210,7 +213,9 @@ par réflexion) ; l'annotation n'a aucun autre effet.
 `qlang dap` est un adaptateur de débogage ([DAP](https://microsoft.github.io/debug-adapter-protocol/)) : points d'arrêt,
 pas à pas, pause, pile d'appels et variables dans l'éditeur. Dans VS Code (extension du dépôt), **F5** sur un fichier
 `.q` suffit ; pour les autres éditeurs, voir [docs/editors.md](docs/editors.md). Le programme tourne sans l'optimisation à
-registres (plus lent) et sans entrée au clavier.
+registres (plus lent) et sans entrée au clavier. Il lance le fichier comme `qlang run` : un programme servi
+(`qlang serve`, `handle`) ne s'y débogue pas comme serveur ; les limites sont listées dans la section
+« Débogueur » de [docs/editors.md](docs/editors.md), et `qlang dap` est **expérimental**.
 
 ### Session interactive : `qlang repl`
 

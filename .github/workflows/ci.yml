@@ -31,6 +31,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo build --release -p qlang-cli
+      - name: The documentation matches the program
+        run: scripts/check-docs.py
       # the cases are in their own repository, at the tag named in conformance.ref
       - name: Fetch the cases
         run: git clone --depth 1 --branch "$(cat conformance.ref)" https://github.com/quenti77/qlang-conformance.git ../qlang-conformance

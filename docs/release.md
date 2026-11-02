@@ -9,7 +9,8 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 
    Puis `cargo build` pour mettre à jour `Cargo.lock`. Le workflow refuse de publier si
    les deux numéros diffèrent, ou si le tag ne correspond pas.
-2. **Fusionner** ce changement sur `main` (PR, CI verte).
+2. **Fusionner** ce changement sur `main` (PR, CI verte ; `scripts/check-docs.py` ne signale aucun écart entre la
+   documentation et le programme, la CI le lance aussi).
 3. **Tagger** et pousser :
 
    ```sh

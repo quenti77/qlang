@@ -133,3 +133,21 @@ print(total(S { n: 0 }))
 ";
     assert_eq!(run(src), "6\n");
 }
+
+#[test]
+fn a_bound_on_a_trait_gives_the_operators_of_its_super_traits() {
+    let src = "trait Numeric<T> extends Add<T>, Sub<T>
+end
+impl Numeric<int> for int
+end
+fun double<T: Numeric<T>>(a: T) -> T
+    a + a
+end
+fun gap<T: Numeric<T> + Ord>(a: T, b: T) -> T
+    if a > b then a - b else b - a end
+end
+print(double(2))
+print(gap(2, 9))
+";
+    assert_eq!(run(src), "4\n7\n");
+}

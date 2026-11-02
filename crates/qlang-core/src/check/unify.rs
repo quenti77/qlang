@@ -492,7 +492,12 @@ impl Checker {
         }
         let tid = self.defs.lang(lang);
         if let Ty::Param(p) = &ty {
-            let bounds = self.defs.params[*p].bounds.clone();
+            let bounds: Vec<(TraitId, Vec<Ty>)> = self.defs.params[*p]
+                .bounds
+                .clone()
+                .into_iter()
+                .flat_map(|(t, a)| self.trait_closure(t, &a))
+                .collect();
             for (t, a) in bounds {
                 if t != tid {
                     continue;

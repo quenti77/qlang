@@ -166,6 +166,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `R012` | ``negative exponent: use decimals (`2.0 ** -1`) for fractions`` |
 | `R013` | `cannot convert {f} to an integer` |
 | `R014` | `square root of a negative number` |
+| `R015` | ``sum() of an empty array needs a zero: the elements are not numbers`` |
 | `R016` | ``{x} is outside the domain of `{name}``` <br> ```log` needs a positive number and a positive base other than 1 (found {x} and {base})`` <br> ```clamp` needs min <= max (found {lo} and {hi})`` |
 | `R017` | ```time.sleep` waits from 0 to 3600000 milliseconds (found {ms})`` <br> ```random.bytes` gives from 0 to 1048576 bytes (found {n})`` |
 | `R020` | `index {i} is out of bounds (length {})` <br> `index {n} is out of bounds (length {len})` <br> `an array index must be an int` |

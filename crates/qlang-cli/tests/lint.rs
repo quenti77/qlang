@@ -35,16 +35,16 @@ fn it_reports_unused_names_and_unreachable_code() {
     let (out, code) = lint(&dir, &["main.q"]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("main.q:1:8: warning[L003]: `sign` is imported but never used"),
+        out.contains("main.q:1:8: warning[Q003]: `sign` is imported but never used"),
         "{out}"
     );
     assert!(!out.contains("`other` is imported"), "{out}");
     assert!(
-        out.contains("main.q:3:7: warning[L001]: `spare` is never used"),
+        out.contains("main.q:3:7: warning[Q001]: `spare` is never used"),
         "{out}"
     );
     assert!(!out.contains("_kept"), "{out}");
-    assert!(out.contains("main.q:7:5: warning[L004]"), "{out}");
+    assert!(out.contains("main.q:7:5: warning[Q004]"), "{out}");
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn complexity_has_a_threshold() {
     let (out, code) = lint(&dir, &["big.q", "--max-complexity", "5"]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("warning[L005]: function `big` has 7 paths"),
+        out.contains("warning[Q005]: function `big` has 7 paths"),
         "{out}"
     );
     let (out, code) = lint(&dir, &["big.q"]);

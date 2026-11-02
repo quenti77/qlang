@@ -196,11 +196,11 @@ Ce que le vérificateur de types ne dit pas (code de sortie 1 s'il y a quelque c
 
 | Code | Signalé |
 | --- | --- |
-| `L001` | une variable jamais utilisée (un nom qui commence par `_` est gardé exprès) |
-| `L002` | une fonction privée que rien n'appelle (dans un fichier qui a un `export`) ; `test_…`, `run`, `handle`, `main`, `setup` et les fonctions annotées sont exemptés |
-| `L003` | un nom importé (`import a, b from "x.q"`) qui n'est jamais écrit |
-| `L004` | du code après `return`, `break` ou `continue` |
-| `L005` | une fonction avec trop de chemins (1 + `if`, `elseif`, `while`, `for`, `case`, `and`, `or` ; 15 par défaut) |
+| `Q001` | une variable jamais utilisée (un nom qui commence par `_` est gardé exprès) |
+| `Q002` | une fonction privée que rien n'appelle (dans un fichier qui a un `export`) ; `test_…`, `run`, `handle`, `main`, `setup` et les fonctions annotées sont exemptés |
+| `Q003` | un nom importé (`import a, b from "x.q"`) qui n'est jamais écrit |
+| `Q004` | du code après `return`, `break` ou `continue` |
+| `Q005` | une fonction avec trop de chemins (1 + `if`, `elseif`, `while`, `for`, `case`, `and`, `or` ; 15 par défaut) |
 
 `#[used]` devant une fonction dit au lint qu'elle sert par un chemin qu'il ne voit pas (retrouvée par son nom,
 par réflexion) ; l'annotation n'a aucun autre effet.

@@ -1847,7 +1847,7 @@ du service, `qlang` par défaut) :
   cet identifiant »), `Trace.traceparent()` la valeur d'en-tête à donner à un service appelé autrement que par `http`
   (un message de file, par exemple).
 
-Les spans partent par lots, en arrière-plan, toutes les secondes ; un collecteur absent ne ralentit ni ne casse
+Les spans partent par lots, en arrière-plan, toutes les secondes (`QLANG_OTLP_FLUSH_MS` change l'intervalle, 10 ms au minimum) ; un collecteur absent ne ralentit ni ne casse
 aucune requête (un avertissement, une seule fois). Sans `--otlp-endpoint`, rien n'est exporté, mais un `traceparent`
 reçu est quand même transmis aux appels et aux logs : un service au milieu d'une chaîne ne la coupe pas. Le
 drapeau d'échantillonnage reçu est respecté (un appelant qui n'échantillonne pas : rien n'est envoyé) ; sinon tout est
@@ -3332,6 +3332,10 @@ indique l'étape :
 | `R`     | exécution (division par zéro, indice hors limites, `panic`…) |
 | `J`     | requête JSON invalide (voir le README)                       |
 | `X`     | erreur interne : un bug de qlang (à signaler)                |
+| `W`     | avertissement (par exemple une fonction dépréciée)           |
+| `Q`     | règle de `qlang lint` (voir le README)                       |
+
+La liste de tous les codes, avec leur message, est dans [errors.md](errors.md).
 
 Le compilateur signale **plusieurs erreurs à la fois** quand il le peut, jusqu'à
 100 : au-delà, il l'indique (`too many errors`) au lieu de tout lister. Les

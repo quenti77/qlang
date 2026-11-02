@@ -31,6 +31,15 @@ Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qla
 - **S'adapter** : `qlang fmt` une fois sur le projet, puis commiter. Une CI qui lance `qlang fmt --check` échoue
   tant que ce n'est pas fait. Le sens des programmes ne change pas (le résultat a exactement les mêmes jetons).
 
+## 1.0 : les règles de `qlang lint` s'appellent `Q001` à `Q005`
+
+- **Avant** : `qlang lint` signalait `L001` à `L005`, les mêmes codes que les erreurs de lecture du texte (`L001` caractère
+  inconnu, `L002` chaîne non terminée…).
+- **Après** : les règles de `qlang lint` sont `Q001` (variable inutilisée), `Q002` (fonction privée inutilisée), `Q003`
+  (import inutilisé), `Q004` (code après `return`, `break` ou `continue`), `Q005` (trop de chemins). Les `Lxxx` ne
+  désignent plus que les erreurs de lecture.
+- **S'adapter** : remplacer `L001`…`L005` par `Q001`…`Q005` là où un script ou une CI filtre la sortie de `qlang lint`.
+
 ## 0.83 : `Log.warn` est retiré
 
 Déprécié en 0.69 (avertissement `W001`), retiré après quatorze versions mineures.

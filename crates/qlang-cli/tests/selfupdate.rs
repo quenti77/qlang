@@ -162,7 +162,10 @@ fn a_wrong_checksum_leaves_the_program_alone() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("checksum mismatch"));
     let version = output(Command::new(&exe).arg("--version"));
-    assert!(String::from_utf8_lossy(&version.stdout).starts_with("qlang 0."));
+    assert!(
+        String::from_utf8_lossy(&version.stdout)
+            .starts_with(concat!("qlang ", env!("CARGO_PKG_VERSION")))
+    );
 }
 
 #[test]
@@ -172,7 +175,10 @@ fn check_only_says_what_exists() {
     let o = update(&exe, &base, &["--check"]);
     assert!(String::from_utf8_lossy(&o.stdout).contains("qlang 9.9.9 is available"));
     let version = output(Command::new(&exe).arg("--version"));
-    assert!(String::from_utf8_lossy(&version.stdout).starts_with("qlang 0."));
+    assert!(
+        String::from_utf8_lossy(&version.stdout)
+            .starts_with(concat!("qlang ", env!("CARGO_PKG_VERSION")))
+    );
 }
 
 #[test]

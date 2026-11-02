@@ -710,6 +710,8 @@ pub struct Resolutions {
     pub builtin_sigs: FxHashMap<NodeId, (Ty, Vec<Ty>, Ty)>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: FxHashSet<NodeId>,
+    /// `xs.sum()` calls on `array<int>`; an empty sum of anything else has no zero (`R015`).
+    pub int_sums: FxHashSet<NodeId>,
     /// Method calls made through a trait (a generic bound or a trait-typed value): at
     /// run time they go to the user's impl, not to a built-in method of the same name.
     pub trait_calls: FxHashSet<NodeId>,

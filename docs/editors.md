@@ -6,6 +6,11 @@ plan du fichier, mise en forme (`textDocument/formatting`). Il suffit de dire à
 fichiers `*.q`. Ces réglages suivent la documentation de chaque éditeur ; seul VS Code (l'extension du dépôt)
 est testé à chaque version.
 
+**Niveau de stabilité** (voir [stability.md](stability.md)) : `qlang lsp` et `qlang doc` sont **provisoires** ; `qlang fmt`
+(y compris `textDocument/formatting`) est **stable**, mais `qlang fmt --stdin`, `qlang lint`, `qlang repl` et `qlang dap`
+(le débogueur) sont **expérimentaux**. Les réglages des éditeurs autres que VS Code sont **non vérifiés** : ils suivent
+leur documentation, sans être essayés à chaque version.
+
 La coloration vient d'une grammaire TextMate, [`editors/vscode/syntaxes/qlang.tmLanguage.json`](../editors/vscode/syntaxes/qlang.tmLanguage.json),
 que Sublime Text, JetBrains et d'autres savent lire.
 

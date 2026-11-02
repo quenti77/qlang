@@ -186,3 +186,18 @@ fn narrowing_still_works_when_no_function_assigns_the_variable() {
         "fun f() -> int\n  let y: int? = 1\n  y = 2\n  if y != none then\n    y + 1\n  else\n    0\n  end\nend\nprint(f())",
     );
 }
+
+#[test]
+fn a_function_ending_with_a_match_that_misses_cases_says_so() {
+    let src = "enum Color\n    Red\n    Green\n    Blue\nend\nfun f(c: Color) -> string\n    match c\n        case Color.Red then \"r\"\n        case Color.Green then \"g\"\n    end\nend\n";
+    let mut host = MemoryHost::new();
+    let diags = compile("main.q", src, &mut host).err().unwrap().diagnostics;
+    let d = diags.iter().find(|d| d.code == "T181").expect("T181");
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.message.contains("does not cover every case")),
+        "{:?}",
+        d.notes
+    );
+}

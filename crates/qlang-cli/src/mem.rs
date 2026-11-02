@@ -2,43 +2,47 @@
 //! runs out (`R904`). The core cannot count by itself: it hands the job to this allocator.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicIsize, Ordering::Relaxed};
 
-static IN_USE: AtomicUsize = AtomicUsize::new(0);
+/// What every thread has handed over. Signed on purpose: memory allocated by one thread and freed by another is
+/// counted as a debit that may arrive before the matching credit, and clamping it at zero would lose it for good
+/// (the total then only grows, until `R904` stops a server that holds 14 MB).
+static IN_USE: AtomicIsize = AtomicIsize::new(0);
 
 /// Each thread counts on its own and hands its balance over by chunks: an atomic operation
 /// on every allocation would show in the interpreter's speed.
 const CHUNK: isize = 1 << 18;
 
+/// A thread's balance, handed over when the thread ends too (a connection's thread is short-lived).
+struct Local(std::cell::Cell<isize>);
+
+impl Drop for Local {
+    fn drop(&mut self) {
+        IN_USE.fetch_add(self.0.get(), Relaxed);
+    }
+}
+
 thread_local! {
-    static LOCAL: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+    static LOCAL: Local = const { Local(std::cell::Cell::new(0)) };
 }
 
 #[inline]
 fn count(delta: isize) {
-    // `try_with`: the cell is gone while a thread is being torn down
-    let _ = LOCAL.try_with(|c| {
-        let v = c.get() + delta;
-        if v >= CHUNK || v <= -CHUNK {
-            if v >= 0 {
-                IN_USE.fetch_add(v as usize, Relaxed);
+    // `try_with`: the cell is gone while a thread is being torn down; the change then goes straight to the total
+    let gone = LOCAL
+        .try_with(|local| {
+            let v = local.0.get() + delta;
+            if v >= CHUNK || v <= -CHUNK {
+                IN_USE.fetch_add(v, Relaxed);
+                local.0.set(0);
             } else {
-                // memory freed here that another thread allocated: never below zero
-                let mut cur = IN_USE.load(Relaxed);
-                while let Err(seen) = IN_USE.compare_exchange_weak(
-                    cur,
-                    cur.saturating_sub((-v) as usize),
-                    Relaxed,
-                    Relaxed,
-                ) {
-                    cur = seen;
-                }
+                local.0.set(v);
             }
-            c.set(0);
-        } else {
-            c.set(v);
-        }
-    });
+        })
+        .is_err();
+    if gone {
+        IN_USE.fetch_add(delta, Relaxed);
+    }
 }
 
 /// The system allocator, counting the bytes it has handed out and not got back.
@@ -78,7 +82,7 @@ unsafe impl GlobalAlloc for Counting {
 }
 
 pub fn in_use() -> usize {
-    IN_USE.load(Relaxed)
+    IN_USE.load(Relaxed).max(0) as usize
 }
 
 /// Default limit: a gigabyte (`--max-memory MB` or `QLANG_MAX_MEMORY`; `0` removes it).
@@ -102,4 +106,29 @@ pub fn configure(args: &mut Vec<String>) -> Result<(), String> {
         qlang_core::host::set_memory_limit(in_use, mb.saturating_mul(1 << 20));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The other tests of the binary allocate at the same time, so the bound is far above their noise and far below what
+    /// the lost balances added (about 300 MB here).
+    ///
+    /// A short-lived thread (a connection's) frees what another thread allocated and ends with a negative balance:
+    /// that balance used to be dropped with the thread, leaving the total higher for good, until a server that held
+    /// 14 MB was stopped by `R904`.
+    #[test]
+    fn the_balance_of_a_thread_that_ends_is_not_lost() {
+        let before = in_use();
+        for _ in 0..3000 {
+            let block = vec![1u8; 100_000];
+            std::thread::spawn(move || drop(block)).join().unwrap();
+        }
+        let after = in_use();
+        assert!(
+            after < before + (128 << 20),
+            "{before} bytes before, {after} after"
+        );
+    }
 }

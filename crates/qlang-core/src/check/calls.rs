@@ -1686,17 +1686,21 @@ impl Checker {
                 }
             }
             "sum" => match t {
-                Ty::Int => {}
+                Ty::Int => {
+                    self.res.int_sums.insert(e.id);
+                }
                 Ty::Float => {
                     self.res.float_sums.insert(e.id);
                 }
                 _ => {
-                    let shown = self.show(&t);
-                    self.err(
-                        "T260",
-                        format!("`sum()` needs an array of numbers, not `array<{shown}>`"),
-                        span,
-                    );
+                    if self.find_lang_impl(&t, Lang::Add, std::slice::from_ref(&t)).is_none() {
+                        let shown = self.show(&t);
+                        self.err(
+                            "T260",
+                            format!("`sum()` needs elements that can be added, but `{shown}` cannot (implement `Add` for it)"),
+                            span,
+                        );
+                    }
                 }
             },
             _ => {}

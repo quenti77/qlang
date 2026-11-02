@@ -151,3 +151,42 @@ print(gap(2, 9))
 ";
     assert_eq!(run(src), "4\n7\n");
 }
+
+#[test]
+fn sum_adds_elements_that_implement_add() {
+    let src = "struct V
+    public x: int
+end
+impl Add<V> for V
+    public fun add(self, o: V) -> V
+        V { x: self.x + o.x }
+    end
+end
+fun total<T: Add<T>>(xs: array<T>) -> T
+    xs.sum()
+end
+print([V { x: 1 }, V { x: 2 }, V { x: 3 }].sum().x)
+print(total([V { x: 4 }, V { x: 5 }]).x)
+print(total([1, 2, 3]))
+print([1, 2].sum())
+print([1.5, 2.0].sum())
+";
+    assert_eq!(run(src), "6\n9\n6\n3\n3.5\n");
+}
+
+#[test]
+fn sum_of_elements_that_cannot_be_added_is_refused_and_an_empty_one_has_no_zero() {
+    assert_eq!(run("struct V\n  public x: int\nend\nprint([V { x: 1 }].sum())\n"), "T260");
+    let src = "struct V
+    public x: int
+end
+impl Add<V> for V
+    public fun add(self, o: V) -> V
+        V { x: self.x + o.x }
+    end
+end
+let empty: array<V> = []
+print(empty.sum())
+";
+    assert_eq!(run(src), "RUNTIME R015");
+}

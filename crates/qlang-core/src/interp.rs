@@ -3788,8 +3788,14 @@ impl<'a> Interp<'a> {
                 if items.is_empty() {
                     if self.prog.res.float_sums.contains(&self.cur_call) {
                         Value::Float(0.0)
-                    } else {
+                    } else if self.prog.res.int_sums.contains(&self.cur_call) {
                         Value::Int(0)
+                    } else {
+                        return self.fail(
+                            "R015",
+                            "`sum()` of an empty array needs a zero: the elements are not numbers",
+                            span,
+                        );
                     }
                 } else if all_int {
                     let mut total: i64 = 0;
@@ -3802,8 +3808,16 @@ impl<'a> Interp<'a> {
                         }
                     }
                     Value::Int(total)
-                } else {
+                } else if items.iter().all(|v| matches!(v, Value::Int(_) | Value::Float(_))) {
                     Value::Float(items.iter().filter_map(num).sum())
+                } else {
+                    // elements that implement `Add`: added from left to right
+                    let mut it = items.into_iter();
+                    let mut total = it.next().unwrap_or(Value::None);
+                    for v in it {
+                        total = self.binary(BinOp::Add, total, v, span)?;
+                    }
+                    total
                 }
             }
             (Value::Array(a), "slice") => {

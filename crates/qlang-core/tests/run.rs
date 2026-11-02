@@ -1334,7 +1334,7 @@ fn array_helpers_reject_wrong_element_types() {
         );
     }
     let e = err("print([\"a\"].sum())");
-    assert!(e.contains("needs an array of numbers"), "{e}");
+    assert!(e.contains("needs elements that can be added"), "{e}");
 }
 
 #[test]

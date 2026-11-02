@@ -2747,11 +2747,11 @@ let res = http.send(Request {
 longtemps que le plus lent. Une requête qui échoue est un `err` et n'arrête pas les autres.
 
 ```
-let réponses = http.send_all([
+let reponses = http.send_all([
   Request { method: "GET", url: "https://a.example/api" },
   Request { method: "GET", url: "https://b.example/api" },
 ])
-for r in réponses do
+for r in reponses do
   print(if r.is_ok() then r.unwrap().status else 0 end)
 end
 ```

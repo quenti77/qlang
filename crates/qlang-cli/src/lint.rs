@@ -1,7 +1,7 @@
 //! `qlang lint`: what the type checker does not say about a program.
 //!
-//! L001 an unused variable, L002 an unused private function, L003 an unused import, L004 code after
-//! `return` / `break` / `continue`, L005 a function with too many paths (`--max-complexity`).
+//! Q001 an unused variable, Q002 an unused private function, Q003 an unused import, Q004 code after
+//! `return` / `break` / `continue`, Q005 a function with too many paths (`--max-complexity`).
 
 use qlang_core::ast::{Block, Expr, ExprKind, ImportKind, Item, StmtKind};
 use qlang_core::check::{CompileOptions, compile_with};
@@ -150,7 +150,7 @@ fn lint_file(file: &Path, shown: &str, max_complexity: usize) -> Result<Vec<Find
             out.push(Finding {
                 line: l.loc.line,
                 col: l.loc.col,
-                code: "L001",
+                code: "Q001",
                 text: format!(
                     "`{}` is never used (start the name with `_` to keep it)",
                     l.name
@@ -170,7 +170,7 @@ fn lint_file(file: &Path, shown: &str, max_complexity: usize) -> Result<Vec<Find
             out.push(Finding {
                 line: it.loc.line,
                 col: it.loc.col,
-                code: "L002",
+                code: "Q002",
                 text: format!("function `{}` is never used and not exported", it.name),
             });
         }
@@ -214,7 +214,7 @@ fn lint_file(file: &Path, shown: &str, max_complexity: usize) -> Result<Vec<Find
                     out.push(Finding {
                         line,
                         col,
-                        code: "L003",
+                        code: "Q003",
                         text: format!("`{name}` is imported but never used"),
                     });
                 }
@@ -243,7 +243,7 @@ fn lint_file(file: &Path, shown: &str, max_complexity: usize) -> Result<Vec<Find
             out.push(Finding {
                 line,
                 col,
-                code: "L005",
+                code: "Q005",
                 text: format!(
                     "function `{name}` has {paths} paths (more than {max_complexity}): split it"
                 ),
@@ -288,7 +288,7 @@ fn unreachable_in(block: &Block, at: &dyn Fn(u32) -> (u32, u32), out: &mut Vec<F
             out.push(Finding {
                 line,
                 col,
-                code: "L004",
+                code: "Q004",
                 text: "this code is never reached (it follows return, break or continue)".into(),
             });
             break;

@@ -2747,11 +2747,11 @@ let res = http.send(Request {
 longtemps que le plus lent. Une requête qui échoue est un `err` et n'arrête pas les autres.
 
 ```
-let réponses = http.send_all([
+let reponses = http.send_all([
   Request { method: "GET", url: "https://a.example/api" },
   Request { method: "GET", url: "https://b.example/api" },
 ])
-for r in réponses do
+for r in reponses do
   print(if r.is_ok() then r.unwrap().status else 0 end)
 end
 ```
@@ -2912,7 +2912,7 @@ Options de `qlang serve app.q` :
 | `--max-body TAILLE` | taille d'un corps de requête (1 Mo par défaut ; `512k`, `8m` ou un nombre d'octets) ; au-delà, `413` |
 | `--max-headers TAILLE` | taille de la ligne de requête et des en-têtes (64 Ko par défaut) ; au-delà, `431`     |
 | `--read-timeout S` | secondes laissées à un client pour envoyer **toute** sa requête (20 par défaut) ; au-delà, `408` (protège du slowloris) |
-| `--no-access-log` | n'écrit pas la ligne de chaque requête (`GET /x -> 200 (1 ms)`) sur la sortie d'erreur |
+| `--no-access-log` | n'écrit pas la ligne de chaque requête (`GET /x -> 200 (1 ms)`) sur la sortie d'erreur ; avec `--log-format json`, cette ligne est un objet JSON (`time`, `level`, `message`) |
 | `--idle-timeout S` | secondes de silence après lesquelles une connexion persistante est fermée (5 par défaut) |
 
 - **Fichiers statiques** (`--static public`) : pour `GET` et `HEAD`, si le chemin désigne un

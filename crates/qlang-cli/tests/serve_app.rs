@@ -1202,6 +1202,39 @@ fn dev_is_refused_on_a_public_address() {
 }
 
 #[test]
+fn the_access_line_is_json_too_with_log_format_json() {
+    let file = app_file("jsonaccess", APP);
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .arg("serve")
+        .arg(&file)
+        .args(["--port", &port.to_string(), "--log-format", "json"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut reader = BufReader::new(child.stderr.take().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.contains("serving"), "{line}");
+    exchange_port(port, "GET /json HTTP/1.1\r\nHost: t\r\n\r\n");
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+    let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(v["level"], "info", "{line}");
+    assert!(
+        v["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("GET /json -> 200"),
+        "{line}"
+    );
+    assert!(v["time"].is_string(), "{line}");
+}
+
+#[test]
 fn a_failure_is_one_json_line_with_its_stack_in_production() {
     let file = app_file("jsonlog", FAILING);
     let port = free_port();

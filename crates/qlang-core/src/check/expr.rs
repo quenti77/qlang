@@ -1902,11 +1902,25 @@ impl Checker {
             }) if t != Ty::Unit => self.mismatch(e.span, ret, &t),
             _ => {
                 let r = self.show(ret);
+                let open_match = matches!(
+                    body.stmts.last(),
+                    Some(Stmt {
+                        kind: StmtKind::Expr(Expr {
+                            kind: ExprKind::Match { .. },
+                            ..
+                        }),
+                        ..
+                    })
+                );
                 self.err_note(
                     "T181",
                     format!("{what} must give a value of type `{r}`"),
                     fn_span,
-                    "the last line of the body is the value of the function (or use `return`)",
+                    if open_match {
+                        "the last line is a `match` that does not cover every case, so it gives no value: add the missing cases or an `else`"
+                    } else {
+                        "the last line of the body is the value of the function (or use `return`)"
+                    },
                     body.stmts.last().map(|s| s.span),
                 );
             }

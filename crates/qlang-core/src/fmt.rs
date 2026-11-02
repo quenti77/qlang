@@ -484,7 +484,7 @@ fn tighten(text: &str, line_start: usize, line: &str, toks: &[&Token]) -> Option
 /// between `fun` and the `(` of a function without a name); a `,` is followed by a space. Where
 /// there was none, nothing is added, apart from after a `,`.
 fn gap(a: &Tok, b: &Tok, none_before: bool) -> &'static str {
-    let tight = matches!(a, Tok::LParen | Tok::LBracket | Tok::Dot)
+    let tight = matches!(a, Tok::LParen | Tok::LBracket | Tok::Dot | Tok::Ellipsis)
         || matches!(b, Tok::RParen | Tok::RBracket | Tok::Comma | Tok::Dot)
         || (matches!(b, Tok::LParen | Tok::LBracket)
             && matches!(

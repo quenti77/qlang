@@ -39,6 +39,8 @@ ou **expérimental**, et comment une fonction est dépréciée (`#[deprecated("�
   - [7. Boucles](#7-boucles)
   - [8. Fonctions](#8-fonctions)
     - [Arguments nommés](#arguments-nommés)
+    - [Valeurs par défaut](#valeurs-par-défaut)
+    - [Paramètres variadiques et étalement `...`](#paramètres-variadiques-et-étalement-)
     - [Fonctions anonymes](#fonctions-anonymes)
     - [Type d'une fonction](#type-dune-fonction)
     - [Alias de type](#alias-de-type)
@@ -797,6 +799,75 @@ print(connect("db", tls: true))           -- on saute `port` en nommant le suiva
 - Ça marche pour les fonctions et les méthodes déclarées en qlang, comme les arguments nommés ; pas pour
   les types fonction (`fun(int) -> int`) ni `Callable.call`.
 
+### Paramètres variadiques et étalement `...`
+
+Le **dernier** paramètre d'une fonction peut ramasser les arguments qui restent : on l'écrit avec `...` devant son nom,
+et son type est celui d'**un élément**. Dans le corps, c'est un `array` de ce type.
+
+```
+fun somme(...nombres: int) -> int
+  let total = 0
+  for n in nombres do
+    total += n
+  end
+  total
+end
+
+print(somme())            -- 0 : `nombres` vaut []
+print(somme(1, 2, 3))     -- 6 : `nombres` vaut [1, 2, 3]
+
+fun log(niveau: string, ...morceaux: string) -> string
+  niveau + ": " + morceaux.join(" ")
+end
+print(log("info", "a", "b"))   -- info: a b
+```
+
+- Il n'y en a qu'un, en dernière position (`P044`), sans valeur par défaut (`P046` : sans argument, il vaut `[]`).
+  Une méthode (`public fun pousser(self, ...elements: int)`), une fonction anonyme (`fun(...xs: int) -> int`) et
+  une fonction générique (`fun lier<T>(nom: string, ...valeurs: T)`, où `T` unifie tous les arguments) peuvent l'avoir.
+- Chaque argument est vérifié contre le type de l'élément ; le tableau ramassé est **neuf** (le modifier ne touche pas
+  l'appelant). `...notes: array<float>` déclare des éléments qui sont eux-mêmes des `array<float>` : `notes` vaut un
+  `array<array<float>>`.
+- Il y faut au moins autant d'arguments que de paramètres obligatoires (`T240` : « expects at least 1 argument(s) »).
+  Un paramètre avec valeur par défaut peut précéder le variadique : `f()` donne `a = 1` et `xs = []`, mais pour donner
+  des éléments au variadique il faut écrire `a`.
+- Le variadique **ne se nomme pas** à l'appel (`T266`) ; les paramètres fixes se nomment comme d'habitude.
+- Une fonction variadique est une valeur, de type `fun(string, ...int) -> R` ; `fun(array<int>) -> int` et
+  `fun(...int) -> int` sont deux types différents. Un `trait` peut déclarer une méthode variadique : l'`impl` écrit
+  la même signature (`T134`). Un `extern fun` ne peut pas l'être (`T268`).
+- `Callable.call(args)` prend un tableau plat et ramasse l'excédent ; `ParamInfo.variadic` dit si un paramètre est
+  variadique (son `type_name` est celui d'un élément).
+
+**L'étalement `...liste`** « déroule » un tableau (ou un dictionnaire) là où l'on écrit une suite de valeurs :
+
+```
+let xs = [1, 2, 3]
+print(somme(...xs))           -- 6
+print(somme(10, ...xs, 20))   -- 36 : valeurs et étalements, dans l'ordre
+
+fun add(a: int, b: int, ...c: int) -> string
+  "{a} {b} {c}"
+end
+print(add(...[1, 2, 3, 4]))   -- 1 2 [3, 4] : les éléments remplissent les paramètres de gauche à droite
+
+let a = [1, 2]
+print([...a, 3, ...a])        -- [1, 2, 3, 1, 2] : un tableau neuf
+
+let defauts = { "port": 80, "workers": 2 }
+print({ ...defauts, "port": 8080 })   -- {"port": 8080, "workers": 2} : la dernière clé gagne
+```
+
+- Dans un **appel**, le nombre d'éléments n'est pas connu avant l'exécution : le **type** des éléments doit convenir à
+  chaque paramètre qu'ils peuvent atteindre (`T267`), et le **nombre** est vérifié à l'exécution : trop ou trop peu
+  d'éléments pour la fonction est l'erreur `R018` (qui nomme la fonction). Une valeur par défaut complète ce
+  qui manque. `somme(...[])` appelle `somme()`.
+- Dans un **tableau** `[ ]`, les types s'unifient comme pour un littéral écrit à la main (`[...a]` avec `a: array<int>`
+  n'est pas un `array<float>`). Dans un **dictionnaire** `{ }`, les clés se suivent dans l'ordre d'écriture.
+- On n'étale que des `array` (dans un appel ou `[ ]`) et des `map` (dans `{ }`) : pas un `Set` (écrivez
+  `...ensemble.to_array()`), pas une valeur qui peut être `none` (`...(x ?? [])`), pas une structure, pas un `Any`
+  (`T264`). `...` ailleurs est une erreur de syntaxe. Il n'est pas surchargeable (voir #202).
+- Les intervalles `0..3` et `0..=3` ne changent pas : `...` est un jeton à part.
+
 ### Fonctions anonymes
 
 ```
@@ -1138,7 +1209,7 @@ on lit des descriptions (`StructInfo`, `EnumInfo`, `FunctionInfo`...), des valeu
 | --- | --- |
 | `Reflect.struct_info<Form>()` | `StructInfo` : `name`, `fields` (`FieldInfo` : `name`, `type_name`, `annotations`), `annotations` |
 | `Reflect.enum_info<Color>()` | `EnumInfo` : `name`, `variants` (`VariantInfo` : `name`, `fields`, `annotations`), `annotations` |
-| `Reflect.functions()` | `array<FunctionInfo>` des fonctions déclarées dans **ce fichier** : `name`, `params` (`ParamInfo` : `name`, `type_name`, `annotations`), `return_type`, `annotations` |
+| `Reflect.functions()` | `array<FunctionInfo>` des fonctions déclarées dans **ce fichier** : `name`, `params` (`ParamInfo` : `name`, `variadic`, `type_name`, `annotations`), `return_type`, `annotations` |
 | `Reflect.find<fun(Request) -> Response>("home")` | la fonction `home` de ce fichier si son type est exactement celui-là, sinon `none` |
 | `Reflect.methods<Users>()` | `array<FunctionInfo>` des méthodes des `impl` de `Users` (`has_self` dit si elle prend `self`) |
 | `Reflect.find_method<Users, fun(Request) -> Response>(valeur, "list")` | la méthode `list` de `valeur`, déjà liée à elle, si son type (sans `self`) est celui-là, sinon `none` |

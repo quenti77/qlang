@@ -743,3 +743,33 @@ fn the_clock_and_the_other_capabilities_are_not_reported_as_missing() {
     let d = c.diagnostics("a.q");
     assert!(d.is_empty(), "{d:?}");
 }
+
+#[test]
+fn a_variadic_parameter_is_shown_as_it_is_declared_and_the_help_stays_on_it() {
+    let dir = project("variadic");
+    let file = dir.join("a.q");
+    let text = "fun log(level: string, ...pieces: string) -> string\n  level\nend\nlog(\"info\", \"a\", \"b\")\n";
+    std::fs::write(&file, text).unwrap();
+    let mut c = Client::start(&dir);
+    c.open(&file, text);
+    assert!(c.diagnostics("a.q").is_empty());
+    let h = c.request("textDocument/hover", c.at(&file, 3, 1));
+    let shown = h["contents"]["value"].as_str().unwrap();
+    assert!(
+        shown.contains("fun log(level: string, ...pieces: string) -> string"),
+        "{shown}"
+    );
+    // the third argument is still the variadic parameter
+    let open = text.replace("\"a\", \"b\")", "\"a\", \"b\", ");
+    c.notify(
+        "textDocument/didChange",
+        json!({ "textDocument": { "uri": uri(&file), "version": 2 },
+                "contentChanges": [{ "text": open }] }),
+    );
+    let sig = c.request("textDocument/signatureHelp", c.at(&file, 3, 24));
+    assert_eq!(sig["activeParameter"], json!(1), "{sig}");
+    assert_eq!(
+        sig["signatures"][0]["parameters"][1]["label"],
+        json!("...pieces: string")
+    );
+}

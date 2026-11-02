@@ -370,6 +370,18 @@ impl Checker {
 
     // ---------------------------------------------------------------- types
 
+    /// The types of the parameters of a declaration. A variadic one (`...xs: int`) is `Rest(int)`
+    /// here, as in a function type; inside the body it is an `array<int>` (see `local_ty`).
+    pub(crate) fn param_types(&mut self, params: &[ast::Param]) -> Vec<Ty> {
+        params
+            .iter()
+            .map(|p| {
+                let t = self.resolve_type(&p.ty);
+                if p.variadic { Ty::Rest(Box::new(t)) } else { t }
+            })
+            .collect()
+    }
+
     pub(crate) fn resolve_type(&mut self, te: &TypeExpr) -> Ty {
         match &te.kind {
             TypeExprKind::Nullable(inner) => {
@@ -389,12 +401,27 @@ impl Checker {
                 Ty::Tuple(ts)
             }
             TypeExprKind::Fun { params, ret } => {
-                let ps = params.iter().map(|p| self.resolve_type(p)).collect();
+                let ps = params
+                    .iter()
+                    .map(|p| match &p.kind {
+                        // `fun(string, ...int)`: the last parameter takes what is left over
+                        TypeExprKind::Rest(inner) => Ty::Rest(Box::new(self.resolve_type(inner))),
+                        _ => self.resolve_type(p),
+                    })
+                    .collect();
                 let r = ret
                     .as_ref()
                     .map(|r| self.resolve_type(r))
                     .unwrap_or(Ty::Unit);
                 Ty::Fn(ps, Box::new(r))
+            }
+            TypeExprKind::Rest(inner) => {
+                self.err(
+                    "P044",
+                    "`...type` is only for the last parameter of a function type",
+                    te.span,
+                );
+                Ty::Rest(Box::new(self.resolve_type(inner)))
             }
             TypeExprKind::Named { path, args } => self.resolve_named_type(path, args, te.span),
         }
@@ -740,7 +767,7 @@ impl Checker {
                 }
                 let mark = self.tparam_scope.len();
                 let own = self.make_tparams(&s.tparams);
-                let params: Vec<Ty> = s.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                let params: Vec<Ty> = self.param_types(&s.params);
                 let ret = s
                     .ret
                     .as_ref()
@@ -897,13 +924,20 @@ impl Checker {
             if f.has_self {
                 self.err("T127", "`self` is only available in methods", f.span);
             }
-            let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+            let params: Vec<Ty> = self.param_types(&f.params);
             let ret = f
                 .ret
                 .as_ref()
                 .map(|r| self.resolve_type(r))
                 .unwrap_or(Ty::Unit);
             if f.external {
+                if let Some(p) = f.params.iter().find(|p| p.variadic) {
+                    self.err(
+                        "T268",
+                        format!("an `extern fun` cannot be variadic (`...{}`)", p.name.name),
+                        p.name.span,
+                    );
+                }
                 self.check_extern_signature(f, &params, &ret);
             }
             let def = &mut self.defs.fns[id];
@@ -1095,7 +1129,7 @@ impl Checker {
                 }
                 let mark = self.tparam_scope.len();
                 let own = self.make_tparams(&f.tparams);
-                let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                let params: Vec<Ty> = self.param_types(&f.params);
                 let ret = f
                     .ret
                     .as_ref()

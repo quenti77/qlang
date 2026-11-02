@@ -560,6 +560,7 @@ impl<'a> Parser<'a> {
                     }
                     has_self = true;
                 } else {
+                    let variadic = self.eat(&Tok::Ellipsis);
                     let pname = self.expect_ident()?;
                     if !self.at(&Tok::Colon) {
                         let span = pname.span;
@@ -575,6 +576,27 @@ impl<'a> Parser<'a> {
                     self.bump();
                     let ty = self.parse_type()?;
                     let (annotations, _) = self.take_annotations();
+                    if variadic && self.at(&Tok::Assign) {
+                        let span = self.peek_span();
+                        return self.error_at(
+                            "P046",
+                            format!(
+                                "`...{}` takes the arguments left over: with none, it is an empty array, so it has no default",
+                                pname.name
+                            ),
+                            span,
+                        );
+                    }
+                    if params.iter().any(|q: &Param| q.variadic) {
+                        return self.error_at(
+                            "P044",
+                            format!(
+                                "`{}` comes after a variadic parameter: `...name: type` must be the last parameter",
+                                pname.name
+                            ),
+                            pname.span,
+                        );
+                    }
                     let default = if self.eat(&Tok::Assign) {
                         let d = self.parse_expr()?;
                         if !is_constant(&d) {
@@ -596,6 +618,7 @@ impl<'a> Parser<'a> {
                         name: pname,
                         ty,
                         default,
+                        variadic,
                     });
                 }
                 if !self.eat(&Tok::Comma) {
@@ -939,6 +962,7 @@ impl<'a> Parser<'a> {
                         name: fname,
                         ty,
                         default: None,
+                        variadic: false,
                     });
                     if !self.eat(&Tok::Comma) {
                         break;
@@ -1295,6 +1319,25 @@ impl<'a> Parser<'a> {
                 let mut params = Vec::new();
                 let r: PResult<()> = (|| {
                     while !self.at(&Tok::RParen) {
+                        if self.at(&Tok::Ellipsis) {
+                            // `fun(string, ...int)`: the last parameter takes what is left
+                            let start = self.bump().span;
+                            let elem = self.parse_type()?;
+                            let span = start.to(elem.span);
+                            params.push(TypeExpr {
+                                span,
+                                kind: TypeExprKind::Rest(Box::new(elem)),
+                            });
+                            if !self.at(&Tok::RParen) {
+                                let at = self.peek_span();
+                                return self.error_at(
+                                    "P044",
+                                    "a variadic parameter `...type` must be the last one",
+                                    at,
+                                );
+                            }
+                            break;
+                        }
                         params.push(self.parse_type()?);
                         if !self.eat(&Tok::Comma) {
                             break;
@@ -1740,6 +1783,16 @@ impl<'a> Parser<'a> {
         Ok(e)
     }
 
+    /// An expression, or `...expr` (the elements of a list) where a list of values is written.
+    fn parse_value_or_spread(&mut self) -> PResult<Expr> {
+        if self.at(&Tok::Ellipsis) {
+            let start = self.bump().span;
+            let inner = self.parse_expr()?;
+            return Ok(self.mk(start.to(inner.span), ExprKind::Spread(Box::new(inner))));
+        }
+        self.parse_expr()
+    }
+
     fn parse_call_args(&mut self) -> PResult<(Vec<CallArg>, Span)> {
         let mut args = Vec::new();
         while !self.at(&Tok::RParen) {
@@ -1752,7 +1805,7 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            let value = self.parse_expr()?;
+            let value = self.parse_value_or_spread()?;
             args.push(CallArg { name, value });
             if !self.eat(&Tok::Comma) {
                 break;
@@ -1903,7 +1956,7 @@ impl<'a> Parser<'a> {
                 let r: PResult<(Vec<Expr>, Span)> = (|| {
                     let mut items = Vec::new();
                     while !self.at(&Tok::RBracket) {
-                        items.push(self.parse_expr()?);
+                        items.push(self.parse_value_or_spread()?);
                         if !self.eat(&Tok::Comma) {
                             break;
                         }
@@ -1921,6 +1974,16 @@ impl<'a> Parser<'a> {
                 let r: PResult<(Vec<(Expr, Expr)>, Span)> = (|| {
                     let mut items = Vec::new();
                     while !self.at(&Tok::RBrace) {
+                        if self.at(&Tok::Ellipsis) {
+                            // `{ ...other, key: value }`: the entries of another map
+                            let k = self.parse_value_or_spread()?;
+                            let v = self.mk(k.span, ExprKind::None);
+                            items.push((k, v));
+                            if !self.eat(&Tok::Comma) {
+                                break;
+                            }
+                            continue;
+                        }
                         let k = self.parse_expr()?;
                         if !self.at(&Tok::Colon) {
                             return self.unexpected("`:` and a value after the key");

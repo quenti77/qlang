@@ -148,7 +148,7 @@ impl Checker {
             self.declare(
                 &p.name,
                 Local {
-                    ty: t.clone(),
+                    ty: local_ty(t),
                     kind: LocalKind::Param,
                     orig: None,
                     from_module: false,

@@ -83,6 +83,8 @@ pub enum Tok {
     Assign,
     DotDotEq,
     DotDot,
+    /// `...`: the spread of a list, and the mark of a variadic parameter.
+    Ellipsis,
     Dot,
     Arrow,
     Question,
@@ -182,6 +184,7 @@ impl Tok {
             Tok::Assign => "=",
             Tok::DotDotEq => "..=",
             Tok::DotDot => "..",
+            Tok::Ellipsis => "...",
             Tok::Dot => ".",
             Tok::Arrow => "->",
             Tok::Question => "?",
@@ -463,7 +466,9 @@ pub fn lex_with_docs(
             }
             _ => {
                 let rest = &b[i..];
-                let (tok, len) = if rest.starts_with(b"..=") {
+                let (tok, len) = if rest.starts_with(b"...") {
+                    (Some(Tok::Ellipsis), 3)
+                } else if rest.starts_with(b"..=") {
                     (Some(Tok::DotDotEq), 3)
                 } else if rest.starts_with(b"**") {
                     (Some(Tok::Power), 2)

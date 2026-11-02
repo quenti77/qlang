@@ -1216,6 +1216,9 @@ impl<'a> Interp<'a> {
                 None => self.fail("R002", "`self` is not available here", e.span),
             },
             ExprKind::Super => self.fail("R003", "`super` can only be used for calls", e.span),
+            ExprKind::Spread(_) => {
+                self.fail("R001", "`...` outside a call, an array or a map", e.span)
+            }
             ExprKind::Array(items) => self.eval_array(items, env),
             ExprKind::Map(items) => self.eval_map(e, items, env),
             ExprKind::StructLit(lit) => self.eval_struct_lit(e, lit, env),
@@ -1324,6 +1327,17 @@ impl<'a> Interp<'a> {
     fn eval_array(&mut self, items: &[Expr], env: &Env) -> R<Value> {
         let mut out = Vec::with_capacity(items.len());
         for it in items {
+            if let ExprKind::Spread(inner) = &it.kind {
+                // `[...a, 3]`: a new array that holds the elements of `a`
+                let spread = self.eval(inner, env)?;
+                let Value::Array(list) = &spread else {
+                    return self.fail("R001", "`...` needs an array", it.span);
+                };
+                let list = list.borrow();
+                self.guard_alloc(out.len() + list.len(), it.span)?;
+                out.extend(list.iter().cloned());
+                continue;
+            }
             out.push(self.eval(it, env)?);
         }
         Ok(Value::array(out))
@@ -1333,6 +1347,19 @@ impl<'a> Interp<'a> {
     fn eval_map(&mut self, e: &Expr, items: &[(Expr, Expr)], env: &Env) -> R<Value> {
         let mut m = MapObj::default();
         for (k, v) in items {
+            if let ExprKind::Spread(inner) = &k.kind {
+                // `{ ...a, "x": 1 }`: the entries of `a`, a later key replacing an earlier one
+                let spread = self.eval(inner, env)?;
+                let Value::Map(other) = &spread else {
+                    return self.fail("R001", "`...` needs a map", k.span);
+                };
+                let other = other.borrow();
+                self.guard_alloc(m.len() + other.len(), k.span)?;
+                for (ok, ov) in &other.entries {
+                    m.insert(ok.clone(), ov.clone());
+                }
+                continue;
+            }
             let kv = self.eval(k, env)?;
             let vv = self.eval(v, env)?;
             self.guard_alloc(m.len() + 1, e.span)?;
@@ -1568,6 +1595,9 @@ impl<'a> Interp<'a> {
     /// Evaluates arguments in the order written, then places each value in the parameter
     /// slot it fills (identity unless the call mixed in named arguments: see `arg_order`).
     fn eval_args(&mut self, node: NodeId, args: &[CallArg], env: &Env) -> R<Vec<Value>> {
+        if let Some(pack) = self.prog.res.packs.get(&node).cloned() {
+            return self.eval_packed(&pack, args, env);
+        }
         if let Some(order) = self.prog.res.arg_order.get(&node).cloned() {
             let filled = self.prog.res.arg_defaults.get(&node).cloned();
             let size = args.len() + filled.as_ref().map_or(0, Vec::len);
@@ -1589,6 +1619,91 @@ impl<'a> Interp<'a> {
             out.push(self.eval(&a.value, env)?);
         }
         Ok(out)
+    }
+
+    /// The arguments of a call to a variadic function or with a spread: the list of the values
+    /// written (a spread gives all of its elements) is placed in the parameters, left to right;
+    /// what is left over goes in the variadic parameter, as a new array.
+    fn eval_packed(&mut self, pack: &Pack, args: &[CallArg], env: &Env) -> R<Vec<Value>> {
+        let fixed = pack.params - usize::from(pack.variadic);
+        let mut positional: Vec<Value> = Vec::new();
+        let mut named: Vec<(usize, Value)> = Vec::new();
+        let mut named_at = 0;
+        for a in args {
+            if a.name.is_some() {
+                let v = self.eval(&a.value, env)?;
+                named.push((pack.named[named_at], v));
+                named_at += 1;
+            } else if let ExprKind::Spread(inner) = &a.value.kind {
+                let spread = self.eval(inner, env)?;
+                let Value::Array(list) = &spread else {
+                    return self.fail("R001", "`...` needs an array", a.value.span);
+                };
+                self.guard_alloc(positional.len() + list.borrow().len(), a.value.span)?;
+                positional.extend(list.borrow().iter().cloned());
+            } else {
+                positional.push(self.eval(&a.value, env)?);
+            }
+        }
+        let mut slots: Vec<Option<Value>> = (0..pack.params).map(|_| None).collect();
+        let mut rest: Vec<Value> = Vec::new();
+        let given = positional.len();
+        for (i, v) in positional.into_iter().enumerate() {
+            if i < fixed {
+                slots[i] = Some(v);
+            } else if pack.variadic {
+                rest.push(v);
+            } else {
+                return self.fail(
+                    "R018",
+                    format!(
+                        "`{}` takes {fixed} argument(s) but {given} were given (a `...` gave too many)",
+                        pack.name
+                    ),
+                    pack.span,
+                );
+            }
+        }
+        for (slot, v) in named {
+            if slots[slot].is_some() || (pack.variadic && !rest.is_empty()) {
+                return self.fail(
+                    "R018",
+                    format!(
+                        "`{}`: a parameter is given twice (a `...` already filled it)",
+                        pack.name
+                    ),
+                    pack.span,
+                );
+            }
+            slots[slot] = Some(v);
+        }
+        for (i, slot) in slots.iter_mut().enumerate().take(fixed) {
+            if slot.is_none() {
+                match &pack.defaults[i] {
+                    Some(d) => *slot = Some(self.eval(d, env)?),
+                    None => {
+                        let need = (0..fixed)
+                            .rposition(|j| pack.defaults[j].is_none())
+                            .map_or(0, |j| j + 1);
+                        return self.fail(
+                            "R018",
+                            format!(
+                                "`{}` takes at least {need} argument(s) but {given} were given (a `...` gave too few)",
+                                pack.name
+                            ),
+                            pack.span,
+                        );
+                    }
+                }
+            }
+        }
+        if pack.variadic {
+            slots[fixed] = Some(Value::array(rest));
+        }
+        Ok(slots
+            .into_iter()
+            .map(|v| v.expect("every slot filled"))
+            .collect())
     }
 
     fn eval_call(&mut self, e: &Expr, callee: &Expr, args: &[CallArg], env: &Env) -> R<Value> {
@@ -1913,7 +2028,7 @@ impl<'a> Interp<'a> {
                     };
                     if let Some(a) = arg
                         && let Some(p0) = defs.fns[*fid].params.first()
-                        && !self.value_matches_ty(a, p0)
+                        && !self.value_matches_ty(a, &crate::types::local_ty(p0))
                     {
                         continue;
                     }

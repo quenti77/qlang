@@ -1584,6 +1584,9 @@ impl Gen<'_> {
                 }
             }
             ExprKind::Array(items) => {
+                if items.iter().any(|i| matches!(i.kind, ExprKind::Spread(_))) {
+                    return None;
+                }
                 let ty = self.prog.res.array_lits.get(&e.id)?.clone();
                 let Ty::Array(el) = &ty else { return None };
                 let ety = ety_of(el)?;
@@ -1607,6 +1610,12 @@ impl Gen<'_> {
                 Some(ty)
             }
             ExprKind::Map(items) => {
+                if items
+                    .iter()
+                    .any(|(k, _)| matches!(k.kind, ExprKind::Spread(_)))
+                {
+                    return None;
+                }
                 let ty = self.prog.res.array_lits.get(&e.id)?.clone();
                 let Ty::Map(k, v) = &ty else { return None };
                 let tmp = self.alloc()?;
@@ -2077,7 +2086,8 @@ impl Gen<'_> {
                     return None;
                 };
                 let (eid, vi) = (*eid, *vi);
-                if self.prog.res.arg_order.contains_key(&e.id)
+                if (self.prog.res.arg_order.contains_key(&e.id)
+                    || self.prog.res.packs.contains_key(&e.id))
                     || args.iter().any(|a| a.name.is_some())
                 {
                     return None;
@@ -2091,7 +2101,8 @@ impl Gen<'_> {
             }
             ExprKind::Call { callee, args } => {
                 if !matches!(callee.kind, ExprKind::Ident(..))
-                    || self.prog.res.arg_order.contains_key(&e.id)
+                    || (self.prog.res.arg_order.contains_key(&e.id)
+                        || self.prog.res.packs.contains_key(&e.id))
                     || args.iter().any(|a| a.name.is_some())
                 {
                     return None;
@@ -2262,7 +2273,8 @@ impl Gen<'_> {
         };
         if !targs.is_empty()
             || args.iter().any(|a| a.name.is_some())
-            || self.prog.res.arg_order.contains_key(&e.id)
+            || (self.prog.res.arg_order.contains_key(&e.id)
+                || self.prog.res.packs.contains_key(&e.id))
             || self.prog.res.trait_calls.contains(&e.id)
             || self.prog.res.class_calls.contains(&e.id)
             || self.prog.res.super_calls.contains_key(&callee.id)

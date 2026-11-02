@@ -857,6 +857,224 @@ impl Checker {
         Some(slots.into_iter().map(|s| s.unwrap()).collect())
     }
 
+    /// The arguments of a call whose callee has a variadic parameter, or that spreads a list:
+    /// the types are checked here, the placement is done when the call runs (`Resolved::packs`).
+    /// `false` when the arguments are wrong (the errors are reported).
+    fn check_packed_args(
+        &mut self,
+        e: &Expr,
+        sig: &CallSig,
+        params: &[Ty],
+        args: &[CallArg],
+    ) -> bool {
+        let variadic = matches!(params.last(), Some(Ty::Rest(_)));
+        let fixed = params.len() - usize::from(variadic);
+        let elem = match params.last() {
+            Some(Ty::Rest(x)) if variadic => Some((**x).clone()),
+            _ => None,
+        };
+        let default_of = |i: usize| sig.defaults.get(i).and_then(|d| d.as_ref()).cloned();
+        let mut named: Vec<usize> = Vec::new();
+        let mut taken = vec![false; params.len()];
+        let mut seen_named = false;
+        let mut ok = true;
+        let mut positional = 0usize;
+        let mut spreads = false;
+        for a in args {
+            match &a.name {
+                None => {
+                    if seen_named {
+                        self.err(
+                            "T246",
+                            "positional arguments must come before named arguments",
+                            a.value.span,
+                        );
+                        ok = false;
+                    }
+                    if matches!(a.value.kind, ExprKind::Spread(_)) {
+                        spreads = true;
+                    } else if !spreads {
+                        positional += 1;
+                    }
+                }
+                Some(n) => {
+                    seen_named = true;
+                    let Some(names) = &sig.param_names else {
+                        self.err(
+                            "T245",
+                            format!("`{}` does not accept named arguments", sig.name),
+                            e.span,
+                        );
+                        ok = false;
+                        continue;
+                    };
+                    let Some(idx) = names.iter().position(|p| p == &n.name) else {
+                        self.err(
+                            "T247",
+                            format!("`{}` has no parameter named `{}`", sig.name, n.name),
+                            n.span,
+                        );
+                        ok = false;
+                        continue;
+                    };
+                    if variadic && idx == fixed {
+                        self.err(
+                            "T266",
+                            format!(
+                                "`{}` is the variadic parameter of `{}`: it takes the arguments left over and cannot be named",
+                                n.name, sig.name
+                            ),
+                            n.span,
+                        );
+                        ok = false;
+                        continue;
+                    }
+                    if taken[idx] {
+                        self.err(
+                            "T248",
+                            format!("parameter `{}` is given more than once", n.name),
+                            n.span,
+                        );
+                        ok = false;
+                        continue;
+                    }
+                    taken[idx] = true;
+                    named.push(idx);
+                }
+            }
+        }
+        if !ok {
+            self.check_args_loose(args);
+            return false;
+        }
+        if !spreads {
+            // the arity is known: say what is missing or too much
+            let covered = |i: usize| i < positional || taken[i] || default_of(i).is_some();
+            let required = (0..fixed)
+                .rposition(|i| default_of(i).is_none())
+                .map_or(0, |i| i + 1);
+            if (positional > fixed && !variadic) || (0..fixed).any(|i| !covered(i)) {
+                let wanted = if variadic {
+                    format!("at least {required}")
+                } else if required == fixed {
+                    fixed.to_string()
+                } else {
+                    format!("{required} to {fixed}")
+                };
+                self.err(
+                    "T240",
+                    format!(
+                        "`{}` expects {wanted} argument(s), found {}",
+                        sig.name,
+                        args.len()
+                    ),
+                    e.span,
+                );
+                self.check_args_loose(args);
+                return false;
+            }
+            if variadic && seen_named && positional > fixed {
+                self.err(
+                    "T266",
+                    format!(
+                        "`{}`: arguments left over for the variadic parameter cannot be mixed with named arguments",
+                        sig.name
+                    ),
+                    e.span,
+                );
+                self.check_args_loose(args);
+                return false;
+            }
+        }
+        // the types: an argument at a known place goes to its parameter, one after a spread may
+        // reach any of the parameters from `positional` on (and the variadic one)
+        let mut index = 0usize;
+        let mut after_spread = false;
+        let mut named_at = 0usize;
+        for a in args {
+            let reachable = |from: usize| -> Vec<Ty> {
+                let mut v: Vec<Ty> = params[from.min(fixed)..fixed].to_vec();
+                if let Some(el) = &elem {
+                    v.push(el.clone());
+                }
+                v
+            };
+            if a.name.is_some() {
+                let slot = named[named_at];
+                named_at += 1;
+                let want = self.resolve(&params[slot]);
+                let t = self.expr(&a.value, &Want::Exp(want.clone()));
+                let t = self.require_value(t, a.value.span);
+                if !self.assignable(&t, &params[slot]) {
+                    self.mismatch(a.value.span, &want, &t);
+                }
+                continue;
+            }
+            if let ExprKind::Spread(inner) = &a.value.kind {
+                let el = self.spread_array(inner);
+                for p in reachable(index) {
+                    if !self.assignable(&el, &p) {
+                        let want = self.resolve(&p);
+                        self.err(
+                            "T267",
+                            format!(
+                                "the elements of this array are `{}`, which cannot fill a parameter of type `{}` of `{}`",
+                                self.show(&el),
+                                self.show(&want),
+                                sig.name
+                            ),
+                            a.value.span,
+                        );
+                        break;
+                    }
+                }
+                after_spread = true;
+                continue;
+            }
+            let targets: Vec<Ty> = if after_spread {
+                reachable(index)
+            } else if index < fixed {
+                vec![params[index].clone()]
+            } else {
+                elem.iter().cloned().collect()
+            };
+            index += 1;
+            let hint = if targets.len() == 1 {
+                Want::Exp(self.resolve(&targets[0]))
+            } else {
+                Want::Any
+            };
+            let t = self.expr(&a.value, &hint);
+            let t = self.require_value(t, a.value.span);
+            for p in &targets {
+                if !self.assignable(&t, p) {
+                    let want = self.resolve(p);
+                    self.mismatch(a.value.span, &want, &t);
+                    break;
+                }
+            }
+        }
+        // a type parameter only a variadic parameter mentions, with nothing given for it, stays free
+        if variadic || spreads {
+            let mut defaults: Vec<Option<Rc<Expr>>> = (0..params.len()).map(default_of).collect();
+            if variadic {
+                defaults[fixed] = None;
+            }
+            self.res.packs.insert(
+                e.id,
+                Pack {
+                    name: sig.name.clone(),
+                    params: params.len(),
+                    variadic,
+                    defaults,
+                    named,
+                    span: e.span,
+                },
+            );
+        }
+        true
+    }
+
     /// Check arguments against a signature, inferring generic parameters. `want` is the
     /// type expected of the call's result: when an argument leaves some type parameters
     /// unresolved, matching the result against `want` can resolve the rest (`let x: Box<int>
@@ -913,16 +1131,26 @@ impl Checker {
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.subst(&map)).collect();
         let ret = sig.ret.subst(&map);
-        let Some(ordered) = self.order_args(e, sig, &params, args) else {
-            return self.resolve(&ret);
-        };
-        for (a, p) in ordered.iter().zip(params.iter()) {
-            let want = self.resolve(p);
-            let t = self.expr(a, &Want::Exp(want.clone()));
-            let t = self.require_value(t, a.span);
-            if !self.assignable(&t, p) {
+        let packed = matches!(params.last(), Some(Ty::Rest(_)))
+            || args
+                .iter()
+                .any(|a| matches!(a.value.kind, ExprKind::Spread(_)));
+        if packed {
+            if !self.check_packed_args(e, sig, &params, args) {
+                return self.resolve(&ret);
+            }
+        } else {
+            let Some(ordered) = self.order_args(e, sig, &params, args) else {
+                return self.resolve(&ret);
+            };
+            for (a, p) in ordered.iter().zip(params.iter()) {
                 let want = self.resolve(p);
-                self.mismatch(a.span, &want, &t);
+                let t = self.expr(a, &Want::Exp(want.clone()));
+                let t = self.require_value(t, a.span);
+                if !self.assignable(&t, p) {
+                    let want = self.resolve(p);
+                    self.mismatch(a.span, &want, &t);
+                }
             }
         }
         // a type parameter that only a left-out parameter with a default mentions has nothing

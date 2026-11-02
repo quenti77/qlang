@@ -805,6 +805,22 @@ fn a_connection_stays_open_for_several_requests() {
 }
 
 #[test]
+fn the_hundredth_answer_on_a_connection_says_it_is_the_last() {
+    let server = start("keepalive_last", SERVER, &[]);
+    let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    for n in 1..=100 {
+        s.write_all(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+        let (head, _) = read_one(&mut s);
+        let want = if n == 100 {
+            "Connection: close"
+        } else {
+            "Connection: keep-alive"
+        };
+        assert!(head.contains(want), "answer {n}: {head}");
+    }
+}
+
+#[test]
 fn a_chunked_body_is_decoded_and_100_continue_is_answered() {
     let server = start("chunked", SERVER, &[]);
     let r = exchange(

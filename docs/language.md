@@ -1894,7 +1894,7 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `join(sep)`           | assemble les éléments en une `string`                            |
 | `sort()`              | trie le tableau sur place, de façon stable (voir ci-dessous)     |
 | `min()`, `max()`      | le plus petit / grand élément, ou `none` si vide (`T?`)          |
-| `sum()`               | somme d'un tableau de nombres (`0` ou `0.0` si vide)             |
+| `sum()`               | somme d'un tableau de nombres (`0` ou `0.0` si vide), ou d'éléments qui implémentent `Add` (de gauche à droite ; vide : erreur `R015`) |
 | `slice(début, fin)`   | nouveau tableau des éléments de `début` (inclus) à `fin` (exclu) |
 | `map(f)`              | nouveau tableau de `f(élément)` pour chaque élément               |
 | `filter(f)`           | nouveau tableau des éléments pour lesquels `f(élément)` est `true` |

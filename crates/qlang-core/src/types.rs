@@ -47,6 +47,8 @@ pub enum Ty {
     /// `(int, string)`: two or more types, a fixed number of values of different types.
     Tuple(Vec<Ty>),
     Fn(Vec<Ty>, Box<Ty>),
+    /// `...T`, only as the last parameter of a `Fn`: what is left over, an `array<T>` in the body.
+    Rest(Box<Ty>),
     Struct(StructId, Vec<Ty>),
     /// An enumeration, with the type arguments of a generic one (`Result<int, Error>`).
     Enum(EnumId, Vec<Ty>),
@@ -85,6 +87,7 @@ impl Ty {
             Ty::Param(p) => map.get(p).cloned().unwrap_or_else(|| self.clone()),
             Ty::Nullable(t) => Ty::nullable(t.subst(map)),
             Ty::Array(t) => Ty::Array(Box::new(t.subst(map))),
+            Ty::Rest(t) => Ty::Rest(Box::new(t.subst(map))),
             Ty::Map(k, v) => Ty::Map(Box::new(k.subst(map)), Box::new(v.subst(map))),
             Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| t.subst(map)).collect()),
             Ty::Fn(ps, r) => Ty::Fn(
@@ -101,7 +104,7 @@ impl Ty {
     pub fn contains_infer(&self) -> bool {
         match self {
             Ty::Infer(_) => true,
-            Ty::Nullable(t) | Ty::Array(t) => t.contains_infer(),
+            Ty::Nullable(t) | Ty::Array(t) | Ty::Rest(t) => t.contains_infer(),
             Ty::Map(k, v) => k.contains_infer() || v.contains_infer(),
             Ty::Tuple(ts) => ts.iter().any(Ty::contains_infer),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_infer) || r.contains_infer(),
@@ -113,7 +116,7 @@ impl Ty {
     pub fn contains_param(&self) -> bool {
         match self {
             Ty::Param(_) => true,
-            Ty::Nullable(t) | Ty::Array(t) => t.contains_param(),
+            Ty::Nullable(t) | Ty::Array(t) | Ty::Rest(t) => t.contains_param(),
             Ty::Map(k, v) => k.contains_param() || v.contains_param(),
             Ty::Tuple(ts) => ts.iter().any(Ty::contains_param),
             Ty::Fn(ps, r) => ps.iter().any(Ty::contains_param) || r.contains_param(),
@@ -143,6 +146,7 @@ impl Ty {
                 _ => format!("{}?", t.show(defs)),
             },
             Ty::Array(t) => format!("array<{}>", t.show(defs)),
+            Ty::Rest(t) => format!("...{}", t.show(defs)),
             Ty::Map(k, v) => format!("map<{}, {}>", k.show(defs), v.show(defs)),
             Ty::Tuple(ts) => {
                 let ts: Vec<String> = ts.iter().map(|t| t.show(defs)).collect();
@@ -329,6 +333,31 @@ pub struct AliasDef {
     pub span: Span,
     pub ty: Rc<TypeExpr>,
     pub state: AliasState,
+}
+
+/// The type of the variable a parameter makes in its function: a variadic `...xs: int` is an `array<int>`.
+pub fn local_ty(param: &Ty) -> Ty {
+    match param {
+        Ty::Rest(t) => Ty::Array(t.clone()),
+        other => other.clone(),
+    }
+}
+
+/// How the arguments of a call are placed in the parameters of its callee (see `Resolved::packs`).
+#[derive(Clone, Debug)]
+pub struct Pack {
+    /// The name shown in errors.
+    pub name: String,
+    /// The number of parameters, the variadic one included.
+    pub params: usize,
+    /// The last parameter takes what is left over.
+    pub variadic: bool,
+    /// The default of each parameter (`None`: it is required); a variadic one is `[]` when empty.
+    pub defaults: Vec<Option<Rc<Expr>>>,
+    /// For each named argument, the slot it fills (`f(b: 1)`); the positional ones come first.
+    pub named: Vec<usize>,
+    /// Where the call is, for the errors found when it runs.
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -727,4 +756,8 @@ pub struct Resolutions {
     /// For a call that leaves out parameters having a default: the parameter slot and the
     /// default value filling it (`arg_order` is then present too).
     pub arg_defaults: FxHashMap<NodeId, Vec<(usize, Rc<Expr>)>>,
+    /// Calls whose arguments are placed in the parameters when they run: the callee has a
+    /// variadic parameter (the arguments left over are packed in an array) or an argument is a
+    /// spread (`f(...list)`: the number of arguments is not known before).
+    pub packs: FxHashMap<NodeId, Pack>,
 }

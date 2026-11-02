@@ -342,7 +342,9 @@ end
 struct ParamInfo
     --" The name of the parameter. --"
     public name: string
-    --" The name of its type, as written. --"
+    --" `true` for `...name: type`, which takes the arguments left over. --"
+    public variadic: bool
+    --" The name of its type, as written (for a variadic parameter, the type of one element). --"
     public type_name: string
     --" The annotations of the parameter. --"
     public annotations: array<AnnotationInfo>

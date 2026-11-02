@@ -31,6 +31,8 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `P041` | ```self` must be the first parameter`` |
 | `P042` | ``parameter `{}` needs a type (`{}: type`)`` <br> ``field `{}` needs a type (`{}: type`)`` |
 | `P043` | ``the default of `{}` must be a literal (a number, a text without `{{}}`, `true`, `false`, `none`, `[]` or `{{}}`)`` |
+| `P044` | ``{nom} comes after a variadic parameter: ...name: type must be the last parameter`` <br> `a variadic parameter ...type must be the last one` |
+| `P046` | ``...{nom} takes the arguments left over: with none, it is an empty array, so it has no default`` |
 | `P050` | ``visibility and `static` only apply to members of a `struct` or `impl``` |
 | `P051` | ``annotations only apply to a `fun`, `struct`, `enum`, `trait` or a member of one`` <br> ```{}` is only allowed at the top level of a file`` |
 | `P052` | ```extern` must be followed by `fun name(...)``` <br> ``named functions are only allowed at the top level; here write `let name = fun(...) ... end``` |
@@ -127,6 +129,11 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `T261` | ```flatten()` needs an array of arrays, not `array<{shown}>``` <br> ``parameter `{}` of an `extern fun`: {why}`` |
 | `T262` | ``return type of an `extern fun`: {why}`` |
 | `T263` | `{nom} is not available in this environment (the host does not provide it)` |
+| `T264` | ``... spreads an array, not {type}`` (et, selon le type, la conversion à écrire : `...(x ?? [])`, `...set.to_array()`) |
+| `T266` | `{nom} is the variadic parameter of {f}: it takes the arguments left over and cannot be named` <br> `arguments left over for the variadic parameter cannot be mixed with named arguments` |
+| `T267` | `the elements of this array are {type}, which cannot fill a parameter of type {type} of {f}` |
+| `T268` | ``an extern fun cannot be variadic (...{nom})`` |
+| `T269` | ``... spreads the elements of a list inside a call, an array [ ] or a map { }`` |
 | `T270` | ```{shown}` cannot be a map key: some of its variants carry data`` <br> ```{shown}` cannot be a map key (use int, float, string, bool, uuid, ulid, datetime or an enum)`` |
 | `T280` | ```?` can only be used inside a function (it leaves the function when there is an error)`` |
 | `T281` | ```?` needs a `Result` or a nullable value, found `{shown}``` |
@@ -169,6 +176,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `R015` | ``sum() of an empty array needs a zero: the elements are not numbers`` |
 | `R016` | ``{x} is outside the domain of `{name}``` <br> ```log` needs a positive number and a positive base other than 1 (found {x} and {base})`` <br> ```clamp` needs min <= max (found {lo} and {hi})`` |
 | `R017` | ```time.sleep` waits from 0 to 3600000 milliseconds (found {ms})`` <br> ```random.bytes` gives from 0 to 1048576 bytes (found {n})`` |
+| `R018` | `{f} takes {n} argument(s) but {m} were given (a ... gave too many)` <br> `{f} takes at least {n} argument(s) but {m} were given (a ... gave too few)` <br> `{f}: a parameter is given twice (a ... already filled it)` |
 | `R020` | `index {i} is out of bounds (length {})` <br> `index {n} is out of bounds (length {len})` <br> `an array index must be an int` |
 | `R021` | `cannot count occurrences of an empty string` <br> `the padding must be exactly one character` <br> `invalid repeat count` |
 | `R022` | ``this key is not in the map (use `get(key, default)` or check `has(key)` first)`` |

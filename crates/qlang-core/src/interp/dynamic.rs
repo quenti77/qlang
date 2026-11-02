@@ -403,21 +403,37 @@ impl Interp<'_> {
             return Ok(self.err_result("not a function"));
         };
         let items: Vec<Value> = items.borrow().clone();
-        if items.len() != params.len() {
+        // a variadic function takes the arguments left over as one array
+        let variadic = matches!(params.last(), Some(Ty::Rest(_)));
+        let fixed = params.len() - usize::from(variadic);
+        if items.len() < fixed || (!variadic && items.len() != fixed) {
             return Ok(self.err_result(&format!(
-                "expected {} argument(s), found {}",
-                params.len(),
+                "expected {}{} argument(s), found {}",
+                if variadic { "at least " } else { "" },
+                fixed,
                 items.len()
             )));
         }
-        let mut argv = Vec::with_capacity(items.len());
-        for (i, (item, want)) in items.iter().zip(params.iter()).enumerate() {
+        let mut argv = Vec::with_capacity(params.len());
+        for (i, (item, want)) in items.iter().zip(params.iter().take(fixed)).enumerate() {
             match self.any_fits(item, want) {
                 Ok(v) => argv.push(v),
                 Err(why) => {
                     return Ok(self.err_result(&format!("argument {}: {why}", i + 1)));
                 }
             }
+        }
+        if let Some(Ty::Rest(elem)) = params.last() {
+            let mut rest = Vec::new();
+            for (i, item) in items.iter().enumerate().skip(fixed) {
+                match self.any_fits(item, elem) {
+                    Ok(v) => rest.push(v),
+                    Err(why) => {
+                        return Ok(self.err_result(&format!("argument {}: {why}", i + 1)));
+                    }
+                }
+            }
+            argv.push(Value::array(rest));
         }
         let out = self.call_value(&t.value.clone(), argv, span)?;
         Ok(self.ok_result(self.any_box(out, ret)))

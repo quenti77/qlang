@@ -124,7 +124,7 @@ impl Scope {
                 }
             }
             ExprKind::Array(xs) | ExprKind::Tuple(xs) => xs.iter().for_each(|x| self.expr(x, out)),
-            ExprKind::TupleField(x, _) => self.expr(x, out),
+            ExprKind::TupleField(x, _) | ExprKind::Spread(x) => self.expr(x, out),
             ExprKind::Map(kvs) => {
                 for (k, v) in kvs {
                     self.expr(k, out);

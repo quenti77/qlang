@@ -90,6 +90,8 @@ pub struct Param {
     pub ty: TypeExpr,
     /// `name: type = literal`: the value of the parameter when a call leaves it out.
     pub default: Option<Rc<Expr>>,
+    /// `...name: type`: takes the arguments left over, as an `array<type>`.
+    pub variadic: bool,
 }
 
 #[derive(Debug)]
@@ -209,6 +211,8 @@ pub enum TypeExprKind {
         params: Vec<TypeExpr>,
         ret: Option<Box<TypeExpr>>,
     },
+    /// `...int` as the last parameter of a function type.
+    Rest(Box<TypeExpr>),
 }
 
 #[derive(Debug)]
@@ -489,4 +493,6 @@ pub enum ExprKind {
         else_block: Option<Block>,
     },
     Lambda(Rc<FunDecl>),
+    /// `...list` in a call, an array or a map: the elements of `list`, one after the other.
+    Spread(Box<Expr>),
 }

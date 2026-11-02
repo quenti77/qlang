@@ -46,6 +46,7 @@ impl Checker {
             },
             Ty::Nullable(x) => Ty::nullable(self.resolve(x)),
             Ty::Array(x) => Ty::Array(Box::new(self.resolve(x))),
+            Ty::Rest(x) => Ty::Rest(Box::new(self.resolve(x))),
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Fn(ps, r) => Ty::Fn(
                 ps.iter().map(|p| self.resolve(p)).collect(),
@@ -62,7 +63,7 @@ impl Checker {
     fn occurs(&self, n: u32, t: &Ty) -> bool {
         match self.resolve(t) {
             Ty::Infer(m) => m == n,
-            Ty::Nullable(x) | Ty::Array(x) => self.occurs(n, &x),
+            Ty::Nullable(x) | Ty::Array(x) | Ty::Rest(x) => self.occurs(n, &x),
             Ty::Map(k, v) => self.occurs(n, &k) || self.occurs(n, &v),
             Ty::Fn(ps, r) => ps.iter().any(|p| self.occurs(n, p)) || self.occurs(n, &r),
             Ty::Struct(_, a) | Ty::Enum(_, a) | Ty::Trait(_, a) | Ty::Tuple(a) => {
@@ -108,6 +109,7 @@ impl Checker {
             (Ty::Nullable(a), Ty::Nullable(b)) => self.assignable(a, b),
             (_, Ty::Nullable(b)) => self.assignable(&f, b),
             (Ty::Array(a), Ty::Array(b)) => self.same(a, b),
+            (Ty::Rest(a), Ty::Rest(b)) => self.same(a, b),
             (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
             // tuples never change, so each element may be used where a wider one is expected
             (Ty::Tuple(a), Ty::Tuple(b)) => {
@@ -149,6 +151,7 @@ impl Checker {
             (_, Ty::Infer(y)) => self.bind(*y, &a),
             (Ty::Nullable(x), Ty::Nullable(y)) => self.same(x, y),
             (Ty::Array(x), Ty::Array(y)) => self.same(x, y),
+            (Ty::Rest(x), Ty::Rest(y)) => self.same(x, y),
             (Ty::Map(ka, va), Ty::Map(kb, vb)) => self.same(ka, kb) && self.same(va, vb),
             (Ty::Tuple(x), Ty::Tuple(y)) => {
                 x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| self.same(p, q))

@@ -690,6 +690,15 @@ impl Checker {
                 }
                 t
             }
+            ExprKind::Spread(inner) => {
+                self.err(
+                    "T269",
+                    "`...` spreads the elements of a list inside a call, an array `[ ]` or a map `{ }`",
+                    e.span,
+                );
+                self.expr(inner, &Want::Any);
+                Ty::Error
+            }
             ExprKind::StructLit(lit) => self.check_struct_lit(e, lit, want),
             ExprKind::Unary(op, inner) => {
                 let t = self.expr(inner, &Want::Any);
@@ -996,6 +1005,11 @@ impl Checker {
         }
         let (mut kt, mut vt): (Option<Ty>, Option<Ty>) = (None, None);
         for (k, v) in items {
+            // `...other`: the keys and values of another map
+            let spread = match &k.kind {
+                ExprKind::Spread(inner) => Some(self.spread_map(inner)),
+                _ => None,
+            };
             for (is_key, x) in [(true, k), (false, v)] {
                 let slot = if is_key { &kt } else { &vt };
                 let h = hint
@@ -1006,8 +1020,13 @@ impl Checker {
                     (None, Some(h)) => Want::Exp(h.clone()),
                     _ => Want::Any,
                 };
-                let t = self.expr(x, &w);
-                let t = self.require_value(t, x.span);
+                let t = match &spread {
+                    Some((sk, sv)) => (if is_key { sk } else { sv }).clone(),
+                    None => {
+                        let t = self.expr(x, &w);
+                        self.require_value(t, x.span)
+                    }
+                };
                 let merged = match slot.clone() {
                     None => match &h {
                         Some(h) if self.assignable(&t, h) => h.clone(),
@@ -1041,6 +1060,53 @@ impl Checker {
         Ty::Map(Box::new(kt), Box::new(vt))
     }
 
+    /// The type of the elements of `...inner` when it is spread into an array or a call.
+    pub(crate) fn spread_array(&mut self, inner: &Expr) -> Ty {
+        let t = self.expr(inner, &Want::Any);
+        match self.resolve(&t) {
+            Ty::Array(x) => *x,
+            Ty::Error => Ty::Error,
+            other => {
+                self.not_spreadable(&other, inner.span, false);
+                Ty::Error
+            }
+        }
+    }
+
+    /// The key and value types of `...inner` when it is spread into a map.
+    fn spread_map(&mut self, inner: &Expr) -> (Ty, Ty) {
+        let t = self.expr(inner, &Want::Any);
+        match self.resolve(&t) {
+            Ty::Map(k, v) => (*k, *v),
+            Ty::Error => (Ty::Error, Ty::Error),
+            other => {
+                self.not_spreadable(&other, inner.span, true);
+                (Ty::Error, Ty::Error)
+            }
+        }
+    }
+
+    fn not_spreadable(&mut self, t: &Ty, span: Span, into_map: bool) {
+        let shown = self.show(t);
+        let wanted = if into_map { "a map" } else { "an array" };
+        let hint = match t {
+            Ty::Nullable(_) => " (it may be `none`: write `...(x ?? [])`)".to_string(),
+            Ty::Any => " (convert it first: `...a.as<array<T>>()`)".to_string(),
+            Ty::Struct(sid, _) if self.is_prelude_set(*sid) => {
+                " (write `...set.to_array()`)".to_string()
+            }
+            Ty::Struct(..) => " (a struct cannot be spread: list its fields)".to_string(),
+            Ty::Map(..) if !into_map => " (a map is spread inside `{ }`)".to_string(),
+            Ty::Array(_) if into_map => " (an array is spread inside `[ ]` or a call)".to_string(),
+            _ => String::new(),
+        };
+        self.err(
+            "T264",
+            format!("`...` spreads {wanted}, not `{shown}`{hint}"),
+            span,
+        );
+    }
+
     fn check_array(&mut self, items: &[Expr], want: &Want) -> Ty {
         let hint = match want.expected().map(|t| self.resolve(t)) {
             Some(Ty::Array(t)) => Some(*t),
@@ -1060,8 +1126,14 @@ impl Checker {
                 (None, Some(h)) => Want::Exp(h.clone()),
                 _ => Want::Any,
             };
-            let t = self.expr(it, &w);
-            let t = self.require_value(t, it.span);
+            let t = match &it.kind {
+                // `...other`: the elements of another array
+                ExprKind::Spread(inner) => self.spread_array(inner),
+                _ => {
+                    let t = self.expr(it, &w);
+                    self.require_value(t, it.span)
+                }
+            };
             elem = Some(match elem {
                 None => match &hint {
                     Some(h) if self.assignable(&t, h) => h.clone(),
@@ -1850,7 +1922,7 @@ impl Checker {
         if !own.is_empty() {
             self.err("T128", "anonymous functions cannot be generic", f.span);
         }
-        let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+        let params: Vec<Ty> = self.param_types(&f.params);
         let ret = f
             .ret
             .as_ref()
@@ -1864,7 +1936,7 @@ impl Checker {
             self.declare(
                 &p.name,
                 Local {
-                    ty: t.clone(),
+                    ty: local_ty(t),
                     kind: LocalKind::Param,
                     orig: None,
                     from_module: false,

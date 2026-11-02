@@ -327,6 +327,14 @@ impl Checker {
             .iter()
             .enumerate()
             .map(|(i, p)| {
+                // `...xs: int`: what is left over, written as it is declared
+                if let Ty::Rest(inner) = p {
+                    let t = self.show(&inner.subst(map));
+                    return match names.get(i) {
+                        Some(n) if !n.is_empty() => format!("...{n}: {t}"),
+                        _ => format!("...{t}"),
+                    };
+                }
                 let t = self.show(&p.subst(map));
                 let t = match defaults.get(i) {
                     Some(Some(d)) => format!("{t} = {d}"),

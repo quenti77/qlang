@@ -824,10 +824,11 @@ pub fn blank_as_type(text: &str, line0: usize, from: usize, to: usize) -> String
 
 /// A snippet that writes the call: `name(${1:a}, ${2:b})` with the cursor in the parentheses.
 pub fn call_snippet(name: &str, detail: &str) -> String {
-    // a parameter that has a default (`b: int = 3`) can be left out: the snippet leaves it out
+    // a parameter that has a default (`b: int = 3`) or takes what is left over (`...xs: int`)
+    // can be left out: the snippet leaves it out
     let params: Vec<String> = parameters(detail)
         .into_iter()
-        .filter(|p| p != "self" && !p.contains(" = "))
+        .filter(|p| p != "self" && !p.contains(" = ") && !p.starts_with("..."))
         .collect();
     if params.is_empty() {
         return format!("{name}()$0");

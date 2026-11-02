@@ -96,7 +96,8 @@ postfixExpression
       )*
     ;
 
-argumentList: expression (Comma Newline* expression)* Comma?;
+// f(1, ...liste) : Ellipsis étale les éléments d'un tableau en arguments
+argumentList: spreadable (Comma Newline* spreadable)* Comma?;
 
 primaryExpression
     : literal
@@ -127,9 +128,12 @@ tupleLiteral
     : '(' Newline* expression (Comma Newline* expression)+ Comma? Newline* ')'
     ;
 
+// [1, ...autres, 3] : Ellipsis étale les éléments d'un tableau
 arrayLiteral
-    : '[' Newline* (expression (Comma Newline* expression)* Comma? Newline*)? ']'
+    : '[' Newline* (spreadable (Comma Newline* spreadable)* Comma? Newline*)? ']'
     ;
+
+spreadable: Ellipsis? expression;
 
 // Point { x: 1, y: 2 }   Savings { ..Account.new(id), rate: 0.02 }
 // { "a": 1, "b": 2 }   ou {} (le type vient de l'annotation : map<string, int>)
@@ -137,7 +141,8 @@ mapLiteral
     : '{' Newline* (mapEntry (Comma Newline* mapEntry)* Comma? Newline*)? '}'
     ;
 
-mapEntry: expression Colon expression;
+// { ...defaut, "port": 8080 } : Ellipsis étale les entrées d'un dictionnaire
+mapEntry: Ellipsis expression | expression Colon expression;
 
 structLiteral
     : Identifier typeArguments? '{' Newline*
@@ -188,9 +193,10 @@ functionExpression
 
 parameterList: parameter (Comma Newline* parameter)* Comma?;
 
+// ...xs: int : le dernier paramètre ramasse les arguments restants (un array<int> dans le corps)
 parameter
     : Self
-    | Identifier Colon type
+    | Ellipsis? Identifier Colon type
     ;
 
 // ====================================================================
@@ -279,7 +285,8 @@ typeArguments: Lt type (Comma type)* Gt;
 
 // le type de retour est facultatif (pas de valeur) ; fun(int) -> int?
 // retourne int?, pas une fonction nullable : écrire (fun(int) -> int)?
-functionType: Fun '(' (type (Comma type)*)? ')' (Arrow type)?;
+// fun(string, ...int) -> R : le dernier paramètre peut ramasser les arguments restants
+functionType: Fun '(' ((type Comma)* Ellipsis type | type (Comma type)*)? ')' (Arrow type)?;
 
 // Paramètres de type avec bornes : <T>, <T: Add>, <T: Add + Eq, U>
 // Utilisés par les fonctions, structs, traits (section 5).
@@ -514,6 +521,7 @@ ModAssign: 'mod=';
 Assign: '=';
 
 DotDotEq: '..=';
+Ellipsis: '...';
 DotDot: '..';
 Dot: '.';
 Arrow: '->';

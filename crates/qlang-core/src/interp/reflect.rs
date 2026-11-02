@@ -223,10 +223,16 @@ impl Interp<'_> {
     }
 
     pub(super) fn param_info(&self, name: &str, ty: &Ty, annotations: Value) -> Value {
+        // a variadic parameter is described by the type of one element, not by `array<...>`
+        let (ty, variadic) = match ty {
+            Ty::Rest(inner) => (&**inner, true),
+            other => (other, false),
+        };
         self.info(
             "ParamInfo",
             &[
                 ("name", Value::str(name)),
+                ("variadic", Value::Bool(variadic)),
                 ("type_name", self.type_name(ty)),
                 ("annotations", annotations),
                 ("ty", self.any_box(Value::None, ty)),

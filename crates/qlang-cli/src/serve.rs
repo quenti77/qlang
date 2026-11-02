@@ -1084,7 +1084,17 @@ fn log(text: &str) {
 static ACCESS_LOG: AtomicBool = AtomicBool::new(true);
 
 fn access_log(text: &str) {
-    if ACCESS_LOG.load(Ordering::Relaxed) {
+    if !ACCESS_LOG.load(Ordering::Relaxed) {
+        return;
+    }
+    if crate::logging::json_enabled() {
+        // `--log-format json`: one JSON object per request, like the lines of `Log`
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        crate::logging::write(Some(now), "info", text.trim_end(), &[]);
+    } else {
         log(text);
     }
 }

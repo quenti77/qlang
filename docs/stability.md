@@ -1,10 +1,10 @@
 # Stabilité et dépréciation
 
-qlang est en 0.x : une version sort presque chaque jour. Ce fichier dit **ce sur quoi on peut s'appuyer**,
-**comment un changement cassant est annoncé**, et **ce que la 1.0 promettra**. Il remplace l'habitude de lire tout
+qlang est en 1.0. Ce fichier dit **ce sur quoi on peut s'appuyer**,
+**comment un changement cassant est annoncé**, et **ce que la 1.0 promet**. Il remplace l'habitude de lire tout
 le CHANGELOG pour savoir si une mise à jour va casser quelque chose.
 
-> La classification ci-dessous est une **proposition** de l'auteur du projet : elle dit ce qu'on s'interdit de
+> La classification ci-dessous est celle de l'auteur du projet : elle dit ce qu'on s'interdit de
 > changer à la légère. Si une ligne vous semble fausse, ouvrez une issue.
 
 ## Les trois niveaux
@@ -20,7 +20,7 @@ Un paquet dit le niveau de ses fichiers dans son `qlang.toml` : `[stability]` av
 motif). `qlang doc` l'écrit sous le titre de chaque fichier de la documentation, et `qlang doc --require-levels` échoue
 pour un fichier qui n'en a pas (à mettre dans la CI du paquet).
 
-Aujourd'hui rien n'est « garanti 1.0 » : *stable* veut dire « nous le traiterons comme si la 1.0 était là ».
+Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est listé en bas de cette page.
 
 ## Le langage
 
@@ -100,9 +100,9 @@ Chaque version du CHANGELOG qui casse quelque chose a une rubrique **Cassant** e
 Les versions d'avant cette règle ne marquaient pas toujours leurs changements cassants : leur liste complète est le
 CHANGELOG lui-même.
 
-## Ce que la 1.0 promettra (proposition)
+## Ce que la 1.0 promet
 
-La 1.0 figera un **sous-ensemble** dont la définition exécutable est la suite de conformité
+La 1.0 fige un **sous-ensemble** dont la définition exécutable est la suite de conformité
 ([qlang-conformance](https://github.com/quenti77/qlang-conformance)) : **une ligne n'est promise que quand des cas de
 conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/`).
 
@@ -124,6 +124,5 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Le format de `qlang.toml` (`[package]`, `[dependencies]`, `[stability]`) et de `qlang.lock` | tests d'intégration `manifest_format` (le texte exact du verrou, un verrou écrit à la main qui est obéi, chaque clé acceptée, `qlang = "…"` qui arrête un projet trop exigeant) |
 
 Hors de la promesse : la réflexion (`Reflect`), `extern`, le serveur HTTP et la bibliothèque web, `Term`, les tâches et
-traces, et tout ce qui est marqué provisoire ou expérimental plus haut. Quand la 1.0 sortira, le tag
-`v1.0.0` du dépôt de conformité fixera ce que ces lignes veulent dire ; avant, chaque version de qlang a son tag
-(`v0.X.Y` = la suite de qlang `0.X.Y`) et un cas ne change que si le `CHANGELOG` du dépôt de conformité le dit.
+traces, et tout ce qui est marqué provisoire ou expérimental plus haut. Le tag
+`v1.0.0` du dépôt de conformité fixe ce que ces lignes veulent dire (les versions d'avant avaient chacune leur tag, `v0.X.Y` = la suite de qlang `0.X.Y`) ; un cas ne change ensuite que si le `CHANGELOG` du dépôt de conformité le dit.

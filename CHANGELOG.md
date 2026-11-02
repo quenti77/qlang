@@ -2,7 +2,14 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
-## Non publié
+## 1.0.0
+
+**La première version stable.** Ce que la 1.0 promet est écrit dans [docs/stability.md](docs/stability.md) (niveaux
+stable, provisoire, expérimental ; cycle de dépréciation ; liste des cas de conformité) et les changements cassants
+depuis la 0.84 sont dans [docs/migration.md](docs/migration.md) : `qlang fmt` écrit quatre espaces, et les règles de
+`qlang lint` s'appellent `Q001` à `Q005`. Le reste de cette version corrige ce que la passe de validation complète
+a trouvé (mémoire d'un serveur sous charge, délais, messages d'erreur, documentation) et ajoute les paramètres
+variadiques et l'étalement `...`.
 
 - **Cassant : les règles de `qlang lint` s'appellent `Q001` à `Q005` (et plus `L001` à `L005`).** Les codes `L001`…`L005` désignaient deux choses : les erreurs de lecture du texte (`L001` caractère inconnu, `L005` entier trop grand…) et les règles de lint (`L001` variable inutilisée…). Un code publié doit garder un seul sens (`docs/stability.md`). Avant : `warning[L001]: `x` is never used`. Après : `warning[Q001]: …`. S'adapter : remplacer les codes dans les scripts qui filtrent la sortie de `qlang lint` (voir `docs/migration.md`).
 - **`docs/errors.md` : la liste de tous les codes d'erreur, avec leur message.** Un test vérifie que chaque code émis par le compilateur, l'exécution et `qlang lint` y figure, et qu'aucun code n'y est cité sans exister. `QLANG_OTLP_FLUSH_MS` (intervalle d'envoi des spans) est documenté.

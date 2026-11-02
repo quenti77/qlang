@@ -94,6 +94,18 @@ l'entrée et la sortie standard : points d'arrêt, pas à pas (entrer, sauter, s
 `a.0`). La configuration de lancement prend `program` (obligatoire), `args`, `cwd`, `stopOnEntry` et `allowProcess`.
 VS Code : l'extension du dépôt le branche (touche F5 sur un fichier `.q`).
 
+**Ce qui est déboguable et ce qui ne l'est pas.** Le débogueur lance le fichier comme le fait `qlang run` : le code du
+niveau supérieur s'exécute une fois, puis le programme se termine. Donc :
+
+- un **programme servi** (`qlang serve app.q`, point d'entrée `handle`) ne se débogue pas en tant que serveur : lancé
+  sous le débogueur, seul son code de niveau supérieur s'exécute, `handle` n'est jamais appelé. Pour déboguer un
+  gestionnaire, appelez-le depuis un petit fichier (ou un test, `qlang test`) avec une requête construite à la main ;
+- les **points d'arrêt** sont des lignes (pas de condition, pas de point de journalisation) ; `evaluate` ne comprend
+  que `a`, `a.champ` et `a.0`, pas une expression quelconque ; on ne peut pas **s'attacher** à un programme déjà lancé ;
+- le programme tourne **sans l'optimisation à registres** (donc plus lentement) et **sans entrée au clavier** (`read()`
+  échoue avec `R040`, « no more input to read ») ; la sortie arrive dans la console de débogage ;
+- `qlang dap` est **expérimental** (voir [stability.md](stability.md)) : ses options et son comportement peuvent changer.
+
 Autres éditeurs (même réserve que plus haut : réglages d'après leur documentation) :
 
 ```lua

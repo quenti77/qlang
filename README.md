@@ -145,6 +145,9 @@ sans fichier le cherchent depuis le dossier courant, vers le haut. (`main`, dans
 table, est autre chose : le fichier qu'`import "@mon-app"` charge quand le projet est
 utilisé comme paquet.)
 
+`qlang init --web mon-app` crée en plus une application web (le paquet `std` est installé tout de suite) ;
+`--no-install` ne l'installe pas, et `qlang add std` le fait ensuite.
+
 ### Documentation
 
 ```sh

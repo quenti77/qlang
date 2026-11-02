@@ -20,7 +20,9 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 4. Le workflow compile `qlang` pour Linux (x86_64 et arm64, statique), macOS (arm64 et
    Intel) et Windows (x86_64), empaquette l'extension VS Code, calcule `SHA256SUMS` et crée la
    release GitHub avec ses notes générées. Cinq à dix minutes.
-5. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
+5. Avant de tagger : `cargo build --release && scripts/check-docs.py` (la CI le lance aussi) ne doit signaler aucun écart
+   entre la documentation et le programme.
+6. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
    `Updated: qlang A -> qlang X.Y.Z`.
 
 ## Ce que contient une release

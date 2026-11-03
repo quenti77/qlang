@@ -1278,6 +1278,81 @@ impl Server {
         }
     }
 
+    /// The layout as you type. After a line break: the new line and the one above at their level,
+    /// and the `end` of a block that was just opened and has none. After a space: a `case`, `else`
+    /// or `elseif` put at its level, which an editor cannot know from the line alone.
+    fn on_type_formatting(&mut self, params: &Value) -> Value {
+        let Some(uri) = params["textDocument"]["uri"].as_str() else {
+            return Value::Null;
+        };
+        let Some(doc) = self.docs.get(uri) else {
+            return Value::Null;
+        };
+        let line = params["position"]["line"].as_u64().unwrap_or(0) as usize;
+        let lines: Vec<&str> = doc
+            .text
+            .split('\n')
+            .map(|l| l.trim_end_matches('\r'))
+            .collect();
+        let Some(&current) = lines.get(line) else {
+            return json!([]);
+        };
+        let indent_of = |l: &str| l.len() - l.trim_start_matches([' ', '\t']).len();
+        let reindent = |n: usize, level: usize| -> Option<Value> {
+            let want = "    ".repeat(level);
+            let have = &lines[n][..indent_of(lines[n])];
+            (have != want).then(|| {
+                json!({
+                    "range": {
+                        "start": { "line": n, "character": 0 },
+                        "end": { "line": n, "character": have.chars().count() },
+                    },
+                    "newText": want,
+                })
+            })
+        };
+        let mut edits: Vec<Value> = Vec::new();
+        if params["ch"].as_str() == Some(" ") {
+            let first = current.split_whitespace().next();
+            if matches!(first, Some("case" | "else" | "elseif"))
+                && let Some(t) = qlang_core::fmt::typing(&doc.text, line)
+            {
+                edits.extend(reindent(line, t.level));
+            }
+            return json!(edits);
+        }
+        let above = (0..line).rev().find(|&n| !lines[n].trim().is_empty());
+        if let Some(n) = above
+            && let Some(t) = qlang_core::fmt::typing(&doc.text, n)
+        {
+            edits.extend(reindent(n, t.level));
+            if t.unclosed && current.trim().is_empty() {
+                // after the new line when there is one, so that the cursor is not moved
+                let closer = format!("{}end\n", "    ".repeat(t.level));
+                edits.push(match lines.get(line + 1) {
+                    Some(_) => json!({
+                        "range": {
+                            "start": { "line": line + 1, "character": 0 },
+                            "end": { "line": line + 1, "character": 0 },
+                        },
+                        "newText": closer,
+                    }),
+                    None => json!({
+                        "range": {
+                            "start": { "line": line, "character": current.chars().count() },
+                            "end": { "line": line, "character": current.chars().count() },
+                        },
+                        "newText": format!("\n{}", closer.trim_end()),
+                    }),
+                });
+            }
+        }
+        if let Some(t) = qlang_core::fmt::typing(&doc.text, line) {
+            edits.extend(reindent(line, t.level));
+        }
+        json!(edits)
+    }
+
     fn document_symbols(&mut self, params: &Value) -> Value {
         let Some(uri) = params["textDocument"]["uri"].as_str().map(str::to_string) else {
             return Value::Null;
@@ -1384,6 +1459,7 @@ impl Server {
                 "renameProvider": { "prepareProvider": true },
                 "documentSymbolProvider": true,
                 "documentFormattingProvider": true,
+                "documentOnTypeFormattingProvider": { "firstTriggerCharacter": "\n", "moreTriggerCharacter": [" "] },
                 "workspaceSymbolProvider": true,
             },
             "serverInfo": { "name": "qlang", "version": env!("CARGO_PKG_VERSION") },
@@ -1482,6 +1558,7 @@ impl Server {
             "textDocument/rename" => self.rename(id, params),
             "textDocument/documentSymbol" => respond(id, self.document_symbols(params)),
             "textDocument/formatting" => respond(id, self.formatting(params)),
+            "textDocument/onTypeFormatting" => respond(id, self.on_type_formatting(params)),
             "workspace/symbol" => respond(id, self.workspace_symbols(params)),
             _ => respond_error(id, -32601, &format!("method not supported: {method}")),
         }

@@ -121,7 +121,8 @@
     ],
     "configurationDefaults": {
       "[qlang]": {
-        "editor.quickSuggestions": { "other": "on", "comments": "off", "strings": "on" }
+        "editor.quickSuggestions": { "other": "on", "comments": "off", "strings": "on" },
+        "editor.formatOnType": true
       }
     },
     "configuration": {

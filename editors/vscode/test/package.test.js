@@ -47,11 +47,19 @@ test('language configuration regular expressions compile and behave', () => {
   for (const line of ['let x = 1', 'print(x)', 'if x then print(1) end', 'end', '  x = 2']) {
     assert.ok(!inc.test(line), `should not indent after: ${line}`);
   }
-  for (const line of ['end', '  end', 'else', 'elseif a then', '  case 1 then']) {
+  for (const line of ['end', '  end', 'else', 'elseif a then']) {
     assert.ok(dec.test(line), `should dedent: ${line}`);
   }
+  // a `case` is put in by the server (`textDocument/onTypeFormatting`): from the line alone it is not known
+  // whether it follows its `match` or the body of another `case`
+  assert.ok(!dec.test('  case 1 then'));
+  assert.ok(!inc.test('  case 1 then "a"'), 'a case with its body on the line does not indent');
   assert.ok(!dec.test('endpoint = 1'), '`endpoint` is not `end`');
   new RegExp(cfg.wordPattern);
+});
+
+test('format on type is on, the server lays out a line as it is typed', () => {
+  assert.strictEqual(read('package.json').contributes.configurationDefaults['[qlang]']['editor.formatOnType'], true);
 });
 
 test('snippets have a prefix and a body, and tabstops are well formed', () => {

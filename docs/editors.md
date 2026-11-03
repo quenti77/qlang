@@ -2,7 +2,9 @@
 
 `qlang lsp` parle le [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) sur l'entrée et la
 sortie standard : erreurs pendant la frappe, infobulles, complétion, aller à la définition, références, renommage,
-plan du fichier, mise en forme (`textDocument/formatting`). Il suffit de dire à l'éditeur de le lancer pour les
+plan du fichier, mise en forme (`textDocument/formatting`) et mise en forme à la frappe
+(`textDocument/onTypeFormatting` : indentation de `case`, `else` et `elseif`, et `end` écrit après une ligne qui ouvre un
+bloc ; VS Code l'active avec `editor.formatOnType`). Il suffit de dire à l'éditeur de le lancer pour les
 fichiers `*.q`. Ces réglages suivent la documentation de chaque éditeur ; seul VS Code (l'extension du dépôt)
 est testé à chaque version.
 

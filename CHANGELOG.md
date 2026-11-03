@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.1.0
+
+Le serveur de langage met en forme pendant la frappe, ce qui corrige deux gênes dans l'éditeur.
+
+- **`qlang lsp` : mise en forme à la frappe (`textDocument/onTypeFormatting`).** Avant : dans VS Code, un `case` tapé se retrouvait au niveau du `match` (l'éditeur ne peut pas savoir, d'après la seule ligne, s'il suit le `match` ou le corps d'un autre `case`), et aucun `end` n'était écrit après `fun`, `if`, `match`, etc. Après : après un retour à la ligne, la ligne et celle du dessus sont mises à leur niveau et un `end` est écrit si le bloc ouvert n'est fermé par rien ; après un espace, un `case`, `else` ou `elseif` est mis à son niveau. Le calcul est celui de `qlang fmt`. L'extension VS Code active `editor.formatOnType` pour qlang et ne dédente plus `case`.
+
 ## 1.0.0
 
 **La première version stable.** Ce que la 1.0 promet est écrit dans [docs/stability.md](docs/stability.md) (niveaux

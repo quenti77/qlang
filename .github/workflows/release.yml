@@ -228,6 +228,20 @@ jobs:
           export BUCKET_REPO="https://x-access-token:${PACKAGES_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/scoop-qlang.git"
           source/scripts/update-package-repos.sh "$GITHUB_REF_NAME" dist
 
+      # the site of the documentation (quenti77/qlang-learn) proposes the new version in a pull request; same rule
+      # as above: nothing happens without the secret (a token that can write to qlang-learn), and no failure undoes the release
+      - name: Tell the documentation site
+        continue-on-error: true
+        env:
+          SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
+        run: |
+          if [ -z "$SITE_TOKEN" ]; then
+            echo "SITE_TOKEN is not set: the documentation site is not told"
+            exit 0
+          fi
+          GH_TOKEN="$SITE_TOKEN" gh api "repos/${GITHUB_REPOSITORY_OWNER}/qlang-learn/dispatches" \
+            -f event_type=qlang-release -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+
   docker:
     name: Docker image
     needs: [version, build]

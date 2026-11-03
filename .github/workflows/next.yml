@@ -1,0 +1,57 @@
+name: Next
+
+# qlang as it is on main, for the documentation site (the version "next" of quenti77/qlang-learn): the browser build
+# (qlang.wasm, qlang.mjs) and the reference of the prelude (reference.json), in a pre-release named `next` that is
+# replaced at every change. A pre-release is never "the latest release": install.sh and `qlang self-update` ignore it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/**
+      - editors/vscode/intel.js
+      - docs/language.md
+      - README.md
+      - Cargo.toml
+      - .github/workflows/next.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: next
+  cancel-in-progress: true
+
+jobs:
+  next:
+    name: Build and publish next
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo build --profile wasm --target wasm32-unknown-unknown -p qlang-wasm
+      - run: |
+          mkdir -p dist
+          cp target/wasm32-unknown-unknown/wasm/qlang_wasm.wasm dist/qlang.wasm
+          cp crates/qlang-wasm/js/qlang.mjs dist/qlang.mjs
+          cargo run --release -p qlang-cli -- doc --prelude -o dist/reference.json
+      - name: Replace the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete next --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+          gh release create next dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "qlang next ($GITHUB_SHA)" \
+            --notes "qlang as it is on main, for the documentation site. Not a release: use the latest release."
+      # the site rebuilds its version "next"; nothing happens without the secret (see release.yml)
+      - name: Tell the documentation site
+        continue-on-error: true
+        env:
+          SITE_TOKEN: ${{ secrets.SITE_TOKEN }}
+        run: |
+          if [ -z "$SITE_TOKEN" ]; then
+            echo "SITE_TOKEN is not set: the documentation site is not told"
+            exit 0
+          fi
+          GH_TOKEN="$SITE_TOKEN" gh api "repos/${GITHUB_REPOSITORY_OWNER}/qlang-learn/dispatches" -f event_type=qlang-next

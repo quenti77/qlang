@@ -23,6 +23,18 @@ Une version se publie en poussant un tag. Tout le reste est automatique
    release GitHub avec ses notes générées. Cinq à dix minutes.
 5. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
    `Updated: qlang A -> qlang X.Y.Z`.
+6. **Le site de documentation** (`quenti77/qlang-learn`) suit tout seul : à la fin de la publication, le workflow
+   prévient le dépôt du site, dont le workflow *Follow a release* ouvre une pull request qui met à jour
+   `versions.json` et les deux fichiers qui nomment les versions épinglées. Un correctif (`1.0.1`) met à jour la ligne `1.0` ; un nouveau
+   numéro mineur (`1.1.0`) ajoute une version au site, la rend la dernière et garde le texte écrit à la main de la
+   précédente (tag `site-1.0`). Relire la pull request (`npm run sync` signale quand la traduction anglaise de la
+   référence doit suivre `docs/language.md`) et la fusionner : le site est publié à la fusion. Sans le secret
+   `SITE_TOKEN` (un jeton qui peut écrire dans `qlang-learn`), rien n'est envoyé : lancer *Follow a release* à la
+   main depuis l'onglet *Actions* du dépôt du site (`project` = `qlang`, `version` = `X.Y.Z`).
+
+Le workflow `.github/workflows/next.yml` publie en plus, à chaque changement de `main`, une pré-version nommée `next`
+(`qlang.wasm`, `qlang.mjs`, `reference.json`) : c'est la version « next » du site. Une pré-version n'est jamais « la
+dernière version » : `install.sh` et `qlang self-update` l'ignorent.
 
 ## Ce que contient une release
 

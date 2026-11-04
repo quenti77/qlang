@@ -30,6 +30,14 @@ push() {
   echo "$name: updated to $version"
 }
 
-[ -n "${TAP_REPO:-}" ] && push "$TAP_REPO" qlang.rb Formula/qlang.rb tap || echo "tap: TAP_REPO not set, skipped"
-[ -n "${BUCKET_REPO:-}" ] && push "$BUCKET_REPO" qlang.json bucket/qlang.json bucket || echo "bucket: BUCKET_REPO not set, skipped"
-exit 0
+# a failure (clone, push) stops the script with a non-zero status: it must not look like an update
+if [ -n "${TAP_REPO:-}" ]; then
+  push "$TAP_REPO" qlang.rb Formula/qlang.rb tap
+else
+  echo "tap: TAP_REPO not set, skipped"
+fi
+if [ -n "${BUCKET_REPO:-}" ]; then
+  push "$BUCKET_REPO" qlang.json bucket/qlang.json bucket
+else
+  echo "bucket: BUCKET_REPO not set, skipped"
+fi

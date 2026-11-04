@@ -507,6 +507,19 @@ impl Checker {
                 if matches!(obj.kind, ExprKind::Super) {
                     return self.call_super(e, callee, name, args, want);
                 }
+                // `T.zero()`: a method without `self` called through a type parameter
+                if let ExprKind::Ident(tname, targs0) = &obj.kind
+                    && targs0.is_empty()
+                    && self.lookup_var(tname).is_none()
+                    && let Some((_, p)) = self
+                        .tparam_scope
+                        .iter()
+                        .rev()
+                        .find(|(n, _)| n == tname)
+                        .cloned()
+                {
+                    return self.call_param_static(e, callee, p, name, args, want);
+                }
                 match self.try_head(obj) {
                     Some(Head::Error) => {
                         self.check_args_loose(args);
@@ -613,6 +626,71 @@ impl Checker {
                 Ty::Error
             }
         }
+    }
+
+    /// `T.zero()`: `T` is a type parameter, and one of the traits it is bounded by declares a method
+    /// without `self`. The impl is found at run time, from the type argument `T` stands for, so the
+    /// function (and the functions that call it) get their type arguments, as for `Json.to<T>`.
+    fn call_param_static(
+        &mut self,
+        e: &Expr,
+        callee: &Expr,
+        p: ParamId,
+        name: &Ident,
+        args: &[CallArg],
+        want: &Want,
+    ) -> Ty {
+        let refs: Vec<(TraitId, Vec<Ty>)> = self.defs.params[p]
+            .bounds
+            .clone()
+            .into_iter()
+            .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&Ty::Param(p))))
+            .collect();
+        for (tid, targs) in refs {
+            let td = self.defs.traits[tid].clone();
+            let Some(sig) = td.sigs.iter().find(|s| s.name == name.name && !s.has_self) else {
+                continue;
+            };
+            let mut map: HashMap<ParamId, Ty> = HashMap::new();
+            map.insert(SELF_PARAM, Ty::Param(p));
+            for (tp, a) in td.tparams.iter().zip(targs.iter()) {
+                map.insert(*tp, a.clone());
+            }
+            self.res
+                .paths
+                .insert(callee.id, PathRes::ParamStatic(p, tid, name.name.clone()));
+            if let Some(f) = self.cur_fn {
+                self.res.reified.insert(f);
+            }
+            let cs = CallSig {
+                name: name.name.clone(),
+                tparams: sig.tparams.clone(),
+                params: sig.params.iter().map(|t| t.subst(&map)).collect(),
+                ret: sig.ret.clone().map(|r| r.subst(&map)).unwrap_or(Ty::Error),
+                param_names: None,
+                defaults: Vec::new(),
+            };
+            return self.check_args(e, &cs, &[], map, args, want);
+        }
+        let shown = self.show(&Ty::Param(p));
+        self.err(
+            "T161",
+            format!(
+                "`{shown}` has no method `{}` without `self` in its bounds (add a trait that declares it: `{shown}: Trait`)",
+                name.name
+            ),
+            name.span,
+        );
+        self.check_args_loose(args);
+        Ty::Error
+    }
+
+    /// The id of a trait declared in the prelude, by name (`Zero`, `One`...).
+    fn prelude_trait(&self, name: &str) -> Option<TraitId> {
+        self.defs
+            .traits
+            .iter()
+            .position(|t| t.module == PRELUDE_MOD && t.name == name)
     }
 
     /// The prelude's `Db`, `fs`, `env` and `http` need something from the host. Their
@@ -1113,21 +1191,31 @@ impl Checker {
                 map.insert(*p, f);
             }
         }
-        if let Some(fid) = hint
-            && !sig.tparams.is_empty()
-        {
-            self.res.type_args.insert(
-                e.id,
-                TypeArgs {
-                    callee: fid,
-                    caller: self.cur_fn,
-                    args: sig
-                        .tparams
-                        .iter()
-                        .filter_map(|p| map.get(p).map(|t| (*p, t.clone())))
-                        .collect(),
-                },
-            );
+        if let Some(fid) = hint {
+            // the parameters of the impl a method belongs to, then its own
+            let mut ids: Vec<ParamId> = self.defs.fns[fid]
+                .scope_params
+                .iter()
+                .map(|(_, p)| *p)
+                .collect();
+            for p in &sig.tparams {
+                if !ids.contains(p) {
+                    ids.push(*p);
+                }
+            }
+            if !ids.is_empty() {
+                self.res.type_args.insert(
+                    e.id,
+                    TypeArgs {
+                        callee: fid,
+                        caller: self.cur_fn,
+                        args: ids
+                            .iter()
+                            .filter_map(|p| map.get(p).map(|t| (*p, t.clone())))
+                            .collect(),
+                    },
+                );
+            }
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.subst(&map)).collect();
         let ret = sig.ret.subst(&map);
@@ -1338,7 +1426,7 @@ impl Checker {
             _ => vec![],
         }
         .into_iter()
-        .flat_map(|(t, a)| self.trait_closure(t, &a))
+        .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&rt)))
         .collect();
         for (tid, targs2) in trait_refs {
             let td = self.defs.traits[tid].clone();
@@ -1492,6 +1580,14 @@ impl Checker {
                     ("fs", "exists") => Some(("fs_exists", "there is no disk access")),
                     ("fs", "is_dir") => Some(("fs_is_dir", "there is no disk access")),
                     ("fs", "list" | "glob") => Some(("fs_list", "there is no disk access")),
+                    ("fs", "is_file") => Some(("fs_stat", "there is no disk access")),
+                    ("fs", "append") => Some(("fs_append", "there is no disk access")),
+                    ("fs", "remove" | "remove_dir") => {
+                        Some(("fs_remove", "there is no disk access"))
+                    }
+                    ("fs", "rename") => Some(("fs_rename", "there is no disk access")),
+                    ("fs", "copy") => Some(("fs_copy", "there is no disk access")),
+                    ("File" | "Dir", _) => Some(("fs_stat", "there is no disk access")),
                     ("fs", "lines" | "each_line" | "read_lines") => {
                         Some(("fs_open_lines", "there is no disk access"))
                     }
@@ -1933,6 +2029,16 @@ impl Checker {
                             format!("`sum()` needs elements that can be added, but `{shown}` cannot (implement `Add` for it)"),
                             span,
                         );
+                    } else if let Some(zero) = self.prelude_trait("Zero")
+                        && self.implements(&t, zero, &[])
+                    {
+                        // an empty array sums to `T.zero()`
+                        if t.contains_param()
+                            && let Some(f) = self.cur_fn
+                        {
+                            self.res.reified.insert(f);
+                        }
+                        self.res.zero_sums.insert(e.id, t.clone());
                     }
                 }
             },
@@ -2074,7 +2180,8 @@ impl Checker {
             (Ty::Ulid, "time") => (vec![], Ty::Int),
             (
                 Ty::DateTime,
-                "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms",
+                "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms"
+                | "day_of_year" | "week" | "week_year",
             ) => (vec![], Ty::Int),
             (
                 Ty::DateTime,
@@ -2084,6 +2191,7 @@ impl Checker {
             (Ty::DateTime, "start_of_day") => (vec![], Ty::DateTime),
             (Ty::DateTime, "days_until") => (vec![Ty::DateTime], Ty::Int),
             (Ty::DateTime, "format") => (vec![Ty::Str], Ty::Str),
+            (Ty::DateTime, "format_in") => (vec![Ty::Str, Ty::Str], Ty::Str),
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),

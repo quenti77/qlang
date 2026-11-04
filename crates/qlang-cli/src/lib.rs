@@ -37,8 +37,8 @@ pub mod ws;
 
 use qlang_core::check::compile;
 use qlang_core::host::{
-    Capabilities, Host, HostError, HostValue, HttpRequest, HttpResponse, Limits, SQL_EXTERNS,
-    SqlBackend, SqlRow, SqlValue, sql_call,
+    Capabilities, Host, HostError, HostValue, HttpRequest, HttpResponse, Limits, PathStat,
+    SQL_EXTERNS, SqlBackend, SqlRow, SqlValue, sql_call,
 };
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -362,6 +362,54 @@ pub(crate) fn system_entropy() -> u64 {
 
 impl TerminalHost {
     /// `fs.read`/`fs.write` honour `--root` the same way imports do.
+    /// Where a file written at `path` ends up: its folder must exist and be inside `--root`
+    /// (checked on the real folder), and a link in its place must not lead out of it.
+    fn write_target(&self, path: &str) -> Result<PathBuf, HostError> {
+        let p = Path::new(path);
+        let parent = p
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let full_parent = parent
+            .canonicalize()
+            .map_err(|e| HostError::Other(e.to_string()))?;
+        self.check_fs_root(&full_parent)?;
+        let Some(name) = p.file_name() else {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is not a valid file name"
+            )));
+        };
+        let target = full_parent.join(name);
+        // the folder was checked, not the file: a link in it must not lead out of `--root`
+        if std::fs::symlink_metadata(&target).is_ok_and(|m| m.file_type().is_symlink()) {
+            let real = target
+                .canonicalize()
+                .map_err(|e| HostError::Other(e.to_string()))?;
+            self.check_fs_root(&real)?;
+            return Ok(real);
+        }
+        Ok(target)
+    }
+
+    /// The entry at `path` itself (a link is not followed): its folder is checked against `--root`.
+    fn entry_target(&self, path: &str) -> Result<PathBuf, HostError> {
+        let p = Path::new(path);
+        let parent = p
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let full_parent = parent
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full_parent)?;
+        let Some(name) = p.file_name() else {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is not a valid file name"
+            )));
+        };
+        Ok(full_parent.join(name))
+    }
+
     fn check_fs_root(&self, full: &Path) -> Result<(), HostError> {
         if let Some(root) = &self.root
             && !full.starts_with(root)
@@ -580,30 +628,97 @@ impl Host for TerminalHost {
     }
 
     fn write_file_bytes(&mut self, path: &str, content: &[u8]) -> Result<(), HostError> {
-        let p = Path::new(path);
-        let parent = p
-            .parent()
-            .filter(|d| !d.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        let full_parent = parent
-            .canonicalize()
-            .map_err(|e| HostError::Other(e.to_string()))?;
-        self.check_fs_root(&full_parent)?;
-        let Some(name) = p.file_name() else {
-            return Err(HostError::Other(format!(
-                "\"{path}\" is not a valid file name"
-            )));
-        };
-        let target = full_parent.join(name);
-        // the folder was checked, not the file: a link in it must not lead out of `--root`
-        if std::fs::symlink_metadata(&target).is_ok_and(|m| m.file_type().is_symlink()) {
-            let real = target
-                .canonicalize()
-                .map_err(|e| HostError::Other(e.to_string()))?;
-            self.check_fs_root(&real)?;
-            return std::fs::write(real, content).map_err(|e| HostError::Other(e.to_string()));
-        }
+        let target = self.write_target(path)?;
         std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn append_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
+        use std::io::Write as _;
+        let target = self.write_target(path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(target)
+            .map_err(|e| HostError::Other(e.to_string()))?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn stat_path(&mut self, path: &str) -> Result<Option<PathStat>, HostError> {
+        let Ok(link) = std::fs::symlink_metadata(path) else {
+            return Ok(None);
+        };
+        // what a link leads to must be inside `--root` too
+        let Ok(full) = Path::new(path).canonicalize() else {
+            // a link to nothing
+            return Ok(Some(PathStat {
+                is_file: false,
+                is_dir: false,
+                is_link: link.file_type().is_symlink(),
+                size: 0,
+                modified_ms: 0,
+            }));
+        };
+        self.check_fs_root(&full)?;
+        let meta = std::fs::metadata(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        let modified_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_millis() as i64);
+        Ok(Some(PathStat {
+            is_file: meta.is_file(),
+            is_dir: meta.is_dir(),
+            is_link: link.file_type().is_symlink(),
+            size: if meta.is_file() { meta.len() } else { 0 },
+            modified_ms,
+        }))
+    }
+
+    fn remove_path(&mut self, path: &str, recursive: bool) -> Result<(), HostError> {
+        let target = self.entry_target(path)?;
+        let meta = std::fs::symlink_metadata(&target)
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        // never the folder `--root` itself, nor the one the program runs in
+        if self.root.as_deref() == Some(target.as_path())
+            || std::env::current_dir().is_ok_and(|d| d == target)
+        {
+            return Err(HostError::Other(format!(
+                "\"{path}\" is the root folder: it is not removed"
+            )));
+        }
+        let done = if meta.is_dir() && !meta.file_type().is_symlink() {
+            if recursive {
+                std::fs::remove_dir_all(&target)
+            } else {
+                std::fs::remove_dir(&target)
+            }
+        } else {
+            std::fs::remove_file(&target)
+        };
+        done.map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn rename_path(&mut self, from: &str, to: &str) -> Result<(), HostError> {
+        let source = self.entry_target(from)?;
+        let target = self.write_target(to)?;
+        std::fs::rename(source, target).map_err(|e| HostError::Other(e.to_string()))
+    }
+
+    fn copy_file(&mut self, from: &str, to: &str) -> Result<(), HostError> {
+        let source = Path::new(from)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{from}\" not found")))?;
+        self.check_fs_root(&source)?;
+        if !source.is_file() {
+            return Err(HostError::Other(format!(
+                "\"{from}\" is not a regular file"
+            )));
+        }
+        let target = self.write_target(to)?;
+        std::fs::copy(source, target)
+            .map(|_| ())
+            .map_err(|e| HostError::Other(e.to_string()))
     }
 
     fn is_dir(&mut self, path: &str) -> Result<bool, HostError> {

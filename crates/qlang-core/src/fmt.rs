@@ -52,6 +52,25 @@ pub fn format(src: &str) -> Result<String, String> {
 }
 
 fn layout(src: &str) -> Result<String, String> {
+    probe(src).map(|l| l.text)
+}
+
+/// What the layout found out about a text, besides the text itself.
+struct Probe {
+    text: String,
+    /// The level of each line that has code on it.
+    levels: Vec<Option<usize>>,
+    /// The lines that left more blocks open than they found.
+    opens: Vec<bool>,
+    /// The blocks (`fun`, `if`, `match`...) still open at the end of the text.
+    open_blocks: usize,
+}
+
+fn is_block(kind: Kind) -> bool {
+    !matches!(kind, Kind::Paren | Kind::Brace | Kind::Params)
+}
+
+fn probe(src: &str) -> Result<Probe, String> {
     let crlf = src.contains("\r\n");
     let text = src.replace("\r\n", "\n");
     let mut diags: Vec<Diagnostic> = Vec::new();
@@ -129,6 +148,7 @@ fn layout(src: &str) -> Result<String, String> {
 
     let mut stack: Vec<Frame> = Vec::new();
     let mut level_of: Vec<Option<usize>> = vec![None; lines.len()];
+    let mut opens: Vec<bool> = vec![false; lines.len()];
     let mut closer_first: Vec<bool> = vec![false; lines.len()];
     let mut prev_last: Option<Tok> = None;
     let mut impl_header = false;
@@ -141,6 +161,7 @@ fn layout(src: &str) -> Result<String, String> {
         }
         let first = &real[idxs[0]].tok;
         let type_alias = matches!(first, Tok::Ident(name) if name == "type");
+        let blocks_before = stack.iter().filter(|f| is_block(f.kind)).count();
         // closers at the start of the line leave their blocks before the level is computed
         let mut done = 0usize;
         let mut lead = stack.clone();
@@ -352,6 +373,7 @@ fn layout(src: &str) -> Result<String, String> {
             }
             last_tok = Some(t);
         }
+        opens[n] = stack.iter().filter(|f| is_block(f.kind)).count() > blocks_before;
         impl_header = false;
         prev_last = last_tok.cloned();
         case_header = false;
@@ -414,8 +436,14 @@ fn layout(src: &str) -> Result<String, String> {
     while out.last().is_some_and(|l| l.is_empty()) {
         out.pop();
     }
+    let open_blocks = stack.iter().filter(|f| is_block(f.kind)).count();
     if out.is_empty() {
-        return Ok(String::new());
+        return Ok(Probe {
+            text: String::new(),
+            levels: level_of,
+            opens,
+            open_blocks,
+        });
     }
     let mut result = out.join("\n");
     result.push('\n');
@@ -445,7 +473,39 @@ fn layout(src: &str) -> Result<String, String> {
     if crlf || result.contains("\r\n") {
         result = result.replace("\r\n", "\n").replace('\n', "\r\n");
     }
-    Ok(result)
+    Ok(Probe {
+        text: result,
+        levels: level_of,
+        opens,
+        open_blocks,
+    })
+}
+
+/// What an editor needs to know while the program is being typed.
+pub struct Typing {
+    /// The level (four spaces each) the line should be at.
+    pub level: usize,
+    /// The line opened a block (`fun`, `if`, `match`...) that nothing closes yet.
+    pub unclosed: bool,
+}
+
+/// The level of line `line` (counted from 0) and whether it opens a block left open, for the layout
+/// as you type: an empty line is taken as if it had a statement on it, and the text may have blocks
+/// without their `end`. `None` when the text does not lex or the line is a comment.
+pub fn typing(src: &str, line: usize) -> Option<Typing> {
+    let text = src.replace("\r\n", "\n");
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    if line >= lines.len() {
+        return None;
+    }
+    if lines[line].trim().is_empty() {
+        lines[line] = "_";
+    }
+    let p = probe(&lines.join("\n")).ok()?;
+    Some(Typing {
+        level: p.levels.get(line).copied().flatten()?,
+        unclosed: p.opens[line] && p.open_blocks > 0,
+    })
 }
 
 /// The line with the white space between its tokens put in order, or `None` when it has nothing
@@ -620,7 +680,7 @@ fn skip_type(real: &[&Token], i: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::format;
+    use super::{format, typing};
 
     fn same(src: &str) {
         assert_eq!(format(src).unwrap(), src, "should be left as it is");
@@ -764,5 +824,34 @@ mod tests {
         let src = "struct A\npublic x: int\nend\nimpl A\npublic fun f(self) -> int\nlet go = fun(y: int) -> int y + self.x end\nmatch self.x\ncase 1 then 2\nelse\nreturn go(3)\nend\nend\nend\n";
         let once = format(src).unwrap();
         assert_eq!(format(&once).unwrap(), once);
+    }
+
+    #[test]
+    fn typing_puts_a_case_inside_its_match() {
+        let src = "fun f(x: int) -> string\n    match x\ncase 1 then \"a\"\n    end\nend\n";
+        assert_eq!(typing(src, 2).unwrap().level, 2);
+        let src = "fun f(x: int)\n    match x\n        case 1 then\n            print(1)\ncase 2 then 3\n    end\nend\n";
+        assert_eq!(typing(src, 4).unwrap().level, 2);
+    }
+
+    #[test]
+    fn typing_gives_a_level_to_an_empty_line() {
+        let src = "fun f()\n\n";
+        assert_eq!(typing(src, 1).unwrap().level, 1);
+        assert!(typing(src, 0).unwrap().unclosed);
+    }
+
+    #[test]
+    fn typing_knows_if_the_block_is_closed() {
+        assert!(typing("if x then\n\n", 0).unwrap().unclosed);
+        assert!(!typing("if x then\n\nend\n", 0).unwrap().unclosed);
+        assert!(!typing("let a = f(\n\n", 0).unwrap().unclosed);
+        // a new `if` takes the `end` of the function around it: one is missing
+        assert!(
+            typing("fun f()\n    if x then\n\nend\n", 1)
+                .unwrap()
+                .unclosed
+        );
+        assert!(!typing("fun f()\n    let a = 1\nend\n", 1).unwrap().unclosed);
     }
 }

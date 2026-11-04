@@ -430,6 +430,14 @@ impl Checker {
     fn resolve_named_type(&mut self, path: &[Ident], args: &[TypeExpr], span: Span) -> Ty {
         if path.len() == 1 {
             let name = path[0].name.as_str();
+            if name == "Self"
+                && let Some(t) = self.self_ty.clone()
+            {
+                if !args.is_empty() {
+                    self.err("T121", "`Self` takes no type arguments", span);
+                }
+                return t;
+            }
             if let Some((_, p)) = self.tparam_scope.iter().rev().find(|(n, _)| n == name) {
                 let p = *p;
                 if !args.is_empty() {
@@ -727,6 +735,8 @@ impl Checker {
             let Item::Trait(t) = item else { continue };
             let id = self.mscopes[m].decl_ids[&idx];
             self.tparam_scope.clear();
+            // `Self` in a signature is the type that implements the trait
+            self.self_ty = Some(Ty::Param(SELF_PARAM));
             let tps = self.make_tparams(&t.tparams);
             let tp_ids: Vec<ParamId> = tps.iter().map(|(_, p)| *p).collect();
             // `self` inside a default body: the trait itself, applied to its own
@@ -814,6 +824,7 @@ impl Checker {
             def.supers = supers;
             def.sigs = sigs;
             self.tparam_scope.clear();
+            self.self_ty = None;
         }
     }
 
@@ -1066,8 +1077,10 @@ impl Checker {
         for (item_idx, item) in ast.items.iter().enumerate() {
             let Item::Impl(imp) = item else { continue };
             self.tparam_scope.clear();
+            self.self_ty = None;
             let tps = self.make_tparams(&imp.tparams);
             let target = self.resolve_type(&imp.target);
+            self.self_ty = Some(target.clone());
             match &target {
                 Ty::Error => {
                     self.tparam_scope.clear();
@@ -1080,6 +1093,7 @@ impl Checker {
                 | Ty::Bool
                 | Ty::Str
                 | Ty::Array(_)
+                | Ty::Map(..)
                 | Ty::Uuid
                 | Ty::Ulid
                 | Ty::DateTime => {}
@@ -1160,6 +1174,7 @@ impl Checker {
             self.verify_impl(impl_id, imp);
             self.tparam_scope.clear();
         }
+        self.self_ty = None;
     }
 
     /// Check an impl against its trait, or for duplicate inherent methods.

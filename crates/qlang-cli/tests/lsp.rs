@@ -13,6 +13,7 @@ struct Client {
     rx: Receiver<Value>,
     notes: Vec<Value>,
     next: i64,
+    capabilities: Value,
 }
 
 impl Drop for Client {
@@ -72,12 +73,14 @@ impl Client {
             rx,
             notes: Vec::new(),
             next: 1,
+            capabilities: Value::Null,
         };
         let init = c.request(
             "initialize",
             json!({ "rootUri": uri(root), "capabilities": {} }),
         );
         assert_eq!(init["capabilities"]["hoverProvider"], json!(true));
+        c.capabilities = init["capabilities"].clone();
         c.notify("initialized", json!({}));
         c
     }
@@ -520,6 +523,83 @@ fn formatting_returns_the_document_laid_out_and_nothing_when_it_already_is() {
         json!({ "textDocument": { "uri": uri(&main) }, "options": {} }),
     );
     assert_eq!(r.as_array().unwrap().len(), 0, "{r}");
+}
+
+/// The capabilities `initialize` announces are what `docs/editors.md` lists: one that appears or goes away
+/// is a decision, not an accident (a client acts on this list).
+#[test]
+fn the_announced_capabilities_are_the_documented_ones() {
+    let dir = project("capabilities");
+    let c = Client::start(&dir);
+    let mut names: Vec<&str> = c
+        .capabilities
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "completionProvider",
+            "definitionProvider",
+            "documentFormattingProvider",
+            "documentOnTypeFormattingProvider",
+            "documentSymbolProvider",
+            "hoverProvider",
+            "positionEncoding",
+            "referencesProvider",
+            "renameProvider",
+            "signatureHelpProvider",
+            "textDocumentSync",
+            "workspaceSymbolProvider",
+        ]
+    );
+    assert_eq!(c.capabilities["positionEncoding"], "utf-16");
+    assert_eq!(
+        c.capabilities["textDocumentSync"]["change"], 1,
+        "the whole text is sent at each change"
+    );
+    assert_eq!(
+        c.capabilities["documentOnTypeFormattingProvider"]["firstTriggerCharacter"],
+        "\n"
+    );
+}
+
+#[test]
+fn typing_closes_a_block_and_puts_case_inside_its_match() {
+    let dir = project("ontype");
+    let main = dir.join("main.q");
+    std::fs::write(&main, "").unwrap();
+    let mut c = Client::start(&dir);
+    let on_type = |c: &mut Client, ch: &str, line: u64, col: u64| {
+        c.request(
+            "textDocument/onTypeFormatting",
+            json!({
+                "textDocument": { "uri": uri(&main) },
+                "position": { "line": line, "character": col },
+                "ch": ch,
+                "options": { "tabSize": 4, "insertSpaces": true },
+            }),
+        )
+    };
+    // Enter after a block that has no `end`: one is written, at the level of the block
+    c.open(&main, "fun f()\n    ");
+    let r = on_type(&mut c, "\n", 1, 4);
+    let edits = r.as_array().unwrap();
+    assert_eq!(edits.len(), 1, "{r}");
+    assert_eq!(edits[0]["newText"], "\nend");
+    // ... but not when something closes it already
+    c.open(&main, "fun f()\n    \nend\n");
+    let r = on_type(&mut c, "\n", 1, 4);
+    assert_eq!(r.as_array().unwrap().len(), 0, "{r}");
+    // a `case` typed at the level of its `match` is moved in
+    c.open(&main, "match x\ncase 1 then 2\nend\n");
+    let r = on_type(&mut c, " ", 1, 5);
+    let edits = r.as_array().unwrap();
+    assert_eq!(edits.len(), 1, "{r}");
+    assert_eq!(edits[0]["newText"], "    ");
 }
 
 /// The labels of the completion at (`line`, `col`) of `src`, written to `name` in `dir`.

@@ -2277,6 +2277,10 @@ impl Gen<'_> {
                 || self.prog.res.packs.contains_key(&e.id))
             || self.prog.res.trait_calls.contains(&e.id)
             || self.prog.res.class_calls.contains(&e.id)
+            || matches!(
+                self.prog.res.paths.get(&callee.id),
+                Some(PathRes::ParamStatic(..))
+            )
             || self.prog.res.super_calls.contains_key(&callee.id)
             || self.prog.res.paths.get(&callee.id).is_some()
         {
@@ -4243,6 +4247,9 @@ impl Interp<'_> {
                 let Some(fid) = st.fid else {
                     fail!("R001", "a call without a function");
                 };
+                // a generic function that looks at its type arguments (`T.zero()`) gets them here
+                // as it does from the tree walker
+                self.stage_type_args(st.node);
                 let out = self.call_fid(fid, None, argv, span)?;
                 if st.ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
                 {

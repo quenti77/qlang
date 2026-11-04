@@ -1,4 +1,4 @@
-//! `fs.list`, `fs.is_dir`, `fs.glob` and the line readers (`fs.lines`, `each_line`, `read_lines`).
+//! `fs.list`, `fs.is_dir`, `fs.glob`, the line readers (`fs.lines`, `each_line`, `read_lines`), the `File` and `Dir` objects, and `append`, `remove`, `rename` and `copy`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -208,4 +208,96 @@ print(total(db))
         &[],
     );
     assert_eq!(out, "0\n1\n1\nkept\n2\nnope\n2\n3\n", "{err}");
+}
+
+#[test]
+fn file_and_dir_objects() {
+    let d = Dir::new("objects");
+    d.write("src/a.q", b"abc");
+    d.write("src/deep/c.q", b"");
+    d.write("src/deep/d.txt", b"");
+    d.write("src/.git/x.q", b"");
+    d.write("src/node_modules/y.q", b"");
+    let (out, err) = d.run(
+        r#"let f = File.of("src/a.q")
+print(f.name())
+print(f.stem())
+print(f.ext())
+print(f.parent().name())
+print(f.size().unwrap())
+print(f.modified().unwrap().year() > 2000)
+print(f.is_file().unwrap())
+print(File.of("src").is_file().unwrap())
+print(File.of("nope").size().is_err())
+f.append("def").unwrap()
+print(f.read().unwrap())
+let g = f.copy_to("src/copy.q").unwrap()
+print(g.read().unwrap())
+g.move_to("src/moved.q").unwrap()
+print(File.of("src/copy.q").exists().unwrap())
+print(File.of("src/moved.q").exists().unwrap())
+File.of("src/moved.q").remove().unwrap()
+print(Dir.of("src").files().unwrap().map(fun(x: File) -> string x.name() end).join(","))
+print(Dir.of("src").dirs().unwrap().map(fun(x: Dir) -> string x.name() end).join(","))
+for q in Dir.of("src").walk(name: "*.q", ignore: [".git", "node_modules"]).unwrap() do
+    print(q.path)
+end
+print(Dir.of("src").walk(depth: 0).unwrap().count())
+print(Dir.of("nope").walk().is_err())
+"#,
+        &[],
+    );
+    assert_eq!(err, "");
+    assert_eq!(
+        out,
+        "a.q\na\nq\nsrc\n3\ntrue\ntrue\nfalse\ntrue\nabcdef\nabcdef\nfalse\ntrue\n\
+         a.q\n.git,deep,node_modules\nsrc/a.q\nsrc/deep/c.q\n1\ntrue\n"
+    );
+}
+
+#[test]
+fn removing_a_folder_needs_all() {
+    let d = Dir::new("remove");
+    d.write("stuff/a.txt", b"");
+    let (out, err) = d.run(
+        r#"print(fs.remove("stuff").is_err())
+print(fs.remove_dir("stuff").is_err())
+print(fs.remove_dir("stuff", all: true).unwrap())
+print(fs.exists("stuff").unwrap())
+print(fs.remove(".").is_err())
+"#,
+        &[],
+    );
+    assert_eq!(err, "");
+    assert_eq!(out, "true\ntrue\ntrue\nfalse\ntrue\n");
+}
+
+#[test]
+fn root_confines_remove_rename_and_copy() {
+    let base = Dir::new("root-write");
+    base.write("outside.txt", b"out\n");
+    base.write(
+        "inside/main.q",
+        br#"print(fs.remove("../outside.txt").is_err())
+print(fs.copy("../outside.txt", "c.txt").is_err())
+print(fs.write("a.txt", "x").is_ok())
+print(fs.rename("a.txt", "../escaped.txt").is_err())
+print(fs.rename("a.txt", "b.txt").is_ok())
+print(fs.remove_dir(".", all: true).is_err())
+print(fs.append("../outside.txt", "more").is_err())
+"#,
+    );
+    let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .args(["run", "--root", ".", "main.q"])
+        .current_dir(base.0.join("inside"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout),
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert_eq!(fs::read(base.0.join("outside.txt")).unwrap(), b"out\n");
+    assert!(!base.0.join("escaped.txt").exists());
 }

@@ -58,6 +58,7 @@ ou **expérimental**, et comment une fonction est dépréciée (`#[deprecated("�
     - [`Any`](#any)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Méthode par défaut](#méthode-par-défaut)
+    - [Une méthode sans `self` : `Self` et `T.zero()`](#une-méthode-sans-self--self-et-tzero)
     - [Un trait comme type](#un-trait-comme-type)
     - [Surcharger un opérateur](#surcharger-un-opérateur)
     - [Surcharger une conversion](#surcharger-une-conversion)
@@ -730,6 +731,58 @@ end
 - Le tableau parcouru peut être modifié pendant la boucle ; la boucle voit les
   éléments ajoutés.
 
+### Parcourir son propre type : `Iterable`
+
+*Niveau : provisoire.*
+
+Un type du programme se parcourt avec `for` (et s'étale avec `...`) quand il implémente un trait du
+prélude. `Step<T>` dit ce que donne un pas : `Step.Item(valeur)` ou `Step.End` quand il n'y a plus rien
+(ce n'est pas un `T?` : un élément peut valoir `none` sans arrêter la boucle).
+
+| Trait | Méthode | Ce que ça permet |
+| --- | --- | --- |
+| `Iterator<T>` | `next(self) -> Step<T>` | donner les éléments un par un |
+| `Iterable<T>` | `iter(self) -> Iterator<T>` | `for x in c`, `for i, x in c` (`i` est un compteur 0, 1, 2…), `[...c]`, `f(...c)` |
+| `KeyedIterable<K, V>` | `iter_keyed(self) -> Iterator<(K, V)>` | `for k, v in c`, `{ ...c }` |
+
+```
+struct Count
+    public n: int
+    public max: int
+end
+
+impl Iterator<int> for Count
+    public fun next(self) -> Step<int>
+        if self.n >= self.max then
+            return Step<int>.End
+        end
+        self.n += 1
+        Step<int>.Item(self.n)
+    end
+end
+
+for x in Count { n: 0, max: 3 } do
+    print(x)                          -- 1, 2, 3
+end
+```
+
+- Un `Iterator<T>` se parcourt tel quel (sans `Iterable`). Le tableau, la chaîne et `Set<T>` implémentent
+  `Iterable`, le dictionnaire `KeyedIterable` : `[1, 2, 3].iter()`, `m.iter_keyed()`. Leurs boucles `for`
+  gardent leur chemin direct (même comportement, même vitesse).
+- Un `Iterator<T>` a des méthodes **paresseuses** : `map(f)`, `filter(garde)`, `take(n)` et `skip(n)` rendent un
+  nouvel itérateur, et rien ne s'exécute avant qu'on le parcoure ; `collect()` donne un tableau, `count()` le nombre
+  d'éléments restants, `first()` le suivant ou `none`.
+  `Count { n: 0, max: 1000000000 }.filter(pair).take(3).collect()` ne calcule que ce qu'il faut.
+- Une fonction générique peut demander un type parcourable : `fun total<I: Iterable<int>>(c: I)`.
+- Pendant la boucle, un type à soi décide de ce qu'il fait si on le modifie : le langage ne promet que de ne
+  jamais planter. Les types prédéfinis gardent leur comportement (tableau : vue vivante, dictionnaire : copie).
+- `Step`, `Item`, `End`, `Iterator`, `Iterable`, `KeyedIterable`, `iter`, `iter_keyed` et `next` sont des noms du
+  prélude ; un programme qui déclare les siens les masque, comme pour tout nom du prélude.
+- Les itérateurs que rendent ces méthodes et les collections sont des types du prélude : `MapIter`, `FilterIter`,
+  `TakeIter`, `SkipIter` (les adaptateurs), `ArrayIter` (tableau, chaîne et `Set`) et `PairIter` (dictionnaire).
+  On s'en sert par leurs méthodes (`next`, `map`...) sans les nommer.
+- Pas encore : `enumerate`, `zip`, `reduce` paresseux, générateurs (`yield`).
+
 ---
 
 ## 8. Fonctions
@@ -863,9 +916,10 @@ print({ ...defauts, "port": 8080 })   -- {"port": 8080, "workers": 2} : la derni
   qui manque. `somme(...[])` appelle `somme()`.
 - Dans un **tableau** `[ ]`, les types s'unifient comme pour un littéral écrit à la main (`[...a]` avec `a: array<int>`
   n'est pas un `array<float>`). Dans un **dictionnaire** `{ }`, les clés se suivent dans l'ordre d'écriture.
-- On n'étale que des `array` (dans un appel ou `[ ]`) et des `map` (dans `{ }`) : pas un `Set` (écrivez
-  `...ensemble.to_array()`), pas une valeur qui peut être `none` (`...(x ?? [])`), pas une structure, pas un `Any`
-  (`T264`). `...` ailleurs est une erreur de syntaxe. Il n'est pas surchargeable (voir #202).
+- On n'étale que des `array`, des `Set` et tout type qui implémente `Iterable<T>` (dans un appel ou `[ ]`), des `map` et
+  tout type qui implémente `KeyedIterable<K, V>` (dans `{ }`) : voir [Parcourir son propre type](#parcourir-son-propre-type--iterable).
+  Pas une valeur qui peut être `none` (`...(x ?? [])`), pas une structure qui n'implémente pas ces traits, pas un `Any`
+  (`T264`). `...` ailleurs est une erreur de syntaxe. Il n'est pas surchargeable : il s'appuie sur `Iterable`.
 - Les intervalles `0..3` et `0..=3` ne changent pas : `...` est un jeton à part.
 
 ### Fonctions anonymes
@@ -930,7 +984,7 @@ end
 - `type` n'est pas un mot réservé : `let type = 3` reste valable. Il ne commence un alias que
   sous la forme `type Nom =`, au niveau du fichier.
 - Un alias se déclare dans un fichier, s'exporte (`export Handler`) et s'importe comme une
-  structure. Il n'a pas de paramètre de type (`T121` si on en donne).
+  structure. Il n'a pas de paramètre de type (`type Noms<T> = ...` est une erreur de syntaxe, `P002`).
 - Il ne sert qu'à **écrire un type** : on ne peut pas construire une valeur par son nom
   (`Names { ... }` n'existe pas : écris le nom du vrai type).
 - Un alias qui se désigne lui-même, directement ou par un autre, est une erreur (`T122`), et le
@@ -1185,6 +1239,7 @@ end
 - Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
   champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
   `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
+- **Niveau** : la déclaration, la vérification à la compilation et `#[deprecated]` sont **stables** ; les lire pendant l'exécution (avec `Reflect`) reste **expérimental**.
 - La vérification contrôle le nom (`T001`, `T290` si ce n'est pas une annotation), les arguments
   (`T292` nom inconnu, en trop ou donné deux fois ; `T293` argument manquant ; `T294` pas un
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
@@ -1398,6 +1453,62 @@ fun hello(g: Greeter) -> string
   g.greet() + " / " + g.name()     -- name() vient de Named
 end
 ```
+
+### Une méthode sans `self` : `Self` et `T.zero()`
+
+Un trait peut déclarer une méthode **sans `self`**, et `Self` y désigne le type qui implémente le trait :
+
+```
+trait Zero
+  fun zero() -> Self
+end
+
+impl Zero for Money
+  public fun zero() -> Self
+    Money { cents: 0 }
+  end
+end
+```
+
+Dans un `impl`, `Self` est le type de l'`impl` (`Money` ici, `Pair<T>` pour `impl<T> Zero for Pair<T>`) ; dans un
+trait, c'est le type qui l'implémentera. Dans le corps d'une méthode par défaut d'un trait, `Self` est le trait lui-même (comme `self`), et là où la méthode est appelée il vaut le type de la valeur (`chien.jumeau()` rend un `Chien`). Hors d'un trait ou d'un `impl`, `Self` n'existe pas (`T001`).
+
+Dans une fonction ou un `impl` générique, un paramètre de type borné par un tel trait s'utilise comme préfixe d'appel :
+`T.zero()`. La méthode appelée est celle de l'`impl` du type que `T` désigne, trouvé à l'appel :
+
+```
+fun total<T: Add + Zero>(xs: array<T>) -> T
+  let t = T.zero()
+  for x in xs do
+    t = t + x
+  end
+  t
+end
+
+struct Point<T>
+  public x: T
+  public y: T
+end
+
+impl<T: Zero> Point<T>
+  public fun origin() -> Point<T>
+    Point { x: T.zero(), y: T.zero() }
+  end
+end
+
+print(total([1, 2, 3]))            -- 6
+print(total<float>([]))            -- 0.0
+let p: Point<int> = Point.origin() -- Point { x: 0, y: 0 }
+```
+
+- Le prélude fournit `Zero` (`T.zero()`, l'élément neutre de l'addition) et `One` (`T.one()`, celui de la
+  multiplication) pour `int` et `float` ; tu peux les implémenter pour tes types.
+- `[].sum()` d'un tableau vide vaut `T.zero()` quand les éléments implémentent `Add` et `Zero` ; sans `Zero`, c'est
+  l'erreur `R015`.
+- `T` doit se déduire des arguments, du type attendu ou d'un `<...>` écrit : sinon `Point.origin()` donne `T171`
+  (`Point<int>.origin()` ou `let p: Point<int> = Point.origin()` les évitent).
+- Si les bornes de `T` ne déclarent pas la méthode, c'est `T161`.
+- **Provisoire** : `Self`, `T.nom()`, `Zero` et `One` sont nouveaux en 1.1 (voir [stability.md](stability.md)).
 
 ### Un trait comme type
 
@@ -2227,7 +2338,7 @@ cette variable.
 
 ### Identifiants : `uuid` et `ulid`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1, sauf le hasard : la forme d'un `uuid` ou d'un `ulid` est promise, pas les valeurs de `uuid.v4()`, `uuid.v7()` et `ulid.new()`.*
 
 Deux types pour identifier une chose de façon unique. Tous deux font 128 bits et
 sont distincts de `string` : on ne peut pas passer l'un pour l'autre.
@@ -2312,15 +2423,64 @@ end
 
 - **Affichage** : un `datetime` s'affiche au format ISO 8601, `2026-10-11T14:30:00Z`
   (avec `.123` avant le `Z` s'il y a des millisecondes). `"{d}"` et `d as string` donnent ce texte.
-- **`format`** reconnaît `YYYY` (année), `MM` (mois), `DD` (jour), `HH` (heure), `mm` (minute),
-  `ss` (seconde) et `SSS` (millisecondes). Les autres caractères sont gardés tels quels :
-  `d.format("YYYY-MM-DD à HH:mm")`.
+- **`format`** reconnaît `YYYY` / `YY` (année), `MMMM` / `MMM` (nom du mois), `MM` / `M` (numéro), `DD` / `D` (jour),
+  `dddd` / `ddd` (nom du jour), `HH` / `H` (heure), `hh` / `h` (heure sur 12), `A` (`AM` ou `PM`), `mm` (minute),
+  `ss` (seconde), `SSS` (millisecondes) et `WW` (semaine ISO). Un texte entre `[` et `]` est gardé tel quel, comme
+  les autres caractères : `d.format("YYYY-MM-DD [à] HH:mm")`. Les noms sont en anglais ;
+  `d.format_in("dddd D MMMM YYYY", "fr")` les donne en français (`"en"` ou `"fr"`, une autre langue est l'erreur `R066`).
+  *Depuis la 1.1* : `M`, `D`, `H`, `h`, `A`, `W`, `d` et `Y` seuls (ou en groupes de 2 à 3) sont des jetons ; un texte
+  qui les contenait doit les mettre entre crochets.
+- **Autres accesseurs** : `d.day_of_year()`, `d.week()` (semaine ISO 8601, 1 à 53) et `d.week_year()` (l'année de
+  cette semaine).
 - **`parse`** lit `AAAA-MM-JJ`, éventuellement suivi de `T` ou d'un espace puis de `HH:MM`,
   `HH:MM:SS` ou `HH:MM:SS.mmm`, et d'un `Z` facultatif. Une date seule est minuit.
 - **`add_months` et `add_years`** : un jour qui n'existe pas dans le nouveau mois devient son
   dernier jour (31 janvier + 1 mois = 28 ou 29 février).
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
+#### Durées : `Duration`
+
+*Niveau : provisoire (depuis la 1.1).*
+
+Une `Duration` est une durée : `years`, `months`, `days`, `hours`, `minutes`, `seconds`, `ms`. Rien n'est converti
+de soi-même : `Duration.of(minutes: 90)` reste 90 minutes jusqu'à `normalize()`. Les **années et les mois** n'ont pas
+de longueur fixe (ça dépend de la date à laquelle on les ajoute) ; un jour fait toujours 24 heures, puisqu'un
+`datetime` est en UTC.
+
+| Appel | Résultat |
+| --- | --- |
+| `Duration.of(days: 2, hours: 3)` | ce qui n'est pas donné vaut 0 |
+| `d + durée`, `d - durée` (ou `d.plus(durée)`, `d.minus(durée)`) | un `datetime` : années et mois d'abord (le 31 janvier + 1 mois est le dernier jour de février), puis le reste |
+| `a.until(b)` | la `Duration` de `a` à `b` : années et mois entiers, puis jours, heures, minutes, secondes, ms (négative si `b` est avant) |
+| `dur.total_ms()`, `total_seconds()`, `total_minutes()`, `total_hours()`, `total_days()` | un `Result<int, Error>` : `err` s'il y a des années ou des mois |
+| `dur.plus(autre)`, `minus(autre)`, `times(n)`, `negate()`, `is_zero()` | calcul terme à terme |
+| `dur.normalize()` | reporte les retenues (12 mois = 1 an, 60 s = 1 min, 24 h = 1 jour…), le signe est celui de l'ensemble |
+| `dur.to_iso()` | texte ISO 8601 : `P1Y2M3DT4H5M6.007S`, `PT0S` pour zéro |
+
+`b - a` reste le nombre de millisecondes (un `int`), comme avant. Les comparaisons, écarts et bornes de période :
+
+| Appel | Résultat |
+| --- | --- |
+| `a.is_before(b)`, `a.is_after(b)`, `d.between(a, b)`, `a.same_day(b)` | des `bool` (`between` inclut les bornes) |
+| `d.is_weekend()`, `d.is_leap_year()`, `d.days_in_month()`, `d.quarter()` | samedi ou dimanche ; année de 366 jours ; 28 à 31 ; 1 à 4 |
+| `a.diff_in_months(b)`, `diff_in_years(b)` | mois / années entiers de `a` à `b` (31 janvier à 28 février : 1) |
+| `a.diff_in_days(b)`, `diff_in_hours(b)`, `diff_in_minutes(b)`, `diff_in_seconds(b)` | unités entières (tronquées vers 0) |
+| `d.start_of_hour()`, `start_of_week()`, `start_of_month()`, `start_of_quarter()`, `start_of_year()` | début de la période (la semaine commence le lundi) ; `start_of_day()` existait |
+| `d.end_of_hour()`, `end_of_day()`, `end_of_week()`, `end_of_month()`, `end_of_quarter()`, `end_of_year()` | dernière milliseconde de la période |
+| `d.with(month: 3, day: 1)` | remplace des champs (`year`, `month`, `day`, `hour`, `minute`, `second`) ; un jour absent du mois devient son dernier jour |
+| `d.next_weekday(n)`, `d.previous_weekday(n)` | minuit du prochain / dernier jour `n` (1 lundi … 7 dimanche) |
+| `d.nth_weekday_of_month(2, 1)`, `d.last_day_of_month()` | le 2ᵉ lundi du mois (`none` s'il n'y en a pas) ; minuit du dernier jour |
+| `d.unix()`, `datetime.at(ms)` | secondes depuis 1970 ; (pour des secondes : `datetime.at(s * 1000)`) |
+| `d.to_http()`, `d.to_rfc2822()`, `d.to_iso()` | `Tue, 03 Nov 2026 14:30:00 GMT`, `… +0000`, `2026-11-03T14:30:00Z` |
+| `d.humanize(maintenant)`, `d.humanize(maintenant, "fr")` | `3 days ago`, `in 2 hours`, `il y a 3 jours` |
+
+```
+let debut = datetime.of(2026, 1, 31, 10, 0, 0)
+print(debut + Duration.of(months: 1, days: 2))   -- 2026-03-02T10:00:00Z
+print(debut.until(datetime.of(2027, 3, 4)).to_iso())
+print(debut.end_of_month().format("D MMMM YYYY"))
+```
 
 ### Fuseaux horaires : `Zone`
 
@@ -2351,7 +2511,7 @@ décalage d'avant le changement ; une heure qui existe deux fois (retour à l'he
 
 ### Expressions régulières
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1.*
 
 L'espace de noms `regex` propose les opérations courantes sur les expressions
 régulières, à partir de deux chaînes (`text`, `pattern`) :
@@ -2388,7 +2548,7 @@ condition à récupérer avec `Result`.
 
 ### Encodages et hachages
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1 pour le texte ; les variantes `*_bytes` sont **provisoires**.*
 
 Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; un décodage en texte renvoie
 `none` si le résultat n'est pas du texte UTF-8 valide. Pour des données quelconques, voir
@@ -2452,7 +2612,7 @@ print(b.at(1))               -- 195 (none hors des octets)
 
 ### Chemins et mise en forme : `Path` et `Format`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1.*
 
 `Path` manipule des chemins **écrits en texte**, avec `/` entre les parties (aussi sous Windows) ; il ne touche pas
 au disque.
@@ -3192,6 +3352,47 @@ else
 end
 
 fs.write("sortie.txt", "contenu").unwrap()
+```
+
+**Modifier le disque.** `fs.append(chemin, texte)` ajoute à la fin d'un fichier (le crée au besoin) ;
+`fs.is_file(chemin)` dit si c'est un fichier ; `fs.remove(chemin)` supprime un fichier ou un lien (un dossier est
+une erreur : il faut `fs.remove_dir`) ; `fs.remove_dir(dossier)` supprime un dossier **vide**, et
+`fs.remove_dir(dossier, all: true)` supprime aussi tout ce qu'il contient ; `fs.rename(source, cible)` déplace ou
+renomme (le dossier de la cible doit exister) ; `fs.copy(source, cible)` copie un fichier (et remplace la cible).
+Avec `--root`, aucune de ces opérations ne sort du dossier, et ni le dossier de `--root` ni celui où tourne le
+programme ne se supprime.
+
+**Fichiers et dossiers comme objets : `File` et `Dir`.** `File.of("notes/a.txt")` et `Dir.of("src")` ne lisent rien
+tant qu'on n'appelle pas une méthode (le chemin est relu à chaque appel).
+
+| Appel | Résultat |
+| --- | --- |
+| `f.name()`, `f.stem()`, `f.ext()`, `f.parent()` | `a.txt`, `a`, `txt`, le `Dir` qui le contient |
+| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` |
+| `f.size()`, `f.modified()` | la taille en octets, la date de modification (un [`datetime`](#dates-et-heures--datetime)), dans un `Result` |
+| `f.read()`, `f.read_bytes()`, `f.lines()` | comme `fs.read`, `fs.read_bytes`, `fs.lines` |
+| `f.write(texte)`, `f.append(texte)` | remplace, ajoute à la fin |
+| `f.copy_to(cible)`, `f.move_to(cible)` | rendent le `File` de la cible |
+| `f.remove()` | supprime le fichier |
+| `d.name()`, `d.parent()`, `d.join(nom)`, `d.file(nom)` | le nom, le `Dir` au-dessus, le chemin ou le `File` de `nom` dans ce dossier |
+| `d.exists()`, `d.create()`, `d.remove()` | `d.remove(all: true)` supprime aussi le contenu ; sans `all`, seul un dossier vide part |
+| `d.move_to(cible)` | déplace le dossier |
+| `d.files()`, `d.dirs()` | les `File` / les `Dir` directement dans le dossier, triés |
+| `d.walk(name: "*.q", ignore: [".git"], depth: 40)` | un `Iterator<File>` sur tous les fichiers du dossier et de ceux en dessous |
+
+`walk` est paresseux (voir [`Iterable`](#parcourir-son-propre-type--iterable)) : dossier par dossier, ses fichiers
+puis ses sous-dossiers, chacun trié par nom. `name` ne garde que les fichiers dont le nom correspond au motif,
+`ignore` saute les fichiers et dossiers dont le nom correspond à l'un de ses motifs (ni `.git` ni `node_modules`
+n'est ouvert), `depth` limite le nombre de niveaux (`0` : ce dossier seulement). Le type de l'itérateur
+(`WalkIter`) se manipule par ses méthodes.
+
+```
+for f in Dir.of("src").walk(name: "*.q", ignore: [".git"]).unwrap() do
+  print("{f.path} {f.size().unwrap()}")
+end
+
+let tous = Dir.of("logs").walk().unwrap()
+let anciens = tous.filter(fun(f: File) -> bool f.modified().unwrap() < datetime.of(2026, 1, 1) end).collect()
 ```
 
 `env.get(nom)` renvoie la valeur d'une variable d'environnement, ou `none` si

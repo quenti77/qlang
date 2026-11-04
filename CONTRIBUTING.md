@@ -31,6 +31,10 @@ compiler : `QLANG=target/debug/qlang target/debug/qlang run --allow-process run.
 
 - **Le code et ses tests.** Un test d'intégration dans `crates/*/tests` pour un comportement visible ; un cas dans
   `qlang-conformance` quand c'est une promesse du langage (une sortie ou un code d'erreur, jamais un message).
+  **Même nom de branche des deux côtés** (`feat/generic_statics` dans `qlang` et dans `qlang-conformance`) : la CI de
+  la pull request teste alors contre cette branche des cas (`scripts/conformance-ref.sh`), sans toucher à
+  `conformance.ref` ni poser de tag. On fusionne d'abord les cas. Le tag de la suite n'est posé qu'à la sortie de la
+  version, et `conformance.ref` le nomme : la CI d'un push sur `main` refuse une branche.
 - **La documentation** : `docs/language.md` (en français) pour le langage, `README.md` pour les commandes,
   `CHANGELOG.md` (une rubrique **Cassant** si quelque chose casse : voir [docs/stability.md](docs/stability.md) et
   [docs/migration.md](docs/migration.md)). Le site reprend ces documents : sa traduction anglaise

@@ -587,6 +587,33 @@ pub enum PathRes {
     ClassName(String),
     /// A call of `Reflect`: described by `ReflectOp`.
     Reflect(ReflectOp),
+    /// `T.zero()`: a method without `self`, called through a type parameter bounded by a trait that
+    /// declares it. The impl is found at run time from the type argument.
+    ParamStatic(ParamId, TraitId, String),
+}
+
+/// Does `pattern`, which may hold type parameters, match `ty`? `bound` gets what each parameter stands for.
+pub fn match_ty(pattern: &Ty, ty: &Ty, bound: &mut HashMap<ParamId, Ty>) -> bool {
+    let all = |a: &[Ty], b: &[Ty], bound: &mut HashMap<ParamId, Ty>| {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| match_ty(x, y, bound))
+    };
+    match (pattern, ty) {
+        (Ty::Param(p), t) => match bound.get(p) {
+            Some(prev) => prev == t,
+            None => {
+                bound.insert(*p, t.clone());
+                true
+            }
+        },
+        (Ty::Struct(a, xs), Ty::Struct(b, ys)) => a == b && all(xs, ys, bound),
+        (Ty::Enum(a, xs), Ty::Enum(b, ys)) => a == b && all(xs, ys, bound),
+        (Ty::Trait(a, xs), Ty::Trait(b, ys)) => a == b && all(xs, ys, bound),
+        (Ty::Array(a), Ty::Array(b)) | (Ty::Nullable(a), Ty::Nullable(b)) => match_ty(a, b, bound),
+        (Ty::Map(ak, av), Ty::Map(bk, bv)) => match_ty(ak, bk, bound) && match_ty(av, bv, bound),
+        (Ty::Tuple(a), Ty::Tuple(b)) => all(a, b, bound),
+        (Ty::Fn(ap, ar), Ty::Fn(bp, br)) => all(ap, bp, bound) && match_ty(ar, br, bound),
+        (a, b) => a == b,
+    }
 }
 
 /// The instantiation of a generic function at one call.
@@ -741,6 +768,9 @@ pub struct Resolutions {
     pub float_sums: FxHashSet<NodeId>,
     /// `xs.sum()` calls on `array<int>`; an empty sum of anything else has no zero (`R015`).
     pub int_sums: FxHashSet<NodeId>,
+    /// `xs.sum()` on elements that implement `Zero`: the element type, whose `zero()` is the sum of an
+    /// empty array.
+    pub zero_sums: FxHashMap<NodeId, Ty>,
     /// Method calls made through a trait (a generic bound or a trait-typed value): at
     /// run time they go to the user's impl, not to a built-in method of the same name.
     pub trait_calls: FxHashSet<NodeId>,

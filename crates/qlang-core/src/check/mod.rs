@@ -176,6 +176,678 @@ fun Err<T, E>(error: E) -> Result<T, E>
     Result<T, E>.Err(error)
 end
 
+-- ===== iteration =====
+
+--" What one step of an iteration gives: `Item(value)`, or `End` when there is nothing left.
+It is not a `T?`: an element may itself be `none`, and that must not stop the loop. --"
+enum Step<T>
+    --" The next element. --"
+    Item(value: T)
+    --" There is nothing left. --"
+    End
+end
+
+--" Something that gives its elements one at a time: `next()` returns `Item(x)` until it
+returns `End`. --"
+trait Iterator<T>
+    --" The next step of the iteration. --"
+    fun next(self) -> Step<T>
+
+    --" All the remaining elements, in an array. --"
+    fun collect(self) -> array<T>
+        let out: array<T> = []
+        while true do
+            match self.next()
+                case Item(v) then out[] = v
+                case End then return out
+            end
+        end
+        out
+    end
+
+    --" How many elements remain (they are used up). --"
+    fun count(self) -> int
+        let n = 0
+        while true do
+            match self.next()
+                case Item(_) then n += 1
+                case End then return n
+            end
+        end
+        n
+    end
+
+    --" The next element, or `none` when there is nothing left (an element that is itself
+    `none` cannot be told apart: use `next()` for that). --"
+    fun first(self) -> T?
+        match self.next()
+            case Item(v) then v
+            case End then none
+        end
+    end
+
+    --" An iterator over `f(x)` for each element `x`; nothing runs until it is used. --"
+    fun map<U>(self, f: fun(T) -> U) -> Iterator<U>
+        MapIter<T, U> { source: self, f: f }
+    end
+
+    --" An iterator over the elements for which `keep(x)` is true. --"
+    fun filter(self, keep: fun(T) -> bool) -> Iterator<T>
+        FilterIter<T> { source: self, keep: keep }
+    end
+
+    --" An iterator over the first `n` elements. --"
+    fun take(self, n: int) -> Iterator<T>
+        TakeIter<T> { source: self, left: n }
+    end
+
+    --" An iterator over the elements after the first `n`. --"
+    fun skip(self, n: int) -> Iterator<T>
+        SkipIter<T> { source: self, skip: n }
+    end
+end
+
+struct MapIter<T, U>
+    public source: Iterator<T>
+    public f: fun(T) -> U
+end
+
+impl<T, U> Iterator<U> for MapIter<T, U>
+    public fun next(self) -> Step<U>
+        match self.source.next()
+            case Item(v) then Step<U>.Item((self.f)(v))
+            case End then Step<U>.End
+        end
+    end
+end
+
+struct FilterIter<T>
+    public source: Iterator<T>
+    public keep: fun(T) -> bool
+end
+
+impl<T> Iterator<T> for FilterIter<T>
+    public fun next(self) -> Step<T>
+        while true do
+            match self.source.next()
+                case Item(v) then
+                    if (self.keep)(v) then
+                        return Step<T>.Item(v)
+                    end
+                case End then
+                    return Step<T>.End
+            end
+        end
+        Step<T>.End
+    end
+end
+
+struct TakeIter<T>
+    public source: Iterator<T>
+    public left: int
+end
+
+impl<T> Iterator<T> for TakeIter<T>
+    public fun next(self) -> Step<T>
+        if self.left <= 0 then
+            return Step<T>.End
+        end
+        self.left -= 1
+        self.source.next()
+    end
+end
+
+struct SkipIter<T>
+    public source: Iterator<T>
+    public skip: int
+end
+
+impl<T> Iterator<T> for SkipIter<T>
+    public fun next(self) -> Step<T>
+        while self.skip > 0 do
+            self.skip -= 1
+            match self.source.next()
+                case Item(_) then
+                case End then
+                    return Step<T>.End
+            end
+        end
+        self.source.next()
+    end
+end
+
+--" A type that `for x in value`, `for i, x in value` and `[...value]` can go through. --"
+trait Iterable<T>
+    --" An iterator over the elements. --"
+    fun iter(self) -> Iterator<T>
+end
+
+--" A type that `for key, value in x` can go through: its elements are pairs. --"
+trait KeyedIterable<K, V>
+    --" An iterator over the `(key, value)` pairs. --"
+    fun iter_keyed(self) -> Iterator<(K, V)>
+end
+
+struct ArrayIter<T>
+    public items: array<T>
+    public at: int
+end
+
+impl<T> Iterator<T> for ArrayIter<T>
+    public fun next(self) -> Step<T>
+        if self.at >= self.items.len() then
+            return Step<T>.End
+        end
+        self.at += 1
+        Step<T>.Item(self.items[self.at - 1])
+    end
+end
+
+impl<T> Iterable<T> for array<T>
+    --" An iterator over the elements. --"
+    public fun iter(self) -> Iterator<T>
+        ArrayIter<T> { items: self, at: 0 }
+    end
+end
+
+impl Iterable<string> for string
+    --" An iterator over the characters. --"
+    public fun iter(self) -> Iterator<string>
+        ArrayIter<string> { items: self.chars(), at: 0 }
+    end
+end
+
+impl<T> Iterable<T> for Set<T>
+    --" An iterator over the values, as they are now. --"
+    public fun iter(self) -> Iterator<T>
+        ArrayIter<T> { items: self.to_array(), at: 0 }
+    end
+end
+
+struct PairIter<K, V>
+    public keys: array<K>
+    public values: array<V>
+    public at: int
+end
+
+impl<K, V> Iterator<(K, V)> for PairIter<K, V>
+    public fun next(self) -> Step<(K, V)>
+        if self.at >= self.keys.len() then
+            return Step<(K, V)>.End
+        end
+        self.at += 1
+        Step<(K, V)>.Item((self.keys[self.at - 1], self.values[self.at - 1]))
+    end
+end
+
+impl<K, V> KeyedIterable<K, V> for map<K, V>
+    --" An iterator over the `(key, value)` pairs, as they are now. --"
+    public fun iter_keyed(self) -> Iterator<(K, V)>
+        PairIter<K, V> { keys: self.keys(), values: self.values(), at: 0 }
+    end
+end
+
+-- ===== durations =====
+
+--" A length of time: years and months (which depend on the date they are added to), then days, hours,
+minutes, seconds and milliseconds (days are 24 hours: a `datetime` is always UTC). Nothing is converted on its
+own: `Duration.of(minutes: 90)` stays 90 minutes until `normalize()`. Added to a `datetime` with `+`, `-`, `plus` or `minus`,
+the years and months go first (31 January + 1 month is the last day of February). --"
+struct Duration
+    public years: int
+    public months: int
+    public days: int
+    public hours: int
+    public minutes: int
+    public seconds: int
+    public ms: int
+end
+
+impl Duration
+    --" `Duration.of(days: 2, hours: 3)`: what is not given is 0. --"
+    public fun of(years: int = 0, months: int = 0, days: int = 0, hours: int = 0, minutes: int = 0, seconds: int = 0, ms: int = 0) -> Duration
+        Duration { years: years, months: months, days: days, hours: hours, minutes: minutes, seconds: seconds, ms: ms }
+    end
+
+    --" Whether every part is 0. --"
+    public fun is_zero(self) -> bool
+        self.years == 0 and self.months == 0 and self.days == 0 and self.hours == 0 and self.minutes == 0 and self.seconds == 0 and self.ms == 0
+    end
+
+    --" Whether it has years or months: their length depends on the date, so there is no `total_*` of it. --"
+    public fun has_calendar_parts(self) -> bool
+        self.years != 0 or self.months != 0
+    end
+
+    --" The same length with the opposite sign. --"
+    public fun negate(self) -> Duration
+        Duration { years: -self.years, months: -self.months, days: -self.days, hours: -self.hours, minutes: -self.minutes, seconds: -self.seconds, ms: -self.ms }
+    end
+
+    --" Part by part sum. --"
+    public fun plus(self, other: Duration) -> Duration
+        Duration { years: self.years + other.years, months: self.months + other.months, days: self.days + other.days, hours: self.hours + other.hours, minutes: self.minutes + other.minutes, seconds: self.seconds + other.seconds, ms: self.ms + other.ms }
+    end
+
+    --" Part by part difference. --"
+    public fun minus(self, other: Duration) -> Duration
+        self.plus(other.negate())
+    end
+
+    --" Every part multiplied by `n`. --"
+    public fun times(self, n: int) -> Duration
+        Duration { years: self.years * n, months: self.months * n, days: self.days * n, hours: self.hours * n, minutes: self.minutes * n, seconds: self.seconds * n, ms: self.ms * n }
+    end
+
+    --" The length in milliseconds, or `err` if it has years or months. --"
+    public fun total_ms(self) -> Result<int, Error>
+        if self.has_calendar_parts() then
+            return Result<int, Error>.Err(Error { message: "a duration with years or months has no fixed length: use datetime.until / diff_in_*" })
+        end
+        Result<int, Error>.Ok(((self.days * 24 + self.hours) * 60 + self.minutes) * 60000 + self.seconds * 1000 + self.ms)
+    end
+
+    --" The length in whole seconds (cut toward 0), or `err` if it has years or months. --"
+    public fun total_seconds(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 1000)
+    end
+
+    --" The length in whole minutes (cut toward 0), or `err` if it has years or months. --"
+    public fun total_minutes(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 60000)
+    end
+
+    --" The length in whole hours (cut toward 0), or `err` if it has years or months. --"
+    public fun total_hours(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 3600000)
+    end
+
+    --" The length in whole days (cut toward 0), or `err` if it has years or months. --"
+    public fun total_days(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 86400000)
+    end
+
+    --" The same length with the parts carried: 12 months are a year, 1000 ms a second, 60 seconds a minute,
+    60 minutes an hour, 24 hours a day. The sign is that of the whole (every part gets it). --"
+    public fun normalize(self) -> Duration
+        let months = self.years * 12 + self.months
+        let exact = ((self.days * 24 + self.hours) * 60 + self.minutes) * 60000 + self.seconds * 1000 + self.ms
+        let m = months.abs()
+        let e = exact.abs()
+        let sm = if months < 0 then -1 else 1 end
+        let se = if exact < 0 then -1 else 1 end
+        Duration {
+            years: sm * (m div 12),
+            months: sm * (m % 12),
+            days: se * (e div 86400000),
+            hours: se * (e div 3600000 % 24),
+            minutes: se * (e div 60000 % 60),
+            seconds: se * (e div 1000 % 60),
+            ms: se * (e % 1000)
+        }
+    end
+
+    --" ISO 8601 text: `P1Y2M3DT4H5M6.007S` (`PT0S` when it is zero, a leading `-` when every part is negative). --"
+    public fun to_iso(self) -> string
+        if not self.is_zero() and self.years <= 0 and self.months <= 0 and self.days <= 0 and self.hours <= 0 and self.minutes <= 0 and self.seconds <= 0 and self.ms <= 0 then
+            return "-" + self.negate().to_iso()
+        end
+        let date = ""
+        if self.years != 0 then date += "{self.years}Y" end
+        if self.months != 0 then date += "{self.months}M" end
+        if self.days != 0 then date += "{self.days}D" end
+        let time = ""
+        if self.hours != 0 then time += "{self.hours}H" end
+        if self.minutes != 0 then time += "{self.minutes}M" end
+        if self.seconds != 0 or self.ms != 0 then
+            let secs = "{self.seconds}"
+            if self.ms != 0 then
+                let frac = "{self.ms.abs()}".pad_left(3, "0")
+                let sign = if self.seconds == 0 and self.ms < 0 then "-" else "" end
+                secs = sign + "{self.seconds}" + "." + frac
+            end
+            time += secs + "S"
+        end
+        if date == "" and time == "" then
+            return "PT0S"
+        end
+        if time == "" then "P" + date else "P" + date + "T" + time end
+    end
+end
+
+impl datetime
+    --" The instant after adding a duration: its years and months first, then the rest. --"
+    public fun plus(self, d: Duration) -> datetime
+        let t = self.add_years(d.years).add_months(d.months)
+        let rest = ((d.days * 24 + d.hours) * 60 + d.minutes) * 60000 + d.seconds * 1000 + d.ms
+        datetime.at(t.ms() + rest)
+    end
+
+    --" The instant after taking a duration away. --"
+    public fun minus(self, d: Duration) -> datetime
+        self.plus(d.negate())
+    end
+
+    --" Whether this instant is earlier than `other`. --"
+    public fun is_before(self, other: datetime) -> bool
+        self.ms() < other.ms()
+    end
+
+    --" Whether this instant is later than `other`. --"
+    public fun is_after(self, other: datetime) -> bool
+        self.ms() > other.ms()
+    end
+
+    --" Whether it is between `first` and `last`, both included. --"
+    public fun between(self, first: datetime, last: datetime) -> bool
+        self.ms() >= first.ms() and self.ms() <= last.ms()
+    end
+
+    --" Whether `other` is on the same day. --"
+    public fun same_day(self, other: datetime) -> bool
+        self.start_of_day().ms() == other.start_of_day().ms()
+    end
+
+    --" Saturday or Sunday. --"
+    public fun is_weekend(self) -> bool
+        self.weekday() >= 6
+    end
+
+    --" Whether the year has 366 days. --"
+    public fun is_leap_year(self) -> bool
+        let y = self.year()
+        (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+    end
+
+    --" 28 to 31. --"
+    public fun days_in_month(self) -> int
+        let m = self.month()
+        if m == 2 then
+            return if self.is_leap_year() then 29 else 28 end
+        end
+        if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31 end
+    end
+
+    --" The quarter of the year, 1 to 4. --"
+    public fun quarter(self) -> int
+        (self.month() - 1) div 3 + 1
+    end
+
+    --" Whole months from this instant to `other` (negative if `other` is earlier): 31 January to 28 February is 1. --"
+    public fun diff_in_months(self, other: datetime) -> int
+        let n = (other.year() - self.year()) * 12 + (other.month() - self.month())
+        if other.ms() >= self.ms() then
+            if self.add_months(n).ms() > other.ms() then n -= 1 end
+        else
+            if self.add_months(n).ms() < other.ms() then n += 1 end
+        end
+        n
+    end
+
+    --" Whole years from this instant to `other`. --"
+    public fun diff_in_years(self, other: datetime) -> int
+        self.diff_in_months(other) div 12
+    end
+
+    --" Whole days (blocks of 24 hours) from this instant to `other`, cut toward 0. --"
+    public fun diff_in_days(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 86400000
+    end
+
+    --" Whole hours from this instant to `other`, cut toward 0. --"
+    public fun diff_in_hours(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 3600000
+    end
+
+    --" Whole minutes from this instant to `other`, cut toward 0. --"
+    public fun diff_in_minutes(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 60000
+    end
+
+    --" Whole seconds from this instant to `other`, cut toward 0. --"
+    public fun diff_in_seconds(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 1000
+    end
+
+    --" The time from this instant to `other` as a `Duration`: whole years and months first, then days, hours,
+    minutes, seconds and milliseconds (every part has the sign of the direction). --"
+    public fun until(self, other: datetime) -> Duration
+        let months = self.diff_in_months(other)
+        let rest = other.ms() - self.add_months(months).ms()
+        Duration.of(months: months, ms: rest).normalize()
+    end
+
+    --" The start of the hour. --"
+    public fun start_of_hour(self) -> datetime
+        datetime.of(self.year(), self.month(), self.day(), self.hour(), 0, 0)
+    end
+
+    --" The last millisecond of the hour. --"
+    public fun end_of_hour(self) -> datetime
+        datetime.at(self.start_of_hour().ms() + 3599999)
+    end
+
+    --" The last millisecond of the day. --"
+    public fun end_of_day(self) -> datetime
+        datetime.at(self.start_of_day().ms() + 86399999)
+    end
+
+    --" Midnight of the Monday of this week. --"
+    public fun start_of_week(self) -> datetime
+        self.start_of_day().add_days(1 - self.weekday())
+    end
+
+    --" The last millisecond of the Sunday of this week. --"
+    public fun end_of_week(self) -> datetime
+        datetime.at(self.start_of_week().ms() + 7 * 86400000 - 1)
+    end
+
+    --" Midnight of the first day of the month. --"
+    public fun start_of_month(self) -> datetime
+        datetime.of(self.year(), self.month(), 1)
+    end
+
+    --" The last millisecond of the month. --"
+    public fun end_of_month(self) -> datetime
+        datetime.at(datetime.of(self.year(), self.month(), self.days_in_month()).ms() + 86399999)
+    end
+
+    --" Midnight of the first day of the quarter. --"
+    public fun start_of_quarter(self) -> datetime
+        datetime.of(self.year(), (self.quarter() - 1) * 3 + 1, 1)
+    end
+
+    --" The last millisecond of the quarter. --"
+    public fun end_of_quarter(self) -> datetime
+        let last = self.quarter() * 3
+        let m = datetime.of(self.year(), last, 1)
+        datetime.at(datetime.of(self.year(), last, m.days_in_month()).ms() + 86399999)
+    end
+
+    --" Midnight of 1 January. --"
+    public fun start_of_year(self) -> datetime
+        datetime.of(self.year(), 1, 1)
+    end
+
+    --" The last millisecond of the year. --"
+    public fun end_of_year(self) -> datetime
+        datetime.at(datetime.of(self.year(), 12, 31).ms() + 86399999)
+    end
+
+    --" The same instant with some parts replaced: `d.with(month: 3, day: 1)`. A day the new month does
+    not have becomes its last day. --"
+    public fun with(self, year: int? = none, month: int? = none, day: int? = none, hour: int? = none, minute: int? = none, second: int? = none) -> datetime
+        let y = year ?? self.year()
+        let mo = month ?? self.month()
+        let first = datetime.of(y, mo, 1)
+        let d = day ?? self.day()
+        if d > first.days_in_month() and day == none then
+            d = first.days_in_month()
+        end
+        datetime.of(y, mo, d, hour ?? self.hour(), minute ?? self.minute(), second ?? self.second()).plus(Duration.of(ms: self.ms() % 1000))
+    end
+
+    --" Midnight of the next day that is `weekday` (1 Monday to 7 Sunday), after today. --"
+    public fun next_weekday(self, weekday: int) -> datetime
+        let delta = (weekday - self.weekday() + 6) % 7 + 1
+        self.start_of_day().add_days(delta)
+    end
+
+    --" Midnight of the last day that was `weekday`, before today. --"
+    public fun previous_weekday(self, weekday: int) -> datetime
+        let delta = (self.weekday() - weekday + 6) % 7 + 1
+        self.start_of_day().add_days(-delta)
+    end
+
+    --" Midnight of the `n`th `weekday` of this month (`n` from 1), or `none` if the month has no such day
+    (a fifth Monday). --"
+    public fun nth_weekday_of_month(self, n: int, weekday: int) -> datetime?
+        let first = self.start_of_month()
+        let delta = (weekday - first.weekday() + 7) % 7
+        let day = 1 + delta + (n - 1) * 7
+        if n < 1 or day > self.days_in_month() then
+            return none
+        end
+        datetime.of(self.year(), self.month(), day)
+    end
+
+    --" Midnight of the last day of the month. --"
+    public fun last_day_of_month(self) -> datetime
+        datetime.of(self.year(), self.month(), self.days_in_month())
+    end
+
+    --" Seconds since 1970 (cut toward the past). --"
+    public fun unix(self) -> int
+        let ms = self.ms()
+        (ms - ((ms % 1000) + 1000) % 1000) div 1000
+    end
+
+    --" `Tue, 03 Nov 2026 14:30:00 GMT`: the form of the HTTP `Date` and `Last-Modified` headers. --"
+    public fun to_http(self) -> string
+        self.format("ddd, DD MMM YYYY HH:mm:ss") + " GMT"
+    end
+
+    --" `Tue, 03 Nov 2026 14:30:00 +0000` (RFC 2822). --"
+    public fun to_rfc2822(self) -> string
+        self.format("ddd, DD MMM YYYY HH:mm:ss") + " +0000"
+    end
+
+    --" ISO 8601 text, as `"{d}"` gives it. --"
+    public fun to_iso(self) -> string
+        "{self}"
+    end
+
+    --" The time to `now` in words, in `locale` (`"en"` or `"fr"`): `3 days ago`, `in 2 hours`. --"
+    public fun humanize(self, now: datetime, locale: string = "en") -> string
+        let diff = self.ms() - now.ms()
+        let past = diff < 0
+        let secs = diff.abs() div 1000
+        let n = 0
+        let unit = ""
+        if secs < 45 then
+            return if locale == "fr" then (if past then "il y a quelques secondes" else "dans quelques secondes" end) else (if past then "a few seconds ago" else "in a few seconds" end) end
+        end
+        if secs < 3600 then
+            n = (secs + 30) div 60
+            unit = "minute"
+        elseif secs < 86400 then
+            n = (secs + 1800) div 3600
+            unit = "hour"
+        elseif secs < 86400 * 30 then
+            n = (secs + 43200) div 86400
+            unit = "day"
+        elseif secs < 86400 * 365 then
+            n = (secs + 1296000) div 2592000
+            unit = "month"
+        else
+            n = (secs + 15768000) div 31536000
+            unit = "year"
+        end
+        if n == 0 then n = 1 end
+        if locale == "fr" then
+            let fr = if unit == "minute" then "minute" elseif unit == "hour" then "heure" elseif unit == "day" then "jour" elseif unit == "month" then "mois" else "an" end
+            if n > 1 and unit != "month" then fr += "s" end
+            return if past then "il y a {n} {fr}" else "dans {n} {fr}" end
+        end
+        let en = if n > 1 then unit + "s" else unit end
+        if past then "{n} {en} ago" else "in {n} {en}" end
+    end
+end
+
+impl Add<Duration> for datetime
+    --" `datetime + duration`: see `plus`. --"
+    public fun add(self, d: Duration) -> datetime
+        self.plus(d)
+    end
+end
+
+impl Sub<Duration> for datetime
+    --" `datetime - duration`: see `minus`. --"
+    public fun sub(self, d: Duration) -> datetime
+        self.minus(d)
+    end
+end
+
+-- ===== neutral elements =====
+
+--" A type with a value that changes nothing when added: `0` for an `int`, `0.0` for a `float`.
+Written `T.zero()` in a generic function (`fun total<T: Add + Zero>(...)`) or an `impl`. --"
+trait Zero
+    --" The neutral element of the addition. --"
+    fun zero() -> Self
+end
+
+--" A type with a value that changes nothing when multiplied: `1` for an `int`, `1.0` for a
+`float`. Written `T.one()`, like `Zero`. --"
+trait One
+    --" The neutral element of the multiplication. --"
+    fun one() -> Self
+end
+
+impl Zero for int
+    --" `0`. --"
+    public fun zero() -> int
+        0
+    end
+end
+
+impl Zero for float
+    --" `0.0`. --"
+    public fun zero() -> float
+        0.0
+    end
+end
+
+impl One for int
+    --" `1`. --"
+    public fun one() -> int
+        1
+    end
+end
+
+impl One for float
+    --" `1.0`. --"
+    public fun one() -> float
+        1.0
+    end
+end
+
 -- ===== encode =====
 
 --" A type that can be turned into JSON text: `impl ToJson for Post ... end`. --"
@@ -1631,6 +2303,11 @@ extern fun fs_create_dir(path: string) -> Result<bool, Error>
 extern fun fs_exists(path: string) -> Result<bool, Error>
 extern fun fs_is_dir(path: string) -> Result<bool, Error>
 extern fun fs_list(path: string) -> Result<array<string>, Error>
+extern fun fs_stat(path: string) -> Result<array<int>?, Error>
+extern fun fs_append(path: string, content: string) -> Result<bool, Error>
+extern fun fs_remove(path: string, recursive: bool) -> Result<bool, Error>
+extern fun fs_rename(source: string, target: string) -> Result<bool, Error>
+extern fun fs_copy(source: string, target: string) -> Result<bool, Error>
 extern fun fs_open_lines(path: string) -> Result<int, Error>
 extern fun fs_read_line(handle: int) -> Result<string?, Error>
 extern fun fs_close_lines(handle: int) -> Result<bool, Error>
@@ -1683,6 +2360,46 @@ impl fs
     --" The names (not the paths) of what a folder holds, sorted. Needs disk access. --"
     public fun list(path: string) -> Result<array<string>, Error>
         fs_list(path)
+    end
+
+    --" Whether `path` is a file (`false` when it is not there, or is a folder). Needs disk access. --"
+    public fun is_file(path: string) -> Result<bool, Error>
+        let st = fs_stat(path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
+    end
+
+    --" Adds `content` at the end of a file (creating it if needed). Needs disk access. --"
+    public fun append(path: string, content: string) -> Result<bool, Error>
+        fs_append(path, content)
+    end
+
+    --" Deletes a file (or a link). A folder is `remove_dir`. Needs disk access. --"
+    public fun remove(path: string) -> Result<bool, Error>
+        if kind_at(path) % 4 >= 2 then
+            return Result<bool, Error>.Err(Error { message: "\"" + path + "\" is a folder: use fs.remove_dir" })
+        end
+        fs_remove(path, false)
+    end
+
+    --" Deletes a folder: only an empty one, unless `all` is true (then everything it holds goes too,
+    be sure of the path). The `--root` folder itself and the one the program runs in are never removed.
+    Needs disk access. --"
+    public fun remove_dir(path: string, all: bool = false) -> Result<bool, Error>
+        fs_remove(path, all)
+    end
+
+    --" Moves or renames a file or a folder (the target's folder must be there). Needs disk access. --"
+    public fun rename(source: string, target: string) -> Result<bool, Error>
+        fs_rename(source, target)
+    end
+
+    --" Copies a file to `target` (replacing what is there). Needs disk access. --"
+    public fun copy(source: string, target: string) -> Result<bool, Error>
+        fs_copy(source, target)
     end
 
     --" Opens a text file to read it one line at a time, without loading it all: `next()` gives each
@@ -1779,6 +2496,318 @@ impl Lines
     --" Closes the file before its end (a file that was read to its end closes by itself). --"
     public fun close(self)
         fs_close_lines(self.handle)
+    end
+end
+
+--" The kind of what is at `path` as bits (1 file, 2 folder, 4 link), 0 when nothing is there or it cannot be
+told. --"
+fun kind_at(path: string) -> int
+    let st = fs_stat(path)
+    if st.is_err() then
+        return 0
+    end
+    let found = st.unwrap()
+    if found == none then
+        return 0
+    end
+    found[0]
+end
+
+fun stat_of(path: string) -> Result<array<int>, Error>
+    let st = fs_stat(path)
+    if st.is_err() then
+        return Result<array<int>, Error>.Err(st.unwrap_err())
+    end
+    let found = st.unwrap()
+    if found == none then
+        return Result<array<int>, Error>.Err(Error { message: "\"" + path + "\" not found" })
+    end
+    Result<array<int>, Error>.Ok(found)
+end
+
+--" A file on disk, by its path (it may not be there yet): `File.of("notes/a.txt")`. The path is read
+when a method is called, nothing is kept open. Needs disk access. --"
+struct File
+    --" The path given to `File.of`. --"
+    public path: string
+end
+
+impl File
+    --" The file at `path`. --"
+    public fun of(path: string) -> File
+        File { path: path }
+    end
+
+    --" The last part of the path: `a.txt`. --"
+    public fun name(self) -> string
+        Path.base(self.path)
+    end
+
+    --" The name without its extension: `a`. --"
+    public fun stem(self) -> string
+        Path.stem(self.path)
+    end
+
+    --" The extension without the dot, in lower case: `txt` (`""` for none). --"
+    public fun ext(self) -> string
+        Path.ext(self.path)
+    end
+
+    --" The folder that holds it. --"
+    public fun parent(self) -> Dir
+        Dir { path: Path.dir(self.path) }
+    end
+
+    --" Whether something is at this path. --"
+    public fun exists(self) -> Result<bool, Error>
+        fs_exists(self.path)
+    end
+
+    --" Whether this is a file (and not a folder). --"
+    public fun is_file(self) -> Result<bool, Error>
+        let st = fs_stat(self.path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
+    end
+
+    --" Whether this path is a link. --"
+    public fun is_link(self) -> Result<bool, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        Result<bool, Error>.Ok(st.unwrap()[0] >= 4)
+    end
+
+    --" The size in bytes. --"
+    public fun size(self) -> Result<int, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<int, Error>.Err(st.unwrap_err())
+        end
+        Result<int, Error>.Ok(st.unwrap()[1])
+    end
+
+    --" When it was last changed (an instant, UTC). --"
+    public fun modified(self) -> Result<datetime, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<datetime, Error>.Err(st.unwrap_err())
+        end
+        Result<datetime, Error>.Ok(datetime.at(st.unwrap()[2]))
+    end
+
+    --" The whole content as text. --"
+    public fun read(self) -> Result<string, Error>
+        fs_read(self.path)
+    end
+
+    --" The whole content as bytes. --"
+    public fun read_bytes(self) -> Result<bytes, Error>
+        fs_read_bytes(self.path)
+    end
+
+    --" The lines, one at a time (see `fs.lines`). --"
+    public fun lines(self) -> Result<Lines, Error>
+        open_lines(self.path)
+    end
+
+    --" Replaces the content. --"
+    public fun write(self, content: string) -> Result<bool, Error>
+        fs_write(self.path, content)
+    end
+
+    --" Adds `content` at the end (creating the file if needed). --"
+    public fun append(self, content: string) -> Result<bool, Error>
+        fs_append(self.path, content)
+    end
+
+    --" Copies the file to `target`; gives the copy. --"
+    public fun copy_to(self, target: string) -> Result<File, Error>
+        let done = fs_copy(self.path, target)
+        if done.is_err() then
+            return Result<File, Error>.Err(done.unwrap_err())
+        end
+        Result<File, Error>.Ok(File { path: target })
+    end
+
+    --" Moves (renames) the file to `target`; gives it at its new place. --"
+    public fun move_to(self, target: string) -> Result<File, Error>
+        let done = fs_rename(self.path, target)
+        if done.is_err() then
+            return Result<File, Error>.Err(done.unwrap_err())
+        end
+        Result<File, Error>.Ok(File { path: target })
+    end
+
+    --" Deletes the file. --"
+    public fun remove(self) -> Result<bool, Error>
+        if kind_at(self.path) % 4 >= 2 then
+            return Result<bool, Error>.Err(Error { message: "\"" + self.path + "\" is a folder: use Dir.remove" })
+        end
+        fs_remove(self.path, false)
+    end
+end
+
+--" A folder on disk, by its path: `Dir.of("src")`. Needs disk access. --"
+struct Dir
+    --" The path given to `Dir.of`. --"
+    public path: string
+end
+
+impl Dir
+    --" The folder at `path`. --"
+    public fun of(path: string) -> Dir
+        Dir { path: path }
+    end
+
+    --" The last part of the path. --"
+    public fun name(self) -> string
+        Path.base(self.path)
+    end
+
+    --" The folder above. --"
+    public fun parent(self) -> Dir
+        Dir { path: Path.dir(self.path) }
+    end
+
+    --" The path of `name` inside this folder (nothing is read). --"
+    public fun join(self, name: string) -> string
+        Path.join(self.path, name)
+    end
+
+    --" The file called `name` in this folder (it may not be there). --"
+    public fun file(self, name: string) -> File
+        File { path: Path.join(self.path, name) }
+    end
+
+    --" Whether this is a folder that is there. --"
+    public fun exists(self) -> Result<bool, Error>
+        fs_is_dir(self.path)
+    end
+
+    --" Creates the folder and the ones above it that are missing. --"
+    public fun create(self) -> Result<bool, Error>
+        fs_create_dir(self.path)
+    end
+
+    --" Deletes the folder: only an empty one, unless `all` (then all it holds goes too). --"
+    public fun remove(self, all: bool = false) -> Result<bool, Error>
+        fs_remove(self.path, all)
+    end
+
+    --" Moves (renames) the folder to `target`. --"
+    public fun move_to(self, target: string) -> Result<Dir, Error>
+        let done = fs_rename(self.path, target)
+        if done.is_err() then
+            return Result<Dir, Error>.Err(done.unwrap_err())
+        end
+        Result<Dir, Error>.Ok(Dir { path: target })
+    end
+
+    --" The files directly in this folder (not those of its sub-folders), sorted by name. --"
+    public fun files(self) -> Result<array<File>, Error>
+        let names = fs_list(self.path)
+        if names.is_err() then
+            return Result<array<File>, Error>.Err(names.unwrap_err())
+        end
+        let out: array<File> = []
+        for name in names.unwrap() do
+            let path = Path.join(self.path, name)
+            if kind_at(path) % 2 == 1 then
+                out.push(File { path: path })
+            end
+        end
+        Result<array<File>, Error>.Ok(out)
+    end
+
+    --" The folders directly in this folder, sorted by name. --"
+    public fun dirs(self) -> Result<array<Dir>, Error>
+        let names = fs_list(self.path)
+        if names.is_err() then
+            return Result<array<Dir>, Error>.Err(names.unwrap_err())
+        end
+        let out: array<Dir> = []
+        for name in names.unwrap() do
+            let path = Path.join(self.path, name)
+            if kind_at(path) % 4 >= 2 then
+                out.push(Dir { path: path })
+            end
+        end
+        Result<array<Dir>, Error>.Ok(out)
+    end
+
+    --" The files of this folder and of all the ones below it, one at a time (nothing is read before
+    it is needed): a folder's files, then its sub-folders, each sorted by name. `name` keeps the files
+    whose name matches (`*.q`), `ignore` skips the files and folders with these names or patterns
+    (`[".git", "node_modules"]`), `depth` is how many folder levels to go down (`0`: this folder only). --"
+    public fun walk(self, name: string = "*", ignore: array<string> = [], depth: int = 40) -> Result<Iterator<File>, Error>
+        let first = fs_list(self.path)
+        if first.is_err() then
+            return Result<Iterator<File>, Error>.Err(first.unwrap_err())
+        end
+        let it = WalkIter { pending: [self.path], levels: [0], files: [], name: name, ignore: ignore, depth: depth }
+        Result<Iterator<File>, Error>.Ok(it)
+    end
+end
+
+struct WalkIter
+    public pending: array<string>
+    public levels: array<int>
+    public files: array<File>
+    public name: string
+    public ignore: array<string>
+    public depth: int
+end
+
+fun walk_ignored(name: string, ignore: array<string>) -> bool
+    for pattern in ignore do
+        if Path.matches(pattern, name) then
+            return true
+        end
+    end
+    false
+end
+
+impl Iterator<File> for WalkIter
+    public fun next(self) -> Step<File>
+        while self.files.is_empty() do
+            if self.pending.is_empty() then
+                return Step<File>.End
+            end
+            let dir = self.pending.pop() ?? ""
+            let level = self.levels.pop() ?? 0
+            let names = fs_list(dir)
+            if names.is_err() then
+                continue
+            end
+            let subdirs: array<string> = []
+            for entry in names.unwrap() do
+                if walk_ignored(entry, self.ignore) then
+                    continue
+                end
+                let path = Path.join(dir, entry)
+                if kind_at(path) % 4 >= 2 then
+                    if level < self.depth then
+                        subdirs.push(path)
+                    end
+                elseif Path.matches(self.name, entry) then
+                    self.files.push(File { path: path })
+                end
+            end
+            self.files.reverse()
+            -- popped from the end: the last one pushed is the first folder visited
+            let i = subdirs.len() - 1
+            while i >= 0 do
+                self.pending.push(subdirs[i])
+                self.levels.push(level + 1)
+                i -= 1
+            end
+        end
+        Step<File>.Item(self.files.pop() ?? File { path: "" })
     end
 end
 
@@ -4236,6 +5265,8 @@ pub(crate) struct Checker {
     pub cur_mod: ModId,
     pub scopes: Vec<HashMap<String, Local>>,
     pub tparam_scope: Vec<(String, ParamId)>,
+    /// What `Self` means here: the type an `impl` is for, or the (still unknown) implementer in a trait.
+    pub self_ty: Option<Ty>,
     /// Return type of the enclosing function or lambda.
     pub ret_stack: Vec<Ty>,
     pub loop_depth: usize,
@@ -4269,6 +5300,7 @@ impl Checker {
             cur_mod: 0,
             scopes: Vec::new(),
             tparam_scope: Vec::new(),
+            self_ty: None,
             ret_stack: Vec::new(),
             loop_depth: 0,
             cur_impl_struct: None,

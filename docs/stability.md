@@ -27,7 +27,7 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | Partie | Niveau |
 | --- | --- |
 | Syntaxe : `let`, `fun`, `if`/`elseif`/`else`, `for`, `while`, `match`, `struct`, `enum`, `trait`, `impl`, `import`/`export`, interpolation `"{x}"` | **stable** |
-| Paramètres variadiques (`fun f(...xs: int)`) et étalement `...` dans un appel, un tableau et un dictionnaire | provisoire |
+| Paramètres variadiques (`fun f(...xs: int)`) et étalement `...` dans un appel, un tableau et un dictionnaire | **stable** (depuis la 1.1) |
 | Types de base, `array`, `map`, `Set`, tuples, nullables `T?`, `??`, `?`, `Result`/`Error` | **stable** |
 | Vérification de types, inférence, génériques et contraintes (`T: Eq`, `Ord`) | **stable** |
 | `Json.of` / `Json.to` / `Json.parse`, `string`, `int`, `float`, `bool` et leurs méthodes courantes | **stable** |
@@ -119,6 +119,7 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Structures, méthodes, traits, énumérations, héritage | `structs`, `structs_and_methods`, `traits`, `traits_as_types`, `traits_and_operators`, `enums`, `compile_structs`, `compile_traits_and_ops`, `compile_inheritance` |
 | `Json.parse`, `Json.of`, `Json.to` | `json` |
 | Modules : `import` / `export`, alias | `modules` |
+| Paramètres variadiques `...xs` et étalement `...` (promis depuis la 1.1) | `variadics`, `compile_variadics`, `runtime_variadics` |
 | Les **codes** des erreurs de compilation et d'exécution les plus courantes | les dossiers `compile_*`, `runtime_errors`, `runtime_failures`, `arithmetic_errors` |
 | Les commandes `run`, `check`, `fmt`, `test` (leurs options actuelles) | **pas dans la suite de conformité** (qui ne couvre que le langage) : tests d'intégration de `qlang` (`crates/qlang-cli/tests`) : `cli_options` (`--max-steps`, `--seed`), `limits` (`--max-memory`), `testrun` (`--filter`), `coverage` (`--group`, `--skip-group`, `--coverage`, `--coverage-lcov`), `deprecated` (`--deny-warnings`), `fmt` et `fmt_config` (`--check`, `--stdin`), `root_fs` et `imports` (`--root`), `providers` (`--extern`, `--trust-externs`), `process` (`--allow-process`) |
 | Le format de `qlang.toml` (`[package]`, `[dependencies]`, `[stability]`) et de `qlang.lock` | tests d'intégration `manifest_format` (le texte exact du verrou, un verrou écrit à la main qui est obéi, chaque clé acceptée, `qlang = "…"` qui arrête un projet trop exigeant) |

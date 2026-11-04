@@ -4,8 +4,9 @@
 
 ## 1.1.0
 
-Le serveur de langage met en forme pendant la frappe, ce qui corrige deux gênes dans l'éditeur.
+Le serveur de langage met en forme pendant la frappe (deux gênes de l'éditeur corrigées), et les paramètres variadiques deviennent stables.
 
+- **Les paramètres variadiques et l'étalement `...` sont stables.** Ils étaient provisoires depuis la 1.0 (#201). Treize cas de la suite de conformité les couvrent (`variadics`, `compile_variadics`, `runtime_variadics`, suite `v1.1.0`), et `docs/stability.md` les liste dans ce que la 1.x promet. Rien ne change dans le langage.
 - **`qlang lsp` : mise en forme à la frappe (`textDocument/onTypeFormatting`).** Avant : dans VS Code, un `case` tapé se retrouvait au niveau du `match` (l'éditeur ne peut pas savoir, d'après la seule ligne, s'il suit le `match` ou le corps d'un autre `case`), et aucun `end` n'était écrit après `fun`, `if`, `match`, etc. Après : après un retour à la ligne, la ligne et celle du dessus sont mises à leur niveau et un `end` est écrit si le bloc ouvert n'est fermé par rien ; après un espace, un `case`, `else` ou `elseif` est mis à son niveau. Le calcul est celui de `qlang fmt`. L'extension VS Code active `editor.formatOnType` pour qlang et ne dédente plus `case`.
 
 ## 1.0.0

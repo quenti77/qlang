@@ -48,11 +48,11 @@ niveau de leur partie : une clé ajoutée n'est pas un changement cassant, une c
 
 | Partie | Niveau |
 | --- | --- |
-| `qlang run`, `check`, `fmt`, `test` (options existantes) | **stable** (on ajoute des options, on n'en retire pas sans cycle) |
+| `qlang run`, `check`, `fmt` (y compris `fmt --stdin`), `test` (options existantes) | **stable** (on ajoute des options, on n'en retire pas sans cycle) |
 | `qlang serve` (options, protocole de `handle`) | provisoire (`--max-workers` : expérimental) ; `Response.stream` / `sse` / `file` provisoires ; WebSocket **expérimental** |
-| `qlang install`, `add`, `update`, `remove`, `search`, `lsp`, `doc`, `self-update` | provisoire |
+| `qlang install`, `add`, `update`, `remove`, `search`, `lsp`, `doc`, `lint` (règles `Q001` à `Q005`), `self-update` | provisoire |
 | `qlang info`, `publish`, `verify`, `migrate`, les contraintes `version = "…"`, `signed`, `token_env`, l'index (`packages.json`) | **expérimental** |
-| `qlang init --web`, `qlang test --coverage` / `--group`, `qlang lint`, `qlang repl`, `qlang dap`, `qlang fmt --stdin` | **expérimental** |
+| `qlang init --web`, `qlang test --coverage` / `--group`, `qlang repl`, `qlang dap` | **expérimental** |
 | `qlang.toml` : `[package]` (`name`, `version`, `entry`, `main`, `qlang`) et `[dependencies]` | provisoire |
 | `qlang.toml` : `[externs]` | **expérimental** |
 | `qlang.lock` | provisoire (format lisible, ne pas l'éditer) |

@@ -36,6 +36,44 @@ fn stdin_is_laid_out_on_the_output() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), NEAT);
 }
 
+/// Runs `qlang fmt --stdin` on `input`: (standard output, exit code).
+fn fmt_stdin(input: &str) -> (String, i32) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qlang"))
+        .args(["fmt", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
+#[test]
+fn stdin_keeps_line_endings_and_lays_out_a_second_time_as_it_is() {
+    let (once, code) = fmt_stdin("if true then\r\nprint(1)\r\nend\r\n");
+    assert_eq!(code, 0);
+    assert_eq!(once, "if true then\r\n    print(1)\r\nend\r\n");
+    assert_eq!(fmt_stdin(&once), (once.clone(), 0));
+    assert_eq!(fmt_stdin(""), (String::new(), 0));
+}
+
+#[test]
+fn stdin_that_does_not_lex_writes_nothing_and_exits_65() {
+    let (out, code) = fmt_stdin("let s = \"never closed\n");
+    assert_eq!(code, 65);
+    assert_eq!(out, "", "nothing is written for a text that does not lex");
+}
+
 #[test]
 fn excluded_paths_are_left_alone() {
     let dir = project(

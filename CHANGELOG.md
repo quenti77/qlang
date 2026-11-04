@@ -6,6 +6,7 @@
 
 Le serveur de langage met en forme pendant la frappe, ce qui corrige deux gênes dans l'éditeur.
 
+- **Niveaux de stabilité des outils.** `qlang fmt --stdin` passe d'expérimental à **stable** (même moteur que `qlang fmt` ; tests : entrée, sortie, fins de ligne, code `65` pour un texte qui ne se lit pas) et `qlang lint` à **provisoire** (une règle `Q002` testée, comme les autres). `qlang lsp` reste provisoire : un test fige la liste de ses capacités, il pourra passer en stable après une version sans changement. `docs/editors.md` : `warning[L00x]` devenu `warning[Q00x]`.
 - **`qlang lsp` : mise en forme à la frappe (`textDocument/onTypeFormatting`).** Avant : dans VS Code, un `case` tapé se retrouvait au niveau du `match` (l'éditeur ne peut pas savoir, d'après la seule ligne, s'il suit le `match` ou le corps d'un autre `case`), et aucun `end` n'était écrit après `fun`, `if`, `match`, etc. Après : après un retour à la ligne, la ligne et celle du dessus sont mises à leur niveau et un `end` est écrit si le bloc ouvert n'est fermé par rien ; après un espace, un `case`, `else` ou `elseif` est mis à son niveau. Le calcul est celui de `qlang fmt`. L'extension VS Code active `editor.formatOnType` pour qlang et ne dédente plus `case`.
 
 ## 1.0.0

@@ -814,12 +814,22 @@ impl Checker {
                             for (_, fid) in &self.defs.impls[iid].methods {
                                 let f = &self.defs.fns[*fid];
                                 if let Some(n) = f.decl.as_ref().and_then(|d| d.name.as_ref()) {
+                                    // a default method copied from the trait has the trait's explanation
+                                    let doc = self.docs.of(n.span).or_else(|| {
+                                        let (tid, _) = self.defs.impls[iid].trait_.as_ref()?;
+                                        let t = &self.defs.traits[*tid];
+                                        self.docs
+                                            .signatures
+                                            .get(&(t.span.file, t.span.start))
+                                            .and_then(|d| d.get(&f.name))
+                                            .cloned()
+                                    });
                                     push(
                                         n.span,
                                         &f.name,
                                         "method",
                                         format!("fun {}", self.fn_signature(*fid, &HashMap::new())),
-                                        self.docs.of(n.span),
+                                        doc,
                                         Some(self.show(&self.defs.impls[iid].target)),
                                         f.vis == Visibility::Public,
                                     );

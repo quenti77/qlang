@@ -6,6 +6,8 @@
 
 À venir : `BigInt` et `BigDecimal`, la suite des dates (`Date`, `Time`, lecture avec un format), et la promotion de niveau des parties qui n'ont rien cassé depuis la 1.0.
 
+- **`BigInt` et `BigDecimal`** (issue #204, non cassant). `BigInt` est un entier sans limite : `BigInt.of(n)`, `BigInt.parse(texte)`, `BigInt.pow(2, 200)`, les opérateurs `+ - * ** div %` et les comparaisons, le mélange avec un `int` (`BigInt.of(3) + 2`), `to_int()` qui échoue hors plage, `divmod`. `BigDecimal` est un décimal exact pour l'argent : un `BigInt` et une échelle, `0.1 + 0.2 == 0.3`, `divide(b, échelle, mode)` et `round` avec sept modes d'arrondi. `/` n'est défini sur aucun des deux (il faudrait choisir l'échelle) et `BigDecimal == float` est refusé. `to_json()` écrit une chaîne. Écrits en qlang dans le prélude : exacts mais plus lents que le natif. Niveau provisoire.
+
 ## 1.1.0
 
 Quatre fonctionnalités du langage et de la bibliothèque (`Iterable`, `File` et `Dir`, `Duration` et un `datetime` plus complet, `Self` et `T.zero()`), un serveur de langage qui met en forme pendant la frappe, et une première série de parties qui passent de provisoire à stable (paramètres variadiques, opérateurs surchargés, alias de type, annotations, `Any`, petits modules de la bibliothèque, `fmt --stdin`). Un seul changement cassant, dans une partie provisoire : les jetons de `datetime.format` (voir [docs/migration.md](docs/migration.md)).

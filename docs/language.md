@@ -526,6 +526,66 @@ De la plus faible à la plus forte :
   vaut `3.5` (un `float`). Cela vient d'implémentations de traits fournies par
   le langage (`impl Add<float> for int`, etc.), et tu peux définir les tiennes.
 
+### Grands nombres : `BigInt` et `BigDecimal`
+
+*Niveau : provisoire (depuis la 1.2).*
+
+Un `int` tient sur 64 bits (environ 9,2·10¹⁸) et dépasser est une erreur ; un `float` n'est pas exact (`0.1 + 0.2` n'est pas
+`0.3`). Deux types du prélude règlent ces deux cas. Ils sont écrits en qlang (rien de natif) : très bien pour une factorielle de
+quelques milliers ou un total en euros, lents pour des nombres de dizaines de milliers de chiffres.
+
+**`BigInt`** est un entier sans limite.
+
+| Appel | Résultat |
+| --- | --- |
+| `BigInt.of(12)`, `BigInt.parse("123456789012345678901234567890")` | un `BigInt` ; `parse` rend un `Result` (`err` si ce ne sont pas des chiffres, avec un `+` ou `-` facultatif) |
+| `BigInt.pow(2, 200)` | `2 ** 200`, calculé exactement |
+| `a + b`, `a - b`, `a * b`, `a ** n`, `-a` | exacts ; `n` est un `int` |
+| `a div b`, `a % b` | quotient (vers zéro) et reste (du signe de `a`), comme pour les `int` ; diviser par zéro arrête le programme |
+| `a / b` | **n'existe pas** (`T…`) : écrire `div`, ou passer par `BigDecimal` |
+| `a == b`, `a < b`… | entre deux `BigInt` |
+| `a + 2`, `2 + a`, `a * 3`, `a div 2` | un `int` se mélange avec un `BigInt` (il est converti) ; pour comparer, écrire `a == BigInt.of(2)` |
+| `a.to_int()` | un `Result<int, Error>` : `err` si le nombre ne tient pas dans un `int` |
+| `"{a}"`, `a as string`, `a.to_string()` | les chiffres |
+| `a.sign()`, `a.abs()`, `a.is_zero()`, `a.divmod(b)` | −1, 0 ou 1 ; valeur absolue ; test ; le couple (quotient, reste) |
+
+**`BigDecimal`** est un décimal exact, pour l'argent : un `BigInt` et une **échelle** (le nombre de chiffres après la virgule).
+`12.50` est `1250` d'échelle 2 et s'affiche `12.50`.
+
+| Appel | Résultat |
+| --- | --- |
+| `BigDecimal.parse("12.50")`, `BigDecimal.of(3)`, `BigDecimal.from_bigint(n)` | un `BigDecimal` (`parse` rend un `Result`) |
+| `a + b`, `a - b`, `a * b`, `-a` | exacts : l'échelle d'une somme est la plus grande des deux, celle d'un produit est la somme |
+| `a == b`, `a < b`… | comparent les **valeurs** : `12.50 == 12.5` est vrai |
+| `a.divide(b, 2, "half_even")` | le quotient avec 2 chiffres après la virgule, arrondi selon le mode ; `a / b` n'existe pas |
+| `a.round(2, "half_up")` | la même valeur à 2 chiffres (plus de chiffres ajoute des zéros, moins arrondit) |
+| `a.to_bigint("down")` | la partie entière, arrondie selon le mode |
+| `a.strip_zeros()` | `12.50` devient `12.5` |
+| `a.to_float()` | le `float` le plus proche (on perd l'exactitude : c'est le seul chemin vers un `float`) |
+
+Les modes d'arrondi sont `"half_even"` (au pair, celui des banques), `"half_up"`, `"half_down"`, `"up"` (loin de zéro), `"down"`
+(vers zéro), `"floor"` et `"ceiling"` ; un autre mot arrête le programme. Comparer un `BigDecimal` à un `float` n'est pas possible : c'est
+voulu.
+
+```
+let f = BigInt.one()
+for i in 1..31 do
+  f = f * i
+end
+print(f)                                       -- 265252859812191058636308480000000
+
+let a = BigDecimal.parse("0.1").unwrap()
+let b = BigDecimal.parse("0.2").unwrap()
+print(a + b == BigDecimal.parse("0.3").unwrap())   -- true
+print(BigDecimal.parse("19.99").unwrap() * 3)      -- 59.97
+print(BigDecimal.parse("10").unwrap().divide(BigDecimal.of(3), 4, "half_even"))   -- 3.3333
+```
+
+- **JSON** : `n.to_json()` écrit une chaîne (`"1180591620717411303424"`, `"12.50"`), parce qu'un nombre perdrait des chiffres chez beaucoup de
+  lecteurs. `Json.of(n)` décrit les champs, pas le nombre : passer par `to_string()`.
+- Pas encore : colonnes `NUMERIC` / `BIGINT` des bases de données, clés de `map` (l'égalité vaut pour deux `BigInt`, pas leur hachage),
+  `BigRational`.
+
 ### Comparaisons et logique
 
 - `==` et `!=` fonctionnent sur les nombres (`1 == 1.0` est vrai), les

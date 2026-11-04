@@ -9,6 +9,7 @@ impl Checker {
         self.cur_mod = m;
         self.scopes.clear();
         self.tparam_scope.clear();
+        self.self_ty = None;
         self.ret_stack.clear();
         self.loop_depth = 0;
         self.cur_impl_struct = None;
@@ -105,6 +106,7 @@ impl Checker {
         self.scopes.push(HashMap::new());
         if let Some(iid) = def.impl_id {
             let target = self.defs.impls[iid].target.clone();
+            self.self_ty = Some(target.clone());
             if let Ty::Struct(sid, _) = &target {
                 self.cur_impl_struct = Some(*sid);
             }

@@ -58,6 +58,7 @@ ou **expérimental**, et comment une fonction est dépréciée (`#[deprecated("�
     - [`Any`](#any)
   - [10. Traits et surcharge d'opérateurs](#10-traits-et-surcharge-dopérateurs)
     - [Méthode par défaut](#méthode-par-défaut)
+    - [Une méthode sans `self` : `Self` et `T.zero()`](#une-méthode-sans-self--self-et-tzero)
     - [Un trait comme type](#un-trait-comme-type)
     - [Surcharger un opérateur](#surcharger-un-opérateur)
     - [Surcharger une conversion](#surcharger-une-conversion)
@@ -1398,6 +1399,62 @@ fun hello(g: Greeter) -> string
   g.greet() + " / " + g.name()     -- name() vient de Named
 end
 ```
+
+### Une méthode sans `self` : `Self` et `T.zero()`
+
+Un trait peut déclarer une méthode **sans `self`**, et `Self` y désigne le type qui implémente le trait :
+
+```
+trait Zero
+  fun zero() -> Self
+end
+
+impl Zero for Money
+  public fun zero() -> Self
+    Money { cents: 0 }
+  end
+end
+```
+
+Dans un `impl`, `Self` est le type de l'`impl` (`Money` ici, `Pair<T>` pour `impl<T> Zero for Pair<T>`) ; dans un
+trait, c'est le type qui l'implémentera. Hors d'un trait ou d'un `impl`, `Self` n'existe pas (`T001`).
+
+Dans une fonction ou un `impl` générique, un paramètre de type borné par un tel trait s'utilise comme préfixe d'appel :
+`T.zero()`. La méthode appelée est celle de l'`impl` du type que `T` désigne, trouvé à l'appel :
+
+```
+fun total<T: Add + Zero>(xs: array<T>) -> T
+  let t = T.zero()
+  for x in xs do
+    t = t + x
+  end
+  t
+end
+
+struct Point<T>
+  public x: T
+  public y: T
+end
+
+impl<T: Zero> Point<T>
+  public fun origin() -> Point<T>
+    Point { x: T.zero(), y: T.zero() }
+  end
+end
+
+print(total([1, 2, 3]))            -- 6
+print(total<float>([]))            -- 0.0
+let p: Point<int> = Point.origin() -- Point { x: 0, y: 0 }
+```
+
+- Le prélude fournit `Zero` (`T.zero()`, l'élément neutre de l'addition) et `One` (`T.one()`, celui de la
+  multiplication) pour `int` et `float` ; tu peux les implémenter pour tes types.
+- `[].sum()` d'un tableau vide vaut `T.zero()` quand les éléments implémentent `Add` et `Zero` ; sans `Zero`, c'est
+  l'erreur `R015`.
+- `T` doit se déduire des arguments, du type attendu ou d'un `<...>` écrit : sinon `Point.origin()` donne `T171`
+  (`Point<int>.origin()` ou `let p: Point<int> = Point.origin()` les évitent).
+- Si les bornes de `T` ne déclarent pas la méthode, c'est `T161`.
+- **Provisoire** : `Self`, `T.nom()`, `Zero` et `One` sont nouveaux en 1.1 (voir [stability.md](stability.md)).
 
 ### Un trait comme type
 

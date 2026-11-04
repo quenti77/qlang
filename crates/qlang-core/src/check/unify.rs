@@ -349,6 +349,17 @@ impl Checker {
                     if let Some(mut map) = self.impl_matches(iid, &cand) {
                         // `Self` in a method the trait wrote the body of: the type the method is called on
                         map.insert(SELF_PARAM, cand.clone());
+                        // a default body is written with the trait's own parameters (`T` of
+                        // `Iterator<T>`): in this impl they are the trait's arguments
+                        if self.defs.fns[fid].trait_default_self.is_some()
+                            && let Some((tid, targs)) = self.defs.impls[iid].trait_.clone()
+                        {
+                            let tparams = self.defs.traits[tid].tparams.clone();
+                            for (p, a) in tparams.iter().zip(targs.iter()) {
+                                let a = a.subst(&map);
+                                map.insert(*p, a);
+                            }
+                        }
                         return Some(UserMethod {
                             fid,
                             impl_id: iid,
@@ -594,6 +605,67 @@ impl Checker {
                 };
                 let ret = self.defs.fns[fid].ret.subst(&map);
                 return Some(LangImpl::User { fid, ret });
+            }
+        }
+        None
+    }
+
+    /// The type arguments with which `ty` implements the prelude's `Iterable<T>` (or, when
+    /// `keyed`, `KeyedIterable<K, V>`), if it does: a user type, or a type parameter bounded by it.
+    pub fn iterable_args(&mut self, ty: &Ty, keyed: bool) -> Option<Vec<Ty>> {
+        let ty = self.resolve(ty);
+        // an iterator can be gone through as it is: `for x in it`, `[...it]`
+        let names: &[&str] = if keyed {
+            &["KeyedIterable"]
+        } else {
+            &["Iterable", "Iterator"]
+        };
+        for name in names {
+            let Some(tid) = self
+                .defs
+                .traits
+                .iter()
+                .position(|t| t.module == super::PRELUDE_MOD && t.name == *name)
+            else {
+                continue;
+            };
+            if let Ty::Trait(t, a) = &ty
+                && *t == tid
+            {
+                return Some(a.clone());
+            }
+            if let Ty::Param(p) = &ty {
+                let bounds: Vec<(TraitId, Vec<Ty>)> = self.defs.params[*p]
+                    .bounds
+                    .clone()
+                    .into_iter()
+                    .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&ty)))
+                    .collect();
+                if let Some((_, a)) = bounds.into_iter().find(|(t, _)| *t == tid) {
+                    return Some(a);
+                }
+                continue;
+            }
+            for cand in self.candidate_types(&ty) {
+                for iid in 0..self.defs.impls.len() {
+                    let Some((t, a)) = self.defs.impls[iid].trait_.clone() else {
+                        continue;
+                    };
+                    if t != tid {
+                        continue;
+                    }
+                    let Some(map) = self.impl_matches(iid, &cand) else {
+                        continue;
+                    };
+                    return Some(
+                        a.iter()
+                            .map(|x| {
+                                let x = x.subst(&map);
+                                self.resolve(&x)
+                            })
+                            .collect(),
+                    );
+                }
             }
         }
         None

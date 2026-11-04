@@ -1130,9 +1130,89 @@ impl<'a> Interp<'a> {
                     self.tick(s.span)?;
                 }
             }
+            // a type of the program that implements `Iterable` / `KeyedIterable`: ask it for an
+            // iterator, then take steps until `End`
+            Value::Struct(_) | Value::Enum(..) => {
+                let keyed =
+                    var2.is_some() && self.find_method(&it, "iter_keyed", None, None).is_some();
+                let iterator = self.iterator_of(&it, keyed, iter.span)?;
+                let next = Ident {
+                    name: "next".to_string(),
+                    span: iter.span,
+                };
+                let mut i: i64 = 0;
+                loop {
+                    let step = self.call_method(iterator.clone(), &next, Vec::new(), iter.span)?;
+                    // `Item(value)` is the first variant of `Step`, `End` the second
+                    let Value::Enum(_, 0, Some(payload)) = &step else {
+                        break;
+                    };
+                    let item = payload.first().cloned().unwrap_or(Value::None);
+                    let ok = if keyed {
+                        match item {
+                            Value::Tuple(ref kv) if kv.len() == 2 => {
+                                run_body(self, kv[0].clone(), Some(kv[1].clone()))?
+                            }
+                            _ => {
+                                return self.fail(
+                                    "R001",
+                                    "`iter_keyed` must give `(key, value)` pairs",
+                                    iter.span,
+                                );
+                            }
+                        }
+                    } else if var2.is_some() {
+                        run_body(self, Value::Int(i), Some(item))?
+                    } else {
+                        run_body(self, item, None)?
+                    };
+                    if !ok {
+                        break;
+                    }
+                    self.tick(s.span)?;
+                    i += 1;
+                }
+            }
             _ => return self.fail("R032", "this value cannot be looped over", iter.span),
         }
         Ok(Value::Unit)
+    }
+
+    /// The iterator of a value that `for` or `...` goes through: what its `iter()` (or, when
+    /// `keyed`, `iter_keyed()`) gives, or the value itself when it is an iterator already.
+    fn iterator_of(&mut self, v: &Value, keyed: bool, span: Span) -> R<Value> {
+        let name = if keyed { "iter_keyed" } else { "iter" };
+        if self.find_method(v, name, None, None).is_none() {
+            return Ok(v.clone());
+        }
+        let method = Ident {
+            name: name.to_string(),
+            span,
+        };
+        self.call_method(v.clone(), &method, Vec::new(), span)
+    }
+
+    /// All the elements of a value of the program that implements `Iterable` (or, when `keyed`,
+    /// `KeyedIterable`, as `(key, value)` tuples), for `...`. Anything else is an error.
+    fn iterate_to_vec(&mut self, v: &Value, keyed: bool, span: Span) -> R<Vec<Value>> {
+        if !matches!(v, Value::Struct(_) | Value::Enum(..)) {
+            return self.fail("R001", "`...` needs an array, a map or an iterable", span);
+        }
+        let iterator = self.iterator_of(v, keyed, span)?;
+        let next = Ident {
+            name: "next".to_string(),
+            span,
+        };
+        let mut out = Vec::new();
+        loop {
+            let step = self.call_method(iterator.clone(), &next, Vec::new(), span)?;
+            let Value::Enum(_, 0, Some(payload)) = &step else {
+                return Ok(out);
+            };
+            self.guard_alloc(out.len() + 1, span)?;
+            out.push(payload.first().cloned().unwrap_or(Value::None));
+            self.tick(span)?;
+        }
     }
 
     /// Takes a tuple apart into variables of `scope` (the checker made sure it has the shape).
@@ -1331,7 +1411,10 @@ impl<'a> Interp<'a> {
                 // `[...a, 3]`: a new array that holds the elements of `a`
                 let spread = self.eval(inner, env)?;
                 let Value::Array(list) = &spread else {
-                    return self.fail("R001", "`...` needs an array", it.span);
+                    let items = self.iterate_to_vec(&spread, false, it.span)?;
+                    self.guard_alloc(out.len() + items.len(), it.span)?;
+                    out.extend(items);
+                    continue;
                 };
                 let list = list.borrow();
                 self.guard_alloc(out.len() + list.len(), it.span)?;
@@ -1351,7 +1434,18 @@ impl<'a> Interp<'a> {
                 // `{ ...a, "x": 1 }`: the entries of `a`, a later key replacing an earlier one
                 let spread = self.eval(inner, env)?;
                 let Value::Map(other) = &spread else {
-                    return self.fail("R001", "`...` needs a map", k.span);
+                    for pair in self.iterate_to_vec(&spread, true, k.span)? {
+                        let Value::Tuple(kv) = &pair else { continue };
+                        self.guard_alloc(m.len() + 1, k.span)?;
+                        if kv.len() == 2 && !m.insert(kv[0].clone(), kv[1].clone()) {
+                            return self.fail(
+                                "R023",
+                                "this value cannot be used as a map key",
+                                k.span,
+                            );
+                        }
+                    }
+                    continue;
                 };
                 let other = other.borrow();
                 self.guard_alloc(m.len() + other.len(), k.span)?;
@@ -1637,7 +1731,10 @@ impl<'a> Interp<'a> {
             } else if let ExprKind::Spread(inner) = &a.value.kind {
                 let spread = self.eval(inner, env)?;
                 let Value::Array(list) = &spread else {
-                    return self.fail("R001", "`...` needs an array", a.value.span);
+                    let items = self.iterate_to_vec(&spread, false, a.value.span)?;
+                    self.guard_alloc(positional.len() + items.len(), a.value.span)?;
+                    positional.extend(items);
+                    continue;
                 };
                 self.guard_alloc(positional.len() + list.borrow().len(), a.value.span)?;
                 positional.extend(list.borrow().iter().cloned());

@@ -476,6 +476,39 @@ impl Checker {
                         (args[0].clone(), Ty::Error)
                     }
                     (Ty::Error, _) => (Ty::Error, Ty::Error),
+                    // a type of the program that implements `Iterable<T>` / `KeyedIterable<K, V>`
+                    (other, false)
+                        if matches!(
+                            other,
+                            Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
+                        ) && self.iterable_args(other, false).is_some() =>
+                    {
+                        let a = self.iterable_args(other, false).unwrap_or_default();
+                        (a.first().cloned().unwrap_or(Ty::Error), Ty::Error)
+                    }
+                    (other, true)
+                        if matches!(
+                            other,
+                            Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
+                        ) && self.iterable_args(other, true).is_some() =>
+                    {
+                        let a = self.iterable_args(other, true).unwrap_or_default();
+                        (
+                            a.first().cloned().unwrap_or(Ty::Error),
+                            a.get(1).cloned().unwrap_or(Ty::Error),
+                        )
+                    }
+                    // (a `Set` has no position: it keeps refusing two variables)
+                    (other, true)
+                        if matches!(
+                            other,
+                            Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
+                        ) && !matches!(other, Ty::Struct(sid, _) if self.is_prelude_set(*sid))
+                            && self.iterable_args(other, false).is_some() =>
+                    {
+                        let a = self.iterable_args(other, false).unwrap_or_default();
+                        (Ty::Int, a.first().cloned().unwrap_or(Ty::Error))
+                    }
                     (other, two) => {
                         let shown = other.show(&self.defs);
                         let msg = if two {
@@ -488,7 +521,7 @@ impl Checker {
                             )
                         } else {
                             format!(
-                                "cannot loop over `{shown}` (use a range like `0..10`, an array, a string or a map)"
+                                "cannot loop over `{shown}` (use a range like `0..10`, an array, a string, a map, or a type that implements `Iterable<T>`)"
                             )
                         };
                         self.err("T190", msg, iter.span);
@@ -1067,6 +1100,14 @@ impl Checker {
             Ty::Array(x) => *x,
             Ty::Error => Ty::Error,
             other => {
+                // a type of the program that implements `Iterable<T>`
+                if matches!(
+                    other,
+                    Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
+                ) && let Some(a) = self.iterable_args(&other, false)
+                {
+                    return a.first().cloned().unwrap_or(Ty::Error);
+                }
                 self.not_spreadable(&other, inner.span, false);
                 Ty::Error
             }
@@ -1080,6 +1121,17 @@ impl Checker {
             Ty::Map(k, v) => (*k, *v),
             Ty::Error => (Ty::Error, Ty::Error),
             other => {
+                // a type of the program that implements `KeyedIterable<K, V>`
+                if matches!(
+                    other,
+                    Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
+                ) && let Some(a) = self.iterable_args(&other, true)
+                {
+                    return (
+                        a.first().cloned().unwrap_or(Ty::Error),
+                        a.get(1).cloned().unwrap_or(Ty::Error),
+                    );
+                }
                 self.not_spreadable(&other, inner.span, true);
                 (Ty::Error, Ty::Error)
             }
@@ -1092,10 +1144,13 @@ impl Checker {
         let hint = match t {
             Ty::Nullable(_) => " (it may be `none`: write `...(x ?? [])`)".to_string(),
             Ty::Any => " (convert it first: `...a.as<array<T>>()`)".to_string(),
-            Ty::Struct(sid, _) if self.is_prelude_set(*sid) => {
-                " (write `...set.to_array()`)".to_string()
+            Ty::Struct(sid, _) if self.is_prelude_set(*sid) && into_map => {
+                " (a set is spread inside `[ ]` or a call)".to_string()
             }
-            Ty::Struct(..) => " (a struct cannot be spread: list its fields)".to_string(),
+            Ty::Struct(..) => {
+                " (a struct is spread when it implements `Iterable<T>` (in `[ ]` or a call) or `KeyedIterable<K, V>` (in `{ }`))"
+                    .to_string()
+            }
             Ty::Map(..) if !into_map => " (a map is spread inside `{ }`)".to_string(),
             Ty::Array(_) if into_map => " (an array is spread inside `[ ]` or a call)".to_string(),
             _ => String::new(),

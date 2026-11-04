@@ -380,6 +380,21 @@ pub const DATETIME: &[Entry] = &[
         "The day of the week: 1 is Monday, 7 is Sunday.",
     ),
     (
+        "day_of_year",
+        "",
+        "The day of the year, from 1 (1 January).",
+    ),
+    (
+        "week",
+        "",
+        "The ISO 8601 week number, from 1 to 53 (week 1 has the year's first Thursday).",
+    ),
+    (
+        "week_year",
+        "",
+        "The year the ISO week belongs to (it can differ from `year()` at the turn of the year).",
+    ),
+    (
         "ms",
         "",
         "Milliseconds since 1970-01-01 00:00:00 UTC (can be negative before 1970).",
@@ -407,7 +422,12 @@ pub const DATETIME: &[Entry] = &[
     (
         "format",
         "pattern",
-        "Text following `pattern`: `YYYY` year, `MM` month, `DD` day, `HH` hour, `mm` minute, `ss` second, `SSS` milliseconds. Other characters are kept: `\"DD/MM/YYYY\"`.",
+        "Text following `pattern`: `YYYY` year, `MMMM`/`MMM`/`MM`/`M` month, `DD`/`D` day, `dddd`/`ddd` weekday, `HH`/`H` hour, `hh`/`h` 12-hour clock, `A` AM or PM, `mm` minute, `ss` second, `SSS` milliseconds, `WW` ISO week. `[text]` and other characters are kept: `\"DD/MM/YYYY\"`.",
+    ),
+    (
+        "format_in",
+        "pattern, locale",
+        "Like `format`, with the names of months and weekdays in `locale` (`\"en\"` or `\"fr\"`; another is an error).",
     ),
 ];
 

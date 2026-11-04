@@ -2172,7 +2172,8 @@ impl Checker {
             (Ty::Ulid, "time") => (vec![], Ty::Int),
             (
                 Ty::DateTime,
-                "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms",
+                "year" | "month" | "day" | "hour" | "minute" | "second" | "weekday" | "ms"
+                | "day_of_year" | "week" | "week_year",
             ) => (vec![], Ty::Int),
             (
                 Ty::DateTime,
@@ -2182,6 +2183,7 @@ impl Checker {
             (Ty::DateTime, "start_of_day") => (vec![], Ty::DateTime),
             (Ty::DateTime, "days_until") => (vec![Ty::DateTime], Ty::Int),
             (Ty::DateTime, "format") => (vec![Ty::Str], Ty::Str),
+            (Ty::DateTime, "format_in") => (vec![Ty::Str, Ty::Str], Ty::Str),
             (Ty::Int, "abs") => (vec![], Ty::Int),
             (Ty::Int, "min" | "max" | "pow") => (vec![Ty::Int], Ty::Int),
             (Ty::Int, "sqrt") => (vec![], Ty::Float),

@@ -387,6 +387,423 @@ impl<K, V> KeyedIterable<K, V> for map<K, V>
     end
 end
 
+-- ===== durations =====
+
+--" A length of time: years and months (which depend on the date they are added to), then days, hours,
+minutes, seconds and milliseconds (days are 24 hours: a `datetime` is always UTC). Nothing is converted on its
+own: `Duration.of(minutes: 90)` stays 90 minutes until `normalize()`. Added to a `datetime` with `+`, `-`, `plus` or `minus`,
+the years and months go first (31 January + 1 month is the last day of February). --"
+struct Duration
+    public years: int
+    public months: int
+    public days: int
+    public hours: int
+    public minutes: int
+    public seconds: int
+    public ms: int
+end
+
+impl Duration
+    --" `Duration.of(days: 2, hours: 3)`: what is not given is 0. --"
+    public fun of(years: int = 0, months: int = 0, days: int = 0, hours: int = 0, minutes: int = 0, seconds: int = 0, ms: int = 0) -> Duration
+        Duration { years: years, months: months, days: days, hours: hours, minutes: minutes, seconds: seconds, ms: ms }
+    end
+
+    --" Whether every part is 0. --"
+    public fun is_zero(self) -> bool
+        self.years == 0 and self.months == 0 and self.days == 0 and self.hours == 0 and self.minutes == 0 and self.seconds == 0 and self.ms == 0
+    end
+
+    --" Whether it has years or months: their length depends on the date, so there is no `total_*` of it. --"
+    public fun has_calendar_parts(self) -> bool
+        self.years != 0 or self.months != 0
+    end
+
+    --" The same length with the opposite sign. --"
+    public fun negate(self) -> Duration
+        Duration { years: -self.years, months: -self.months, days: -self.days, hours: -self.hours, minutes: -self.minutes, seconds: -self.seconds, ms: -self.ms }
+    end
+
+    --" Part by part sum. --"
+    public fun plus(self, other: Duration) -> Duration
+        Duration { years: self.years + other.years, months: self.months + other.months, days: self.days + other.days, hours: self.hours + other.hours, minutes: self.minutes + other.minutes, seconds: self.seconds + other.seconds, ms: self.ms + other.ms }
+    end
+
+    --" Part by part difference. --"
+    public fun minus(self, other: Duration) -> Duration
+        self.plus(other.negate())
+    end
+
+    --" Every part multiplied by `n`. --"
+    public fun times(self, n: int) -> Duration
+        Duration { years: self.years * n, months: self.months * n, days: self.days * n, hours: self.hours * n, minutes: self.minutes * n, seconds: self.seconds * n, ms: self.ms * n }
+    end
+
+    --" The length in milliseconds, or `err` if it has years or months. --"
+    public fun total_ms(self) -> Result<int, Error>
+        if self.has_calendar_parts() then
+            return Result<int, Error>.Err(Error { message: "a duration with years or months has no fixed length: use datetime.until / diff_in_*" })
+        end
+        Result<int, Error>.Ok(((self.days * 24 + self.hours) * 60 + self.minutes) * 60000 + self.seconds * 1000 + self.ms)
+    end
+
+    --" The length in whole seconds (cut toward 0), or `err` if it has years or months. --"
+    public fun total_seconds(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 1000)
+    end
+
+    --" The length in whole minutes (cut toward 0), or `err` if it has years or months. --"
+    public fun total_minutes(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 60000)
+    end
+
+    --" The length in whole hours (cut toward 0), or `err` if it has years or months. --"
+    public fun total_hours(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 3600000)
+    end
+
+    --" The length in whole days (cut toward 0), or `err` if it has years or months. --"
+    public fun total_days(self) -> Result<int, Error>
+        let t = self.total_ms()
+        if t.is_err() then
+            return Result<int, Error>.Err(t.unwrap_err())
+        end
+        Result<int, Error>.Ok(t.unwrap() div 86400000)
+    end
+
+    --" The same length with the parts carried: 12 months are a year, 1000 ms a second, 60 seconds a minute,
+    60 minutes an hour, 24 hours a day. The sign is that of the whole (every part gets it). --"
+    public fun normalize(self) -> Duration
+        let months = self.years * 12 + self.months
+        let exact = ((self.days * 24 + self.hours) * 60 + self.minutes) * 60000 + self.seconds * 1000 + self.ms
+        let m = months.abs()
+        let e = exact.abs()
+        let sm = if months < 0 then -1 else 1 end
+        let se = if exact < 0 then -1 else 1 end
+        Duration {
+            years: sm * (m div 12),
+            months: sm * (m % 12),
+            days: se * (e div 86400000),
+            hours: se * (e div 3600000 % 24),
+            minutes: se * (e div 60000 % 60),
+            seconds: se * (e div 1000 % 60),
+            ms: se * (e % 1000)
+        }
+    end
+
+    --" ISO 8601 text: `P1Y2M3DT4H5M6.007S` (`PT0S` when it is zero, a leading `-` when every part is negative). --"
+    public fun to_iso(self) -> string
+        if not self.is_zero() and self.years <= 0 and self.months <= 0 and self.days <= 0 and self.hours <= 0 and self.minutes <= 0 and self.seconds <= 0 and self.ms <= 0 then
+            return "-" + self.negate().to_iso()
+        end
+        let date = ""
+        if self.years != 0 then date += "{self.years}Y" end
+        if self.months != 0 then date += "{self.months}M" end
+        if self.days != 0 then date += "{self.days}D" end
+        let time = ""
+        if self.hours != 0 then time += "{self.hours}H" end
+        if self.minutes != 0 then time += "{self.minutes}M" end
+        if self.seconds != 0 or self.ms != 0 then
+            let secs = "{self.seconds}"
+            if self.ms != 0 then
+                let frac = "{self.ms.abs()}".pad_left(3, "0")
+                let sign = if self.seconds == 0 and self.ms < 0 then "-" else "" end
+                secs = sign + "{self.seconds}" + "." + frac
+            end
+            time += secs + "S"
+        end
+        if date == "" and time == "" then
+            return "PT0S"
+        end
+        if time == "" then "P" + date else "P" + date + "T" + time end
+    end
+end
+
+impl datetime
+    --" The instant after adding a duration: its years and months first, then the rest. --"
+    public fun plus(self, d: Duration) -> datetime
+        let t = self.add_years(d.years).add_months(d.months)
+        let rest = ((d.days * 24 + d.hours) * 60 + d.minutes) * 60000 + d.seconds * 1000 + d.ms
+        datetime.at(t.ms() + rest)
+    end
+
+    --" The instant after taking a duration away. --"
+    public fun minus(self, d: Duration) -> datetime
+        self.plus(d.negate())
+    end
+
+    --" Whether this instant is earlier than `other`. --"
+    public fun is_before(self, other: datetime) -> bool
+        self.ms() < other.ms()
+    end
+
+    --" Whether this instant is later than `other`. --"
+    public fun is_after(self, other: datetime) -> bool
+        self.ms() > other.ms()
+    end
+
+    --" Whether it is between `first` and `last`, both included. --"
+    public fun between(self, first: datetime, last: datetime) -> bool
+        self.ms() >= first.ms() and self.ms() <= last.ms()
+    end
+
+    --" Whether `other` is on the same day. --"
+    public fun same_day(self, other: datetime) -> bool
+        self.start_of_day().ms() == other.start_of_day().ms()
+    end
+
+    --" Saturday or Sunday. --"
+    public fun is_weekend(self) -> bool
+        self.weekday() >= 6
+    end
+
+    --" Whether the year has 366 days. --"
+    public fun is_leap_year(self) -> bool
+        let y = self.year()
+        (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+    end
+
+    --" 28 to 31. --"
+    public fun days_in_month(self) -> int
+        let m = self.month()
+        if m == 2 then
+            return if self.is_leap_year() then 29 else 28 end
+        end
+        if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31 end
+    end
+
+    --" The quarter of the year, 1 to 4. --"
+    public fun quarter(self) -> int
+        (self.month() - 1) div 3 + 1
+    end
+
+    --" Whole months from this instant to `other` (negative if `other` is earlier): 31 January to 28 February is 1. --"
+    public fun diff_in_months(self, other: datetime) -> int
+        let n = (other.year() - self.year()) * 12 + (other.month() - self.month())
+        if other.ms() >= self.ms() then
+            if self.add_months(n).ms() > other.ms() then n -= 1 end
+        else
+            if self.add_months(n).ms() < other.ms() then n += 1 end
+        end
+        n
+    end
+
+    --" Whole years from this instant to `other`. --"
+    public fun diff_in_years(self, other: datetime) -> int
+        self.diff_in_months(other) div 12
+    end
+
+    --" Whole days (blocks of 24 hours) from this instant to `other`, cut toward 0. --"
+    public fun diff_in_days(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 86400000
+    end
+
+    --" Whole hours from this instant to `other`, cut toward 0. --"
+    public fun diff_in_hours(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 3600000
+    end
+
+    --" Whole minutes from this instant to `other`, cut toward 0. --"
+    public fun diff_in_minutes(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 60000
+    end
+
+    --" Whole seconds from this instant to `other`, cut toward 0. --"
+    public fun diff_in_seconds(self, other: datetime) -> int
+        (other.ms() - self.ms()) div 1000
+    end
+
+    --" The time from this instant to `other` as a `Duration`: whole years and months first, then days, hours,
+    minutes, seconds and milliseconds (every part has the sign of the direction). --"
+    public fun until(self, other: datetime) -> Duration
+        let months = self.diff_in_months(other)
+        let rest = other.ms() - self.add_months(months).ms()
+        Duration.of(months: months, ms: rest).normalize()
+    end
+
+    --" The start of the hour. --"
+    public fun start_of_hour(self) -> datetime
+        datetime.of(self.year(), self.month(), self.day(), self.hour(), 0, 0)
+    end
+
+    --" The last millisecond of the hour. --"
+    public fun end_of_hour(self) -> datetime
+        datetime.at(self.start_of_hour().ms() + 3599999)
+    end
+
+    --" The last millisecond of the day. --"
+    public fun end_of_day(self) -> datetime
+        datetime.at(self.start_of_day().ms() + 86399999)
+    end
+
+    --" Midnight of the Monday of this week. --"
+    public fun start_of_week(self) -> datetime
+        self.start_of_day().add_days(1 - self.weekday())
+    end
+
+    --" The last millisecond of the Sunday of this week. --"
+    public fun end_of_week(self) -> datetime
+        datetime.at(self.start_of_week().ms() + 7 * 86400000 - 1)
+    end
+
+    --" Midnight of the first day of the month. --"
+    public fun start_of_month(self) -> datetime
+        datetime.of(self.year(), self.month(), 1)
+    end
+
+    --" The last millisecond of the month. --"
+    public fun end_of_month(self) -> datetime
+        datetime.at(datetime.of(self.year(), self.month(), self.days_in_month()).ms() + 86399999)
+    end
+
+    --" Midnight of the first day of the quarter. --"
+    public fun start_of_quarter(self) -> datetime
+        datetime.of(self.year(), (self.quarter() - 1) * 3 + 1, 1)
+    end
+
+    --" The last millisecond of the quarter. --"
+    public fun end_of_quarter(self) -> datetime
+        let last = self.quarter() * 3
+        let m = datetime.of(self.year(), last, 1)
+        datetime.at(datetime.of(self.year(), last, m.days_in_month()).ms() + 86399999)
+    end
+
+    --" Midnight of 1 January. --"
+    public fun start_of_year(self) -> datetime
+        datetime.of(self.year(), 1, 1)
+    end
+
+    --" The last millisecond of the year. --"
+    public fun end_of_year(self) -> datetime
+        datetime.at(datetime.of(self.year(), 12, 31).ms() + 86399999)
+    end
+
+    --" The same instant with some parts replaced: `d.with(month: 3, day: 1)`. A day the new month does
+    not have becomes its last day. --"
+    public fun with(self, year: int? = none, month: int? = none, day: int? = none, hour: int? = none, minute: int? = none, second: int? = none) -> datetime
+        let y = year ?? self.year()
+        let mo = month ?? self.month()
+        let first = datetime.of(y, mo, 1)
+        let d = day ?? self.day()
+        if d > first.days_in_month() and day == none then
+            d = first.days_in_month()
+        end
+        datetime.of(y, mo, d, hour ?? self.hour(), minute ?? self.minute(), second ?? self.second()).plus(Duration.of(ms: self.ms() % 1000))
+    end
+
+    --" Midnight of the next day that is `weekday` (1 Monday to 7 Sunday), after today. --"
+    public fun next_weekday(self, weekday: int) -> datetime
+        let delta = (weekday - self.weekday() + 6) % 7 + 1
+        self.start_of_day().add_days(delta)
+    end
+
+    --" Midnight of the last day that was `weekday`, before today. --"
+    public fun previous_weekday(self, weekday: int) -> datetime
+        let delta = (self.weekday() - weekday + 6) % 7 + 1
+        self.start_of_day().add_days(-delta)
+    end
+
+    --" Midnight of the `n`th `weekday` of this month (`n` from 1), or `none` if the month has no such day
+    (a fifth Monday). --"
+    public fun nth_weekday_of_month(self, n: int, weekday: int) -> datetime?
+        let first = self.start_of_month()
+        let delta = (weekday - first.weekday() + 7) % 7
+        let day = 1 + delta + (n - 1) * 7
+        if n < 1 or day > self.days_in_month() then
+            return none
+        end
+        datetime.of(self.year(), self.month(), day)
+    end
+
+    --" Midnight of the last day of the month. --"
+    public fun last_day_of_month(self) -> datetime
+        datetime.of(self.year(), self.month(), self.days_in_month())
+    end
+
+    --" Seconds since 1970 (cut toward the past). --"
+    public fun unix(self) -> int
+        let ms = self.ms()
+        (ms - ((ms % 1000) + 1000) % 1000) div 1000
+    end
+
+    --" `Tue, 03 Nov 2026 14:30:00 GMT`: the form of the HTTP `Date` and `Last-Modified` headers. --"
+    public fun to_http(self) -> string
+        self.format("ddd, DD MMM YYYY HH:mm:ss") + " GMT"
+    end
+
+    --" `Tue, 03 Nov 2026 14:30:00 +0000` (RFC 2822). --"
+    public fun to_rfc2822(self) -> string
+        self.format("ddd, DD MMM YYYY HH:mm:ss") + " +0000"
+    end
+
+    --" ISO 8601 text, as `"{d}"` gives it. --"
+    public fun to_iso(self) -> string
+        "{self}"
+    end
+
+    --" The time to `now` in words, in `locale` (`"en"` or `"fr"`): `3 days ago`, `in 2 hours`. --"
+    public fun humanize(self, now: datetime, locale: string = "en") -> string
+        let diff = self.ms() - now.ms()
+        let past = diff < 0
+        let secs = diff.abs() div 1000
+        let n = 0
+        let unit = ""
+        if secs < 45 then
+            return if locale == "fr" then (if past then "il y a quelques secondes" else "dans quelques secondes" end) else (if past then "a few seconds ago" else "in a few seconds" end) end
+        end
+        if secs < 3600 then
+            n = (secs + 30) div 60
+            unit = "minute"
+        elseif secs < 86400 then
+            n = (secs + 1800) div 3600
+            unit = "hour"
+        elseif secs < 86400 * 30 then
+            n = (secs + 43200) div 86400
+            unit = "day"
+        elseif secs < 86400 * 365 then
+            n = (secs + 1296000) div 2592000
+            unit = "month"
+        else
+            n = (secs + 15768000) div 31536000
+            unit = "year"
+        end
+        if n == 0 then n = 1 end
+        if locale == "fr" then
+            let fr = if unit == "minute" then "minute" elseif unit == "hour" then "heure" elseif unit == "day" then "jour" elseif unit == "month" then "mois" else "an" end
+            if n > 1 and unit != "month" then fr += "s" end
+            return if past then "il y a {n} {fr}" else "dans {n} {fr}" end
+        end
+        let en = if n > 1 then unit + "s" else unit end
+        if past then "{n} {en} ago" else "in {n} {en}" end
+    end
+end
+
+impl Add<Duration> for datetime
+    --" `datetime + duration`: see `plus`. --"
+    public fun add(self, d: Duration) -> datetime
+        self.plus(d)
+    end
+end
+
+impl Sub<Duration> for datetime
+    --" `datetime - duration`: see `minus`. --"
+    public fun sub(self, d: Duration) -> datetime
+        self.minus(d)
+    end
+end
+
 -- ===== neutral elements =====
 
 --" A type with a value that changes nothing when added: `0` for an `int`, `0.0` for a `float`.

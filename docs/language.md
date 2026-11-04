@@ -930,7 +930,7 @@ end
 - `type` n'est pas un mot réservé : `let type = 3` reste valable. Il ne commence un alias que
   sous la forme `type Nom =`, au niveau du fichier.
 - Un alias se déclare dans un fichier, s'exporte (`export Handler`) et s'importe comme une
-  structure. Il n'a pas de paramètre de type (`T121` si on en donne).
+  structure. Il n'a pas de paramètre de type (`type Noms<T> = ...` est une erreur de syntaxe, `P002`).
 - Il ne sert qu'à **écrire un type** : on ne peut pas construire une valeur par son nom
   (`Names { ... }` n'existe pas : écris le nom du vrai type).
 - Un alias qui se désigne lui-même, directement ou par un autre, est une erreur (`T122`), et le
@@ -1185,6 +1185,7 @@ end
 - Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
   champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
   `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
+- **Niveau** : la déclaration, la vérification à la compilation et `#[deprecated]` sont **stables** ; les lire pendant l'exécution (avec `Reflect`) reste **expérimental**.
 - La vérification contrôle le nom (`T001`, `T290` si ce n'est pas une annotation), les arguments
   (`T292` nom inconnu, en trop ou donné deux fois ; `T293` argument manquant ; `T294` pas un
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de

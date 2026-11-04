@@ -2548,7 +2548,7 @@ print(debut.end_of_month().format("D MMMM YYYY"))
 
 ### Fuseaux horaires : `Zone`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 Un `datetime` est toujours un instant en UTC. Une `Zone` de la base IANA (`Europe/Paris`,
 `America/New_York`, `UTC`...) dit ce que lit une horloge murale de cet endroit à cet instant, heure d'été
@@ -2739,7 +2739,7 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 
 ### Compression et archives : `Gzip`, `Zip`, `Tar`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 Compresser et décompresser des octets, et lire ou écrire des archives **en mémoire** (le disque
 passe par `fs.read_bytes` / `fs.write_bytes`). Il faut la commande `qlang` (`T250` ailleurs).

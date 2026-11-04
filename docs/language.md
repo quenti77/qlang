@@ -3305,6 +3305,47 @@ end
 fs.write("sortie.txt", "contenu").unwrap()
 ```
 
+**Modifier le disque.** `fs.append(chemin, texte)` ajoute à la fin d'un fichier (le crée au besoin) ;
+`fs.is_file(chemin)` dit si c'est un fichier ; `fs.remove(chemin)` supprime un fichier ou un lien (un dossier est
+une erreur : il faut `fs.remove_dir`) ; `fs.remove_dir(dossier)` supprime un dossier **vide**, et
+`fs.remove_dir(dossier, all: true)` supprime aussi tout ce qu'il contient ; `fs.rename(source, cible)` déplace ou
+renomme (le dossier de la cible doit exister) ; `fs.copy(source, cible)` copie un fichier (et remplace la cible).
+Avec `--root`, aucune de ces opérations ne sort du dossier, et ni le dossier de `--root` ni celui où tourne le
+programme ne se supprime.
+
+**Fichiers et dossiers comme objets : `File` et `Dir`.** `File.of("notes/a.txt")` et `Dir.of("src")` ne lisent rien
+tant qu'on n'appelle pas une méthode (le chemin est relu à chaque appel).
+
+| Appel | Résultat |
+| --- | --- |
+| `f.name()`, `f.stem()`, `f.ext()`, `f.parent()` | `a.txt`, `a`, `txt`, le `Dir` qui le contient |
+| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` |
+| `f.size()`, `f.modified()` | la taille en octets, la date de modification (un [`datetime`](#dates-et-heures--datetime)), dans un `Result` |
+| `f.read()`, `f.read_bytes()`, `f.lines()` | comme `fs.read`, `fs.read_bytes`, `fs.lines` |
+| `f.write(texte)`, `f.append(texte)` | remplace, ajoute à la fin |
+| `f.copy_to(cible)`, `f.move_to(cible)` | rendent le `File` de la cible |
+| `f.remove()` | supprime le fichier |
+| `d.name()`, `d.parent()`, `d.join(nom)`, `d.file(nom)` | le nom, le `Dir` au-dessus, le chemin ou le `File` de `nom` dans ce dossier |
+| `d.exists()`, `d.create()`, `d.remove()` | `d.remove(all: true)` supprime aussi le contenu ; sans `all`, seul un dossier vide part |
+| `d.move_to(cible)` | déplace le dossier |
+| `d.files()`, `d.dirs()` | les `File` / les `Dir` directement dans le dossier, triés |
+| `d.walk(name: "*.q", ignore: [".git"], depth: 40)` | un `Iterator<File>` sur tous les fichiers du dossier et de ceux en dessous |
+
+`walk` est paresseux (voir [`Iterable`](#parcourir-son-propre-type--iterable)) : dossier par dossier, ses fichiers
+puis ses sous-dossiers, chacun trié par nom. `name` ne garde que les fichiers dont le nom correspond au motif,
+`ignore` saute les fichiers et dossiers dont le nom correspond à l'un de ses motifs (ni `.git` ni `node_modules`
+n'est ouvert), `depth` limite le nombre de niveaux (`0` : ce dossier seulement). Le type de l'itérateur
+(`WalkIter`) se manipule par ses méthodes.
+
+```
+for f in Dir.of("src").walk(name: "*.q", ignore: [".git"]).unwrap() do
+  print("{f.path} {f.size().unwrap()}")
+end
+
+let tous = Dir.of("logs").walk().unwrap()
+let anciens = tous.filter(fun(f: File) -> bool f.modified().unwrap() < datetime.of(2026, 1, 1) end).collect()
+```
+
 `env.get(nom)` renvoie la valeur d'une variable d'environnement, ou `none` si
 elle n'est pas définie (`string?`, pas de `Result` : une variable absente est
 une situation normale, pas une erreur). `env.args()` renvoie les arguments

@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.2.0
+
+À venir : `BigInt` et `BigDecimal`, la suite des dates (`Date`, `Time`, lecture avec un format), et la promotion de niveau des parties qui n'ont rien cassé depuis la 1.0.
+
 ## 1.1.0
 
 Quatre fonctionnalités du langage et de la bibliothèque (`Iterable`, `File` et `Dir`, `Duration` et un `datetime` plus complet, `Self` et `T.zero()`), un serveur de langage qui met en forme pendant la frappe, et une première série de parties qui passent de provisoire à stable (paramètres variadiques, opérateurs surchargés, alias de type, annotations, `Any`, petits modules de la bibliothèque, `fmt --stdin`). Un seul changement cassant, dans une partie provisoire : les jetons de `datetime.format` (voir [docs/migration.md](docs/migration.md)).

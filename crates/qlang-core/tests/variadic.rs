@@ -166,8 +166,15 @@ fn spread_errors_are_reported_at_compile_time() {
         )),
         "COMPILE T264"
     );
+    // a `Set` is iterable, so it can be spread; a struct that is not, cannot
     assert_eq!(
         run(&format!("{SUM}let s = Set.of([1])\nprint(sum(...s))\n")),
+        "1\n"
+    );
+    assert_eq!(
+        run(&format!(
+            "{SUM}struct P\n    public x: int\nend\nprint(sum(...P {{ x: 1 }}))\n"
+        )),
         "COMPILE T264"
     );
     assert_eq!(run("let a = ...[1]\n"), "COMPILE P001");

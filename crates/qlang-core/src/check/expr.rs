@@ -1144,8 +1144,8 @@ impl Checker {
         let hint = match t {
             Ty::Nullable(_) => " (it may be `none`: write `...(x ?? [])`)".to_string(),
             Ty::Any => " (convert it first: `...a.as<array<T>>()`)".to_string(),
-            Ty::Struct(sid, _) if self.is_prelude_set(*sid) => {
-                " (write `...set.to_array()`)".to_string()
+            Ty::Struct(sid, _) if self.is_prelude_set(*sid) && into_map => {
+                " (a set is spread inside `[ ]` or a call)".to_string()
             }
             Ty::Struct(..) => {
                 " (a struct is spread when it implements `Iterable<T>` (in `[ ]` or a call) or `KeyedIterable<K, V>` (in `{ }`))"

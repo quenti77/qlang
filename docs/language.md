@@ -916,9 +916,10 @@ print({ ...defauts, "port": 8080 })   -- {"port": 8080, "workers": 2} : la derni
   qui manque. `somme(...[])` appelle `somme()`.
 - Dans un **tableau** `[ ]`, les types s'unifient comme pour un littéral écrit à la main (`[...a]` avec `a: array<int>`
   n'est pas un `array<float>`). Dans un **dictionnaire** `{ }`, les clés se suivent dans l'ordre d'écriture.
-- On n'étale que des `array` (dans un appel ou `[ ]`) et des `map` (dans `{ }`) : pas un `Set` (écrivez
-  `...ensemble.to_array()`), pas une valeur qui peut être `none` (`...(x ?? [])`), pas une structure, pas un `Any`
-  (`T264`). `...` ailleurs est une erreur de syntaxe. Il n'est pas surchargeable (voir #202).
+- On n'étale que des `array`, des `Set` et tout type qui implémente `Iterable<T>` (dans un appel ou `[ ]`), des `map` et
+  tout type qui implémente `KeyedIterable<K, V>` (dans `{ }`) : voir [Parcourir son propre type](#parcourir-son-propre-type--iterable).
+  Pas une valeur qui peut être `none` (`...(x ?? [])`), pas une structure qui n'implémente pas ces traits, pas un `Any`
+  (`T264`). `...` ailleurs est une erreur de syntaxe. Il n'est pas surchargeable : il s'appuie sur `Iterable`.
 - Les intervalles `0..3` et `0..=3` ne changent pas : `...` est un jeton à part.
 
 ### Fonctions anonymes

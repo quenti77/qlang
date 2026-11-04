@@ -2534,6 +2534,10 @@ de longueur fixe (ça dépend de la date à laquelle on les ajoute) ; un jour fa
 | `d.unix()`, `datetime.at(ms)` | secondes depuis 1970 ; (pour des secondes : `datetime.at(s * 1000)`) |
 | `d.to_http()`, `d.to_rfc2822()`, `d.to_iso()` | `Tue, 03 Nov 2026 14:30:00 GMT`, `… +0000`, `2026-11-03T14:30:00Z` |
 | `d.humanize(maintenant)`, `d.humanize(maintenant, "fr")` | `3 days ago`, `in 2 hours`, `il y a 3 jours` |
+| `datetime.from_unix(s)` | l'instant de `s` secondes après 1970 (`R064` hors des années 1 à 9999) |
+| `datetime.parse_with("11/10/2026 14:30", "DD/MM/YYYY HH:mm")` | lit un texte avec les jetons de `format` (`YYYY`, `YY`, `MM`, `M`, `DD`, `D`, `HH`, `H`, `mm`, `ss`, `SSS`) et `ZZ` pour un décalage (`+02:00`, `-0530` ou `Z`, retiré pour rendre l'instant UTC) ; le texte entre `[ ]` doit être là tel quel ; `none` si le texte ne correspond pas ou si la date n'existe pas |
+| `d.each(Duration.of(months: 1), until: fin)` | un `DatePeriod`, itérable : `d`, `d + 1 mois`, … jusqu'à `fin` (comprise si on l'atteint). Chaque instant est le début plus `n` pas : le 31 janvier donne le 28 février puis le 31 mars. Un pas nul ne rend rien |
+| `Duration.parse("P1Y2M3DT4H5M6S")` | lit le texte ISO 8601 (`PT90M`, `P2W` = 14 jours) ; `err` si ce n'en est pas un |
 
 ```
 let debut = datetime.of(2026, 1, 31, 10, 0, 0)

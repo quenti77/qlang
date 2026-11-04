@@ -2274,6 +2274,13 @@ fn static_fn(owner: &str, name: &str, nargs: usize) -> Option<(&'static str, Vec
         ("datetime", "of") if nargs == 6 => ("of", vec![Ty::Int; 6], Ty::DateTime, Needs::Nothing),
         ("datetime", "of") => ("of", vec![Ty::Int; 3], Ty::DateTime, Needs::Nothing),
         ("datetime", "at") => ("at", vec![Ty::Int], Ty::DateTime, Needs::Nothing),
+        ("datetime", "from_unix") => ("from_unix", vec![Ty::Int], Ty::DateTime, Needs::Nothing),
+        ("datetime", "parse_with") => (
+            "parse_with",
+            vec![Ty::Str, Ty::Str],
+            Ty::nullable(Ty::DateTime),
+            Needs::Nothing,
+        ),
         ("datetime", "parse") => (
             "parse",
             vec![Ty::Str],

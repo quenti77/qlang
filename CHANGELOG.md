@@ -7,6 +7,7 @@
 À venir : `BigInt` et `BigDecimal`, la suite des dates (`Date`, `Time`, lecture avec un format), et la promotion de niveau des parties qui n'ont rien cassé depuis la 1.0.
 
 - **`BigInt` et `BigDecimal`** (issue #204, non cassant). `BigInt` est un entier sans limite : `BigInt.of(n)`, `BigInt.parse(texte)`, `BigInt.pow(2, 200)`, les opérateurs `+ - * ** div %` et les comparaisons, le mélange avec un `int` (`BigInt.of(3) + 2`), `to_int()` qui échoue hors plage, `divmod`. `BigDecimal` est un décimal exact pour l'argent : un `BigInt` et une échelle, `0.1 + 0.2 == 0.3`, `divide(b, échelle, mode)` et `round` avec sept modes d'arrondi. `/` n'est défini sur aucun des deux (il faudrait choisir l'échelle) et `BigDecimal == float` est refusé. `to_json()` écrit une chaîne. Écrits en qlang dans le prélude : exacts mais plus lents que le natif. Niveau provisoire.
+- **Dates : lecture avec un format, secondes Unix, période, durée ISO** (issue #249, non cassant). `datetime.parse_with(texte, motif)` lit un texte avec les jetons de `format` plus `ZZ` pour un décalage (`+02:00`) et rend `none` s'il ne correspond pas ; `datetime.from_unix(s)` ; `d.each(Duration.of(months: 1), until: fin)` rend un `DatePeriod` itérable (chaque instant est le début plus `n` pas : 31 janvier, 28 février, 31 mars) ; `Duration.parse("P1DT2H")`. Niveau provisoire. Pas dans cette version : types `Date` et `Time`, fuseau dans la valeur, autres langues, nanosecondes.
 
 ## 1.1.0
 

@@ -116,6 +116,7 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// checks the current module first).
 const PRELUDE_SOURCE: &str = concat!(
     r#"
+--" What a failed call gives back in a `Result`. --"
 struct Error
     --" What went wrong, for a person to read. --"
     public message: string
@@ -248,12 +249,16 @@ trait Iterator<T>
     end
 end
 
+--" The iterator of `map`: each element of `source` through `f`. --"
 struct MapIter<T, U>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" The function applied to each element. --"
     public f: fun(T) -> U
 end
 
 impl<T, U> Iterator<U> for MapIter<T, U>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<U>
         match self.source.next()
             case Item(v) then Step<U>.Item((self.f)(v))
@@ -262,12 +267,16 @@ impl<T, U> Iterator<U> for MapIter<T, U>
     end
 end
 
+--" The iterator of `filter`: the elements of `source` that `keep` accepts. --"
 struct FilterIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" Tells whether an element stays. --"
     public keep: fun(T) -> bool
 end
 
 impl<T> Iterator<T> for FilterIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         while true do
             match self.source.next()
@@ -283,12 +292,16 @@ impl<T> Iterator<T> for FilterIter<T>
     end
 end
 
+--" The iterator of `take`: at most the first `left` elements of `source`. --"
 struct TakeIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" How many elements can still be given. --"
     public left: int
 end
 
 impl<T> Iterator<T> for TakeIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         if self.left <= 0 then
             return Step<T>.End
@@ -298,12 +311,16 @@ impl<T> Iterator<T> for TakeIter<T>
     end
 end
 
+--" The iterator of `skip`: `source` without its first elements. --"
 struct SkipIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" How many elements are still to be skipped. --"
     public skip: int
 end
 
 impl<T> Iterator<T> for SkipIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         while self.skip > 0 do
             self.skip -= 1
@@ -329,12 +346,16 @@ trait KeyedIterable<K, V>
     fun iter_keyed(self) -> Iterator<(K, V)>
 end
 
+--" The iterator of an array, a string or a `Set`: its elements in order. --"
 struct ArrayIter<T>
+    --" The elements. --"
     public items: array<T>
+    --" The position of the next one. --"
     public at: int
 end
 
 impl<T> Iterator<T> for ArrayIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         if self.at >= self.items.len() then
             return Step<T>.End
@@ -365,13 +386,18 @@ impl<T> Iterable<T> for Set<T>
     end
 end
 
+--" The iterator of a map: its `(key, value)` pairs. --"
 struct PairIter<K, V>
+    --" The keys. --"
     public keys: array<K>
+    --" The values, in the same order. --"
     public values: array<V>
+    --" The position of the next pair. --"
     public at: int
 end
 
 impl<K, V> Iterator<(K, V)> for PairIter<K, V>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<(K, V)>
         if self.at >= self.keys.len() then
             return Step<(K, V)>.End
@@ -395,12 +421,19 @@ minutes, seconds and milliseconds (days are 24 hours: a `datetime` is always UTC
 own: `Duration.of(minutes: 90)` stays 90 minutes until `normalize()`. Added to a `datetime` with `+`, `-`, `plus` or `minus`,
 the years and months go first (31 January + 1 month is the last day of February). --"
 struct Duration
+    --" Whole years. --"
     public years: int
+    --" Whole months. --"
     public months: int
+    --" Days of 24 hours. --"
     public days: int
+    --" Hours. --"
     public hours: int
+    --" Minutes. --"
     public minutes: int
+    --" Seconds. --"
     public seconds: int
+    --" Milliseconds. --"
     public ms: int
 end
 
@@ -606,9 +639,13 @@ end
 The start is included, the limit too if it is reached. Each moment is the start plus `n` steps, so months do not drift
 (31 January, 28 February, 31 March). --"
 struct DatePeriod
+    --" The first moment. --"
     public start: datetime
+    --" The distance between two moments. --"
     public gap: Duration
+    --" The limit, included when it is reached. --"
     public last: datetime
+    --" How many moments were given. --"
     public count: int
 end
 
@@ -620,6 +657,7 @@ impl DatePeriod
 end
 
 impl Iterator<datetime> for DatePeriod
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<datetime>
         let t = self.start.plus(self.gap.times(self.count))
         if self.gap.is_zero() or t.is_after(self.last) then
@@ -1543,6 +1581,7 @@ fun parse_hex4(hex: string) -> int?
     a * 4096 + b * 256 + c * 16 + d
 end
 
+--" The reader behind `Json.parse` (internal). --"
 struct JsonParser
     text: string
     pos: int
@@ -2858,12 +2897,19 @@ impl Dir
     end
 end
 
+--" The iterator of `Dir.walk`: the files of a folder and its sub-folders, read as it goes. --"
 struct WalkIter
+    --" Folders still to read. --"
     public pending: array<string>
+    --" The depth of each folder in `pending`. --"
     public levels: array<int>
+    --" Files found and not yet given. --"
     public files: array<File>
+    --" The pattern the names must match (empty for all). --"
     public name: string
+    --" Names of folders to skip. --"
     public ignore: array<string>
+    --" How deep to go (-1 for no limit). --"
     public depth: int
 end
 
@@ -2877,6 +2923,7 @@ fun walk_ignored(name: string, ignore: array<string>) -> bool
 end
 
 impl Iterator<File> for WalkIter
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<File>
         while self.files.is_empty() do
             if self.pending.is_empty() then

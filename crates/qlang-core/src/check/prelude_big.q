@@ -378,108 +378,126 @@ impl BigInt
 end
 
 impl As<string> for BigInt
+    --" The text of the number (`As<string>`). --"
     public fun convert(self) -> string
         self.to_string()
     end
 end
 
 impl Eq for BigInt
+    --" Whether both numbers are equal (`==`). --"
     public fun eq(self, other: BigInt) -> bool
         self.negative == other.negative and big_cmp_mag(self.limbs, other.limbs) == 0
     end
 end
 
 impl Ord for BigInt
+    --" -1, 0 or 1 (`<`, `>`). --"
     public fun cmp(self, other: BigInt) -> int
         self.compare(other)
     end
 end
 
 impl Add for BigInt
+    --" The sum (`+`). --"
     public fun add(self, other: BigInt) -> BigInt
         self.plus(other)
     end
 end
 
 impl Sub for BigInt
+    --" The difference (`-`). --"
     public fun sub(self, other: BigInt) -> BigInt
         self.minus(other)
     end
 end
 
 impl Mul for BigInt
+    --" The product (`*`). --"
     public fun mul(self, other: BigInt) -> BigInt
         self.times(other)
     end
 end
 
 impl IntDiv for BigInt
+    --" The quotient cut toward 0 (`div`). --"
     public fun int_div(self, other: BigInt) -> BigInt
         self.quotient(other)
     end
 end
 
 impl Mod for BigInt
+    --" The remainder (`%`). --"
     public fun modulo(self, other: BigInt) -> BigInt
         self.remainder(other)
     end
 end
 
 impl Neg for BigInt
+    --" The opposite (unary `-`). --"
     public fun neg(self) -> BigInt
         self.negate()
     end
 end
 
 impl Pow<int> for BigInt
+    --" The power (`**`). --"
     public fun pow(self, exponent: int) -> BigInt
         self.power(exponent)
     end
 end
 
 impl Add<int> for BigInt
+    --" The sum (`+`). --"
     public fun add(self, other: int) -> BigInt
         self.plus(BigInt.of(other))
     end
 end
 
 impl Sub<int> for BigInt
+    --" The difference (`-`). --"
     public fun sub(self, other: int) -> BigInt
         self.minus(BigInt.of(other))
     end
 end
 
 impl Mul<int> for BigInt
+    --" The product (`*`). --"
     public fun mul(self, other: int) -> BigInt
         self.times(BigInt.of(other))
     end
 end
 
 impl IntDiv<int> for BigInt
+    --" The quotient cut toward 0 (`div`). --"
     public fun int_div(self, other: int) -> BigInt
         self.quotient(BigInt.of(other))
     end
 end
 
 impl Mod<int> for BigInt
+    --" The remainder (`%`). --"
     public fun modulo(self, other: int) -> BigInt
         self.remainder(BigInt.of(other))
     end
 end
 
 impl Add<BigInt> for int
+    --" The sum (`+`). --"
     public fun add(self, other: BigInt) -> BigInt
         BigInt.of(self).plus(other)
     end
 end
 
 impl Sub<BigInt> for int
+    --" The difference (`-`). --"
     public fun sub(self, other: BigInt) -> BigInt
         BigInt.of(self).minus(other)
     end
 end
 
 impl Mul<BigInt> for int
+    --" The product (`*`). --"
     public fun mul(self, other: BigInt) -> BigInt
         BigInt.of(self).times(other)
     end
@@ -594,6 +612,7 @@ impl BigDecimal
     end
 
     -- the unscaled value brought to a bigger scale
+    --" The unscaled value brought to a larger scale. --"
     public fun widened(self, scale: int) -> BigInt
         if scale <= self.scale then
             return self.unscaled
@@ -681,78 +700,91 @@ impl BigDecimal
 end
 
 impl As<string> for BigDecimal
+    --" The text of the number (`As<string>`). --"
     public fun convert(self) -> string
         self.to_string()
     end
 end
 
 impl Eq for BigDecimal
+    --" Whether both numbers are equal (`==`). --"
     public fun eq(self, other: BigDecimal) -> bool
         self.compare(other) == 0
     end
 end
 
 impl Ord for BigDecimal
+    --" -1, 0 or 1 (`<`, `>`). --"
     public fun cmp(self, other: BigDecimal) -> int
         self.compare(other)
     end
 end
 
 impl Add for BigDecimal
+    --" The sum (`+`). --"
     public fun add(self, other: BigDecimal) -> BigDecimal
         self.plus(other)
     end
 end
 
 impl Sub for BigDecimal
+    --" The difference (`-`). --"
     public fun sub(self, other: BigDecimal) -> BigDecimal
         self.minus(other)
     end
 end
 
 impl Mul for BigDecimal
+    --" The product (`*`). --"
     public fun mul(self, other: BigDecimal) -> BigDecimal
         self.times(other)
     end
 end
 
 impl Neg for BigDecimal
+    --" The opposite (unary `-`). --"
     public fun neg(self) -> BigDecimal
         self.negate()
     end
 end
 
 impl Add<int> for BigDecimal
+    --" The sum (`+`). --"
     public fun add(self, other: int) -> BigDecimal
         self.plus(BigDecimal.of(other))
     end
 end
 
 impl Sub<int> for BigDecimal
+    --" The difference (`-`). --"
     public fun sub(self, other: int) -> BigDecimal
         self.minus(BigDecimal.of(other))
     end
 end
 
 impl Mul<int> for BigDecimal
+    --" The product (`*`). --"
     public fun mul(self, other: int) -> BigDecimal
         self.times(BigDecimal.of(other))
     end
 end
 
 impl Add<BigDecimal> for int
+    --" The sum (`+`). --"
     public fun add(self, other: BigDecimal) -> BigDecimal
         BigDecimal.of(self).plus(other)
     end
 end
 
 impl Sub<BigDecimal> for int
+    --" The difference (`-`). --"
     public fun sub(self, other: BigDecimal) -> BigDecimal
         BigDecimal.of(self).minus(other)
     end
 end
 
 impl Mul<BigDecimal> for int
+    --" The product (`*`). --"
     public fun mul(self, other: BigDecimal) -> BigDecimal
         BigDecimal.of(self).times(other)
     end

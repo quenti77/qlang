@@ -81,3 +81,21 @@ fn every_builtin_method_and_function_is_explained() {
         }
     }
 }
+
+#[test]
+fn every_public_type_field_and_method_of_the_prelude_is_explained() {
+    let r = reference();
+    for t in r["types"].as_array().unwrap() {
+        let name = t["name"].as_str().unwrap();
+        assert!(!t["doc"].as_str().unwrap().is_empty(), "type {name}");
+        for list in ["fields", "variants", "methods"] {
+            for m in t[list].as_array().unwrap() {
+                assert!(
+                    !m["doc"].as_str().unwrap().is_empty(),
+                    "{name}.{}",
+                    m["name"]
+                );
+            }
+        }
+    }
+}

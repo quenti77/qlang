@@ -210,13 +210,27 @@ impl Checker {
 
     /// A trait followed by every trait it extends, directly or not, with their arguments.
     pub fn trait_closure(&self, tid: TraitId, targs: &[Ty]) -> Vec<(TraitId, Vec<Ty>)> {
+        self.trait_closure_of(tid, targs, None)
+    }
+
+    /// The trait and the traits it extends, with their arguments. `self_ty`, when it is known, is what
+    /// `Self` stands for in them (`trait Numeric extends Add<Self>`): the type that has the bound.
+    pub fn trait_closure_of(
+        &self,
+        tid: TraitId,
+        targs: &[Ty],
+        self_ty: Option<&Ty>,
+    ) -> Vec<(TraitId, Vec<Ty>)> {
         let mut out: Vec<(TraitId, Vec<Ty>)> = vec![(tid, targs.to_vec())];
         let mut next = 0;
         while next < out.len() && out.len() < 64 {
             let (t, a) = out[next].clone();
             next += 1;
             let def = &self.defs.traits[t];
-            let map: HashMap<ParamId, Ty> = def.tparams.iter().cloned().zip(a).collect();
+            let mut map: HashMap<ParamId, Ty> = def.tparams.iter().cloned().zip(a).collect();
+            if let Some(s) = self_ty {
+                map.insert(SELF_PARAM, s.clone());
+            }
             for (st, sa) in &def.supers {
                 if !out.iter().any(|(x, _)| x == st) {
                     out.push((*st, sa.iter().map(|x| x.subst(&map)).collect()));
@@ -231,7 +245,7 @@ impl Checker {
         match &ty {
             Ty::Error => return true,
             Ty::Trait(t, a) => {
-                for (st, sa) in self.trait_closure(*t, a) {
+                for (st, sa) in self.trait_closure_of(*t, a, Some(&ty)) {
                     if st == tid
                         && sa.len() == targs.len()
                         && sa.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
@@ -244,7 +258,7 @@ impl Checker {
             Ty::Param(p) => {
                 let bounds = self.defs.params[*p].bounds.clone();
                 for (t, a) in bounds {
-                    for (st, sa) in self.trait_closure(t, &a) {
+                    for (st, sa) in self.trait_closure_of(t, &a, Some(&ty)) {
                         if st == tid
                             && sa.len() == targs.len()
                             && sa.iter().zip(targs.iter()).all(|(x, y)| self.same(x, y))
@@ -332,7 +346,9 @@ impl Checker {
                     else {
                         continue;
                     };
-                    if let Some(map) = self.impl_matches(iid, &cand) {
+                    if let Some(mut map) = self.impl_matches(iid, &cand) {
+                        // `Self` in a method the trait wrote the body of: the type the method is called on
+                        map.insert(SELF_PARAM, cand.clone());
                         return Some(UserMethod {
                             fid,
                             impl_id: iid,
@@ -499,7 +515,7 @@ impl Checker {
                 .bounds
                 .clone()
                 .into_iter()
-                .flat_map(|(t, a)| self.trait_closure(t, &a))
+                .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&ty)))
                 .collect();
             for (t, a) in bounds {
                 if t != tid {

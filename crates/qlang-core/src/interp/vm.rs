@@ -2277,6 +2277,10 @@ impl Gen<'_> {
                 || self.prog.res.packs.contains_key(&e.id))
             || self.prog.res.trait_calls.contains(&e.id)
             || self.prog.res.class_calls.contains(&e.id)
+            || matches!(
+                self.prog.res.paths.get(&callee.id),
+                Some(PathRes::ParamStatic(..))
+            )
             || self.prog.res.super_calls.contains_key(&callee.id)
             || self.prog.res.paths.get(&callee.id).is_some()
         {

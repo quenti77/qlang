@@ -1729,6 +1729,11 @@ impl<'a> Interp<'a> {
                         let argv = self.eval_args(e.id, args, env)?;
                         return self.static_call(ty, name, argv, e.span);
                     }
+                    // `T.zero()`: the impl of the type `T` stands for
+                    Some(PathRes::ParamStatic(p, tid, name)) => {
+                        let argv = self.eval_args(e.id, args, env)?;
+                        return self.param_static_call(*p, *tid, name, argv, e.span);
+                    }
                     Some(PathRes::Reflect(op)) => {
                         let mut argv = Vec::new();
                         if op.takes_receiver()
@@ -1797,6 +1802,53 @@ impl<'a> Interp<'a> {
             }
             _ => self.fail("R007", "this value is not a function", span),
         }
+    }
+
+    /// `T.name(args)` for a type parameter `T` of the function being run: the method `name` (without
+    /// `self`) of the impl of trait `tid` for the type `T` stands for.
+    fn param_static_call(
+        &mut self,
+        p: ParamId,
+        tid: TraitId,
+        name: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> R<Value> {
+        let ty = self.runtime_ty(&Ty::Param(p));
+        self.type_static_call(&ty, tid, name, args, span)
+    }
+
+    /// The method `name` (without `self`) of the impl of trait `tid` for the type `ty`.
+    fn type_static_call(
+        &mut self,
+        ty: &Ty,
+        tid: TraitId,
+        name: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> R<Value> {
+        let ty = ty.clone();
+        let defs = &self.prog.defs;
+        let found = defs.impls.iter().find_map(|imp| {
+            if !matches!(&imp.trait_, Some((t, _)) if *t == tid) {
+                return None;
+            }
+            let (_, fid) = imp.methods.iter().find(|(n, _)| n == name)?;
+            let mut bound = HashMap::new();
+            crate::types::match_ty(&imp.target, &ty, &mut bound).then_some((*fid, bound))
+        });
+        let Some((fid, bound)) = found else {
+            let shown = ty.show(defs);
+            return self.fail(
+                "R008",
+                format!("`{shown}` has no implementation of `{name}` here"),
+                span,
+            );
+        };
+        if self.prog.res.reified.contains(&fid) {
+            self.pending_targs = Some(bound);
+        }
+        self.call_fid(fid, None, args, span)
     }
 
     fn call_fid(
@@ -3905,6 +3957,17 @@ impl<'a> Interp<'a> {
                         Value::Float(0.0)
                     } else if self.prog.res.int_sums.contains(&self.cur_call) {
                         Value::Int(0)
+                    } else if let Some(t) = self.prog.res.zero_sums.get(&self.cur_call).cloned() {
+                        // the elements implement `Zero`
+                        let zero = self
+                            .prog
+                            .defs
+                            .traits
+                            .iter()
+                            .position(|d| d.module == 0 && d.name == "Zero")
+                            .expect("the prelude declares Zero");
+                        let ty = self.runtime_ty(&t);
+                        self.type_static_call(&ty, zero, "zero", Vec::new(), span)?
                     } else {
                         return self.fail(
                             "R015",

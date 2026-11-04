@@ -731,6 +731,55 @@ end
 - Le tableau parcouru peut être modifié pendant la boucle ; la boucle voit les
   éléments ajoutés.
 
+### Parcourir son propre type : `Iterable`
+
+*Niveau : provisoire.*
+
+Un type du programme se parcourt avec `for` (et s'étale avec `...`) quand il implémente un trait du
+prélude. `Step<T>` dit ce que donne un pas : `Step.Item(valeur)` ou `Step.End` quand il n'y a plus rien
+(ce n'est pas un `T?` : un élément peut valoir `none` sans arrêter la boucle).
+
+| Trait | Méthode | Ce que ça permet |
+| --- | --- | --- |
+| `Iterator<T>` | `next(self) -> Step<T>` | donner les éléments un par un |
+| `Iterable<T>` | `iter(self) -> Iterator<T>` | `for x in c`, `for i, x in c` (`i` est un compteur 0, 1, 2…), `[...c]`, `f(...c)` |
+| `KeyedIterable<K, V>` | `iter_keyed(self) -> Iterator<(K, V)>` | `for k, v in c`, `{ ...c }` |
+
+```
+struct Count
+    public n: int
+    public max: int
+end
+
+impl Iterator<int> for Count
+    public fun next(self) -> Step<int>
+        if self.n >= self.max then
+            return Step<int>.End
+        end
+        self.n += 1
+        Step<int>.Item(self.n)
+    end
+end
+
+for x in Count { n: 0, max: 3 } do
+    print(x)                          -- 1, 2, 3
+end
+```
+
+- Un `Iterator<T>` se parcourt tel quel (sans `Iterable`). Le tableau, la chaîne et `Set<T>` implémentent
+  `Iterable`, le dictionnaire `KeyedIterable` : `[1, 2, 3].iter()`, `m.iter_keyed()`. Leurs boucles `for`
+  gardent leur chemin direct (même comportement, même vitesse).
+- Un `Iterator<T>` a des méthodes **paresseuses** : `map(f)`, `filter(garde)`, `take(n)` et `skip(n)` rendent un
+  nouvel itérateur, et rien ne s'exécute avant qu'on le parcoure ; `collect()` donne un tableau, `count()` le nombre
+  d'éléments restants, `first()` le suivant ou `none`.
+  `Count { n: 0, max: 1000000000 }.filter(pair).take(3).collect()` ne calcule que ce qu'il faut.
+- Une fonction générique peut demander un type parcourable : `fun total<I: Iterable<int>>(c: I)`.
+- Pendant la boucle, un type à soi décide de ce qu'il fait si on le modifie : le langage ne promet que de ne
+  jamais planter. Les types prédéfinis gardent leur comportement (tableau : vue vivante, dictionnaire : copie).
+- `Step`, `Item`, `End`, `Iterator`, `Iterable`, `KeyedIterable`, `iter`, `iter_keyed` et `next` sont des noms du
+  prélude ; un programme qui déclare les siens les masque, comme pour tout nom du prélude.
+- Pas encore : `enumerate`, `zip`, `reduce` paresseux, générateurs (`yield`).
+
 ---
 
 ## 8. Fonctions

@@ -176,6 +176,217 @@ fun Err<T, E>(error: E) -> Result<T, E>
     Result<T, E>.Err(error)
 end
 
+-- ===== iteration =====
+
+--" What one step of an iteration gives: `Item(value)`, or `End` when there is nothing left.
+It is not a `T?`: an element may itself be `none`, and that must not stop the loop. --"
+enum Step<T>
+    --" The next element. --"
+    Item(value: T)
+    --" There is nothing left. --"
+    End
+end
+
+--" Something that gives its elements one at a time: `next()` returns `Item(x)` until it
+returns `End`. --"
+trait Iterator<T>
+    --" The next step of the iteration. --"
+    fun next(self) -> Step<T>
+
+    --" All the remaining elements, in an array. --"
+    fun collect(self) -> array<T>
+        let out: array<T> = []
+        while true do
+            match self.next()
+                case Item(v) then out[] = v
+                case End then return out
+            end
+        end
+        out
+    end
+
+    --" How many elements remain (they are used up). --"
+    fun count(self) -> int
+        let n = 0
+        while true do
+            match self.next()
+                case Item(_) then n += 1
+                case End then return n
+            end
+        end
+        n
+    end
+
+    --" The next element, or `none` when there is nothing left (an element that is itself
+    `none` cannot be told apart: use `next()` for that). --"
+    fun first(self) -> T?
+        match self.next()
+            case Item(v) then v
+            case End then none
+        end
+    end
+
+    --" An iterator over `f(x)` for each element `x`; nothing runs until it is used. --"
+    fun map<U>(self, f: fun(T) -> U) -> Iterator<U>
+        MapIter<T, U> { source: self, f: f }
+    end
+
+    --" An iterator over the elements for which `keep(x)` is true. --"
+    fun filter(self, keep: fun(T) -> bool) -> Iterator<T>
+        FilterIter<T> { source: self, keep: keep }
+    end
+
+    --" An iterator over the first `n` elements. --"
+    fun take(self, n: int) -> Iterator<T>
+        TakeIter<T> { source: self, left: n }
+    end
+
+    --" An iterator over the elements after the first `n`. --"
+    fun skip(self, n: int) -> Iterator<T>
+        SkipIter<T> { source: self, skip: n }
+    end
+end
+
+struct MapIter<T, U>
+    public source: Iterator<T>
+    public f: fun(T) -> U
+end
+
+impl<T, U> Iterator<U> for MapIter<T, U>
+    public fun next(self) -> Step<U>
+        match self.source.next()
+            case Item(v) then Step<U>.Item((self.f)(v))
+            case End then Step<U>.End
+        end
+    end
+end
+
+struct FilterIter<T>
+    public source: Iterator<T>
+    public keep: fun(T) -> bool
+end
+
+impl<T> Iterator<T> for FilterIter<T>
+    public fun next(self) -> Step<T>
+        while true do
+            match self.source.next()
+                case Item(v) then
+                    if (self.keep)(v) then
+                        return Step<T>.Item(v)
+                    end
+                case End then
+                    return Step<T>.End
+            end
+        end
+        Step<T>.End
+    end
+end
+
+struct TakeIter<T>
+    public source: Iterator<T>
+    public left: int
+end
+
+impl<T> Iterator<T> for TakeIter<T>
+    public fun next(self) -> Step<T>
+        if self.left <= 0 then
+            return Step<T>.End
+        end
+        self.left -= 1
+        self.source.next()
+    end
+end
+
+struct SkipIter<T>
+    public source: Iterator<T>
+    public skip: int
+end
+
+impl<T> Iterator<T> for SkipIter<T>
+    public fun next(self) -> Step<T>
+        while self.skip > 0 do
+            self.skip -= 1
+            match self.source.next()
+                case Item(_) then
+                case End then
+                    return Step<T>.End
+            end
+        end
+        self.source.next()
+    end
+end
+
+--" A type that `for x in value`, `for i, x in value` and `[...value]` can go through. --"
+trait Iterable<T>
+    --" An iterator over the elements. --"
+    fun iter(self) -> Iterator<T>
+end
+
+--" A type that `for key, value in x` can go through: its elements are pairs. --"
+trait KeyedIterable<K, V>
+    --" An iterator over the `(key, value)` pairs. --"
+    fun iter_keyed(self) -> Iterator<(K, V)>
+end
+
+struct ArrayIter<T>
+    public items: array<T>
+    public at: int
+end
+
+impl<T> Iterator<T> for ArrayIter<T>
+    public fun next(self) -> Step<T>
+        if self.at >= self.items.len() then
+            return Step<T>.End
+        end
+        self.at += 1
+        Step<T>.Item(self.items[self.at - 1])
+    end
+end
+
+impl<T> Iterable<T> for array<T>
+    --" An iterator over the elements. --"
+    public fun iter(self) -> Iterator<T>
+        ArrayIter<T> { items: self, at: 0 }
+    end
+end
+
+impl Iterable<string> for string
+    --" An iterator over the characters. --"
+    public fun iter(self) -> Iterator<string>
+        ArrayIter<string> { items: self.chars(), at: 0 }
+    end
+end
+
+impl<T> Iterable<T> for Set<T>
+    --" An iterator over the values, as they are now. --"
+    public fun iter(self) -> Iterator<T>
+        ArrayIter<T> { items: self.to_array(), at: 0 }
+    end
+end
+
+struct PairIter<K, V>
+    public keys: array<K>
+    public values: array<V>
+    public at: int
+end
+
+impl<K, V> Iterator<(K, V)> for PairIter<K, V>
+    public fun next(self) -> Step<(K, V)>
+        if self.at >= self.keys.len() then
+            return Step<(K, V)>.End
+        end
+        self.at += 1
+        Step<(K, V)>.Item((self.keys[self.at - 1], self.values[self.at - 1]))
+    end
+end
+
+impl<K, V> KeyedIterable<K, V> for map<K, V>
+    --" An iterator over the `(key, value)` pairs, as they are now. --"
+    public fun iter_keyed(self) -> Iterator<(K, V)>
+        PairIter<K, V> { keys: self.keys(), values: self.values(), at: 0 }
+    end
+end
+
 -- ===== neutral elements =====
 
 --" A type with a value that changes nothing when added: `0` for an `int`, `0.0` for a `float`.

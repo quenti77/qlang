@@ -1093,6 +1093,7 @@ impl Checker {
                 | Ty::Bool
                 | Ty::Str
                 | Ty::Array(_)
+                | Ty::Map(..)
                 | Ty::Uuid
                 | Ty::Ulid
                 | Ty::DateTime => {}

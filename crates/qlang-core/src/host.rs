@@ -75,6 +75,17 @@ pub trait SqlBackend {
     fn sql_close(&mut self, conn: u64) -> Result<(), HostError>;
 }
 
+/// What a host knows about a path (`Host::stat_path`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PathStat {
+    pub is_file: bool,
+    pub is_dir: bool,
+    pub is_link: bool,
+    pub size: u64,
+    /// Milliseconds since 1970-01-01 (UTC), 0 when the system does not say.
+    pub modified_ms: i64,
+}
+
 /// The `extern fun` of the prelude that the methods of [`Host`] above implement: `fs.read`
 /// and `fs.write` (`fs_read`, `fs_write`), `env.get` and `env.args` (`env_get`, `env_args`)
 /// and `http.send` (`http_send`). Whether a host has them follows its [`Capabilities`].
@@ -82,7 +93,9 @@ pub fn std_has(caps: Capabilities, name: &str) -> bool {
     match name {
         "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" | "fs_create_dir"
         | "fs_exists" | "fs_list" | "fs_is_dir" | "fs_open_lines" | "fs_read_line"
-        | "fs_close_lines" => caps.fs,
+        | "fs_close_lines" | "fs_stat" | "fs_append" | "fs_remove" | "fs_rename" | "fs_copy" => {
+            caps.fs
+        }
         "env_get" | "env_args" => caps.env,
         "secure_random_bytes" => caps.random,
         // pure functions, and the log: every host has them
@@ -116,6 +129,29 @@ pub fn std_call<H: Host + ?Sized>(
         }
         ("fs_exists", [HostValue::Str(path)]) => host.path_exists(path).map(HostValue::Bool),
         ("fs_is_dir", [HostValue::Str(path)]) => host.is_dir(path).map(HostValue::Bool),
+        ("fs_stat", [HostValue::Str(path)]) => host.stat_path(path).map(|st| match st {
+            // [kind bits (1 file, 2 folder, 4 link), size, modified]
+            Some(st) => HostValue::Array(vec![
+                HostValue::Int(
+                    i64::from(st.is_file) | i64::from(st.is_dir) << 1 | i64::from(st.is_link) << 2,
+                ),
+                HostValue::Int(st.size.min(i64::MAX as u64) as i64),
+                HostValue::Int(st.modified_ms),
+            ]),
+            None => HostValue::Null,
+        }),
+        ("fs_append", [HostValue::Str(path), HostValue::Str(content)]) => host
+            .append_file(path, content)
+            .map(|()| HostValue::Bool(true)),
+        ("fs_remove", [HostValue::Str(path), HostValue::Bool(recursive)]) => host
+            .remove_path(path, *recursive)
+            .map(|()| HostValue::Bool(true)),
+        ("fs_rename", [HostValue::Str(from), HostValue::Str(to)]) => {
+            host.rename_path(from, to).map(|()| HostValue::Bool(true))
+        }
+        ("fs_copy", [HostValue::Str(from), HostValue::Str(to)]) => {
+            host.copy_file(from, to).map(|()| HostValue::Bool(true))
+        }
         ("fs_list", [HostValue::Str(path)]) => host
             .list_dir(path)
             .map(|names| HostValue::Array(names.into_iter().map(HostValue::Str).collect())),
@@ -200,6 +236,11 @@ pub fn std_call<H: Host + ?Sized>(
             | "fs_open_lines"
             | "fs_read_line"
             | "fs_close_lines"
+            | "fs_stat"
+            | "fs_append"
+            | "fs_remove"
+            | "fs_rename"
+            | "fs_copy"
             | "env_get"
             | "env_args"
             | "http_send"
@@ -470,6 +511,32 @@ pub trait Host {
 
     /// Whether `path` is a folder.
     fn is_dir(&mut self, _path: &str) -> Result<bool, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// What is at `path`, or `None` when nothing is there. A link is reported as a link (it is not
+    /// followed), with the size and the kind of what it leads to.
+    fn stat_path(&mut self, _path: &str) -> Result<Option<PathStat>, HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Add `content` at the end of a file (creating it if needed).
+    fn append_file(&mut self, _path: &str, _content: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Delete a file or a link, or a folder: only an empty one unless `recursive`.
+    fn remove_path(&mut self, _path: &str, _recursive: bool) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Move or rename a file or a folder.
+    fn rename_path(&mut self, _from: &str, _to: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Copy a file, replacing the target if there is one.
+    fn copy_file(&mut self, _from: &str, _to: &str) -> Result<(), HostError> {
         Err(HostError::Unsupported("fs"))
     }
 

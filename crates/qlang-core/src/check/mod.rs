@@ -2303,6 +2303,11 @@ extern fun fs_create_dir(path: string) -> Result<bool, Error>
 extern fun fs_exists(path: string) -> Result<bool, Error>
 extern fun fs_is_dir(path: string) -> Result<bool, Error>
 extern fun fs_list(path: string) -> Result<array<string>, Error>
+extern fun fs_stat(path: string) -> Result<array<int>?, Error>
+extern fun fs_append(path: string, content: string) -> Result<bool, Error>
+extern fun fs_remove(path: string, recursive: bool) -> Result<bool, Error>
+extern fun fs_rename(source: string, target: string) -> Result<bool, Error>
+extern fun fs_copy(source: string, target: string) -> Result<bool, Error>
 extern fun fs_open_lines(path: string) -> Result<int, Error>
 extern fun fs_read_line(handle: int) -> Result<string?, Error>
 extern fun fs_close_lines(handle: int) -> Result<bool, Error>
@@ -2355,6 +2360,46 @@ impl fs
     --" The names (not the paths) of what a folder holds, sorted. Needs disk access. --"
     public fun list(path: string) -> Result<array<string>, Error>
         fs_list(path)
+    end
+
+    --" Whether `path` is a file (`false` when it is not there, or is a folder). Needs disk access. --"
+    public fun is_file(path: string) -> Result<bool, Error>
+        let st = fs_stat(path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
+    end
+
+    --" Adds `content` at the end of a file (creating it if needed). Needs disk access. --"
+    public fun append(path: string, content: string) -> Result<bool, Error>
+        fs_append(path, content)
+    end
+
+    --" Deletes a file (or a link). A folder is `remove_dir`. Needs disk access. --"
+    public fun remove(path: string) -> Result<bool, Error>
+        if kind_at(path) % 4 >= 2 then
+            return Result<bool, Error>.Err(Error { message: "\"" + path + "\" is a folder: use fs.remove_dir" })
+        end
+        fs_remove(path, false)
+    end
+
+    --" Deletes a folder: only an empty one, unless `all` is true (then everything it holds goes too,
+    be sure of the path). The `--root` folder itself and the one the program runs in are never removed.
+    Needs disk access. --"
+    public fun remove_dir(path: string, all: bool = false) -> Result<bool, Error>
+        fs_remove(path, all)
+    end
+
+    --" Moves or renames a file or a folder (the target's folder must be there). Needs disk access. --"
+    public fun rename(source: string, target: string) -> Result<bool, Error>
+        fs_rename(source, target)
+    end
+
+    --" Copies a file to `target` (replacing what is there). Needs disk access. --"
+    public fun copy(source: string, target: string) -> Result<bool, Error>
+        fs_copy(source, target)
     end
 
     --" Opens a text file to read it one line at a time, without loading it all: `next()` gives each
@@ -2451,6 +2496,318 @@ impl Lines
     --" Closes the file before its end (a file that was read to its end closes by itself). --"
     public fun close(self)
         fs_close_lines(self.handle)
+    end
+end
+
+--" The kind of what is at `path` as bits (1 file, 2 folder, 4 link), 0 when nothing is there or it cannot be
+told. --"
+fun kind_at(path: string) -> int
+    let st = fs_stat(path)
+    if st.is_err() then
+        return 0
+    end
+    let found = st.unwrap()
+    if found == none then
+        return 0
+    end
+    found[0]
+end
+
+fun stat_of(path: string) -> Result<array<int>, Error>
+    let st = fs_stat(path)
+    if st.is_err() then
+        return Result<array<int>, Error>.Err(st.unwrap_err())
+    end
+    let found = st.unwrap()
+    if found == none then
+        return Result<array<int>, Error>.Err(Error { message: "\"" + path + "\" not found" })
+    end
+    Result<array<int>, Error>.Ok(found)
+end
+
+--" A file on disk, by its path (it may not be there yet): `File.of("notes/a.txt")`. The path is read
+when a method is called, nothing is kept open. Needs disk access. --"
+struct File
+    --" The path given to `File.of`. --"
+    public path: string
+end
+
+impl File
+    --" The file at `path`. --"
+    public fun of(path: string) -> File
+        File { path: path }
+    end
+
+    --" The last part of the path: `a.txt`. --"
+    public fun name(self) -> string
+        Path.base(self.path)
+    end
+
+    --" The name without its extension: `a`. --"
+    public fun stem(self) -> string
+        Path.stem(self.path)
+    end
+
+    --" The extension without the dot, in lower case: `txt` (`""` for none). --"
+    public fun ext(self) -> string
+        Path.ext(self.path)
+    end
+
+    --" The folder that holds it. --"
+    public fun parent(self) -> Dir
+        Dir { path: Path.dir(self.path) }
+    end
+
+    --" Whether something is at this path. --"
+    public fun exists(self) -> Result<bool, Error>
+        fs_exists(self.path)
+    end
+
+    --" Whether this is a file (and not a folder). --"
+    public fun is_file(self) -> Result<bool, Error>
+        let st = fs_stat(self.path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
+    end
+
+    --" Whether this path is a link. --"
+    public fun is_link(self) -> Result<bool, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<bool, Error>.Err(st.unwrap_err())
+        end
+        Result<bool, Error>.Ok(st.unwrap()[0] >= 4)
+    end
+
+    --" The size in bytes. --"
+    public fun size(self) -> Result<int, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<int, Error>.Err(st.unwrap_err())
+        end
+        Result<int, Error>.Ok(st.unwrap()[1])
+    end
+
+    --" When it was last changed (an instant, UTC). --"
+    public fun modified(self) -> Result<datetime, Error>
+        let st = stat_of(self.path)
+        if st.is_err() then
+            return Result<datetime, Error>.Err(st.unwrap_err())
+        end
+        Result<datetime, Error>.Ok(datetime.at(st.unwrap()[2]))
+    end
+
+    --" The whole content as text. --"
+    public fun read(self) -> Result<string, Error>
+        fs_read(self.path)
+    end
+
+    --" The whole content as bytes. --"
+    public fun read_bytes(self) -> Result<bytes, Error>
+        fs_read_bytes(self.path)
+    end
+
+    --" The lines, one at a time (see `fs.lines`). --"
+    public fun lines(self) -> Result<Lines, Error>
+        open_lines(self.path)
+    end
+
+    --" Replaces the content. --"
+    public fun write(self, content: string) -> Result<bool, Error>
+        fs_write(self.path, content)
+    end
+
+    --" Adds `content` at the end (creating the file if needed). --"
+    public fun append(self, content: string) -> Result<bool, Error>
+        fs_append(self.path, content)
+    end
+
+    --" Copies the file to `target`; gives the copy. --"
+    public fun copy_to(self, target: string) -> Result<File, Error>
+        let done = fs_copy(self.path, target)
+        if done.is_err() then
+            return Result<File, Error>.Err(done.unwrap_err())
+        end
+        Result<File, Error>.Ok(File { path: target })
+    end
+
+    --" Moves (renames) the file to `target`; gives it at its new place. --"
+    public fun move_to(self, target: string) -> Result<File, Error>
+        let done = fs_rename(self.path, target)
+        if done.is_err() then
+            return Result<File, Error>.Err(done.unwrap_err())
+        end
+        Result<File, Error>.Ok(File { path: target })
+    end
+
+    --" Deletes the file. --"
+    public fun remove(self) -> Result<bool, Error>
+        if kind_at(self.path) % 4 >= 2 then
+            return Result<bool, Error>.Err(Error { message: "\"" + self.path + "\" is a folder: use Dir.remove" })
+        end
+        fs_remove(self.path, false)
+    end
+end
+
+--" A folder on disk, by its path: `Dir.of("src")`. Needs disk access. --"
+struct Dir
+    --" The path given to `Dir.of`. --"
+    public path: string
+end
+
+impl Dir
+    --" The folder at `path`. --"
+    public fun of(path: string) -> Dir
+        Dir { path: path }
+    end
+
+    --" The last part of the path. --"
+    public fun name(self) -> string
+        Path.base(self.path)
+    end
+
+    --" The folder above. --"
+    public fun parent(self) -> Dir
+        Dir { path: Path.dir(self.path) }
+    end
+
+    --" The path of `name` inside this folder (nothing is read). --"
+    public fun join(self, name: string) -> string
+        Path.join(self.path, name)
+    end
+
+    --" The file called `name` in this folder (it may not be there). --"
+    public fun file(self, name: string) -> File
+        File { path: Path.join(self.path, name) }
+    end
+
+    --" Whether this is a folder that is there. --"
+    public fun exists(self) -> Result<bool, Error>
+        fs_is_dir(self.path)
+    end
+
+    --" Creates the folder and the ones above it that are missing. --"
+    public fun create(self) -> Result<bool, Error>
+        fs_create_dir(self.path)
+    end
+
+    --" Deletes the folder: only an empty one, unless `all` (then all it holds goes too). --"
+    public fun remove(self, all: bool = false) -> Result<bool, Error>
+        fs_remove(self.path, all)
+    end
+
+    --" Moves (renames) the folder to `target`. --"
+    public fun move_to(self, target: string) -> Result<Dir, Error>
+        let done = fs_rename(self.path, target)
+        if done.is_err() then
+            return Result<Dir, Error>.Err(done.unwrap_err())
+        end
+        Result<Dir, Error>.Ok(Dir { path: target })
+    end
+
+    --" The files directly in this folder (not those of its sub-folders), sorted by name. --"
+    public fun files(self) -> Result<array<File>, Error>
+        let names = fs_list(self.path)
+        if names.is_err() then
+            return Result<array<File>, Error>.Err(names.unwrap_err())
+        end
+        let out: array<File> = []
+        for name in names.unwrap() do
+            let path = Path.join(self.path, name)
+            if kind_at(path) % 2 == 1 then
+                out.push(File { path: path })
+            end
+        end
+        Result<array<File>, Error>.Ok(out)
+    end
+
+    --" The folders directly in this folder, sorted by name. --"
+    public fun dirs(self) -> Result<array<Dir>, Error>
+        let names = fs_list(self.path)
+        if names.is_err() then
+            return Result<array<Dir>, Error>.Err(names.unwrap_err())
+        end
+        let out: array<Dir> = []
+        for name in names.unwrap() do
+            let path = Path.join(self.path, name)
+            if kind_at(path) % 4 >= 2 then
+                out.push(Dir { path: path })
+            end
+        end
+        Result<array<Dir>, Error>.Ok(out)
+    end
+
+    --" The files of this folder and of all the ones below it, one at a time (nothing is read before
+    it is needed): a folder's files, then its sub-folders, each sorted by name. `name` keeps the files
+    whose name matches (`*.q`), `ignore` skips the files and folders with these names or patterns
+    (`[".git", "node_modules"]`), `depth` is how many folder levels to go down (`0`: this folder only). --"
+    public fun walk(self, name: string = "*", ignore: array<string> = [], depth: int = 40) -> Result<Iterator<File>, Error>
+        let first = fs_list(self.path)
+        if first.is_err() then
+            return Result<Iterator<File>, Error>.Err(first.unwrap_err())
+        end
+        let it = WalkIter { pending: [self.path], levels: [0], files: [], name: name, ignore: ignore, depth: depth }
+        Result<Iterator<File>, Error>.Ok(it)
+    end
+end
+
+struct WalkIter
+    public pending: array<string>
+    public levels: array<int>
+    public files: array<File>
+    public name: string
+    public ignore: array<string>
+    public depth: int
+end
+
+fun walk_ignored(name: string, ignore: array<string>) -> bool
+    for pattern in ignore do
+        if Path.matches(pattern, name) then
+            return true
+        end
+    end
+    false
+end
+
+impl Iterator<File> for WalkIter
+    public fun next(self) -> Step<File>
+        while self.files.is_empty() do
+            if self.pending.is_empty() then
+                return Step<File>.End
+            end
+            let dir = self.pending.pop() ?? ""
+            let level = self.levels.pop() ?? 0
+            let names = fs_list(dir)
+            if names.is_err() then
+                continue
+            end
+            let subdirs: array<string> = []
+            for entry in names.unwrap() do
+                if walk_ignored(entry, self.ignore) then
+                    continue
+                end
+                let path = Path.join(dir, entry)
+                if kind_at(path) % 4 >= 2 then
+                    if level < self.depth then
+                        subdirs.push(path)
+                    end
+                elseif Path.matches(self.name, entry) then
+                    self.files.push(File { path: path })
+                end
+            end
+            self.files.reverse()
+            -- popped from the end: the last one pushed is the first folder visited
+            let i = subdirs.len() - 1
+            while i >= 0 do
+                self.pending.push(subdirs[i])
+                self.levels.push(level + 1)
+                i -= 1
+            end
+        end
+        Step<File>.Item(self.files.pop() ?? File { path: "" })
     end
 end
 

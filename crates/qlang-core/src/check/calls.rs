@@ -1580,6 +1580,14 @@ impl Checker {
                     ("fs", "exists") => Some(("fs_exists", "there is no disk access")),
                     ("fs", "is_dir") => Some(("fs_is_dir", "there is no disk access")),
                     ("fs", "list" | "glob") => Some(("fs_list", "there is no disk access")),
+                    ("fs", "is_file") => Some(("fs_stat", "there is no disk access")),
+                    ("fs", "append") => Some(("fs_append", "there is no disk access")),
+                    ("fs", "remove" | "remove_dir") => {
+                        Some(("fs_remove", "there is no disk access"))
+                    }
+                    ("fs", "rename") => Some(("fs_rename", "there is no disk access")),
+                    ("fs", "copy") => Some(("fs_copy", "there is no disk access")),
+                    ("File" | "Dir", _) => Some(("fs_stat", "there is no disk access")),
                     ("fs", "lines" | "each_line" | "read_lines") => {
                         Some(("fs_open_lines", "there is no disk access"))
                     }

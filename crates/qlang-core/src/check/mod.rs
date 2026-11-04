@@ -114,7 +114,8 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// qlang source (same checker, same diagnostics), just loaded as module 0 before the
 /// entry file. A name declared locally always shadows one from here (`lookup_item`
 /// checks the current module first).
-const PRELUDE_SOURCE: &str = r#"
+const PRELUDE_SOURCE: &str = concat!(
+    r#"
 struct Error
     --" What went wrong, for a person to read. --"
     public message: string
@@ -4864,7 +4865,9 @@ impl Db
         outcome
     end
 end
-"#;
+"#,
+    include_str!("prelude_big.q")
+);
 
 fn compile_inner(
     entry: &str,

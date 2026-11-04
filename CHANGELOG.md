@@ -6,6 +6,7 @@
 
 Le serveur de langage met en forme pendant la frappe, ce qui corrige deux gênes dans l'éditeur.
 
+- **Les petits modules de la bibliothèque sont stables** (issue #227, première partie) : `Base64`, `Hex`, `Url` et `Hash` (sur du texte), `regex`, `Path`, `Format`, `uuid` et `ulid` (sauf le hasard). Ils étaient provisoires. Douze cas de la suite de conformité les couvrent (`encodings`, `hashes`, `regex`, `path`, `format`, `identifiers`) et `docs/stability.md` nomme ces cas. Restent provisoires : `datetime` (en cours de refonte, #224), `Crypto`, `Password` et les variantes `*_bytes`. Rien ne change dans le comportement.
 - **`qlang lsp` : mise en forme à la frappe (`textDocument/onTypeFormatting`).** Avant : dans VS Code, un `case` tapé se retrouvait au niveau du `match` (l'éditeur ne peut pas savoir, d'après la seule ligne, s'il suit le `match` ou le corps d'un autre `case`), et aucun `end` n'était écrit après `fun`, `if`, `match`, etc. Après : après un retour à la ligne, la ligne et celle du dessus sont mises à leur niveau et un `end` est écrit si le bloc ouvert n'est fermé par rien ; après un espace, un `case`, `else` ou `elseif` est mis à son niveau. Le calcul est celui de `qlang fmt`. L'extension VS Code active `editor.formatOnType` pour qlang et ne dédente plus `case`.
 
 ## 1.0.0

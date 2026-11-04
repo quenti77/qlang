@@ -31,7 +31,8 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | Types de base, `array`, `map`, `Set`, tuples, nullables `T?`, `??`, `?`, `Result`/`Error` | **stable** |
 | Vérification de types, inférence, génériques et contraintes (`T: Eq`, `Ord`) | **stable** |
 | `Json.of` / `Json.to` / `Json.parse`, `string`, `int`, `float`, `bool` et leurs méthodes courantes | **stable** |
-| `datetime`, `uuid`, `ulid`, `regex`, `Hash`, `Base64`, `Hex`, `Url`, `Crypto`, `Password`, `Format`, `Path` | provisoire |
+| `uuid`, `ulid` (sauf le hasard), `regex`, `Hash`, `Base64`, `Hex`, `Url` (sur du texte), `Format`, `Path` | **stable** (depuis la 1.1) |
+| `datetime`, `Crypto`, `Password`, les variantes `*_bytes` de `Hash`, `Base64`, `Hex` et `Url` | provisoire |
 | `fs`, `env`, `http`, `Db`, `Redis`, `Process`, `Log` | provisoire |
 | Opérateurs surchargés, alias de type, annotations (`#[annotation]`), `Any` | provisoire |
 | `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard`, `Shared` | provisoire (récents) |
@@ -119,6 +120,7 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Structures, méthodes, traits, énumérations, héritage | `structs`, `structs_and_methods`, `traits`, `traits_as_types`, `traits_and_operators`, `enums`, `compile_structs`, `compile_traits_and_ops`, `compile_inheritance` |
 | `Json.parse`, `Json.of`, `Json.to` | `json` |
 | Modules : `import` / `export`, alias | `modules` |
+| Les petits modules de la bibliothèque (promis depuis la 1.1) : `Base64`, `Hex`, `Url`, `Hash`, `regex`, `Path`, `Format`, `uuid`, `ulid` | `encodings`, `hashes`, `regex`, `path`, `format`, `identifiers` |
 | Les **codes** des erreurs de compilation et d'exécution les plus courantes | les dossiers `compile_*`, `runtime_errors`, `runtime_failures`, `arithmetic_errors` |
 | Les commandes `run`, `check`, `fmt`, `test` (leurs options actuelles) | **pas dans la suite de conformité** (qui ne couvre que le langage) : tests d'intégration de `qlang` (`crates/qlang-cli/tests`) : `cli_options` (`--max-steps`, `--seed`), `limits` (`--max-memory`), `testrun` (`--filter`), `coverage` (`--group`, `--skip-group`, `--coverage`, `--coverage-lcov`), `deprecated` (`--deny-warnings`), `fmt` et `fmt_config` (`--check`, `--stdin`), `root_fs` et `imports` (`--root`), `providers` (`--extern`, `--trust-externs`), `process` (`--allow-process`) |
 | Le format de `qlang.toml` (`[package]`, `[dependencies]`, `[stability]`) et de `qlang.lock` | tests d'intégration `manifest_format` (le texte exact du verrou, un verrou écrit à la main qui est obéi, chaque clé acceptée, `qlang = "…"` qui arrête un projet trop exigeant) |

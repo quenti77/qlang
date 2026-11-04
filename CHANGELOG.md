@@ -6,6 +6,7 @@
 
 Le serveur de langage met en forme pendant la frappe, ce qui corrige deux gênes dans l'éditeur.
 
+- **Opérateurs surchargés, alias de type, annotations et `Any` sont stables** (issue #226). Dix-neuf cas de la suite de conformité les couvrent (`operator_overloading`, `type_aliases`, `annotations`, `any_values` et leurs cas d'erreur `compile_*`). Lire une annotation pendant l'exécution (`Reflect`) reste expérimental. `docs/language.md` : un alias à paramètre de type est l'erreur de syntaxe `P002` (la doc annonçait `T121`).
 - **`qlang lsp` : mise en forme à la frappe (`textDocument/onTypeFormatting`).** Avant : dans VS Code, un `case` tapé se retrouvait au niveau du `match` (l'éditeur ne peut pas savoir, d'après la seule ligne, s'il suit le `match` ou le corps d'un autre `case`), et aucun `end` n'était écrit après `fun`, `if`, `match`, etc. Après : après un retour à la ligne, la ligne et celle du dessus sont mises à leur niveau et un `end` est écrit si le bloc ouvert n'est fermé par rien ; après un espace, un `case`, `else` ou `elseif` est mis à son niveau. Le calcul est celui de `qlang fmt`. L'extension VS Code active `editor.formatOnType` pour qlang et ne dédente plus `case`.
 
 ## 1.0.0

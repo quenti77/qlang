@@ -8,10 +8,12 @@ bloc ; VS Code l'active avec `editor.formatOnType`). Il suffit de dire à l'édi
 fichiers `*.q`. Ces réglages suivent la documentation de chaque éditeur ; seul VS Code (l'extension du dépôt)
 est testé à chaque version.
 
-**Niveau de stabilité** (voir [stability.md](stability.md)) : `qlang lsp` et `qlang doc` sont **provisoires** ; `qlang fmt`
-(y compris `textDocument/formatting`) est **stable**, mais `qlang fmt --stdin`, `qlang lint`, `qlang repl` et `qlang dap`
-(le débogueur) sont **expérimentaux**. Les réglages des éditeurs autres que VS Code sont **non vérifiés** : ils suivent
-leur documentation, sans être essayés à chaque version.
+**Niveau de stabilité** (voir [stability.md](stability.md)) : `qlang fmt` (y compris `fmt --stdin` et
+`textDocument/formatting`) est **stable** ; `qlang lsp`, `qlang doc` et `qlang lint` sont **provisoires** ; `qlang repl` et
+`qlang dap` (le débogueur) sont **expérimentaux**. Les capacités que `qlang lsp` annonce sont celles de la liste
+ci-dessus, et un test (`crates/qlang-cli/tests/lsp.rs`) échoue si l'une apparaît ou disparaît sans que ce soit voulu.
+Les réglages des éditeurs autres que VS Code sont **non vérifiés** : ils suivent leur documentation, sans être essayés à
+chaque version.
 
 La coloration vient d'une grammaire TextMate, [`editors/vscode/syntaxes/qlang.tmLanguage.json`](../editors/vscode/syntaxes/qlang.tmLanguage.json),
 que Sublime Text, JetBrains et d'autres savent lire.
@@ -149,5 +151,5 @@ protocole) ; un point d'arrêt sur une ligne sans instruction (blanche, commenta
 ## Mise en forme et analyse depuis n'importe quel éditeur
 
 - `qlang fmt --stdin` : le programme sur l'entrée, mis en forme sur la sortie (code 65 si le fichier ne s'analyse pas).
-- `qlang lint fichier.q` : les avertissements `fichier:ligne:colonne: warning[L00x]: …`, lisibles par la plupart des
+- `qlang lint fichier.q` : les avertissements `fichier:ligne:colonne: warning[Q00x]: …`, lisibles par la plupart des
   éditeurs comme une sortie de compilateur.

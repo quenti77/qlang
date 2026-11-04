@@ -82,3 +82,17 @@ fn a_clean_file_passes_and_a_broken_one_fails() {
     assert_eq!(lint(&dir, &["ok.q"]).1, 0);
     assert_eq!(lint(&dir, &["bad.q"]).1, 65);
 }
+
+#[test]
+fn q002_reports_a_private_function_that_nothing_calls() {
+    let src = "fun used() -> int\n  1\nend\nfun dead() -> int\n  2\nend\nfun _skipped() -> int\n  3\nend\nfun test_one()\n  assert_eq(used(), 1)\nend\n#[used]\nfun by_name() -> int\n  4\nend\nfun shown() -> int\n  5\nend\nexport shown\nprint(used())\n";
+    let dir = project("q002", &[("main.q", src)]);
+    let (out, code) = lint(&dir, &["main.q"]);
+    assert_eq!(code, 1, "{out}");
+    // only `dead`: a called, exported, `_`-prefixed, `test_`-prefixed or `#[used]` function is not reported
+    assert_eq!(out.matches("Q002").count(), 1, "{out}");
+    assert!(
+        out.contains("main.q:4:5: warning[Q002]: function `dead` is never used and not exported"),
+        "{out}"
+    );
+}

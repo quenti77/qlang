@@ -234,3 +234,25 @@ fn errors() {
     // `Self` outside a trait or an impl
     assert_eq!(run("fun f() -> Self\n    1\nend\n"), "COMPILE T001");
 }
+
+#[test]
+fn a_generic_function_called_from_a_loop_still_gets_its_type_arguments() {
+    // the loop is run by the register machine, which calls the generic function through the interpreter
+    let src = "fun total<T: Add + Zero>(xs: array<T>) -> T
+    let s = T.zero()
+    for x in xs do
+        s = s + x
+    end
+    s
+end
+let xs: array<int> = [1, 2, 3]
+for r in 0..2 do
+    total(xs)
+end
+for r in 0..2 do
+    let v = total(xs)
+    print(v)
+end
+";
+    assert_eq!(run(src), "6\n6\n");
+}

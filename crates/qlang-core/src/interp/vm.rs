@@ -4247,6 +4247,9 @@ impl Interp<'_> {
                 let Some(fid) = st.fid else {
                     fail!("R001", "a call without a function");
                 };
+                // a generic function that looks at its type arguments (`T.zero()`) gets them here
+                // as it does from the tree walker
+                self.stage_type_args(st.node);
                 let out = self.call_fid(fid, None, argv, span)?;
                 if st.ret != Ty::Unit && !set_reg(stack, ostack, base + dst as usize, &out, &st.ret)
                 {

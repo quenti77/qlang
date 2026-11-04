@@ -931,7 +931,7 @@ end
 - `type` n'est pas un mot réservé : `let type = 3` reste valable. Il ne commence un alias que
   sous la forme `type Nom =`, au niveau du fichier.
 - Un alias se déclare dans un fichier, s'exporte (`export Handler`) et s'importe comme une
-  structure. Il n'a pas de paramètre de type (`T121` si on en donne).
+  structure. Il n'a pas de paramètre de type (`type Noms<T> = ...` est une erreur de syntaxe, `P002`).
 - Il ne sert qu'à **écrire un type** : on ne peut pas construire une valeur par son nom
   (`Names { ... }` n'existe pas : écris le nom du vrai type).
 - Un alias qui se désigne lui-même, directement ou par un autre, est une erreur (`T122`), et le
@@ -1186,6 +1186,7 @@ end
 - Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
   champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
   `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
+- **Niveau** : la déclaration, la vérification à la compilation et `#[deprecated]` sont **stables** ; les lire pendant l'exécution (avec `Reflect`) reste **expérimental**.
 - La vérification contrôle le nom (`T001`, `T290` si ce n'est pas une annotation), les arguments
   (`T292` nom inconnu, en trop ou donné deux fois ; `T293` argument manquant ; `T294` pas un
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
@@ -2284,7 +2285,7 @@ cette variable.
 
 ### Identifiants : `uuid` et `ulid`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1, sauf le hasard : la forme d'un `uuid` ou d'un `ulid` est promise, pas les valeurs de `uuid.v4()`, `uuid.v7()` et `ulid.new()`.*
 
 Deux types pour identifier une chose de façon unique. Tous deux font 128 bits et
 sont distincts de `string` : on ne peut pas passer l'un pour l'autre.
@@ -2408,7 +2409,7 @@ décalage d'avant le changement ; une heure qui existe deux fois (retour à l'he
 
 ### Expressions régulières
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1.*
 
 L'espace de noms `regex` propose les opérations courantes sur les expressions
 régulières, à partir de deux chaînes (`text`, `pattern`) :
@@ -2445,7 +2446,7 @@ condition à récupérer avec `Result`.
 
 ### Encodages et hachages
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1 pour le texte ; les variantes `*_bytes` sont **provisoires**.*
 
 Quatre espaces de noms travaillent sur le texte (ses octets UTF-8) ; un décodage en texte renvoie
 `none` si le résultat n'est pas du texte UTF-8 valide. Pour des données quelconques, voir
@@ -2509,7 +2510,7 @@ print(b.at(1))               -- 195 (none hors des octets)
 
 ### Chemins et mise en forme : `Path` et `Format`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.1.*
 
 `Path` manipule des chemins **écrits en texte**, avec `/` entre les parties (aussi sous Windows) ; il ne touche pas
 au disque.

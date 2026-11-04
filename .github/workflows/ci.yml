@@ -59,9 +59,13 @@ jobs:
       - run: cargo build --release -p qlang-cli
       - name: The documentation matches the program
         run: scripts/check-docs.py
-      # the cases are in their own repository, at the tag named in conformance.ref
+      # the cases are in their own repository: at the tag named in conformance.ref, or (pull request) on the
+      # branch that has the same name there (scripts/conformance-ref.sh)
+      - name: conformance.ref is a tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/conformance-ref.sh --check-tag
       - name: Fetch the cases
-        run: git clone --depth 1 --branch "$(cat conformance.ref)" https://github.com/quenti77/qlang-conformance.git ../qlang-conformance
+        run: git clone --depth 1 --branch "$(scripts/conformance-ref.sh)" https://github.com/quenti77/qlang-conformance.git ../qlang-conformance
       - name: Run them against this build
         working-directory: ../qlang-conformance
         run: QLANG="$GITHUB_WORKSPACE/target/release/qlang" "$GITHUB_WORKSPACE/target/release/qlang" run --allow-process run.q

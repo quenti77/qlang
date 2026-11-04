@@ -9,21 +9,25 @@ Une version se publie en poussant un tag. Tout le reste est automatique
 
    Puis `cargo build` pour mettre à jour `Cargo.lock`. Le workflow refuse de publier si
    les deux numéros diffèrent, ou si le tag ne correspond pas.
-2. **Fusionner** ce changement sur `main` (PR, CI verte ; `scripts/check-docs.py` ne signale aucun écart entre la
+2. **Tagger la suite de conformité** si la version a de nouveaux cas : dans `qlang-conformance`, fusionner les
+   branches de cas (une par fonctionnalité, de même nom que celle de `qlang`), poser le tag de la version (`v1.1.0`)
+   et mettre ce tag dans `conformance.ref`. La CI d'un push sur `main` échoue tant que `conformance.ref` n'est pas
+   un tag (`scripts/conformance-ref.sh --check-tag`).
+3. **Fusionner** ce changement sur `main` (PR, CI verte ; `scripts/check-docs.py` ne signale aucun écart entre la
    documentation et le programme, la CI le lance aussi).
-3. **Tagger** et pousser :
+4. **Tagger** et pousser :
 
    ```sh
    git checkout main && git pull
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-4. Le workflow compile `qlang` pour Linux (x86_64 et arm64, statique), macOS (arm64 et
+5. Le workflow compile `qlang` pour Linux (x86_64 et arm64, statique), macOS (arm64 et
    Intel) et Windows (x86_64), empaquette l'extension VS Code, calcule `SHA256SUMS` et crée la
    release GitHub avec ses notes générées. Cinq à dix minutes.
-5. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
+6. Vérifier la release sur la page *Releases*, puis essayer `install.sh` sur une machine propre : la commande doit afficher
    `Updated: qlang A -> qlang X.Y.Z`.
-6. **Le site de documentation** (`quenti77/qlang-learn`) suit tout seul : à la fin de la publication, le workflow
+7. **Le site de documentation** (`quenti77/qlang-learn`) suit tout seul : à la fin de la publication, le workflow
    prévient le dépôt du site, dont le workflow *Follow a release* ouvre une pull request qui met à jour
    `versions.json` et les deux fichiers qui nomment les versions épinglées. Un correctif (`1.0.1`) met à jour la ligne `1.0` ; un nouveau
    numéro mineur (`1.1.0`) ajoute une version au site, la rend la dernière et garde le texte écrit à la main de la

@@ -498,11 +498,13 @@ impl Checker {
                             a.get(1).cloned().unwrap_or(Ty::Error),
                         )
                     }
+                    // (a `Set` has no position: it keeps refusing two variables)
                     (other, true)
                         if matches!(
                             other,
                             Ty::Struct(..) | Ty::Enum(..) | Ty::Param(_) | Ty::Trait(..)
-                        ) && self.iterable_args(other, false).is_some() =>
+                        ) && !matches!(other, Ty::Struct(sid, _) if self.is_prelude_set(*sid))
+                            && self.iterable_args(other, false).is_some() =>
                     {
                         let a = self.iterable_args(other, false).unwrap_or_default();
                         (Ty::Int, a.first().cloned().unwrap_or(Ty::Error))

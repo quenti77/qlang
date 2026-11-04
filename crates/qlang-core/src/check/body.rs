@@ -9,6 +9,7 @@ impl Checker {
         self.cur_mod = m;
         self.scopes.clear();
         self.tparam_scope.clear();
+        self.self_ty = None;
         self.ret_stack.clear();
         self.loop_depth = 0;
         self.cur_impl_struct = None;
@@ -96,15 +97,24 @@ impl Checker {
     }
 
     fn check_fn_body(&mut self, fid: FnId) {
-        let def = self.defs.fns[fid].clone();
+        let mut def = self.defs.fns[fid].clone();
+        // in the default body of a trait method, `Self` is the trait itself, as `self` is
+        let trait_self = def.trait_default_self.clone();
+        if let Some(st) = &trait_self {
+            let map: HashMap<ParamId, Ty> = [(SELF_PARAM, st.clone())].into_iter().collect();
+            def.params = def.params.iter().map(|t| t.subst(&map)).collect();
+            def.ret = def.ret.subst(&map);
+        }
         let Some(decl) = def.decl.clone() else { return };
         let Some(body) = &decl.body else { return };
         self.reset_body_state(def.module);
         self.tparam_scope = def.scope_params.clone();
         self.cur_fn = Some(fid);
+        self.self_ty = trait_self;
         self.scopes.push(HashMap::new());
         if let Some(iid) = def.impl_id {
             let target = self.defs.impls[iid].target.clone();
+            self.self_ty = Some(target.clone());
             if let Ty::Struct(sid, _) = &target {
                 self.cur_impl_struct = Some(*sid);
             }

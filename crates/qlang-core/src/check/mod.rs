@@ -176,6 +176,50 @@ fun Err<T, E>(error: E) -> Result<T, E>
     Result<T, E>.Err(error)
 end
 
+-- ===== neutral elements =====
+
+--" A type with a value that changes nothing when added: `0` for an `int`, `0.0` for a `float`.
+Written `T.zero()` in a generic function (`fun total<T: Add + Zero>(...)`) or an `impl`. --"
+trait Zero
+    --" The neutral element of the addition. --"
+    fun zero() -> Self
+end
+
+--" A type with a value that changes nothing when multiplied: `1` for an `int`, `1.0` for a
+`float`. Written `T.one()`, like `Zero`. --"
+trait One
+    --" The neutral element of the multiplication. --"
+    fun one() -> Self
+end
+
+impl Zero for int
+    --" `0`. --"
+    public fun zero() -> int
+        0
+    end
+end
+
+impl Zero for float
+    --" `0.0`. --"
+    public fun zero() -> float
+        0.0
+    end
+end
+
+impl One for int
+    --" `1`. --"
+    public fun one() -> int
+        1
+    end
+end
+
+impl One for float
+    --" `1.0`. --"
+    public fun one() -> float
+        1.0
+    end
+end
+
 -- ===== encode =====
 
 --" A type that can be turned into JSON text: `impl ToJson for Post ... end`. --"
@@ -4236,6 +4280,8 @@ pub(crate) struct Checker {
     pub cur_mod: ModId,
     pub scopes: Vec<HashMap<String, Local>>,
     pub tparam_scope: Vec<(String, ParamId)>,
+    /// What `Self` means here: the type an `impl` is for, or the (still unknown) implementer in a trait.
+    pub self_ty: Option<Ty>,
     /// Return type of the enclosing function or lambda.
     pub ret_stack: Vec<Ty>,
     pub loop_depth: usize,
@@ -4269,6 +4315,7 @@ impl Checker {
             cur_mod: 0,
             scopes: Vec::new(),
             tparam_scope: Vec::new(),
+            self_ty: None,
             ret_stack: Vec::new(),
             loop_depth: 0,
             cur_impl_struct: None,

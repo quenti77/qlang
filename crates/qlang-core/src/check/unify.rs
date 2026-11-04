@@ -346,7 +346,9 @@ impl Checker {
                     else {
                         continue;
                     };
-                    if let Some(map) = self.impl_matches(iid, &cand) {
+                    if let Some(mut map) = self.impl_matches(iid, &cand) {
+                        // `Self` in a method the trait wrote the body of: the type the method is called on
+                        map.insert(SELF_PARAM, cand.clone());
                         return Some(UserMethod {
                             fid,
                             impl_id: iid,

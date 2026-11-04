@@ -1417,7 +1417,7 @@ end
 ```
 
 Dans un `impl`, `Self` est le type de l'`impl` (`Money` ici, `Pair<T>` pour `impl<T> Zero for Pair<T>`) ; dans un
-trait, c'est le type qui l'implémentera. Hors d'un trait ou d'un `impl`, `Self` n'existe pas (`T001`).
+trait, c'est le type qui l'implémentera. Dans le corps d'une méthode par défaut d'un trait, `Self` est le trait lui-même (comme `self`), et là où la méthode est appelée il vaut le type de la valeur (`chien.jumeau()` rend un `Chien`). Hors d'un trait ou d'un `impl`, `Self` n'existe pas (`T001`).
 
 Dans une fonction ou un `impl` générique, un paramètre de type borné par un tel trait s'utilise comme préfixe d'appel :
 `T.zero()`. La méthode appelée est celle de l'`impl` du type que `T` désigne, trouvé à l'appel :

@@ -131,6 +131,33 @@ print(sum_all([1, 2, 3]))
 }
 
 #[test]
+fn self_is_the_trait_in_a_default_body_and_the_type_where_it_is_called() {
+    let src = "trait Describe
+    fun describe(self) -> string
+    fun twin(self) -> Self
+        self
+    end
+    fun label(self) -> string
+        let me: Self = self
+        \"<{me.describe()}>\"
+    end
+end
+struct Dog
+    public name: string
+end
+impl Describe for Dog
+    public fun describe(self) -> string
+        self.name
+    end
+end
+let d = Dog { name: \"rex\" }
+print(d.twin().describe())
+print(d.label())
+";
+    assert_eq!(run(src), "rex\n<rex>\n");
+}
+
+#[test]
 fn zero_and_one_are_in_the_prelude_for_int_and_float() {
     let src = "fun total<T: Add + Zero>(xs: array<T>) -> T
     let t = T.zero()

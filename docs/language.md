@@ -778,6 +778,9 @@ end
   jamais planter. Les types prédéfinis gardent leur comportement (tableau : vue vivante, dictionnaire : copie).
 - `Step`, `Item`, `End`, `Iterator`, `Iterable`, `KeyedIterable`, `iter`, `iter_keyed` et `next` sont des noms du
   prélude ; un programme qui déclare les siens les masque, comme pour tout nom du prélude.
+- Les itérateurs que rendent ces méthodes et les collections sont des types du prélude : `MapIter`, `FilterIter`,
+  `TakeIter`, `SkipIter` (les adaptateurs), `ArrayIter` (tableau, chaîne et `Set`) et `PairIter` (dictionnaire).
+  On s'en sert par leurs méthodes (`next`, `map`...) sans les nommer.
 - Pas encore : `enumerate`, `zip`, `reduce` paresseux, générateurs (`yield`).
 
 ---

@@ -48,6 +48,9 @@ jobs:
       - name: install.sh against a fake release
         if: runner.os != 'Windows'
         run: scripts/test-install.sh
+      - name: update-package-repos.sh against local repositories
+        if: runner.os != 'Windows'
+        run: scripts/test-update-package-repos.sh
 
   conformance:
     name: Conformance suite

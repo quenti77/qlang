@@ -195,6 +195,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `R063` | `randomness is not available in this environment` <br> `cannot get random numbers: {m}` |
 | `R064` | `a datetime must be between the years 1 and 9999` <br> `this date does not exist: {}` |
 | `R065` | `the result is out of the years 1 to 9999` |
+| `R066` | `unknown language "{locale}": "en" or "fr"` |
 | `R070` | ``a program that serves requests needs `fun handle(req: Request) -> Response``` <br> ```handle` must be `fun handle(req: Request) -> Response``` <br> ``there is no test `{name}``` |
 | `R071` | ``the function of `Response.stream` must give a string, or `none` to end`` |
 | `R080` | ```{name}` is not available in this environment`` |

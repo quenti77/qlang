@@ -2423,15 +2423,64 @@ end
 
 - **Affichage** : un `datetime` s'affiche au format ISO 8601, `2026-10-11T14:30:00Z`
   (avec `.123` avant le `Z` s'il y a des millisecondes). `"{d}"` et `d as string` donnent ce texte.
-- **`format`** reconnaît `YYYY` (année), `MM` (mois), `DD` (jour), `HH` (heure), `mm` (minute),
-  `ss` (seconde) et `SSS` (millisecondes). Les autres caractères sont gardés tels quels :
-  `d.format("YYYY-MM-DD à HH:mm")`.
+- **`format`** reconnaît `YYYY` / `YY` (année), `MMMM` / `MMM` (nom du mois), `MM` / `M` (numéro), `DD` / `D` (jour),
+  `dddd` / `ddd` (nom du jour), `HH` / `H` (heure), `hh` / `h` (heure sur 12), `A` (`AM` ou `PM`), `mm` (minute),
+  `ss` (seconde), `SSS` (millisecondes) et `WW` (semaine ISO). Un texte entre `[` et `]` est gardé tel quel, comme
+  les autres caractères : `d.format("YYYY-MM-DD [à] HH:mm")`. Les noms sont en anglais ;
+  `d.format_in("dddd D MMMM YYYY", "fr")` les donne en français (`"en"` ou `"fr"`, une autre langue est l'erreur `R066`).
+  *Depuis la 1.1* : `M`, `D`, `H`, `h`, `A`, `W`, `d` et `Y` seuls (ou en groupes de 2 à 3) sont des jetons ; un texte
+  qui les contenait doit les mettre entre crochets.
+- **Autres accesseurs** : `d.day_of_year()`, `d.week()` (semaine ISO 8601, 1 à 53) et `d.week_year()` (l'année de
+  cette semaine).
 - **`parse`** lit `AAAA-MM-JJ`, éventuellement suivi de `T` ou d'un espace puis de `HH:MM`,
   `HH:MM:SS` ou `HH:MM:SS.mmm`, et d'un `Z` facultatif. Une date seule est minuit.
 - **`add_months` et `add_years`** : un jour qui n'existe pas dans le nouveau mois devient son
   dernier jour (31 janvier + 1 mois = 28 ou 29 février).
 - **Erreurs** : `datetime.of(2026, 2, 29)` (une date qui n'existe pas) est une erreur `R064` ;
   sortir des années 1 à 9999 (`add_days`…) est une erreur `R065`.
+
+#### Durées : `Duration`
+
+*Niveau : provisoire (depuis la 1.1).*
+
+Une `Duration` est une durée : `years`, `months`, `days`, `hours`, `minutes`, `seconds`, `ms`. Rien n'est converti
+de soi-même : `Duration.of(minutes: 90)` reste 90 minutes jusqu'à `normalize()`. Les **années et les mois** n'ont pas
+de longueur fixe (ça dépend de la date à laquelle on les ajoute) ; un jour fait toujours 24 heures, puisqu'un
+`datetime` est en UTC.
+
+| Appel | Résultat |
+| --- | --- |
+| `Duration.of(days: 2, hours: 3)` | ce qui n'est pas donné vaut 0 |
+| `d + durée`, `d - durée` (ou `d.plus(durée)`, `d.minus(durée)`) | un `datetime` : années et mois d'abord (le 31 janvier + 1 mois est le dernier jour de février), puis le reste |
+| `a.until(b)` | la `Duration` de `a` à `b` : années et mois entiers, puis jours, heures, minutes, secondes, ms (négative si `b` est avant) |
+| `dur.total_ms()`, `total_seconds()`, `total_minutes()`, `total_hours()`, `total_days()` | un `Result<int, Error>` : `err` s'il y a des années ou des mois |
+| `dur.plus(autre)`, `minus(autre)`, `times(n)`, `negate()`, `is_zero()` | calcul terme à terme |
+| `dur.normalize()` | reporte les retenues (12 mois = 1 an, 60 s = 1 min, 24 h = 1 jour…), le signe est celui de l'ensemble |
+| `dur.to_iso()` | texte ISO 8601 : `P1Y2M3DT4H5M6.007S`, `PT0S` pour zéro |
+
+`b - a` reste le nombre de millisecondes (un `int`), comme avant. Les comparaisons, écarts et bornes de période :
+
+| Appel | Résultat |
+| --- | --- |
+| `a.is_before(b)`, `a.is_after(b)`, `d.between(a, b)`, `a.same_day(b)` | des `bool` (`between` inclut les bornes) |
+| `d.is_weekend()`, `d.is_leap_year()`, `d.days_in_month()`, `d.quarter()` | samedi ou dimanche ; année de 366 jours ; 28 à 31 ; 1 à 4 |
+| `a.diff_in_months(b)`, `diff_in_years(b)` | mois / années entiers de `a` à `b` (31 janvier à 28 février : 1) |
+| `a.diff_in_days(b)`, `diff_in_hours(b)`, `diff_in_minutes(b)`, `diff_in_seconds(b)` | unités entières (tronquées vers 0) |
+| `d.start_of_hour()`, `start_of_week()`, `start_of_month()`, `start_of_quarter()`, `start_of_year()` | début de la période (la semaine commence le lundi) ; `start_of_day()` existait |
+| `d.end_of_hour()`, `end_of_day()`, `end_of_week()`, `end_of_month()`, `end_of_quarter()`, `end_of_year()` | dernière milliseconde de la période |
+| `d.with(month: 3, day: 1)` | remplace des champs (`year`, `month`, `day`, `hour`, `minute`, `second`) ; un jour absent du mois devient son dernier jour |
+| `d.next_weekday(n)`, `d.previous_weekday(n)` | minuit du prochain / dernier jour `n` (1 lundi … 7 dimanche) |
+| `d.nth_weekday_of_month(2, 1)`, `d.last_day_of_month()` | le 2ᵉ lundi du mois (`none` s'il n'y en a pas) ; minuit du dernier jour |
+| `d.unix()`, `datetime.at(ms)` | secondes depuis 1970 ; (pour des secondes : `datetime.at(s * 1000)`) |
+| `d.to_http()`, `d.to_rfc2822()`, `d.to_iso()` | `Tue, 03 Nov 2026 14:30:00 GMT`, `… +0000`, `2026-11-03T14:30:00Z` |
+| `d.humanize(maintenant)`, `d.humanize(maintenant, "fr")` | `3 days ago`, `in 2 hours`, `il y a 3 jours` |
+
+```
+let debut = datetime.of(2026, 1, 31, 10, 0, 0)
+print(debut + Duration.of(months: 1, days: 2))   -- 2026-03-02T10:00:00Z
+print(debut.until(datetime.of(2027, 3, 4)).to_iso())
+print(debut.end_of_month().format("D MMMM YYYY"))
+```
 
 ### Fuseaux horaires : `Zone`
 

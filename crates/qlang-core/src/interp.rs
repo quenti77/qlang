@@ -3563,6 +3563,9 @@ impl<'a> Interp<'a> {
             "minute" => Value::Int(p.minute),
             "second" => Value::Int(p.second),
             "weekday" => Value::Int(datetime::weekday(t)),
+            "day_of_year" => Value::Int(datetime::day_of_year(t)),
+            "week" => Value::Int(datetime::iso_week(t).0),
+            "week_year" => Value::Int(datetime::iso_week(t).1),
             "ms" => Value::Int(t),
             "start_of_day" => Value::DateTime(datetime::start_of_day(t)),
             "add_years" => {
@@ -3601,6 +3604,22 @@ impl<'a> Interp<'a> {
                 Some(Value::Str(pattern)) => {
                     self.guard_alloc(pattern.len() * 4, span)?;
                     Value::str(&datetime::format(t, pattern))
+                }
+                _ => return Ok(None),
+            },
+            "format_in" => match (args.first(), args.get(1)) {
+                (Some(Value::Str(pattern)), Some(Value::Str(locale))) => {
+                    self.guard_alloc(pattern.len() * 4, span)?;
+                    match datetime::format_locale(t, pattern, locale) {
+                        Some(text) => Value::str(&text),
+                        None => {
+                            return self.fail(
+                                "R066",
+                                format!("unknown language \"{locale}\": \"en\" or \"fr\""),
+                                span,
+                            );
+                        }
+                    }
                 }
                 _ => return Ok(None),
             },

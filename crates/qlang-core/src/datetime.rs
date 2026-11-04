@@ -139,29 +139,131 @@ pub fn to_iso(ms: i64) -> String {
     )
 }
 
-/// Formats with these tokens: `YYYY` `MM` `DD` `HH` `mm` `ss` `SSS`. Any other character is
-/// copied as it is.
-pub fn format(ms: i64, pattern: &str) -> String {
+const MONTHS_EN: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const MONTHS_FR: [&str; 12] = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+];
+const DAYS_EN: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
+const DAYS_FR: [&str; 7] = [
+    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+];
+
+/// The names of the months and of the weekdays (Monday first) in a language: `en` and `fr`.
+pub fn names(locale: &str) -> Option<([&'static str; 12], [&'static str; 7])> {
+    match locale {
+        "en" => Some((MONTHS_EN, DAYS_EN)),
+        "fr" => Some((MONTHS_FR, DAYS_FR)),
+        _ => None,
+    }
+}
+
+/// The first three characters of a name (`Mon`, `janv`-less: `jan`).
+fn short(name: &str) -> String {
+    name.chars().take(3).collect()
+}
+
+/// 1 January is day 1.
+pub fn day_of_year(ms: i64) -> i64 {
     let p = parts(ms);
+    (days_from_civil(p.year, p.month, p.day) - days_from_civil(p.year, 1, 1)) + 1
+}
+
+/// The ISO 8601 week (1 to 53) and the year it belongs to: the week with the year's first Thursday
+/// is week 1.
+pub fn iso_week(ms: i64) -> (i64, i64) {
+    let p = parts(ms);
+    let wd = weekday(ms);
+    let thursday = days_from_civil(p.year, p.month, p.day) + (4 - wd);
+    let (year, _, _) = civil_from_days(thursday);
+    let week = (thursday - days_from_civil(year, 1, 1)) / 7 + 1;
+    (week, year)
+}
+
+/// Formats with these tokens: `YYYY` `YY` year, `MMMM` `MMM` the month's name, `MM` `M` its number,
+/// `DD` `D` day, `dddd` `ddd` weekday name, `HH` `H` hour, `hh` `h` hour on 12 hours, `A` AM or PM,
+/// `mm` minute, `ss` second, `SSS` milliseconds, `WW` ISO week. Text between `[` and `]` is kept
+/// as it is. Any other character is copied as it is.
+pub fn format(ms: i64, pattern: &str) -> String {
+    format_locale(ms, pattern, "en").unwrap_or_default()
+}
+
+/// Like [`format`], with the names of months and weekdays in `locale` (`None` for an unknown one).
+pub fn format_locale(ms: i64, pattern: &str, locale: &str) -> Option<String> {
+    let (months, days) = names(locale)?;
+    let p = parts(ms);
+    let hour12 = if p.hour % 12 == 0 { 12 } else { p.hour % 12 };
     let mut out = String::new();
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        if chars[i] == '['
+            && let Some(close) = chars[i + 1..].iter().position(|c| *c == ']')
+        {
+            out.extend(&chars[i + 1..i + 1 + close]);
+            i += close + 2;
+            continue;
+        }
         let run = chars[i..].iter().take_while(|c| **c == chars[i]).count();
+        let month = months[(p.month - 1) as usize];
+        let day = days[(weekday(ms) - 1) as usize];
         let (text, used) = match (chars[i], run) {
             ('Y', n) if n >= 4 => (format!("{:04}", p.year), 4),
-            ('M', n) if n >= 2 => (format!("{:02}", p.month), 2),
+            ('Y', 2 | 3) => (format!("{:02}", p.year % 100), 2),
+            ('M', n) if n >= 4 => (month.to_string(), 4),
+            ('M', 3) => (short(month), 3),
+            ('M', 2) => (format!("{:02}", p.month), 2),
+            ('M', 1) => (p.month.to_string(), 1),
             ('D', n) if n >= 2 => (format!("{:02}", p.day), 2),
+            ('D', 1) => (p.day.to_string(), 1),
+            ('d', n) if n >= 4 => (day.to_string(), 4),
+            ('d', 3) => (short(day), 3),
             ('H', n) if n >= 2 => (format!("{:02}", p.hour), 2),
+            ('H', 1) => (p.hour.to_string(), 1),
+            ('h', n) if n >= 2 => (format!("{hour12:02}"), 2),
+            ('h', 1) => (hour12.to_string(), 1),
+            ('A', _) => (if p.hour < 12 { "AM" } else { "PM" }.to_string(), 1),
             ('m', n) if n >= 2 => (format!("{:02}", p.minute), 2),
             ('s', n) if n >= 2 => (format!("{:02}", p.second), 2),
             ('S', n) if n >= 3 => (format!("{:03}", p.ms), 3),
+            ('W', n) if n >= 2 => (format!("{:02}", iso_week(ms).0), 2),
             (c, _) => (c.to_string(), 1),
         };
         out.push_str(&text);
         i += used;
     }
-    out
+    Some(out)
 }
 
 /// `YYYY-MM-DD`, optionally followed by `T` or a space and `HH:MM`, `HH:MM:SS` or
@@ -311,6 +413,24 @@ mod tests {
         );
         assert_eq!(format(t, "DD/MM/YYYY"), "09/03/2026");
         assert_eq!(format(t, "at HH:mm"), "at 04:05");
-        assert_eq!(format(t, "M D Y"), "M D Y");
+        assert_eq!(format(t, "D MMMM YYYY"), "9 March 2026");
+        assert_eq!(format(t, "ddd D MMM YY, h:mm A"), "Mon 9 Mar 26, 4:05 AM");
+        assert_eq!(format(t, "[on] dddd"), "on Monday");
+        assert_eq!(format(t, "Y"), "Y");
+        assert_eq!(
+            format_locale(t, "dddd D MMMM", "fr").as_deref(),
+            Some("lundi 9 mars")
+        );
+        assert_eq!(format_locale(t, "MMMM", "xx"), None);
+    }
+
+    #[test]
+    fn iso_weeks_and_days_of_year() {
+        let d = |y, m, d| from_parts(y, m, d, 0, 0, 0, 0).unwrap();
+        assert_eq!(iso_week(d(2026, 1, 1)), (1, 2026));
+        assert_eq!(iso_week(d(2024, 12, 30)), (1, 2025));
+        assert_eq!(iso_week(d(2021, 1, 3)), (53, 2020));
+        assert_eq!(day_of_year(d(2026, 12, 31)), 365);
+        assert_eq!(day_of_year(d(2024, 12, 31)), 366);
     }
 }

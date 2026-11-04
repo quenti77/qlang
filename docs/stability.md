@@ -27,6 +27,7 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | Partie | Niveau |
 | --- | --- |
 | Syntaxe : `let`, `fun`, `if`/`elseif`/`else`, `for`, `while`, `match`, `struct`, `enum`, `trait`, `impl`, `import`/`export`, interpolation `"{x}"` | **stable** |
+| Paramètres variadiques (`fun f(...xs: int)`) et étalement `...` dans un appel, un tableau et un dictionnaire | **stable** (depuis la 1.1) |
 | Paramètres variadiques (`fun f(...xs: int)`) et étalement `...` dans un appel, un tableau et un dictionnaire | provisoire |
 | `Self` dans un trait ou un `impl`, une méthode sans `self` appelée par un paramètre de type (`T.zero()`), les traits `Zero` et `One` du prélude | provisoire (depuis la 1.1) |
 | Types de base, `array`, `map`, `Set`, tuples, nullables `T?`, `??`, `?`, `Result`/`Error` | **stable** |
@@ -121,6 +122,7 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Structures, méthodes, traits, énumérations, héritage | `structs`, `structs_and_methods`, `traits`, `traits_as_types`, `traits_and_operators`, `enums`, `compile_structs`, `compile_traits_and_ops`, `compile_inheritance` |
 | `Json.parse`, `Json.of`, `Json.to` | `json` |
 | Modules : `import` / `export`, alias | `modules` |
+| Paramètres variadiques `...xs` et étalement `...` (promis depuis la 1.1) | `variadics`, `compile_variadics`, `runtime_variadics` |
 | Opérateurs surchargés, alias de type, annotations, `Any` (promis depuis la 1.1) | `operator_overloading`, `type_aliases`, `compile_type_aliases`, `annotations`, `compile_annotations`, `any_values`, `compile_any` |
 | Les petits modules de la bibliothèque (promis depuis la 1.1) : `Base64`, `Hex`, `Url`, `Hash`, `regex`, `Path`, `Format`, `uuid`, `ulid` | `encodings`, `hashes`, `regex`, `path`, `format`, `identifiers` |
 | Les **codes** des erreurs de compilation et d'exécution les plus courantes | les dossiers `compile_*`, `runtime_errors`, `runtime_failures`, `arithmetic_errors` |

@@ -644,7 +644,7 @@ impl Checker {
             .bounds
             .clone()
             .into_iter()
-            .flat_map(|(t, a)| self.trait_closure(t, &a))
+            .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&Ty::Param(p))))
             .collect();
         for (tid, targs) in refs {
             let td = self.defs.traits[tid].clone();
@@ -1426,7 +1426,7 @@ impl Checker {
             _ => vec![],
         }
         .into_iter()
-        .flat_map(|(t, a)| self.trait_closure(t, &a))
+        .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&rt)))
         .collect();
         for (tid, targs2) in trait_refs {
             let td = self.defs.traits[tid].clone();

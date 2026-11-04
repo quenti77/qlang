@@ -180,3 +180,53 @@ fn an_unknown_language_is_an_error() {
         "RUNTIME R066"
     );
 }
+
+#[test]
+fn parse_with_reads_a_text_written_with_a_pattern() {
+    let src = r#"print((datetime.parse_with("11/10/2026 14:30", "DD/MM/YYYY HH:mm") ?? datetime.at(0)).to_iso())
+print((datetime.parse_with("2026-10-11T14:30+02:00", "YYYY-MM-DD[T]HH:mmZZ") ?? datetime.at(0)).to_iso())
+print((datetime.parse_with("2026-10-11T14:30Z", "YYYY-MM-DD[T]HH:mmZZ") ?? datetime.at(0)).to_iso())
+print(datetime.parse_with("31/02/2026", "DD/MM/YYYY"))
+print(datetime.parse_with("11/10/2026 !", "DD/MM/YYYY"))
+print(datetime.parse_with("11-10-2026", "DD/MM/YYYY"))
+print(datetime.from_unix(86400 * 365).format("YYYY-MM-DD"))"#;
+    assert_eq!(
+        run(src),
+        "2026-10-11T14:30:00Z\n2026-10-11T12:30:00Z\n2026-10-11T14:30:00Z\nnone\nnone\nnone\n1971-01-01\n"
+    );
+}
+
+#[test]
+fn a_duration_is_read_from_its_iso_text() {
+    let src = r#"let d = Duration.parse("P1Y2M3DT4H5M6S").unwrap()
+print(d.years)
+print(d.months)
+print(d.days)
+print(d.hours)
+print(d.minutes)
+print(d.seconds)
+print(Duration.parse("PT90M").unwrap().minutes)
+print(Duration.parse("P2W").unwrap().days)
+print(Duration.parse("1D").is_err())
+print(Duration.parse("P").is_err())
+print(Duration.parse("P1H").is_err())
+print(Duration.parse("PT").is_err())"#;
+    assert_eq!(
+        run(src),
+        "1\n2\n3\n4\n5\n6\n90\n14\ntrue\ntrue\ntrue\ntrue\n"
+    );
+}
+
+#[test]
+fn each_walks_a_period_without_drifting() {
+    let src = r#"let start = datetime.of(2026, 1, 31)
+for t in start.each(Duration.of(months: 1), until: datetime.of(2026, 5, 1)) do
+    print(t.format("YYYY-MM-DD"))
+end
+print(start.each(Duration.of(days: 7), until: datetime.of(2026, 2, 28)).count())
+print(start.each(Duration.of(), until: datetime.of(2027, 1, 1)).count())"#;
+    assert_eq!(
+        run(src),
+        "2026-01-31\n2026-02-28\n2026-03-31\n2026-04-30\n5\n0\n"
+    );
+}

@@ -3294,6 +3294,23 @@ impl<'a> Interp<'a> {
             ("datetime", "parse") => {
                 datetime::parse(&text(&args[0])).map_or(Value::None, Value::DateTime)
             }
+            ("datetime", "parse_with") => datetime::parse_with(&text(&args[0]), &text(&args[1]))
+                .map_or(Value::None, Value::DateTime),
+            ("datetime", "from_unix") => {
+                let Value::Int(s) = args[0] else {
+                    return Ok(Value::None);
+                };
+                match s.checked_mul(1000).filter(|ms| datetime::in_range(*ms)) {
+                    Some(ms) => Value::DateTime(ms),
+                    None => {
+                        return self.fail(
+                            "R064",
+                            "a datetime must be between the years 1 and 9999",
+                            span,
+                        );
+                    }
+                }
+            }
             ("datetime", "at") => {
                 let Value::Int(ms) = args[0] else {
                     return Ok(Value::None);

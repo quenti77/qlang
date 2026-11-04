@@ -410,6 +410,76 @@ impl Duration
         Duration { years: years, months: months, days: days, hours: hours, minutes: minutes, seconds: seconds, ms: ms }
     end
 
+    --" Reads the ISO 8601 text of a duration: `P1Y2M3DT4H5M6S`, `PT90M`, `P2W` (weeks are 7 days). `err` if it is not one. --"
+    public fun parse(text: string) -> Result<Duration, Error>
+        let bad = Result<Duration, Error>.Err(Error { message: "not an ISO 8601 duration: " + text })
+        let cs = text.chars()
+        if cs.len() < 2 or cs[0] != "P" then
+            return bad
+        end
+        let d = Duration.of()
+        let in_time = false
+        let digits = ""
+        let any = false
+        for i in 1..cs.len() do
+            let c = cs[i]
+            if c == "T" then
+                if in_time or digits != "" then
+                    return bad
+                end
+                in_time = true
+            else
+                if c >= "0" and c <= "9" then
+                    digits = digits + c
+                else
+                    let n = digits.to_int()
+                    if n == none then
+                        return bad
+                    end
+                    digits = ""
+                    any = true
+                    let ok = false
+                    let v = n
+                    if not in_time and c == "Y" then
+                        d.years = v
+                        ok = true
+                    end
+                    if not in_time and c == "M" then
+                        d.months = v
+                        ok = true
+                    end
+                    if not in_time and c == "W" then
+                        d.days += v * 7
+                        ok = true
+                    end
+                    if not in_time and c == "D" then
+                        d.days += v
+                        ok = true
+                    end
+                    if in_time and c == "H" then
+                        d.hours = v
+                        ok = true
+                    end
+                    if in_time and c == "M" then
+                        d.minutes = v
+                        ok = true
+                    end
+                    if in_time and c == "S" then
+                        d.seconds = v
+                        ok = true
+                    end
+                    if not ok then
+                        return bad
+                    end
+                end
+            end
+        end
+        if digits != "" or not any then
+            return bad
+        end
+        Result<Duration, Error>.Ok(d)
+    end
+
     --" Whether every part is 0. --"
     public fun is_zero(self) -> bool
         self.years == 0 and self.months == 0 and self.days == 0 and self.hours == 0 and self.minutes == 0 and self.seconds == 0 and self.ms == 0
@@ -532,7 +602,40 @@ impl Duration
     end
 end
 
+--" The moments from a start to a limit, a `gap` apart: `datetime.of(2026, 1, 31).each(Duration.of(months: 1), until: datetime.of(2026, 5, 1))`.
+The start is included, the limit too if it is reached. Each moment is the start plus `n` steps, so months do not drift
+(31 January, 28 February, 31 March). --"
+struct DatePeriod
+    public start: datetime
+    public gap: Duration
+    public last: datetime
+    public count: int
+end
+
+impl DatePeriod
+    --" An iterator over the same moments. --"
+    public fun iter(self) -> Iterator<datetime>
+        self
+    end
+end
+
+impl Iterator<datetime> for DatePeriod
+    public fun next(self) -> Step<datetime>
+        let t = self.start.plus(self.gap.times(self.count))
+        if self.gap.is_zero() or t.is_after(self.last) then
+            return Step<datetime>.End
+        end
+        self.count += 1
+        Step<datetime>.Item(t)
+    end
+end
+
 impl datetime
+    --" The moments from here to `until`, one `gap` apart (the limit is included when it is reached). --"
+    public fun each(self, gap: Duration, until: datetime) -> DatePeriod
+        DatePeriod { start: self, gap: gap, last: until, count: 0 }
+    end
+
     --" The instant after adding a duration: its years and months first, then the rest. --"
     public fun plus(self, d: Duration) -> datetime
         let t = self.add_years(d.years).add_months(d.months)

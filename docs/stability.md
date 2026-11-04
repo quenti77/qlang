@@ -32,6 +32,7 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | `File` et `Dir`, `fs.append`, `fs.remove`, `fs.remove_dir`, `fs.rename`, `fs.copy`, `fs.is_file` | provisoire (depuis la 1.1) |
 | `Iterator`, `Iterable`, `KeyedIterable` et `Step` du prélude : `for` et `...` sur un type du programme, `map`, `filter`, `take`, `skip`, `collect` | provisoire (depuis la 1.1) |
 | `Duration`, et les méthodes de `datetime` ajoutées en 1.1 (comparaisons, `diff_in_*`, `start_of_*` / `end_of_*`, `with`, `format_in`, `humanize`) | provisoire (depuis la 1.1) |
+| `datetime.from_unix`, `datetime.parse_with`, `d.each` (`DatePeriod`), `Duration.parse` | provisoire (depuis la 1.2) |
 | `Self` dans un trait ou un `impl`, une méthode sans `self` appelée par un paramètre de type (`T.zero()`), les traits `Zero` et `One` du prélude | provisoire (depuis la 1.1) |
 | Types de base, `array`, `map`, `Set`, tuples, nullables `T?`, `??`, `?`, `Result`/`Error` | **stable** |
 | Vérification de types, inférence, génériques et contraintes (`T: Eq`, `Ord`) | **stable** |

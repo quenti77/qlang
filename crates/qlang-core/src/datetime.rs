@@ -308,6 +308,126 @@ pub fn parse(text: &str) -> Option<i64> {
     from_parts(year, month, day, hour, minute, second, ms)
 }
 
+/// Reads `text` written with `pattern`: the tokens of [`format`] `YYYY` `YY` `MM` `M` `DD` `D` `HH` `H`
+/// `mm` `ss` `SSS`, and `ZZ` for an offset (`+02:00`, `-0530` or `Z`, which is taken away to give UTC). Text
+/// between `[` and `]` and any other character must be there as they are. `None` if `text` does not fit.
+pub fn parse_with(text: &str, pattern: &str) -> Option<i64> {
+    let t: Vec<char> = text.chars().collect();
+    let pat: Vec<char> = pattern.chars().collect();
+    let (mut at, mut i) = (0, 0);
+    let (mut year, mut month, mut day) = (1970, 1, 1);
+    let (mut hour, mut minute, mut second, mut ms, mut offset) = (0, 0, 0, 0, 0);
+    let digits = |at: &mut usize, min: usize, max: usize| -> Option<i64> {
+        let n = t[*at..]
+            .iter()
+            .take(max)
+            .take_while(|c| c.is_ascii_digit())
+            .count();
+        if n < min {
+            return None;
+        }
+        let v = t[*at..*at + n].iter().collect::<String>().parse().ok()?;
+        *at += n;
+        Some(v)
+    };
+    while i < pat.len() {
+        if pat[i] == '['
+            && let Some(close) = pat[i + 1..].iter().position(|c| *c == ']')
+        {
+            for c in &pat[i + 1..i + 1 + close] {
+                if t.get(at) != Some(c) {
+                    return None;
+                }
+                at += 1;
+            }
+            i += close + 2;
+            continue;
+        }
+        let run = pat[i..].iter().take_while(|c| **c == pat[i]).count();
+        let used = match (pat[i], run) {
+            ('Y', n) if n >= 4 => {
+                year = digits(&mut at, 4, 4)?;
+                4
+            }
+            ('Y', 2 | 3) => {
+                year = 2000 + digits(&mut at, 2, 2)?;
+                2
+            }
+            ('M', n) if n >= 2 => {
+                month = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('M', 1) => {
+                month = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('D', n) if n >= 2 => {
+                day = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('D', 1) => {
+                day = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('H', n) if n >= 2 => {
+                hour = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('H', 1) => {
+                hour = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('m', n) if n >= 2 => {
+                minute = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('s', n) if n >= 2 => {
+                second = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('S', n) if n >= 3 => {
+                ms = digits(&mut at, 3, 3)?;
+                3
+            }
+            ('Z', n) if n >= 2 => {
+                if t.get(at) == Some(&'Z') {
+                    at += 1;
+                } else {
+                    let sign = match t.get(at)? {
+                        '+' => 1,
+                        '-' => -1,
+                        _ => return None,
+                    };
+                    at += 1;
+                    let h = digits(&mut at, 2, 2)?;
+                    if t.get(at) == Some(&':') {
+                        at += 1;
+                    }
+                    let m = digits(&mut at, 2, 2)?;
+                    if h > 23 || m > 59 {
+                        return None;
+                    }
+                    offset = sign * (h * 60 + m);
+                }
+                2
+            }
+            (c, _) => {
+                if t.get(at) != Some(&c) {
+                    return None;
+                }
+                at += 1;
+                1
+            }
+        };
+        i += used;
+    }
+    if at != t.len() {
+        return None;
+    }
+    let utc = from_parts(year, month, day, hour, minute, second, ms)?;
+    Some(utc - offset * 60_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

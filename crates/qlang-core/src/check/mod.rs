@@ -897,39 +897,61 @@ impl datetime
 
     --" The time to `now` in words, in `locale` (`"en"` or `"fr"`): `3 days ago`, `in 2 hours`. --"
     public fun humanize(self, now: datetime, locale: string = "en") -> string
+        let w = humanize_words(locale)
         let diff = self.ms() - now.ms()
         let past = diff < 0
         let secs = diff.abs() div 1000
-        let n = 0
-        let unit = ""
         if secs < 45 then
-            return if locale == "fr" then (if past then "il y a quelques secondes" else "dans quelques secondes" end) else (if past then "a few seconds ago" else "in a few seconds" end) end
+            return if past then w[2] else w[3] end
         end
+        let n = 0
+        let unit = 0
         if secs < 3600 then
             n = (secs + 30) div 60
-            unit = "minute"
+            unit = 4
         elseif secs < 86400 then
             n = (secs + 1800) div 3600
-            unit = "hour"
+            unit = 6
         elseif secs < 86400 * 30 then
             n = (secs + 43200) div 86400
-            unit = "day"
+            unit = 8
         elseif secs < 86400 * 365 then
             n = (secs + 1296000) div 2592000
-            unit = "month"
+            unit = 10
         else
             n = (secs + 15768000) div 31536000
-            unit = "year"
+            unit = 12
         end
         if n == 0 then n = 1 end
-        if locale == "fr" then
-            let fr = if unit == "minute" then "minute" elseif unit == "hour" then "heure" elseif unit == "day" then "jour" elseif unit == "month" then "mois" else "an" end
-            if n > 1 and unit != "month" then fr += "s" end
-            return if past then "il y a {n} {fr}" else "dans {n} {fr}" end
-        end
-        let en = if n > 1 then unit + "s" else unit end
-        if past then "{n} {en} ago" else "in {n} {en}" end
+        let word = if n > 1 then w[unit + 1] else w[unit] end
+        let phrase = "{n} {word}"
+        (if past then w[0] else w[1] end).replace("%", phrase)
     end
+end
+
+--" The words `humanize` needs in a language: the pattern for the past and the future (`%` is the amount), the
+sentences for a few seconds, then the singular and the plural of minute, hour, day, month and year. Unknown
+languages are English. --"
+fun humanize_words(locale: string) -> array<string>
+    if locale == "fr" then
+        return ["il y a %", "dans %", "il y a quelques secondes", "dans quelques secondes", "minute", "minutes", "heure", "heures", "jour", "jours", "mois", "mois", "an", "ans"]
+    end
+    if locale == "es" then
+        return ["hace %", "en %", "hace unos segundos", "en unos segundos", "minuto", "minutos", "hora", "horas", "día", "días", "mes", "meses", "año", "años"]
+    end
+    if locale == "de" then
+        return ["vor %", "in %", "vor einigen Sekunden", "in einigen Sekunden", "Minute", "Minuten", "Stunde", "Stunden", "Tag", "Tagen", "Monat", "Monaten", "Jahr", "Jahren"]
+    end
+    if locale == "it" then
+        return ["% fa", "tra %", "alcuni secondi fa", "tra alcuni secondi", "minuto", "minuti", "ora", "ore", "giorno", "giorni", "mese", "mesi", "anno", "anni"]
+    end
+    if locale == "pt" then
+        return ["há %", "em %", "há alguns segundos", "em alguns segundos", "minuto", "minutos", "hora", "horas", "dia", "dias", "mês", "meses", "ano", "anos"]
+    end
+    if locale == "nl" then
+        return ["% geleden", "over %", "enkele seconden geleden", "over enkele seconden", "minuut", "minuten", "uur", "uur", "dag", "dagen", "maand", "maanden", "jaar", "jaar"]
+    end
+    ["% ago", "in %", "a few seconds ago", "in a few seconds", "minute", "minutes", "hour", "hours", "day", "days", "month", "months", "year", "years"]
 end
 
 impl Add<Duration> for datetime
@@ -5016,7 +5038,8 @@ impl Db
     end
 end
 "#,
-    include_str!("prelude_big.q")
+    include_str!("prelude_big.q"),
+    include_str!("prelude_dates.q")
 );
 
 fn compile_inner(

@@ -113,7 +113,7 @@ niveau supérieur s'exécute une fois, puis le programme se termine. Donc :
   que `a`, `a.champ` et `a.0`, pas une expression quelconque ; on ne peut pas **s'attacher** à un programme déjà lancé ;
 - le programme tourne **sans l'optimisation à registres** (donc plus lentement) et **sans entrée au clavier** (`read()`
   échoue avec `R040`, « no more input to read ») ; la sortie arrive dans la console de débogage ;
-- `qlang dap` est **expérimental** (voir [stability.md](stability.md)) : ses options et son comportement peuvent changer.
+- `qlang dap` est **provisoire** (voir [stability.md](stability.md)) : ses options et son comportement peuvent changer.
 
 Autres éditeurs (même réserve que plus haut : réglages d'après leur documentation) :
 

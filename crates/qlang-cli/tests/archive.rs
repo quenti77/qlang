@@ -62,3 +62,28 @@ print(Zone.of("America/New_York").unwrap().format(summer, "HH:mm"))
         "{err}"
     );
 }
+
+#[test]
+fn a_zoned_instant_keeps_its_zone() {
+    let (out, err) = run(r#"
+let paris = Zone.of("Europe/Paris").unwrap()
+let ny = Zone.of("America/New_York").unwrap()
+let z = datetime.of(2026, 7, 1, 12, 0, 0).in_zone(paris)
+print(z.to_iso())
+print(z.hour())
+print(z.abbreviation())
+print(z.in_zone(ny).to_iso())
+print(z == z.in_zone(ny))
+print(z.date().to_iso())
+print(z.time().to_iso())
+let spring = datetime.of(2026, 3, 28, 12, 0, 0).in_zone(paris)
+print(spring.plus(Duration.of(days: 1)).to_iso())
+print(spring.plus(Duration.of(hours: 24)).to_iso())
+print(spring.minus(Duration.of(days: 1)).to_iso())
+"#);
+    assert_eq!(err, "");
+    assert_eq!(
+        out,
+        "2026-07-01T14:00:00+02:00\n14\nCEST\n2026-07-01T08:00:00-04:00\ntrue\n2026-07-01\n14:00:00\n2026-03-29T13:00:00+02:00\n2026-03-29T14:00:00+02:00\n2026-03-27T13:00:00+01:00\n"
+    );
+}

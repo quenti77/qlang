@@ -230,3 +230,46 @@ print(start.each(Duration.of(), until: datetime.of(2027, 1, 1)).count())"#;
         "2026-01-31\n2026-02-28\n2026-03-31\n2026-04-30\n5\n0\n"
     );
 }
+
+#[test]
+fn a_date_and_a_time_are_values_of_their_own() {
+    let src = r#"let d = Date.of(2026, 1, 31) ?? Date.of_datetime(datetime.at(0))
+print(d.to_iso())
+print(d.plus_months(1).to_iso())
+print(d.plus_days(30).to_iso())
+print(Date.of(2026, 2, 30))
+print(d < d.plus_days(1))
+print(d == Date.of_datetime(datetime.of(2026, 1, 31, 23, 59, 59)))
+print(d.weekday())
+print(d.days_until(Date.of(2026, 3, 1) ?? d))
+print((Date.parse("2026-10-11") ?? d).to_iso())
+print(Date.parse("2026-10-11T10:00"))
+let t = Time.of(23, 30) ?? Time.of_datetime(datetime.at(0))
+print(t.to_iso())
+print(t.plus_minutes(45).to_iso())
+print(t.plus_minutes(-24 * 60 * 3).to_iso())
+print(Time.of(25, 0))
+print((Time.parse("14:30:00.250") ?? t).to_iso())
+print(t < (Time.of(23, 31) ?? t))
+print(t.on(d).to_iso())"#;
+    assert_eq!(
+        run(src),
+        "2026-01-31\n2026-02-28\n2026-03-02\nnone\ntrue\ntrue\n6\n29\n2026-10-11\nnone\n23:30:00\n00:15:00\n23:30:00\nnone\n14:30:00.250\ntrue\n2026-01-31T23:30:00Z\n"
+    );
+}
+
+#[test]
+fn more_languages_name_the_months_and_say_how_long_ago() {
+    let src = r#"let now = datetime.of(2026, 11, 5, 12, 0, 0)
+for loc in ["es", "de", "it", "pt", "nl"] do
+    print(now.add_days(-3).humanize(now, loc))
+    print(now.add_hours(2).humanize(now, loc))
+    print(datetime.of(2026, 3, 1).format_in("dddd D MMMM", loc))
+end
+print(now.add_days(-3).humanize(now))
+print(now.add_days(-3).humanize(now, "fr"))"#;
+    assert_eq!(
+        run(src),
+        "hace 3 días\nen 2 horas\ndomingo 1 marzo\nvor 3 Tagen\nin 2 Stunden\nSonntag 1 März\n3 giorni fa\ntra 2 ore\ndomenica 1 marzo\nhá 3 dias\nem 2 horas\ndomingo 1 março\n3 dagen geleden\nover 2 uur\nzondag 1 maart\n3 days ago\nil y a 3 jours\n"
+    );
+}

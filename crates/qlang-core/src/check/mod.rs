@@ -114,7 +114,9 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// qlang source (same checker, same diagnostics), just loaded as module 0 before the
 /// entry file. A name declared locally always shadows one from here (`lookup_item`
 /// checks the current module first).
-const PRELUDE_SOURCE: &str = r#"
+const PRELUDE_SOURCE: &str = concat!(
+    r#"
+--" What a failed call gives back in a `Result`. --"
 struct Error
     --" What went wrong, for a person to read. --"
     public message: string
@@ -247,12 +249,16 @@ trait Iterator<T>
     end
 end
 
+--" The iterator of `map`: each element of `source` through `f`. --"
 struct MapIter<T, U>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" The function applied to each element. --"
     public f: fun(T) -> U
 end
 
 impl<T, U> Iterator<U> for MapIter<T, U>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<U>
         match self.source.next()
             case Item(v) then Step<U>.Item((self.f)(v))
@@ -261,12 +267,16 @@ impl<T, U> Iterator<U> for MapIter<T, U>
     end
 end
 
+--" The iterator of `filter`: the elements of `source` that `keep` accepts. --"
 struct FilterIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" Tells whether an element stays. --"
     public keep: fun(T) -> bool
 end
 
 impl<T> Iterator<T> for FilterIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         while true do
             match self.source.next()
@@ -282,12 +292,16 @@ impl<T> Iterator<T> for FilterIter<T>
     end
 end
 
+--" The iterator of `take`: at most the first `left` elements of `source`. --"
 struct TakeIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" How many elements can still be given. --"
     public left: int
 end
 
 impl<T> Iterator<T> for TakeIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         if self.left <= 0 then
             return Step<T>.End
@@ -297,12 +311,16 @@ impl<T> Iterator<T> for TakeIter<T>
     end
 end
 
+--" The iterator of `skip`: `source` without its first elements. --"
 struct SkipIter<T>
+    --" The iterator it reads from. --"
     public source: Iterator<T>
+    --" How many elements are still to be skipped. --"
     public skip: int
 end
 
 impl<T> Iterator<T> for SkipIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         while self.skip > 0 do
             self.skip -= 1
@@ -328,12 +346,16 @@ trait KeyedIterable<K, V>
     fun iter_keyed(self) -> Iterator<(K, V)>
 end
 
+--" The iterator of an array, a string or a `Set`: its elements in order. --"
 struct ArrayIter<T>
+    --" The elements. --"
     public items: array<T>
+    --" The position of the next one. --"
     public at: int
 end
 
 impl<T> Iterator<T> for ArrayIter<T>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<T>
         if self.at >= self.items.len() then
             return Step<T>.End
@@ -364,13 +386,18 @@ impl<T> Iterable<T> for Set<T>
     end
 end
 
+--" The iterator of a map: its `(key, value)` pairs. --"
 struct PairIter<K, V>
+    --" The keys. --"
     public keys: array<K>
+    --" The values, in the same order. --"
     public values: array<V>
+    --" The position of the next pair. --"
     public at: int
 end
 
 impl<K, V> Iterator<(K, V)> for PairIter<K, V>
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<(K, V)>
         if self.at >= self.keys.len() then
             return Step<(K, V)>.End
@@ -394,12 +421,19 @@ minutes, seconds and milliseconds (days are 24 hours: a `datetime` is always UTC
 own: `Duration.of(minutes: 90)` stays 90 minutes until `normalize()`. Added to a `datetime` with `+`, `-`, `plus` or `minus`,
 the years and months go first (31 January + 1 month is the last day of February). --"
 struct Duration
+    --" Whole years. --"
     public years: int
+    --" Whole months. --"
     public months: int
+    --" Days of 24 hours. --"
     public days: int
+    --" Hours. --"
     public hours: int
+    --" Minutes. --"
     public minutes: int
+    --" Seconds. --"
     public seconds: int
+    --" Milliseconds. --"
     public ms: int
 end
 
@@ -407,6 +441,76 @@ impl Duration
     --" `Duration.of(days: 2, hours: 3)`: what is not given is 0. --"
     public fun of(years: int = 0, months: int = 0, days: int = 0, hours: int = 0, minutes: int = 0, seconds: int = 0, ms: int = 0) -> Duration
         Duration { years: years, months: months, days: days, hours: hours, minutes: minutes, seconds: seconds, ms: ms }
+    end
+
+    --" Reads the ISO 8601 text of a duration: `P1Y2M3DT4H5M6S`, `PT90M`, `P2W` (weeks are 7 days). `err` if it is not one. --"
+    public fun parse(text: string) -> Result<Duration, Error>
+        let bad = Result<Duration, Error>.Err(Error { message: "not an ISO 8601 duration: " + text })
+        let cs = text.chars()
+        if cs.len() < 2 or cs[0] != "P" then
+            return bad
+        end
+        let d = Duration.of()
+        let in_time = false
+        let digits = ""
+        let any = false
+        for i in 1..cs.len() do
+            let c = cs[i]
+            if c == "T" then
+                if in_time or digits != "" then
+                    return bad
+                end
+                in_time = true
+            else
+                if c >= "0" and c <= "9" then
+                    digits = digits + c
+                else
+                    let n = digits.to_int()
+                    if n == none then
+                        return bad
+                    end
+                    digits = ""
+                    any = true
+                    let ok = false
+                    let v = n
+                    if not in_time and c == "Y" then
+                        d.years = v
+                        ok = true
+                    end
+                    if not in_time and c == "M" then
+                        d.months = v
+                        ok = true
+                    end
+                    if not in_time and c == "W" then
+                        d.days += v * 7
+                        ok = true
+                    end
+                    if not in_time and c == "D" then
+                        d.days += v
+                        ok = true
+                    end
+                    if in_time and c == "H" then
+                        d.hours = v
+                        ok = true
+                    end
+                    if in_time and c == "M" then
+                        d.minutes = v
+                        ok = true
+                    end
+                    if in_time and c == "S" then
+                        d.seconds = v
+                        ok = true
+                    end
+                    if not ok then
+                        return bad
+                    end
+                end
+            end
+        end
+        if digits != "" or not any then
+            return bad
+        end
+        Result<Duration, Error>.Ok(d)
     end
 
     --" Whether every part is 0. --"
@@ -531,7 +635,45 @@ impl Duration
     end
 end
 
+--" The moments from a start to a limit, a `gap` apart: `datetime.of(2026, 1, 31).each(Duration.of(months: 1), until: datetime.of(2026, 5, 1))`.
+The start is included, the limit too if it is reached. Each moment is the start plus `n` steps, so months do not drift
+(31 January, 28 February, 31 March). --"
+struct DatePeriod
+    --" The first moment. --"
+    public start: datetime
+    --" The distance between two moments. --"
+    public gap: Duration
+    --" The limit, included when it is reached. --"
+    public last: datetime
+    --" How many moments were given. --"
+    public count: int
+end
+
+impl DatePeriod
+    --" An iterator over the same moments. --"
+    public fun iter(self) -> Iterator<datetime>
+        self
+    end
+end
+
+impl Iterator<datetime> for DatePeriod
+    --" The next element, or `Step.End` when there is none. --"
+    public fun next(self) -> Step<datetime>
+        let t = self.start.plus(self.gap.times(self.count))
+        if self.gap.is_zero() or t.is_after(self.last) then
+            return Step<datetime>.End
+        end
+        self.count += 1
+        Step<datetime>.Item(t)
+    end
+end
+
 impl datetime
+    --" The moments from here to `until`, one `gap` apart (the limit is included when it is reached). --"
+    public fun each(self, gap: Duration, until: datetime) -> DatePeriod
+        DatePeriod { start: self, gap: gap, last: until, count: 0 }
+    end
+
     --" The instant after adding a duration: its years and months first, then the rest. --"
     public fun plus(self, d: Duration) -> datetime
         let t = self.add_years(d.years).add_months(d.months)
@@ -755,39 +897,61 @@ impl datetime
 
     --" The time to `now` in words, in `locale` (`"en"` or `"fr"`): `3 days ago`, `in 2 hours`. --"
     public fun humanize(self, now: datetime, locale: string = "en") -> string
+        let w = humanize_words(locale)
         let diff = self.ms() - now.ms()
         let past = diff < 0
         let secs = diff.abs() div 1000
-        let n = 0
-        let unit = ""
         if secs < 45 then
-            return if locale == "fr" then (if past then "il y a quelques secondes" else "dans quelques secondes" end) else (if past then "a few seconds ago" else "in a few seconds" end) end
+            return if past then w[2] else w[3] end
         end
+        let n = 0
+        let unit = 0
         if secs < 3600 then
             n = (secs + 30) div 60
-            unit = "minute"
+            unit = 4
         elseif secs < 86400 then
             n = (secs + 1800) div 3600
-            unit = "hour"
+            unit = 6
         elseif secs < 86400 * 30 then
             n = (secs + 43200) div 86400
-            unit = "day"
+            unit = 8
         elseif secs < 86400 * 365 then
             n = (secs + 1296000) div 2592000
-            unit = "month"
+            unit = 10
         else
             n = (secs + 15768000) div 31536000
-            unit = "year"
+            unit = 12
         end
         if n == 0 then n = 1 end
-        if locale == "fr" then
-            let fr = if unit == "minute" then "minute" elseif unit == "hour" then "heure" elseif unit == "day" then "jour" elseif unit == "month" then "mois" else "an" end
-            if n > 1 and unit != "month" then fr += "s" end
-            return if past then "il y a {n} {fr}" else "dans {n} {fr}" end
-        end
-        let en = if n > 1 then unit + "s" else unit end
-        if past then "{n} {en} ago" else "in {n} {en}" end
+        let word = if n > 1 then w[unit + 1] else w[unit] end
+        let phrase = "{n} {word}"
+        (if past then w[0] else w[1] end).replace("%", phrase)
     end
+end
+
+--" The words `humanize` needs in a language: the pattern for the past and the future (`%` is the amount), the
+sentences for a few seconds, then the singular and the plural of minute, hour, day, month and year. Unknown
+languages are English. --"
+fun humanize_words(locale: string) -> array<string>
+    if locale == "fr" then
+        return ["il y a %", "dans %", "il y a quelques secondes", "dans quelques secondes", "minute", "minutes", "heure", "heures", "jour", "jours", "mois", "mois", "an", "ans"]
+    end
+    if locale == "es" then
+        return ["hace %", "en %", "hace unos segundos", "en unos segundos", "minuto", "minutos", "hora", "horas", "día", "días", "mes", "meses", "año", "años"]
+    end
+    if locale == "de" then
+        return ["vor %", "in %", "vor einigen Sekunden", "in einigen Sekunden", "Minute", "Minuten", "Stunde", "Stunden", "Tag", "Tagen", "Monat", "Monaten", "Jahr", "Jahren"]
+    end
+    if locale == "it" then
+        return ["% fa", "tra %", "alcuni secondi fa", "tra alcuni secondi", "minuto", "minuti", "ora", "ore", "giorno", "giorni", "mese", "mesi", "anno", "anni"]
+    end
+    if locale == "pt" then
+        return ["há %", "em %", "há alguns segundos", "em alguns segundos", "minuto", "minutos", "hora", "horas", "dia", "dias", "mês", "meses", "ano", "anos"]
+    end
+    if locale == "nl" then
+        return ["% geleden", "over %", "enkele seconden geleden", "over enkele seconden", "minuut", "minuten", "uur", "uur", "dag", "dagen", "maand", "maanden", "jaar", "jaar"]
+    end
+    ["% ago", "in %", "a few seconds ago", "in a few seconds", "minute", "minutes", "hour", "hours", "day", "days", "month", "months", "year", "years"]
 end
 
 impl Add<Duration> for datetime
@@ -1439,6 +1603,7 @@ fun parse_hex4(hex: string) -> int?
     a * 4096 + b * 256 + c * 16 + d
 end
 
+--" The reader behind `Json.parse` (internal). --"
 struct JsonParser
     text: string
     pos: int
@@ -2754,12 +2919,19 @@ impl Dir
     end
 end
 
+--" The iterator of `Dir.walk`: the files of a folder and its sub-folders, read as it goes. --"
 struct WalkIter
+    --" Folders still to read. --"
     public pending: array<string>
+    --" The depth of each folder in `pending`. --"
     public levels: array<int>
+    --" Files found and not yet given. --"
     public files: array<File>
+    --" The pattern the names must match (empty for all). --"
     public name: string
+    --" Names of folders to skip. --"
     public ignore: array<string>
+    --" How deep to go (-1 for no limit). --"
     public depth: int
 end
 
@@ -2773,6 +2945,7 @@ fun walk_ignored(name: string, ignore: array<string>) -> bool
 end
 
 impl Iterator<File> for WalkIter
+    --" The next element, or `Step.End` when there is none. --"
     public fun next(self) -> Step<File>
         while self.files.is_empty() do
             if self.pending.is_empty() then
@@ -4864,7 +5037,10 @@ impl Db
         outcome
     end
 end
-"#;
+"#,
+    include_str!("prelude_big.q"),
+    include_str!("prelude_dates.q")
+);
 
 fn compile_inner(
     entry: &str,

@@ -206,5 +206,5 @@ test('datetime: members and static functions', { skip }, () => {
   const members = intel.memberCompletions(info, d, 'd').map((m) => m.label);
   assert.ok(['year', 'add_days', 'format', 'weekday'].every((n) => members.includes(n)));
   const statics = intel.memberCompletions(info, intel.receiverAt(info, 'main.q', 2, 14), 'x').map((m) => m.label);
-  assert.deepStrictEqual(statics.sort(), ['at', 'now', 'of', 'parse']);
+  assert.deepStrictEqual(statics.sort(), ['at', 'from_unix', 'now', 'of', 'parse', 'parse_with']);
 });

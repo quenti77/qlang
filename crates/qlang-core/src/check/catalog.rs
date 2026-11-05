@@ -821,6 +821,20 @@ pub const STATICS: &[(&str, &str, &str, &str, &str)] = &[
     (
         "datetime",
         "function",
+        "from_unix",
+        "from_unix(seconds: int) -> datetime",
+        "The moment `seconds` seconds after 1970-01-01 00:00:00 UTC (a Unix timestamp).",
+    ),
+    (
+        "datetime",
+        "function",
+        "parse_with",
+        "parse_with(text: string, pattern: string) -> datetime?",
+        "The moment written in `text` with the tokens of `format` (`YYYY` `MM` `DD` `HH` `mm` `ss` `SSS`), plus `ZZ` for an offset (`+02:00` or `Z`); `none` if it does not fit.",
+    ),
+    (
+        "datetime",
+        "function",
         "parse",
         "parse(text: string) -> datetime?",
         "The moment written in `text` (`2026-10-11`, `2026-10-11T14:30:00Z`, `2026-10-11 14:30`), or `none` if it is not valid.",

@@ -180,11 +180,133 @@ const DAYS_FR: [&str; 7] = [
     "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
 ];
 
-/// The names of the months and of the weekdays (Monday first) in a language: `en` and `fr`.
+const MONTHS_ES: [&str; 12] = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+];
+const DAYS_ES: [&str; 7] = [
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+];
+const MONTHS_DE: [&str; 12] = [
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+];
+const DAYS_DE: [&str; 7] = [
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
+];
+const MONTHS_IT: [&str; 12] = [
+    "gennaio",
+    "febbraio",
+    "marzo",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "agosto",
+    "settembre",
+    "ottobre",
+    "novembre",
+    "dicembre",
+];
+const DAYS_IT: [&str; 7] = [
+    "lunedì",
+    "martedì",
+    "mercoledì",
+    "giovedì",
+    "venerdì",
+    "sabato",
+    "domenica",
+];
+const MONTHS_PT: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+const DAYS_PT: [&str; 7] = [
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+    "domingo",
+];
+const MONTHS_NL: [&str; 12] = [
+    "januari",
+    "februari",
+    "maart",
+    "april",
+    "mei",
+    "juni",
+    "juli",
+    "augustus",
+    "september",
+    "oktober",
+    "november",
+    "december",
+];
+const DAYS_NL: [&str; 7] = [
+    "maandag",
+    "dinsdag",
+    "woensdag",
+    "donderdag",
+    "vrijdag",
+    "zaterdag",
+    "zondag",
+];
+
+/// The names of the months and of the weekdays (Monday first) in a language: `en`, `fr`, `es`, `de`,
+/// `it`, `pt` and `nl`.
 pub fn names(locale: &str) -> Option<([&'static str; 12], [&'static str; 7])> {
     match locale {
         "en" => Some((MONTHS_EN, DAYS_EN)),
         "fr" => Some((MONTHS_FR, DAYS_FR)),
+        "es" => Some((MONTHS_ES, DAYS_ES)),
+        "de" => Some((MONTHS_DE, DAYS_DE)),
+        "it" => Some((MONTHS_IT, DAYS_IT)),
+        "pt" => Some((MONTHS_PT, DAYS_PT)),
+        "nl" => Some((MONTHS_NL, DAYS_NL)),
         _ => None,
     }
 }
@@ -306,6 +428,126 @@ pub fn parse(text: &str) -> Option<i64> {
         return None;
     }
     from_parts(year, month, day, hour, minute, second, ms)
+}
+
+/// Reads `text` written with `pattern`: the tokens of [`format`] `YYYY` `YY` `MM` `M` `DD` `D` `HH` `H`
+/// `mm` `ss` `SSS`, and `ZZ` for an offset (`+02:00`, `-0530` or `Z`, which is taken away to give UTC). Text
+/// between `[` and `]` and any other character must be there as they are. `None` if `text` does not fit.
+pub fn parse_with(text: &str, pattern: &str) -> Option<i64> {
+    let t: Vec<char> = text.chars().collect();
+    let pat: Vec<char> = pattern.chars().collect();
+    let (mut at, mut i) = (0, 0);
+    let (mut year, mut month, mut day) = (1970, 1, 1);
+    let (mut hour, mut minute, mut second, mut ms, mut offset) = (0, 0, 0, 0, 0);
+    let digits = |at: &mut usize, min: usize, max: usize| -> Option<i64> {
+        let n = t[*at..]
+            .iter()
+            .take(max)
+            .take_while(|c| c.is_ascii_digit())
+            .count();
+        if n < min {
+            return None;
+        }
+        let v = t[*at..*at + n].iter().collect::<String>().parse().ok()?;
+        *at += n;
+        Some(v)
+    };
+    while i < pat.len() {
+        if pat[i] == '['
+            && let Some(close) = pat[i + 1..].iter().position(|c| *c == ']')
+        {
+            for c in &pat[i + 1..i + 1 + close] {
+                if t.get(at) != Some(c) {
+                    return None;
+                }
+                at += 1;
+            }
+            i += close + 2;
+            continue;
+        }
+        let run = pat[i..].iter().take_while(|c| **c == pat[i]).count();
+        let used = match (pat[i], run) {
+            ('Y', n) if n >= 4 => {
+                year = digits(&mut at, 4, 4)?;
+                4
+            }
+            ('Y', 2 | 3) => {
+                year = 2000 + digits(&mut at, 2, 2)?;
+                2
+            }
+            ('M', n) if n >= 2 => {
+                month = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('M', 1) => {
+                month = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('D', n) if n >= 2 => {
+                day = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('D', 1) => {
+                day = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('H', n) if n >= 2 => {
+                hour = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('H', 1) => {
+                hour = digits(&mut at, 1, 2)?;
+                1
+            }
+            ('m', n) if n >= 2 => {
+                minute = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('s', n) if n >= 2 => {
+                second = digits(&mut at, 2, 2)?;
+                2
+            }
+            ('S', n) if n >= 3 => {
+                ms = digits(&mut at, 3, 3)?;
+                3
+            }
+            ('Z', n) if n >= 2 => {
+                if t.get(at) == Some(&'Z') {
+                    at += 1;
+                } else {
+                    let sign = match t.get(at)? {
+                        '+' => 1,
+                        '-' => -1,
+                        _ => return None,
+                    };
+                    at += 1;
+                    let h = digits(&mut at, 2, 2)?;
+                    if t.get(at) == Some(&':') {
+                        at += 1;
+                    }
+                    let m = digits(&mut at, 2, 2)?;
+                    if h > 23 || m > 59 {
+                        return None;
+                    }
+                    offset = sign * (h * 60 + m);
+                }
+                2
+            }
+            (c, _) => {
+                if t.get(at) != Some(&c) {
+                    return None;
+                }
+                at += 1;
+                1
+            }
+        };
+        i += used;
+    }
+    if at != t.len() {
+        return None;
+    }
+    let utc = from_parts(year, month, day, hour, minute, second, ms)?;
+    Some(utc - offset * 60_000)
 }
 
 #[cfg(test)]

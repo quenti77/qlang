@@ -526,6 +526,66 @@ De la plus faible à la plus forte :
   vaut `3.5` (un `float`). Cela vient d'implémentations de traits fournies par
   le langage (`impl Add<float> for int`, etc.), et tu peux définir les tiennes.
 
+### Grands nombres : `BigInt` et `BigDecimal`
+
+*Niveau : provisoire (depuis la 1.2).*
+
+Un `int` tient sur 64 bits (environ 9,2·10¹⁸) et dépasser est une erreur ; un `float` n'est pas exact (`0.1 + 0.2` n'est pas
+`0.3`). Deux types du prélude règlent ces deux cas. Ils sont écrits en qlang (rien de natif) : très bien pour une factorielle de
+quelques milliers ou un total en euros, lents pour des nombres de dizaines de milliers de chiffres.
+
+**`BigInt`** est un entier sans limite.
+
+| Appel | Résultat |
+| --- | --- |
+| `BigInt.of(12)`, `BigInt.parse("123456789012345678901234567890")` | un `BigInt` ; `parse` rend un `Result` (`err` si ce ne sont pas des chiffres, avec un `+` ou `-` facultatif) |
+| `BigInt.pow(2, 200)` | `2 ** 200`, calculé exactement |
+| `a + b`, `a - b`, `a * b`, `a ** n`, `-a` | exacts ; `n` est un `int` |
+| `a div b`, `a % b` | quotient (vers zéro) et reste (du signe de `a`), comme pour les `int` ; diviser par zéro arrête le programme |
+| `a / b` | **n'existe pas** (`T…`) : écrire `div`, ou passer par `BigDecimal` |
+| `a == b`, `a < b`… | entre deux `BigInt` |
+| `a + 2`, `2 + a`, `a * 3`, `a div 2` | un `int` se mélange avec un `BigInt` (il est converti) ; pour comparer, écrire `a == BigInt.of(2)` |
+| `a.to_int()` | un `Result<int, Error>` : `err` si le nombre ne tient pas dans un `int` |
+| `"{a}"`, `a as string`, `a.to_string()` | les chiffres |
+| `a.sign()`, `a.abs()`, `a.is_zero()`, `a.divmod(b)` | −1, 0 ou 1 ; valeur absolue ; test ; le couple (quotient, reste) |
+
+**`BigDecimal`** est un décimal exact, pour l'argent : un `BigInt` et une **échelle** (le nombre de chiffres après la virgule).
+`12.50` est `1250` d'échelle 2 et s'affiche `12.50`.
+
+| Appel | Résultat |
+| --- | --- |
+| `BigDecimal.parse("12.50")`, `BigDecimal.of(3)`, `BigDecimal.from_bigint(n)` | un `BigDecimal` (`parse` rend un `Result`) |
+| `a + b`, `a - b`, `a * b`, `-a` | exacts : l'échelle d'une somme est la plus grande des deux, celle d'un produit est la somme |
+| `a == b`, `a < b`… | comparent les **valeurs** : `12.50 == 12.5` est vrai |
+| `a.divide(b, 2, "half_even")` | le quotient avec 2 chiffres après la virgule, arrondi selon le mode ; `a / b` n'existe pas |
+| `a.round(2, "half_up")` | la même valeur à 2 chiffres (plus de chiffres ajoute des zéros, moins arrondit) |
+| `a.to_bigint("down")` | la partie entière, arrondie selon le mode |
+| `a.strip_zeros()` | `12.50` devient `12.5` |
+| `a.to_float()` | le `float` le plus proche (on perd l'exactitude : c'est le seul chemin vers un `float`) |
+
+Les modes d'arrondi sont `"half_even"` (au pair, celui des banques), `"half_up"`, `"half_down"`, `"up"` (loin de zéro), `"down"`
+(vers zéro), `"floor"` et `"ceiling"` ; un autre mot arrête le programme. Comparer un `BigDecimal` à un `float` n'est pas possible : c'est
+voulu.
+
+```
+let f = BigInt.one()
+for i in 1..31 do
+  f = f * i
+end
+print(f)                                       -- 265252859812191058636308480000000
+
+let a = BigDecimal.parse("0.1").unwrap()
+let b = BigDecimal.parse("0.2").unwrap()
+print(a + b == BigDecimal.parse("0.3").unwrap())   -- true
+print(BigDecimal.parse("19.99").unwrap() * 3)      -- 59.97
+print(BigDecimal.parse("10").unwrap().divide(BigDecimal.of(3), 4, "half_even"))   -- 3.3333
+```
+
+- **JSON** : `n.to_json()` écrit une chaîne (`"1180591620717411303424"`, `"12.50"`), parce qu'un nombre perdrait des chiffres chez beaucoup de
+  lecteurs. `Json.of(n)` décrit les champs, pas le nombre : passer par `to_string()`.
+- **Bases de données** : `Db` rend un nombre SQL comme un nombre JSON (un `float`) : une colonne `NUMERIC` / `DECIMAL` et un `BIGINT` au-delà de 2⁵³ perdent des chiffres. Pour les lire exactement, demander du texte dans la requête puis le convertir : `SELECT CAST(prix AS TEXT) AS prix FROM t`, puis `BigDecimal.parse(prix.as_string())` où `prix` est `ligne["prix"]` une fois testé `!= none`. Écrire une valeur : passer `Json.string(x as string)` en paramètre.
+- Pas de clés de `map` ni d'éléments de `Set` (l'égalité vaut pour deux `BigInt`, pas leur hachage) ; pas de `BigRational`.
+
 ### Comparaisons et logique
 
 - `==` et `!=` fonctionnent sur les nombres (`1 == 1.0` est vrai), les
@@ -1239,7 +1299,7 @@ end
 - Les arguments se donnent comme ceux d'un appel, dans l'ordre des champs ou par leur nom ; un
   champ avec une valeur par défaut est facultatif. Ce sont des **littéraux** (nombre, texte sans
   `{}`, `true`, `false`, `none`, tableau de littéraux) : tout est connu à la compilation.
-- **Niveau** : la déclaration, la vérification à la compilation et `#[deprecated]` sont **stables** ; les lire pendant l'exécution (avec `Reflect`) reste **expérimental**.
+- **Niveau** : la déclaration, la vérification à la compilation et `#[deprecated]` sont **stables** ; les lire pendant l'exécution (avec `Reflect`) est **provisoire** (depuis la 1.2).
 - La vérification contrôle le nom (`T001`, `T290` si ce n'est pas une annotation), les arguments
   (`T292` nom inconnu, en trop ou donné deux fois ; `T293` argument manquant ; `T294` pas un
   littéral ; `T002` mauvais type), et que `#[annotation]` est sur une structure sans paramètre de
@@ -1951,7 +2011,7 @@ commande `qlang` (`T250` ailleurs).
 
 #### Travail en parallèle : `Worker`
 
-*Niveau : expérimental.*
+*Niveau : provisoire (depuis la 1.2).*
 
 Une **tâche** est un fichier de ton projet qu'un interpréteur à part exécute en même temps que le programme. Elle ne
 partage rien avec lui (même modèle que les workers de `qlang serve`) : les deux se parlent en s'envoyant des valeurs
@@ -2012,7 +2072,7 @@ fait est de **multiplier les interpréteurs** plutôt que de les rendre non bloq
 
 #### Traces distribuées : `Trace` et OpenTelemetry
 
-*Niveau : expérimental.*
+*Niveau : provisoire (depuis la 1.2).*
 
 `qlang serve --otlp-endpoint http://collecteur:4318` (ou la variable `OTEL_EXPORTER_OTLP_ENDPOINT`) envoie les **traces**
 des requêtes à un collecteur OpenTelemetry (OTLP sur HTTP, JSON ; `--service-name` ou `OTEL_SERVICE_NAME` donne le nom
@@ -2304,7 +2364,7 @@ départ). Il s'affiche `Set(1, 2, 3)`.
 
 ### Heure et aléatoire
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 Le cœur du langage ne lit ni l'horloge ni le hasard : comme `read`, ils viennent
 de l'**environnement**. Un programme qui les appelle alors qu'ils manquent est
@@ -2427,7 +2487,7 @@ end
   `dddd` / `ddd` (nom du jour), `HH` / `H` (heure), `hh` / `h` (heure sur 12), `A` (`AM` ou `PM`), `mm` (minute),
   `ss` (seconde), `SSS` (millisecondes) et `WW` (semaine ISO). Un texte entre `[` et `]` est gardé tel quel, comme
   les autres caractères : `d.format("YYYY-MM-DD [à] HH:mm")`. Les noms sont en anglais ;
-  `d.format_in("dddd D MMMM YYYY", "fr")` les donne en français (`"en"` ou `"fr"`, une autre langue est l'erreur `R066`).
+  `d.format_in("dddd D MMMM YYYY", "fr")` les donne en français (`"en"`, `"fr"`, `"es"`, `"de"`, `"it"`, `"pt"` ou `"nl"`, une autre langue est l'erreur `R066`).
   *Depuis la 1.1* : `M`, `D`, `H`, `h`, `A`, `W`, `d` et `Y` seuls (ou en groupes de 2 à 3) sont des jetons ; un texte
   qui les contenait doit les mettre entre crochets.
 - **Autres accesseurs** : `d.day_of_year()`, `d.week()` (semaine ISO 8601, 1 à 53) et `d.week_year()` (l'année de
@@ -2473,7 +2533,11 @@ de longueur fixe (ça dépend de la date à laquelle on les ajoute) ; un jour fa
 | `d.nth_weekday_of_month(2, 1)`, `d.last_day_of_month()` | le 2ᵉ lundi du mois (`none` s'il n'y en a pas) ; minuit du dernier jour |
 | `d.unix()`, `datetime.at(ms)` | secondes depuis 1970 ; (pour des secondes : `datetime.at(s * 1000)`) |
 | `d.to_http()`, `d.to_rfc2822()`, `d.to_iso()` | `Tue, 03 Nov 2026 14:30:00 GMT`, `… +0000`, `2026-11-03T14:30:00Z` |
-| `d.humanize(maintenant)`, `d.humanize(maintenant, "fr")` | `3 days ago`, `in 2 hours`, `il y a 3 jours` |
+| `d.humanize(maintenant)`, `d.humanize(maintenant, "fr")` | `3 days ago`, `in 2 hours`, `il y a 3 jours` (mêmes sept langues ; une autre langue donne l'anglais) |
+| `datetime.from_unix(s)` | l'instant de `s` secondes après 1970 (`R064` hors des années 1 à 9999) |
+| `datetime.parse_with("11/10/2026 14:30", "DD/MM/YYYY HH:mm")` | lit un texte avec les jetons de `format` (`YYYY`, `YY`, `MM`, `M`, `DD`, `D`, `HH`, `H`, `mm`, `ss`, `SSS`) et `ZZ` pour un décalage (`+02:00`, `-0530` ou `Z`, retiré pour rendre l'instant UTC) ; le texte entre `[ ]` doit être là tel quel ; `none` si le texte ne correspond pas ou si la date n'existe pas |
+| `d.each(Duration.of(months: 1), until: fin)` | un `DatePeriod`, itérable : `d`, `d + 1 mois`, … jusqu'à `fin` (comprise si on l'atteint). Chaque instant est le début plus `n` pas : le 31 janvier donne le 28 février puis le 31 mars. Un pas nul ne rend rien |
+| `Duration.parse("P1Y2M3DT4H5M6S")` | lit le texte ISO 8601 (`PT90M`, `P2W` = 14 jours) ; `err` si ce n'en est pas un |
 
 ```
 let debut = datetime.of(2026, 1, 31, 10, 0, 0)
@@ -2484,7 +2548,7 @@ print(debut.end_of_month().format("D MMMM YYYY"))
 
 ### Fuseaux horaires : `Zone`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 Un `datetime` est toujours un instant en UTC. Une `Zone` de la base IANA (`Europe/Paris`,
 `America/New_York`, `UTC`...) dit ce que lit une horloge murale de cet endroit à cet instant, heure d'été
@@ -2572,7 +2636,7 @@ Ces noms commencent par une majuscule pour ne pas être masqués par une variabl
 
 ### Octets : `bytes`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `bytes` est une suite d'octets qui ne change jamais : un fichier, un corps de requête, une
 empreinte. Ce n'est pas du texte (un texte est de l'UTF-8 valide) et pas un tableau d'entiers.
@@ -2643,7 +2707,7 @@ manquante ou en trop, est un arrêt (`panic`) qui dit laquelle : c'est une erreu
 
 ### Secrets : `Crypto` et `Password`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `random` est un générateur qu'on peut fixer (`--seed`) : bien pour les tests, **jamais** pour un
 secret. `Crypto` demande des octets à la source sécurisée du système.
@@ -2673,9 +2737,43 @@ Password.needs_rehash(hash).unwrap()             -- true si les réglages ont vi
 - Seule la commande `qlang` offre `Password` et `Crypto` (un autre hôte : erreur `T250` avant même
   de lancer ; un hôte de test peut répondre de sa graine, jamais pour de vrais secrets).
 
+### Jours, heures et instants avec fuseau : `Date`, `Time`, `Zoned`
+
+*Niveau : provisoire (depuis la 1.2).*
+
+Un `datetime` est un instant. Pour une date d'anniversaire ou une heure d'ouverture, qui ne sont pas des instants, trois
+types du prélude :
+
+| | |
+| --- | --- |
+| `Date.of(2026, 10, 11)` | un jour sans heure ni fuseau, ou `none` s'il n'existe pas ; `Date.parse("2026-10-11")`, `Date.of_datetime(d)`, `d.date()` |
+| `date.plus_days(n)`, `plus_months(n)`, `plus_years(n)` | le jour d'après (le 31 janvier + 1 mois est le dernier jour de février) |
+| `date.weekday()`, `day_of_year()`, `is_leap_year()`, `days_in_month()`, `days_until(autre)`, `each(pas, until: fin)` | comme pour `datetime` |
+| `date.to_iso()`, `format(motif)`, `format_in(motif, "fr")`, `to_datetime()` | `2026-10-11` ; minuit UTC pour l'instant |
+| `Time.of(9, 30)`, `Time.of(9, 30, 15, 250)` | une heure du jour sans date ni fuseau, ou `none` (heure 0 à 23, minute et seconde 0 à 59) ; `Time.parse("14:30")`, `Time.of_datetime(d)`, `d.time()` |
+| `time.plus_minutes(n)`, `minutes_until(autre)`, `to_ms()`, `on(jour)` | `plus_minutes` tourne autour de minuit ; `on` donne l'instant de cette heure ce jour-là (UTC) |
+| `time.to_iso()`, `format("h:mm A")` | `09:30:00`, `09:30:00.250` avec les millisecondes |
+| `d.in_zone(zone)`, `Zoned.of(d, zone)` | un `Zoned` : l'instant **et** son fuseau (demande la commande `qlang`, comme `Zone`) |
+| `z.hour()`, `date()`, `time()`, `wall()`, `offset_seconds()`, `abbreviation()`, `format(motif)`, `to_iso()` | l'horloge murale du fuseau ; `to_iso()` donne `2026-07-01T14:00:00+02:00` |
+| `z.in_zone(autre)` | le même instant vu dans un autre fuseau |
+| `z.plus(durée)`, `z.minus(durée)` | les années, mois et jours bougent l'horloge murale (un jour reste un jour au changement d'heure, l'heure ne bouge pas) ; heures, minutes, secondes et millisecondes bougent l'instant |
+
+Deux `Date`, deux `Time` ou deux `Zoned` se comparent avec `==`, `<` et `>` (un `Zoned` par instant, quels que soient
+les fuseaux). Les valeurs gardent la **milliseconde** : les nanosecondes ne sont pas prises en charge (un `datetime` est
+en millisecondes depuis 1970, comme `Date.now()` de JavaScript).
+
+```
+let paris = Zone.of("Europe/Paris").unwrap()
+let depart = datetime.of(2026, 3, 28, 12, 0, 0).in_zone(paris)
+print(depart.plus(Duration.of(days: 1)).to_iso())    -- 2026-03-29T13:00:00+02:00 (l'heure ne bouge pas)
+print(depart.plus(Duration.of(hours: 24)).to_iso())  -- 2026-03-29T14:00:00+02:00 (24 heures plus tard)
+print(Date.of(2026, 2, 30))                          -- none
+print((Time.of(23, 30) ?? Time.of(0, 0)).plus_minutes(45).to_iso())  -- 00:15:00
+```
+
 ### Compression et archives : `Gzip`, `Zip`, `Tar`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 Compresser et décompresser des octets, et lire ou écrire des archives **en mémoire** (le disque
 passe par `fs.read_bytes` / `fs.write_bytes`). Il faut la commande `qlang` (`T250` ailleurs).
@@ -2913,7 +3011,7 @@ print(r.unwrap().name)    -- Bob
 
 ### Prélude : `http`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `http.send(req)` envoie une requête HTTP et attend la réponse. `Request` et
 `Response` sont fournis par le prélude (pas besoin de les déclarer) :
@@ -3222,7 +3320,7 @@ Options de `qlang serve app.q` :
 
 ### Prélude : `Db`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `Db.connect(url)` ouvre une connexion à une base de données ; le schéma de
 l'URL choisit le pilote : `sqlite://chemin/vers/fichier.db`,
@@ -3308,7 +3406,7 @@ end
 
 ### Prélude : fichiers et environnement
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.2 pour `fs` (lire, écrire, lister, `env`) ; `File`, `Dir` et `fs.append`, `remove`, `rename`, `copy` restent **provisoires** (depuis la 1.1).*
 
 `fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
 contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
@@ -3415,7 +3513,7 @@ comme les imports.
 
 ### Prélude : `Redis`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `Redis.connect(url)` ouvre une connexion à un serveur Redis (protocole RESP2) : `redis://[utilisateur:mot_de_passe@]hôte[:port][/base]`, ou `rediss://` pour TLS (le certificat est vérifié avec les racines de Mozilla, comme pour Postgres). Un serveur qui n'est pas sur cette machine demande `rediss://`, ou `?tls=disable` pour confirmer que tu le veux en clair. Seule la commande `qlang` l'offre (un autre hôte : erreur `T250`).
 
@@ -3433,7 +3531,7 @@ Une connexion fait une chose à la fois (chaque commande attend sa réponse, 30 
 
 ### Prélude : le journal `Log`
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `Log` écrit le journal du programme avec les niveaux de PSR-3 (PHP), du plus bas au plus haut :
 `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` (`Log.warn` a été retiré en 0.83 ; `warn` reste un nom accepté pour *filtrer* : `--log-level warn`). Chaque
@@ -3488,7 +3586,7 @@ Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, 
 
 ### Prélude : lancer un programme
 
-*Niveau : provisoire.*
+*Niveau : stable (depuis la 1.2).*
 
 `Process.run(commande, arguments)` lance un programme de la machine, attend sa fin et renvoie un
 `Result<ProcessOutput, Error>` ; `ProcessOutput` a trois champs publics : `status` (le code de
@@ -3523,7 +3621,7 @@ end
 
 ### Prélude : le terminal
 
-*Niveau : expérimental.*
+*Niveau : provisoire (depuis la 1.2).*
 
 `Term` sert aux programmes qui dessinent un écran (une interface en terminal). Il faut la commande
 `qlang` lancée depuis un terminal : ailleurs (protocole JSON, navigateur) l'emploi est une erreur de
@@ -3653,6 +3751,8 @@ Le code source lui-même ne peut pas dépasser 200 niveaux d'imbrication.
 - **Dictionnaires :** pas de clés de type tableau ou structure (voir plus
   haut ; un tuple convient), et pas de comparaison `<` (deux dictionnaires n'ont pas d'ordre naturel :
   trie `keys()`).
+- **Grands nombres :** `BigInt` et `BigDecimal` ne servent pas de clé de dictionnaire ni d'élément de `Set` (utiliser leur texte, `x as string`) ; `BigInt == int` est refusé (écrire `BigInt.of(n)`) ; il n'y a pas de type non signé (`uint`, `u64`) : les octets passent par `bytes` et les opérations bit à bit explicites ; les montants exacts par `BigDecimal` et une colonne `NUMERIC` / `DECIMAL` ou un `BIGINT` très grand se lit en texte (`CAST(col AS TEXT)`) puis `BigDecimal.parse` ou `BigInt.parse`. Un `BigDecimal` JSON est une chaîne (un nombre JSON perdrait en précision côté JavaScript).
+- **Dates :** la précision est la milliseconde (pas de nanosecondes) et les noms de mois et de jours existent en sept langues (`en`, `fr`, `es`, `de`, `it`, `pt`, `nl`).
 - **Identifiants :** ASCII uniquement (`a-z`, `A-Z`, `0-9`, `_`), alors que les
   chaînes et commentaires acceptent tous les caractères Unicode.
 - **Fonctions anonymes génériques :** non prévues (une fonction nommée `fun f<T>(…)` couvre le besoin, et une fonction anonyme prend ses types du contexte).

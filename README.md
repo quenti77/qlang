@@ -215,7 +215,7 @@ pas à pas, pause, pile d'appels et variables dans l'éditeur. Dans VS Code (ext
 `.q` suffit ; pour les autres éditeurs, voir [docs/editors.md](docs/editors.md). Le programme tourne sans l'optimisation à
 registres (plus lent) et sans entrée au clavier. Il lance le fichier comme `qlang run` : un programme servi
 (`qlang serve`, `handle`) ne s'y débogue pas comme serveur ; les limites sont listées dans la section
-« Débogueur » de [docs/editors.md](docs/editors.md), et `qlang dap` est **expérimental**.
+« Débogueur » de [docs/editors.md](docs/editors.md), et `qlang dap` est **provisoire**.
 
 ### Session interactive : `qlang repl`
 

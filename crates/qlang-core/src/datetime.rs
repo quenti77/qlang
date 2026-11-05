@@ -180,11 +180,133 @@ const DAYS_FR: [&str; 7] = [
     "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
 ];
 
-/// The names of the months and of the weekdays (Monday first) in a language: `en` and `fr`.
+const MONTHS_ES: [&str; 12] = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+];
+const DAYS_ES: [&str; 7] = [
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+];
+const MONTHS_DE: [&str; 12] = [
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+];
+const DAYS_DE: [&str; 7] = [
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
+];
+const MONTHS_IT: [&str; 12] = [
+    "gennaio",
+    "febbraio",
+    "marzo",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "agosto",
+    "settembre",
+    "ottobre",
+    "novembre",
+    "dicembre",
+];
+const DAYS_IT: [&str; 7] = [
+    "lunedì",
+    "martedì",
+    "mercoledì",
+    "giovedì",
+    "venerdì",
+    "sabato",
+    "domenica",
+];
+const MONTHS_PT: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+const DAYS_PT: [&str; 7] = [
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+    "domingo",
+];
+const MONTHS_NL: [&str; 12] = [
+    "januari",
+    "februari",
+    "maart",
+    "april",
+    "mei",
+    "juni",
+    "juli",
+    "augustus",
+    "september",
+    "oktober",
+    "november",
+    "december",
+];
+const DAYS_NL: [&str; 7] = [
+    "maandag",
+    "dinsdag",
+    "woensdag",
+    "donderdag",
+    "vrijdag",
+    "zaterdag",
+    "zondag",
+];
+
+/// The names of the months and of the weekdays (Monday first) in a language: `en`, `fr`, `es`, `de`,
+/// `it`, `pt` and `nl`.
 pub fn names(locale: &str) -> Option<([&'static str; 12], [&'static str; 7])> {
     match locale {
         "en" => Some((MONTHS_EN, DAYS_EN)),
         "fr" => Some((MONTHS_FR, DAYS_FR)),
+        "es" => Some((MONTHS_ES, DAYS_ES)),
+        "de" => Some((MONTHS_DE, DAYS_DE)),
+        "it" => Some((MONTHS_IT, DAYS_IT)),
+        "pt" => Some((MONTHS_PT, DAYS_PT)),
+        "nl" => Some((MONTHS_NL, DAYS_NL)),
         _ => None,
     }
 }

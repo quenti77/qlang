@@ -2,6 +2,13 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.2.1
+
+Un correctif de l'éditeur (`qlang lsp`) et une icône pour les fichiers `.q`. Aucun changement du langage ni cassant.
+
+- **Complétion d'un type dans `let x: T` sans valeur** (non cassant). `let x: ar` ne compile pas (une variable demande une valeur), et si rien ne compilait avant dans le fichier, `qlang lsp` ne répondait rien : « No suggestions » dans PhpStorm. Le serveur essaie maintenant la ligne avec ` = none` (et un type provisoire après `:` ou `->`), donc les types se proposent en tapant `let x: ar` ou `fun f(a: `. Il ne referme plus de blocs que si l'erreur est un `end` manquant, ce qui ramène la réponse de 0,6 s à environ 0,1 s sur du code inachevé.
+- **Icône des fichiers `.q`** : un « q » sur fond violet (`editors/vscode/images/qlang.svg`), utilisée par VS Code pour les fichiers et par la fiche de l'extension.
+
 ## 1.2.0
 
 Les grands nombres (`BigInt` et `BigDecimal`), la suite des dates (`Date`, `Time`, `Zoned`, lecture avec un format, périodes, sept langues), la référence du prélude complète, et surtout les niveaux de stabilité : la plus grande partie de la bibliothèque et des commandes passe en stable, et plus rien n'est expérimental. Aucun changement cassant.

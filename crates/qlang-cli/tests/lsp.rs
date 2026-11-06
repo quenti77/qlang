@@ -811,6 +811,49 @@ fn completion_works_for_a_type_in_a_variable_that_has_no_value_yet() {
 }
 
 #[test]
+fn a_colon_triggers_the_completion_of_a_type_only() {
+    // 1.2.1: `:` is a trigger character, for `let x:` but not for the value of a field
+    let dir = project("complete-colon");
+    let mut c = Client::start(&dir);
+    assert!(
+        c.capabilities["completionProvider"]["triggerCharacters"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(":"))
+    );
+    let ask = |c: &mut Client, name: &str, src: &str, line: u64, col: u64| {
+        let file = dir.join(name);
+        std::fs::write(&file, src).unwrap();
+        c.open(&file, src);
+        let mut params = c.at(&file, line, col);
+        params["context"] = json!({ "triggerKind": 2, "triggerCharacter": ":" });
+        c.request("textDocument/completion", params)
+    };
+    let types = ask(
+        &mut c,
+        "a.q",
+        "struct Point\n  public x: int\nend\nlet p:\n",
+        3,
+        6,
+    );
+    let labels: Vec<&str> = types
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["label"].as_str())
+        .collect();
+    assert!(labels.contains(&"Point"), "{labels:?}");
+    let literal = ask(
+        &mut c,
+        "b.q",
+        "struct Point\n  public x: int\nend\nlet p = Point { x:\n",
+        3,
+        18,
+    );
+    assert!(literal.is_null(), "{literal}");
+}
+
+#[test]
 fn a_parameter_with_a_default_is_shown_and_left_out_of_the_snippet() {
     let dir = project("complete-default");
     std::fs::write(

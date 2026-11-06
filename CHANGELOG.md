@@ -2,6 +2,16 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.2.1
+
+Un correctif de l'éditeur (`qlang lsp`) et une icône pour les fichiers `.q`. Aucun changement du langage ni cassant.
+
+- **Complétion d'un type dans `let x: T` sans valeur** (non cassant). `let x: ar` ne compile pas (une variable demande une valeur), et si rien ne compilait avant dans le fichier, `qlang lsp` ne répondait rien : « No suggestions » dans PhpStorm. Le serveur essaie maintenant la ligne avec ` = none` (et un type provisoire après `:` ou `->`), donc les types se proposent en tapant `let x: ar` ou `fun f(a: `. Il ne referme plus de blocs que si l'erreur est un `end` manquant, ce qui ramène la réponse de 0,6 s à environ 0,1 s sur du code inachevé.
+- **`qlang lsp` ne répond plus qu'à la dernière question d'une rafale** (non cassant). Le serveur traite une demande à la fois ; à chaque frappe, l'éditeur en envoie plusieurs (complétion, symboles…), et elles s'empilaient : plusieurs secondes de retard sur du code inachevé (3 à 4 s mesurées dans PhpStorm). Les demandes de complétion, d'infobulle, d'aide à la signature, de symboles, de surlignage, d'indices et de lentilles qui ont déjà été remplacées par une plus récente sur le même fichier reçoivent une erreur `ContentModified`, une demande annulée par `$/cancelRequest` reçoit `RequestCancelled`. Sur une rafale de 12 frappes, la dernière réponse arrive en 0,3 s au lieu de 9 s.
+- **Complétion dans du code qui ne compile pas encore** (non cassant). Quand rien n'a compilé avant dans le fichier, `qlang lsp` ne proposait rien après `as `, dans `let a: array<`, après `-> ` ou après `case `. Il complète maintenant ces lignes pour interroger le compilateur (un type, un `>`, un motif). Il essaie aussi d'abord le texte avec les parenthèses refermées, ce qui ramène `fun f(p: Po`, `Point { ` et `fun(a: ` de 0,8-1 s à 0,1 s.
+- **`:` ouvre la complétion d'un type** (non cassant) : après `let x:`, `const x:` ou `fun f(a:`. Le serveur déclare `:` parmi ses déclencheurs et ne répond que dans ces déclarations, pas pour la valeur d'un champ (`Point { x:`).
+- **Icône des fichiers `.q`** : un « q » sur fond violet (`editors/vscode/images/qlang.svg`), utilisée par VS Code pour les fichiers et par la fiche de l'extension.
+
 ## 1.2.0
 
 Les grands nombres (`BigInt` et `BigDecimal`), la suite des dates (`Date`, `Time`, `Zoned`, lecture avec un format, périodes, sept langues), la référence du prélude complète, et surtout les niveaux de stabilité : la plus grande partie de la bibliothèque et des commandes passe en stable, et plus rien n'est expérimental. Aucun changement cassant.

@@ -458,7 +458,8 @@ impl Server {
         let mut bases = vec![(text.to_string(), at.1)];
         if let Some(closed) = intel::close_brackets(text, at.0, at.1) {
             let shift = closed.chars().count() - text.chars().count();
-            bases.push((closed, at.1 + shift));
+            // an open bracket cannot parse: the closed text is the one that may
+            bases.insert(0, (closed, at.1 + shift));
         }
         let mut first = None;
         for (base, col) in bases {
@@ -470,17 +471,14 @@ impl Server {
                 .chars()
                 .take(at.1)
                 .collect();
-            let before = line.trim_end();
-            let type_waits = before.ends_with(':') || before.ends_with("->");
-            let tails = if type_waits {
-                // `let x: |` and `fun f(a: |)` wait for a type
-                &["int = none", "int", "", " then", " do"][..]
-            } else {
-                &["", " then", " do", " = none"][..]
-            };
-            for &tail in tails {
+            let tails = unfinished_tails(&line);
+            for tail in tails {
                 // the type goes at the cursor, before the bracket that was closed there
-                let place = if tail.starts_with("int") { at.1 } else { col };
+                let place = if tail.starts_with("int") || tail.starts_with('>') {
+                    at.1
+                } else {
+                    col
+                };
                 let mut source = if tail.is_empty() {
                     base.clone()
                 } else {
@@ -1598,6 +1596,38 @@ impl Server {
 struct RefInfoOwned {
     at: Loc,
     def: Loc,
+}
+
+/// What may complete the line before the cursor so that the file parses, to ask the compiler about
+/// it: a type where one is written (`let x:`, `-> `, `as `, `array<`), a value for a variable, a
+/// pattern after `case`, a `then` or a `do`. The first one that parses is the one used.
+fn unfinished_tails(before: &str) -> Vec<&'static str> {
+    let t = before.trim_end();
+    let mut tails: Vec<&'static str> = Vec::new();
+    let generic_open = match (before.rfind('<'), before.rfind('>')) {
+        (Some(open), Some(close)) => open > close,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let typed = before.contains(':') || before.contains("->") || before.contains(" as ");
+    if before.ends_with('<') && typed {
+        // `let a: array<|`
+        tails.extend(["int> = none", "int>"]);
+    } else if generic_open && typed {
+        // `let a: array<Po|`
+        tails.extend(["> = none", ">"]);
+    }
+    if t.ends_with(':') {
+        // `let x: |` and `fun f(a: |)` wait for a type
+        tails.extend(["int = none", "int"]);
+    } else if t.ends_with("->") || t.ends_with(" as") {
+        tails.push("int");
+    } else if t.trim_start().starts_with("case") && t.ends_with("case") {
+        // `case |` waits for a pattern
+        tails.push("0 then");
+    }
+    tails.extend(["", " then", " do", " = none"]);
+    tails
 }
 
 /// Whether a line that ends with a colon is a declaration that goes on with a type: `let x:`,

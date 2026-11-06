@@ -811,6 +811,33 @@ fn completion_works_for_a_type_in_a_variable_that_has_no_value_yet() {
 }
 
 #[test]
+fn completion_works_after_as_a_generic_bracket_and_case_in_code_that_never_compiled() {
+    // 1.2.1: nothing compiled before these lines, and they do not parse as they stand
+    let dir = project("complete-unfinished");
+    let mut c = Client::start(&dir);
+    let src = "struct Point\n  public x: int\nend\n";
+    let cases = [
+        ("let a: array<", 13, "Point"),
+        ("let a: array<Po", 15, "Point"),
+        ("let n = 1\nlet b = n as ", 13, "Point"),
+        ("fun f() -> ", 11, "Point"),
+        ("let p = Point { x: 1 }\nmatch p\n  case ", 7, "Point"),
+    ];
+    for (i, (body, col, want)) in cases.iter().enumerate() {
+        let last = body.matches('\n').count() as u64 + 3;
+        let l = labels_at(
+            &mut c,
+            &dir,
+            &format!("u{i}.q"),
+            &format!("{src}{body}\n"),
+            last,
+            *col,
+        );
+        assert!(l.contains(&want.to_string()), "{body:?}: {l:?}");
+    }
+}
+
+#[test]
 fn a_colon_triggers_the_completion_of_a_type_only() {
     // 1.2.1: `:` is a trigger character, for `let x:` but not for the value of a field
     let dir = project("complete-colon");

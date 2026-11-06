@@ -4,6 +4,7 @@
   "description": "Language support for qlang: syntax highlighting, errors as you type, hovers, completion, go to definition, references, rename, symbols, snippets and a Run command.",
   "version": "1.2.1",
   "publisher": "qlang",
+  "icon": "images/icon.png",
   "license": "MIT",
   "engines": { "vscode": "^1.82.0" },
   "categories": ["Programming Languages", "Snippets"],
@@ -23,7 +24,8 @@
         "id": "qlang",
         "aliases": ["qlang", "QLang"],
         "extensions": [".q"],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": { "light": "./images/qlang.svg", "dark": "./images/qlang.svg" }
       }
     ],
     "grammars": [

@@ -785,6 +785,32 @@ fn completion_works_in_a_condition_that_has_no_then_yet() {
 }
 
 #[test]
+fn completion_works_for_a_type_in_a_variable_that_has_no_value_yet() {
+    // 1.2.1: `let x: ar` does not parse (no initial value), and nothing compiled before it
+    let dir = project("complete-let-type");
+    let mut c = Client::start(&dir);
+    let src = "struct Point\n  public x: int\nend\n";
+    let cases = [
+        ("let p: Po", 9, "Point"),
+        ("let p: ", 7, "Point"),
+        ("fun f(a: Po", 11, "Point"),
+        ("fun f(a: ", 9, "Point"),
+        ("fun f(a: ) -> int", 9, "Point"),
+    ];
+    for (i, (line, col, want)) in cases.iter().enumerate() {
+        let l = labels_at(
+            &mut c,
+            &dir,
+            &format!("t{i}.q"),
+            &format!("{src}{line}\n"),
+            3,
+            *col,
+        );
+        assert!(l.contains(&want.to_string()), "{line:?}: {l:?}");
+    }
+}
+
+#[test]
 fn a_parameter_with_a_default_is_shown_and_left_out_of_the_snippet() {
     let dir = project("complete-default");
     std::fs::write(

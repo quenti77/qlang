@@ -462,19 +462,41 @@ impl Server {
         }
         let mut first = None;
         for (base, col) in bases {
-            // `if not x|` and `while y|` wait for their `then` / `do`
-            for tail in ["", " then", " do"] {
+            // `if not x|` and `while y|` wait for their `then` / `do`, and `let x: T|` for its value
+            let line: String = text
+                .lines()
+                .nth(at.0)
+                .unwrap_or("")
+                .chars()
+                .take(at.1)
+                .collect();
+            let before = line.trim_end();
+            let type_waits = before.ends_with(':') || before.ends_with("->");
+            let tails = if type_waits {
+                // `let x: |` and `fun f(a: |)` wait for a type
+                &["int = none", "int", "", " then", " do"][..]
+            } else {
+                &["", " then", " do", " = none"][..]
+            };
+            for &tail in tails {
+                // the type goes at the cursor, before the bracket that was closed there
+                let place = if tail.starts_with("int") { at.1 } else { col };
                 let mut source = if tail.is_empty() {
                     base.clone()
                 } else {
-                    intel::insert_at(&base, at.0, col, tail)
+                    intel::insert_at(&base, at.0, place, tail)
                 };
                 for _ in 0..=6 {
                     let a = self.analyse(uri, Some(&source))?;
                     if a.info.is_some() {
                         return Some(a);
                     }
+                    // only a missing `end` is mended by closing one more block
+                    let missing_end = a.diagnostics.iter().any(|d| d.code == "P001");
                     first.get_or_insert(a);
+                    if !missing_end {
+                        break;
+                    }
                     source.push_str("\nend");
                 }
             }

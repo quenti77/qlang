@@ -25,7 +25,7 @@
         "aliases": ["qlang", "QLang"],
         "extensions": [".q"],
         "configuration": "./language-configuration.json",
-        "icon": { "light": "./images/qlang.svg", "dark": "./images/qlang.svg" }
+        "icon": { "light": "./images/qlang-file.png", "dark": "./images/qlang-file.png" }
       }
     ],
     "grammars": [

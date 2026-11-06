@@ -458,23 +458,43 @@ impl Server {
         let mut bases = vec![(text.to_string(), at.1)];
         if let Some(closed) = intel::close_brackets(text, at.0, at.1) {
             let shift = closed.chars().count() - text.chars().count();
-            bases.push((closed, at.1 + shift));
+            // an open bracket cannot parse: the closed text is the one that may
+            bases.insert(0, (closed, at.1 + shift));
         }
         let mut first = None;
         for (base, col) in bases {
-            // `if not x|` and `while y|` wait for their `then` / `do`
-            for tail in ["", " then", " do"] {
+            // `if not x|` and `while y|` wait for their `then` / `do`, and `let x: T|` for its value
+            let line: String = text
+                .lines()
+                .nth(at.0)
+                .unwrap_or("")
+                .chars()
+                .take(at.1)
+                .collect();
+            let tails = unfinished_tails(&line);
+            for tail in tails {
+                // the type goes at the cursor, before the bracket that was closed there
+                let place = if tail.starts_with("int") || tail.starts_with('>') {
+                    at.1
+                } else {
+                    col
+                };
                 let mut source = if tail.is_empty() {
                     base.clone()
                 } else {
-                    intel::insert_at(&base, at.0, col, tail)
+                    intel::insert_at(&base, at.0, place, tail)
                 };
                 for _ in 0..=6 {
                     let a = self.analyse(uri, Some(&source))?;
                     if a.info.is_some() {
                         return Some(a);
                     }
+                    // only a missing `end` is mended by closing one more block
+                    let missing_end = a.diagnostics.iter().any(|d| d.code == "P001");
                     first.get_or_insert(a);
+                    if !missing_end {
+                        break;
+                    }
                     source.push_str("\nend");
                 }
             }
@@ -865,6 +885,13 @@ impl Server {
         }
         if matches!(trigger, Some("\"" | "/" | "@")) {
             return Value::Null;
+        }
+        // a colon only opens the list where a type is written (`let x:`, `fun f(a:`), not in `{ name:`
+        if trigger == Some(":") {
+            let before: String = line[..col.min(line.len())].iter().collect();
+            if !declares_a_type(&before) {
+                return Value::Null;
+            }
         }
         let line_range = |from: usize, to: usize| {
             json!({
@@ -1452,7 +1479,7 @@ impl Server {
                 "positionEncoding": "utf-16",
                 "textDocumentSync": { "openClose": true, "change": 1, "save": { "includeText": false } },
                 "hoverProvider": true,
-                "completionProvider": { "triggerCharacters": [".", "{", ",", "\"", "/", "@"] },
+                "completionProvider": { "triggerCharacters": [".", "{", ",", "\"", "/", "@", ":"] },
                 "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
                 "definitionProvider": true,
                 "referencesProvider": true,
@@ -1571,6 +1598,88 @@ struct RefInfoOwned {
     def: Loc,
 }
 
+/// What may complete the line before the cursor so that the file parses, to ask the compiler about
+/// it: a type where one is written (`let x:`, `-> `, `as `, `array<`), a value for a variable, a
+/// pattern after `case`, a `then` or a `do`. The first one that parses is the one used.
+fn unfinished_tails(before: &str) -> Vec<&'static str> {
+    let t = before.trim_end();
+    let mut tails: Vec<&'static str> = Vec::new();
+    let generic_open = match (before.rfind('<'), before.rfind('>')) {
+        (Some(open), Some(close)) => open > close,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let typed = before.contains(':') || before.contains("->") || before.contains(" as ");
+    if before.ends_with('<') && typed {
+        // `let a: array<|`
+        tails.extend(["int> = none", "int>"]);
+    } else if generic_open && typed {
+        // `let a: array<Po|`
+        tails.extend(["> = none", ">"]);
+    }
+    if t.ends_with(':') {
+        // `let x: |` and `fun f(a: |)` wait for a type
+        tails.extend(["int = none", "int"]);
+    } else if t.ends_with("->") || t.ends_with(" as") {
+        tails.push("int");
+    } else if t.trim_start().starts_with("case") && t.ends_with("case") {
+        // `case |` waits for a pattern
+        tails.push("0 then");
+    }
+    tails.extend(["", " then", " do", " = none"]);
+    tails
+}
+
+/// Whether a line that ends with a colon is a declaration that goes on with a type: `let x:`,
+/// `const x:`, `fun f(a:`. A colon after a field name in a `{ ... }` is followed by a value.
+fn declares_a_type(before: &str) -> bool {
+    let t = before.trim_start();
+    before.ends_with(':')
+        && !before.ends_with("::")
+        && !t.contains('{')
+        && ["let ", "const ", "fun "].iter().any(|k| t.starts_with(k))
+}
+
+/// What the editor asks about the text as it is now: when it asks again before we answered, only
+/// the last question matters (a burst of keystrokes sends one per key).
+const LATEST_WINS: [&str; 7] = [
+    "textDocument/completion",
+    "textDocument/hover",
+    "textDocument/signatureHelp",
+    "textDocument/documentSymbol",
+    "textDocument/documentHighlight",
+    "textDocument/inlayHint",
+    "textDocument/codeLens",
+];
+
+/// The requests of a batch that need no answer worked out: cancelled by `$/cancelRequest`, or
+/// followed by the same question about the same file. They get an error instead (the position in
+/// the batch, the LSP error code).
+fn stale_requests(batch: &[Value]) -> HashMap<usize, i64> {
+    let mut stale = HashMap::new();
+    let cancelled: Vec<&Value> = batch
+        .iter()
+        .filter(|m| m["method"] == "$/cancelRequest")
+        .map(|m| &m["params"]["id"])
+        .collect();
+    let mut last: HashMap<(String, String), usize> = HashMap::new();
+    for (i, m) in batch.iter().enumerate() {
+        let method = m["method"].as_str().unwrap_or("");
+        if m.get("id").is_none() || method.is_empty() {
+            continue;
+        }
+        if cancelled.contains(&&m["id"]) {
+            stale.insert(i, -32800); // RequestCancelled
+        } else if LATEST_WINS.contains(&method) {
+            let uri = m["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+            if let Some(before) = last.insert((method.to_string(), uri.to_string()), i) {
+                stale.insert(before, -32801); // ContentModified
+            }
+        }
+    }
+    stale
+}
+
 pub fn run() -> ExitCode {
     let (tx, rx) = mpsc::channel::<Value>();
     std::thread::spawn(move || read_messages(tx));
@@ -1592,13 +1701,72 @@ pub fn run() -> ExitCode {
         let Some(msg) = msg else {
             break;
         };
-        let method = msg["method"].as_str().unwrap_or("");
-        let params = &msg["params"];
-        if msg.get("id").is_some() && !method.is_empty() {
-            server.request(&msg["id"], method, params);
-        } else if !method.is_empty() {
-            server.notification(method, params);
+        // what piled up while the last one was being answered: old questions are not worth a compile
+        let mut batch = vec![msg];
+        batch.extend(rx.try_iter());
+        let stale = stale_requests(&batch);
+        for (i, msg) in batch.iter().enumerate() {
+            let method = msg["method"].as_str().unwrap_or("");
+            let params = &msg["params"];
+            if msg.get("id").is_some() && !method.is_empty() {
+                match stale.get(&i) {
+                    Some(&code) => respond_error(&msg["id"], code, "superseded by a newer request"),
+                    None => server.request(&msg["id"], method, params),
+                }
+            } else if !method.is_empty() {
+                server.notification(method, params);
+            }
         }
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(id: i64, method: &str, uri: &str) -> Value {
+        json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": { "textDocument": { "uri": uri } } })
+    }
+
+    #[test]
+    fn only_the_last_question_of_a_burst_is_answered() {
+        let batch = vec![
+            req(1, "textDocument/completion", "file:///a.q"),
+            req(2, "textDocument/documentSymbol", "file:///a.q"),
+            json!({ "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {} }),
+            req(3, "textDocument/completion", "file:///a.q"),
+            req(4, "textDocument/documentSymbol", "file:///a.q"),
+            req(5, "textDocument/completion", "file:///b.q"),
+            req(6, "textDocument/onTypeFormatting", "file:///a.q"),
+            req(7, "textDocument/onTypeFormatting", "file:///a.q"),
+        ];
+        let stale = stale_requests(&batch);
+        // the first completion and symbols of a.q are superseded; b.q is another file; edits are kept
+        assert_eq!(stale.get(&0), Some(&-32801));
+        assert_eq!(stale.get(&1), Some(&-32801));
+        assert_eq!(stale.len(), 2, "{stale:?}");
+    }
+
+    #[test]
+    fn a_colon_opens_the_list_only_where_a_type_is_written() {
+        assert!(declares_a_type("let x:"));
+        assert!(declares_a_type("    const port:"));
+        assert!(declares_a_type("fun f(a: int, b:"));
+        assert!(!declares_a_type("let p = Point { x:"));
+        assert!(!declares_a_type("    name:"));
+        assert!(!declares_a_type("let x: "));
+    }
+
+    #[test]
+    fn a_cancelled_request_gets_the_cancel_error() {
+        let batch = vec![
+            req(10, "textDocument/definition", "file:///a.q"),
+            json!({ "jsonrpc": "2.0", "method": "$/cancelRequest", "params": { "id": 10 } }),
+            req(11, "textDocument/definition", "file:///a.q"),
+        ];
+        let stale = stale_requests(&batch);
+        assert_eq!(stale.get(&0), Some(&-32800));
+        assert_eq!(stale.len(), 1);
+    }
 }

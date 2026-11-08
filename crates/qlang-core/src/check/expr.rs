@@ -1930,7 +1930,7 @@ impl Checker {
                         let (shown, er) = (self.show(&ret), self.show(&args[1]));
                         self.err(
                             "T282",
-                            format!("`?` on a `Result` leaves the function with its error, so the function must return a `Result<_, {er}>`, not `{shown}`"),
+                            format!("`?` on a `Result` leaves the function with its error, so the function must return a `Result<_, {er}>` (or one whose error is a parent type of `{er}`), not `{shown}`"),
                             e.span,
                         );
                     }

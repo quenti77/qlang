@@ -3538,6 +3538,44 @@ print(lang != none)
 print(env.args())
 ```
 
+#### Lire une variable avec son type : `require`, `parse`, `optional`
+
+`env.get` ne rend que du texte. Pour un nombre ou un booléen, trois méthodes lisent la variable **et** la convertissent,
+et une valeur mal écrite est une erreur (`ParseEnvError`), jamais un `none` ou un défaut pris en silence :
+
+| Variable | `env.require<T>(nom)` | `env.parse(nom, defaut)` | `env.optional<T>(nom)` |
+| --- | --- | --- | --- |
+| absente | `err` | le défaut | `ok(none)` |
+| présente et valide | `ok(valeur)` | `ok(valeur)` | `ok(valeur)` |
+| présente et invalide | `err` | `err` | `err` |
+
+```
+let db_host: string = env.require<string>("DB_HOST").unwrap()
+let db_port: int = env.parse("DB_PORT", 3306).unwrap()      -- T se déduit du défaut
+let db_ssl: bool? = env.optional<bool>("DB_SSL").unwrap()   -- none si DB_SSL n'existe pas
+
+fun config() -> Result<int, Error>
+  let host = env.require<string>("DB_HOST")?    -- ParseEnvError, accepté grâce à Result covariant
+  let text = fs.read("conf.json")?              -- Error
+  Ok(host.length() + text.length())
+end
+```
+
+- `require` et `optional` demandent `<T>` ou un type attendu (`let p: int = ...`) : sans l'un des deux,
+  `T171`. `parse` prend `T` du défaut.
+- `ParseEnvError` hérite de `Error` : `message` dit ce qui ne va pas, `name` est la variable. Comme `Result` accepte
+  les types fils, `?` le propage dans une fonction qui rend `Result<_, Error>`.
+- Les types lisibles sont ceux qui implémentent `ParsableFromString` (`fun from_text(value: string) -> Self?`, `none`
+  si le texte n'est pas valide). Le prélude l'implémente pour `string` (tout texte, même vide), `int` et `float` (comme
+  `int.parse` et `float.parse`) et `bool` : `true`, `1`, `yes`, `on` donnent `true`, `false`, `0`, `no`, `off` donnent
+  `false`, sans tenir compte de la casse ni des espaces autour, et le reste est invalide. Tes propres types
+  l'implémentent de la même façon (`impl ParsableFromString for Port`).
+- Une variable **présente mais vide** (`DB_PORT=`) est lue comme le texte vide : `string` l'accepte, `int`, `float` et
+  `bool` la refusent, donc `env.parse("DB_PORT", 3306)` rend `err` et non 3306. Pour traiter le vide comme absent,
+  passer par `env.get` et `!= ""`.
+
+*Niveau : stable depuis la 1.3.*
+
 Besoin d'un accès au disque (`fs`) ou à l'environnement du processus (`env`)
 côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait
 échouer la vérification avant même l'exécution, comme `http`/`Db`. Avec

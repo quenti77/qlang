@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.3.0
+
+En cours. Prévu : `Result` covariant (#265), `env.require` / `env.parse` / `env.optional` (#266), des ensembles qui passent de provisoire à stable (#267).
+
 ## 1.2.1
 
 Un correctif de l'éditeur (`qlang lsp`) et une icône pour les fichiers `.q`. Aucun changement du langage ni cassant.

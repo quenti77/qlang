@@ -1593,7 +1593,9 @@ impl Checker {
                     ("fs", "lines" | "each_line" | "read_lines") => {
                         Some(("fs_open_lines", "there is no disk access"))
                     }
-                    ("env", "get") => Some(("env_get", "there is no process environment")),
+                    ("env", "get" | "require" | "parse" | "optional") => {
+                        Some(("env_get", "there is no process environment"))
+                    }
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),
                     ("http", "send_all") => Some(("http_send_all", "there is no network access")),

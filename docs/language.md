@@ -793,7 +793,7 @@ end
 
 ### Parcourir son propre type : `Iterable`
 
-*Niveau : provisoire.*
+*Niveau : stable depuis la 1.3.*
 
 Un type du programme se parcourt avec `for` (et s'étale avec `...`) quand il implémente un trait du
 prélude. `Step<T>` dit ce que donne un pas : `Step.Item(valeur)` ou `Step.End` quand il n'y a plus rien
@@ -1568,7 +1568,7 @@ let p: Point<int> = Point.origin() -- Point { x: 0, y: 0 }
 - `T` doit se déduire des arguments, du type attendu ou d'un `<...>` écrit : sinon `Point.origin()` donne `T171`
   (`Point<int>.origin()` ou `let p: Point<int> = Point.origin()` les évitent).
 - Si les bornes de `T` ne déclarent pas la méthode, c'est `T161`.
-- **Provisoire** : `Self`, `T.nom()`, `Zero` et `One` sont nouveaux en 1.1 (voir [stability.md](stability.md)).
+- **Niveau** : `Self`, `T.nom()`, `Zero` et `One` sont **stables** depuis la 1.3 (voir [stability.md](stability.md)).
 
 ### Un trait comme type
 
@@ -2442,7 +2442,7 @@ chaîne). Pour l'inverse, `uuid.parse` et `ulid.parse` vérifient le texte.
 
 ### Dates et heures : `datetime`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.3, sauf `datetime.from_unix`, `datetime.parse_with`, `d.each` (`DatePeriod`) et les langues `es`, `de`, `it`, `pt`, `nl` de `format_in` et `humanize`, qui restent **provisoires** (depuis la 1.2).*
 
 Un `datetime` est un **instant** : une date et une heure, toujours en **UTC** (pas de fuseau
 horaire, donc les mêmes résultats partout). Il va de l'an 1 à l'an 9999. C'est un type à part,
@@ -2501,7 +2501,7 @@ end
 
 #### Durées : `Duration`
 
-*Niveau : provisoire (depuis la 1.1).*
+*Niveau : **stable** depuis la 1.3, sauf `Duration.parse`, qui reste **provisoire** (depuis la 1.2).*
 
 Une `Duration` est une durée : `years`, `months`, `days`, `hours`, `minutes`, `seconds`, `ms`. Rien n'est converti
 de soi-même : `Duration.of(minutes: 90)` reste 90 minutes jusqu'à `normalize()`. Les **années et les mois** n'ont pas
@@ -3440,7 +3440,7 @@ end
 
 ### Prélude : fichiers et environnement
 
-*Niveau : **stable** depuis la 1.2 pour `fs` (lire, écrire, lister, `env`) ; `File`, `Dir` et `fs.append`, `remove`, `rename`, `copy` restent **provisoires** (depuis la 1.1).*
+*Niveau : **stable** depuis la 1.2 pour `fs` (lire, écrire, lister, `env`) ; **stable** depuis la 1.3 pour `File`, `Dir` et `fs.append`, `remove`, `remove_dir`, `rename`, `copy`, `is_file`.*
 
 `fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
 contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
@@ -3500,7 +3500,7 @@ tant qu'on n'appelle pas une méthode (le chemin est relu à chaque appel).
 | Appel | Résultat |
 | --- | --- |
 | `f.name()`, `f.stem()`, `f.ext()`, `f.parent()` | `a.txt`, `a`, `txt`, le `Dir` qui le contient |
-| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` |
+| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` ; `false` quand rien n'est à ce chemin |
 | `f.size()`, `f.modified()` | la taille en octets, la date de modification (un [`datetime`](#dates-et-heures--datetime)), dans un `Result` |
 | `f.read()`, `f.read_bytes()`, `f.lines()` | comme `fs.read`, `fs.read_bytes`, `fs.lines` |
 | `f.write(texte)`, `f.append(texte)` | remplace, ajoute à la fin |

@@ -29,16 +29,16 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | Syntaxe : `let`, `fun`, `if`/`elseif`/`else`, `for`, `while`, `match`, `struct`, `enum`, `trait`, `impl`, `import`/`export`, interpolation `"{x}"` | **stable** |
 | Paramètres variadiques (`fun f(...xs: int)`) et étalement `...` dans un appel, un tableau et un dictionnaire | **stable** (depuis la 1.1) |
 | `BigInt` et `BigDecimal` du prélude (`+ - * ** div %`, comparaisons, arrondis, `to_json`) | provisoire (depuis la 1.2) |
-| `File` et `Dir`, `fs.append`, `fs.remove`, `fs.remove_dir`, `fs.rename`, `fs.copy`, `fs.is_file` | provisoire (depuis la 1.1) |
-| `Iterator`, `Iterable`, `KeyedIterable` et `Step` du prélude : `for` et `...` sur un type du programme, `map`, `filter`, `take`, `skip`, `collect` | provisoire (depuis la 1.1) |
-| `Duration`, et les méthodes de `datetime` ajoutées en 1.1 (comparaisons, `diff_in_*`, `start_of_*` / `end_of_*`, `with`, `format_in`, `humanize`) | provisoire (depuis la 1.1) |
+| `File` et `Dir`, `fs.append`, `fs.remove`, `fs.remove_dir`, `fs.rename`, `fs.copy`, `fs.is_file` | **stable** (depuis la 1.3) |
+| `Iterator`, `Iterable`, `KeyedIterable` et `Step` du prélude : `for` et `...` sur un type du programme, `map`, `filter`, `take`, `skip`, `collect` | **stable** (depuis la 1.3) |
+| `datetime` (type, accesseurs, `format`, `parse`) et `Duration`, avec les méthodes de 1.1 (comparaisons, `diff_in_*`, `start_of_*` / `end_of_*`, `with`, `format_in` et `humanize` en `en` et `fr`) | **stable** (depuis la 1.3) |
 | `datetime.from_unix`, `datetime.parse_with`, `d.each` (`DatePeriod`), `Duration.parse`, `Date`, `Time`, `Zoned`, `d.in_zone`, les langues `es` `de` `it` `pt` `nl` de `format_in` et `humanize` | provisoire (depuis la 1.2) |
-| `Self` dans un trait ou un `impl`, une méthode sans `self` appelée par un paramètre de type (`T.zero()`), les traits `Zero` et `One` du prélude | provisoire (depuis la 1.1) |
+| `Self` dans un trait ou un `impl`, une méthode sans `self` appelée par un paramètre de type (`T.zero()`), les traits `Zero` et `One` du prélude | **stable** (depuis la 1.3) |
 | Types de base, `array`, `map`, `Set`, tuples, nullables `T?`, `??`, `?`, `Result`/`Error` | **stable** |
 | Vérification de types, inférence, génériques et contraintes (`T: Eq`, `Ord`) | **stable** |
 | `Json.of` / `Json.to` / `Json.parse`, `string`, `int`, `float`, `bool` et leurs méthodes courantes | **stable** |
 | `uuid`, `ulid` (sauf le hasard), `regex`, `Hash`, `Base64`, `Hex`, `Url` (sur du texte), `Format`, `Path` | **stable** (depuis la 1.1) |
-| `datetime` (les jetons de `format` ont changé en 1.1 : une version de plus sans changement avant le stable), les variantes `*_bytes` de `Hash`, `Base64`, `Hex` et `Url` | provisoire |
+| les variantes `*_bytes` de `Hash`, `Base64`, `Hex` et `Url` | provisoire |
 | `Crypto`, `Password`, `bytes`, `time` et `random` (hors valeurs aléatoires), `fs` (lire, écrire, lister), `env`, `http` (client), `Db`, `Redis`, `Process`, `Log` | **stable** (depuis la 1.2) |
 | Opérateurs surchargés (`Add`… `Neg`, `Eq`, `Ord`, `Index`, `IndexSet`, `Push`, `As<T>`), alias de type, annotations (`#[annotation]`, leur vérification à la compilation), `Any` | **stable** (depuis la 1.1) |
 | `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard` | **stable** (depuis la 1.2) |
@@ -133,6 +133,10 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Opérateurs surchargés, alias de type, annotations, `Any` (promis depuis la 1.1) | `operator_overloading`, `type_aliases`, `compile_type_aliases`, `annotations`, `compile_annotations`, `any_values`, `compile_any` |
 | Les petits modules de la bibliothèque (promis depuis la 1.1) : `Base64`, `Hex`, `Url`, `Hash`, `regex`, `Path`, `Format`, `uuid`, `ulid` | `encodings`, `hashes`, `regex`, `path`, `format`, `identifiers` |
 | `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard` (promis depuis la 1.2) | `zones`, `archives`, `panic_guard` |
+| `datetime` et `Duration` (promis depuis la 1.3 ; hors promesse : `from_unix`, `parse_with`, `each`, `Duration.parse`, `Date`, `Time`, `Zoned`, les langues `es` `de` `it` `pt` `nl`) | `dates_and_times`, `datetime_format`, `durations`, `runtime_datetime` |
+| `File`, `Dir`, `fs.append`, `fs.remove`, `fs.remove_dir`, `fs.rename`, `fs.copy`, `fs.is_file` (promis depuis la 1.3) | **pas dans la suite de conformité** (disque nécessaire) : tests d'intégration `files` et `root_fs` |
+| `Iterator`, `Iterable`, `KeyedIterable`, `Step` (promis depuis la 1.3) | `iterables`, `compile_iterables` |
+| `Self`, `T.zero()`, `Zero`, `One` (promis depuis la 1.3) | `generic_statics`, `compile_generic_statics` |
 | `Crypto`, `Password`, `bytes`, `time`, `random`, `fs` (lire, écrire, lister), `env`, `Process`, `Log`, `http` (client), `Db`, `Redis` (promis depuis la 1.2) | **pas dans la suite de conformité** (ils ont besoin du disque, du réseau ou d'un service) : tests d'intégration `fs_env` et `root_fs` (`fs`, `env`, `--root`) (les lectures typées de `env` sont dans `fs_env`), `crypto` et `password`, `bytes`, `stdlib_system` (`time`, `random`), `process`, `log_context`, `http` et `http_all`, `db` et `mysql`, `redis` et `redis_absent` |
 | `qlang install`, `add`, `update`, `remove`, `search`, `lsp`, `doc`, `lint` (promis depuis la 1.2) | tests d'intégration `packages`, `git_packages`, `registry` et `index_file` (paquets), `lsp`, `docgen`, `doc_levels` et `doc_prelude` (`doc`), `lint` |
 | Les **codes** des erreurs de compilation et d'exécution les plus courantes | les dossiers `compile_*`, `runtime_errors`, `runtime_failures`, `arithmetic_errors` |

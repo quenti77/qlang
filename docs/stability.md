@@ -42,6 +42,7 @@ Depuis la 1.0, ce qui est *stable* est **garanti** : ce que la 1.0 promet est li
 | `Crypto`, `Password`, `bytes`, `time` et `random` (hors valeurs aléatoires), `fs` (lire, écrire, lister), `env`, `http` (client), `Db`, `Redis`, `Process`, `Log` | **stable** (depuis la 1.2) |
 | Opérateurs surchargés (`Add`… `Neg`, `Eq`, `Ord`, `Index`, `IndexSet`, `Push`, `As<T>`), alias de type, annotations (`#[annotation]`, leur vérification à la compilation), `Any` | **stable** (depuis la 1.1) |
 | `Zone`, `Gzip`, `Zip`, `Tar`, `Panic.guard` | **stable** (depuis la 1.2) |
+| `Result<T, E>` qui accepte un type fils pour `T` et pour `E` (assignation, argument, retour, `?`) | **stable** (depuis la 1.3) |
 | `Shared` | provisoire (récent) |
 | `Worker` (tâches), `Trace` (traces OpenTelemetry), `Reflect` (constructeurs, `callable`), `extern fun` et fournisseurs, `Term` | provisoire (depuis la 1.2, avant : expérimental) |
 | Mots réservés (`step`, `from`, `then`, `catch`, `public`, `end`…) | on peut en **ajouter** (annoncé en « Cassant ») |
@@ -123,6 +124,7 @@ conformance la couvrent**, et chaque ligne dit lesquels (les dossiers de `cases/
 | Dictionnaires, ensembles, tuples | `maps`, `maps_basics`, `maps_methods`, `maps_are_shared_and_typed`, `map_equality`, `sets`, `tuples` |
 | Valeurs optionnelles (`T?`, `??`, rétrécissement) | `nullables`, `optionals`, `narrowing_follows_assignments`, `compile_nullable_flow` |
 | `Result`, `Error` et l'opérateur `?` | `results` |
+| `Result<T, E>` qui accepte un type fils pour `T` et pour `E`, `?` qui propage une erreur fille (promis depuis la 1.3) | `result_covariance`, `compile_result_covariance` |
 | Structures, méthodes, traits, énumérations, héritage | `structs`, `structs_and_methods`, `traits`, `traits_as_types`, `traits_and_operators`, `enums`, `compile_structs`, `compile_traits_and_ops`, `compile_inheritance` |
 | `Json.parse`, `Json.of`, `Json.to` | `json` |
 | Modules : `import` / `export`, alias | `modules` |

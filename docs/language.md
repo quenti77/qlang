@@ -2866,14 +2866,48 @@ fun load(path: string) -> Result<Json, Error>
 end
 ```
 
-- Le type d'erreur doit être le même des deux côtés (`Error` ici) : sinon, erreur de
-  compilation (`T282`) ; il n'y a pas de conversion automatique.
+- Le type d'erreur de l'appelé doit être celui de la fonction **ou un type qui en hérite** (voir
+  ci-dessous) : sinon, erreur de compilation (`T282`) ; il n'y a pas de conversion automatique.
 - `?` marche aussi sur une valeur **nullable** : `x?` donne la valeur, ou quitte la fonction
   avec `none`, ce qui demande une fonction qui renvoie un `T?`.
   `fun port(s: string) -> int? ... let rest = s.strip_prefix("port=")?` ...
 - Il s'écrit derrière n'importe quelle expression (`a()? + b()?`, `f()?.g()`), mais pas en
   dehors d'une fonction (`T280`), et il ne s'applique qu'à un `Result` ou un nullable
   (`T281`). Dans une fonction anonyme, c'est elle seule qui est quittée.
+
+#### Des erreurs plus précises : `Result` accepte les types fils
+
+`Result<T, E>` ne change jamais une fois construit : son résultat et son erreur peuvent donc être
+d'un type **fils** de celui qu'on attend. `Result<int, OpenFileError>` s'utilise là où
+`Result<int, FileError>` ou `Result<int, Error>` est attendu, pour une assignation, un argument, un retour de
+fonction et l'opérateur `?` :
+
+```
+struct FileError extends Error end
+struct OpenFileError extends FileError end
+struct ReadAccessFileError extends FileError end
+
+fun open_file() -> Result<int, OpenFileError>
+  Err(OpenFileError { message: "impossible d'ouvrir" })
+end
+
+fun read_file() -> Result<string, ReadAccessFileError>
+  Err(ReadAccessFileError { message: "impossible de lire" })
+end
+
+fun handle() -> Result<int, FileError>
+  open_file()?     -- l'erreur garde son type OpenFileError
+  read_file()?
+  Ok(0)
+end
+```
+
+Cela vaut pour le résultat (`Result<Chat, E>` s'utilise comme `Result<Animal, E>`) comme pour l'erreur. Un
+type sans lien d'héritage reste refusé (`T002`, `T282`). Les autres types génériques (`array<T>`, `map<K, V>`,
+`Shared<T>`) restent **exacts**, parce qu'ils se modifient : un `array<Chien>` n'est pas un `array<Animal>`.
+`T?` accepte déjà un type fils.
+
+*Niveau : stable depuis la 1.3.*
 
 ### Prélude : JSON
 

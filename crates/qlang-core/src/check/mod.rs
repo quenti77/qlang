@@ -2738,13 +2738,14 @@ impl File
         Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
     end
 
-    --" Whether this path is a link. --"
+    --" Whether this path is a link. `false` when nothing is there, like `is_file`. --"
     public fun is_link(self) -> Result<bool, Error>
-        let st = stat_of(self.path)
+        let st = fs_stat(self.path)
         if st.is_err() then
             return Result<bool, Error>.Err(st.unwrap_err())
         end
-        Result<bool, Error>.Ok(st.unwrap()[0] >= 4)
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] >= 4)
     end
 
     --" The size in bytes. --"

@@ -6,6 +6,8 @@
 
 En cours. Prévu : `Result` covariant (#265), `env.require` / `env.parse` / `env.optional` (#266), des ensembles qui passent de provisoire à stable (#267).
 
+- **`Result<T, E>` accepte les types fils** (issue #265, non cassant, stable). `Result<int, OpenFileError>` s'utilise là où `Result<int, FileError>` ou `Result<int, Error>` est attendu (assignation, argument, retour de fonction, `Err(...)`), et `?` propage une erreur qui hérite de celle de la fonction : plusieurs erreurs précises dans une même fonction, sans tout ramener à `Error`. Même règle pour le résultat (`Result<Chat, E>` comme `Result<Animal, E>`). Le tableau, le dictionnaire et `Shared` restent exacts, un type sans lien reste refusé (`T002`, `T282`). Cas de conformance : `result_covariance`, `compile_result_covariance`.
+
 ## 1.2.1
 
 Un correctif de l'éditeur (`qlang lsp`) et une icône pour les fichiers `.q`. Aucun changement du langage ni cassant.

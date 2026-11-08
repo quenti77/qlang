@@ -1281,7 +1281,9 @@ impl Checker {
         if ret.contains_infer()
             && let Some(expected) = want.expected()
         {
-            self.same(&ret, expected);
+            // `assignable`, not `same`: the arguments may already have given a narrower type than the one
+            // expected (`let x: Result<Animal, Error> = Ok(chat)`), and the rest is still to be inferred
+            self.assignable(&ret, expected);
             ret = self.resolve(&ret);
         }
         if ret.contains_infer() {

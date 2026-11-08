@@ -9,8 +9,8 @@ fichiers `*.q`. Ces réglages suivent la documentation de chaque éditeur ; seul
 est testé à chaque version.
 
 **Niveau de stabilité** (voir [stability.md](stability.md)) : `qlang fmt` (y compris `fmt --stdin` et
-`textDocument/formatting`) est **stable** ; `qlang lsp`, `qlang doc` et `qlang lint` sont **provisoires** ; `qlang repl` et
-`qlang dap` (le débogueur) sont **expérimentaux**. Les capacités que `qlang lsp` annonce sont celles de la liste
+`textDocument/formatting`) est **stable** ; `qlang lsp`, `qlang doc` et `qlang lint` sont **stables** (depuis la 1.2) ; `qlang repl` et
+`qlang dap` (le débogueur) sont **provisoires**. Les capacités que `qlang lsp` annonce sont celles de la liste
 ci-dessus, et un test (`crates/qlang-cli/tests/lsp.rs`) échoue si l'une apparaît ou disparaît sans que ce soit voulu.
 Les réglages des éditeurs autres que VS Code sont **non vérifiés** : ils suivent leur documentation, sans être essayés à
 chaque version.

@@ -130,10 +130,21 @@ impl Checker {
             // a trait value is also a value of every trait it extends
             (_, Ty::Trait(tid, targs)) => self.implements(&f, *tid, targs),
             (Ty::Param(a), Ty::Param(b)) => a == b,
+            // `Result` never changes once built, so its value and its error may each be used where a
+            // wider type is expected (`Result<int, OpenError>` is a `Result<int, Error>`): this is what
+            // lets `?` pass on an error that extends the function's own. Other enums stay exact.
             (Ty::Enum(a, aa), Ty::Enum(b, ba)) => {
+                let result = self.defs.enums[*a].module == PRELUDE_MOD
+                    && self.defs.enums[*a].name == "Result";
                 a == b
                     && aa.len() == ba.len()
-                    && aa.iter().zip(ba.iter()).all(|(x, y)| self.same(x, y))
+                    && aa.iter().zip(ba.iter()).all(|(x, y)| {
+                        if result {
+                            self.assignable(x, y)
+                        } else {
+                            self.same(x, y)
+                        }
+                    })
             }
             (a, b) => a == b && !matches!(a, Ty::Param(_)),
         }

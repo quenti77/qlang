@@ -1281,7 +1281,9 @@ impl Checker {
         if ret.contains_infer()
             && let Some(expected) = want.expected()
         {
-            self.same(&ret, expected);
+            // `assignable`, not `same`: the arguments may already have given a narrower type than the one
+            // expected (`let x: Result<Animal, Error> = Ok(chat)`), and the rest is still to be inferred
+            self.assignable(&ret, expected);
             ret = self.resolve(&ret);
         }
         if ret.contains_infer() {
@@ -1591,7 +1593,9 @@ impl Checker {
                     ("fs", "lines" | "each_line" | "read_lines") => {
                         Some(("fs_open_lines", "there is no disk access"))
                     }
-                    ("env", "get") => Some(("env_get", "there is no process environment")),
+                    ("env", "get" | "require" | "parse" | "optional") => {
+                        Some(("env_get", "there is no process environment"))
+                    }
                     ("env", "args") => Some(("env_args", "there is no process environment")),
                     ("http", "send") => Some(("http_send", "there is no network access")),
                     ("http", "send_all") => Some(("http_send_all", "there is no network access")),

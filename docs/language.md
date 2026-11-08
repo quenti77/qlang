@@ -793,7 +793,7 @@ end
 
 ### Parcourir son propre type : `Iterable`
 
-*Niveau : provisoire.*
+*Niveau : stable depuis la 1.3.*
 
 Un type du programme se parcourt avec `for` (et s'étale avec `...`) quand il implémente un trait du
 prélude. `Step<T>` dit ce que donne un pas : `Step.Item(valeur)` ou `Step.End` quand il n'y a plus rien
@@ -1568,7 +1568,7 @@ let p: Point<int> = Point.origin() -- Point { x: 0, y: 0 }
 - `T` doit se déduire des arguments, du type attendu ou d'un `<...>` écrit : sinon `Point.origin()` donne `T171`
   (`Point<int>.origin()` ou `let p: Point<int> = Point.origin()` les évitent).
 - Si les bornes de `T` ne déclarent pas la méthode, c'est `T161`.
-- **Provisoire** : `Self`, `T.nom()`, `Zero` et `One` sont nouveaux en 1.1 (voir [stability.md](stability.md)).
+- **Niveau** : `Self`, `T.nom()`, `Zero` et `One` sont **stables** depuis la 1.3 (voir [stability.md](stability.md)).
 
 ### Un trait comme type
 
@@ -2442,7 +2442,7 @@ chaîne). Pour l'inverse, `uuid.parse` et `ulid.parse` vérifient le texte.
 
 ### Dates et heures : `datetime`
 
-*Niveau : provisoire.*
+*Niveau : **stable** depuis la 1.3, sauf `datetime.from_unix`, `datetime.parse_with`, `d.each` (`DatePeriod`) et les langues `es`, `de`, `it`, `pt`, `nl` de `format_in` et `humanize`, qui restent **provisoires** (depuis la 1.2).*
 
 Un `datetime` est un **instant** : une date et une heure, toujours en **UTC** (pas de fuseau
 horaire, donc les mêmes résultats partout). Il va de l'an 1 à l'an 9999. C'est un type à part,
@@ -2501,7 +2501,7 @@ end
 
 #### Durées : `Duration`
 
-*Niveau : provisoire (depuis la 1.1).*
+*Niveau : **stable** depuis la 1.3, sauf `Duration.parse`, qui reste **provisoire** (depuis la 1.2).*
 
 Une `Duration` est une durée : `years`, `months`, `days`, `hours`, `minutes`, `seconds`, `ms`. Rien n'est converti
 de soi-même : `Duration.of(minutes: 90)` reste 90 minutes jusqu'à `normalize()`. Les **années et les mois** n'ont pas
@@ -2866,14 +2866,48 @@ fun load(path: string) -> Result<Json, Error>
 end
 ```
 
-- Le type d'erreur doit être le même des deux côtés (`Error` ici) : sinon, erreur de
-  compilation (`T282`) ; il n'y a pas de conversion automatique.
+- Le type d'erreur de l'appelé doit être celui de la fonction **ou un type qui en hérite** (voir
+  ci-dessous) : sinon, erreur de compilation (`T282`) ; il n'y a pas de conversion automatique.
 - `?` marche aussi sur une valeur **nullable** : `x?` donne la valeur, ou quitte la fonction
   avec `none`, ce qui demande une fonction qui renvoie un `T?`.
   `fun port(s: string) -> int? ... let rest = s.strip_prefix("port=")?` ...
 - Il s'écrit derrière n'importe quelle expression (`a()? + b()?`, `f()?.g()`), mais pas en
   dehors d'une fonction (`T280`), et il ne s'applique qu'à un `Result` ou un nullable
   (`T281`). Dans une fonction anonyme, c'est elle seule qui est quittée.
+
+#### Des erreurs plus précises : `Result` accepte les types fils
+
+`Result<T, E>` ne change jamais une fois construit : son résultat et son erreur peuvent donc être
+d'un type **fils** de celui qu'on attend. `Result<int, OpenFileError>` s'utilise là où
+`Result<int, FileError>` ou `Result<int, Error>` est attendu, pour une assignation, un argument, un retour de
+fonction et l'opérateur `?` :
+
+```
+struct FileError extends Error end
+struct OpenFileError extends FileError end
+struct ReadAccessFileError extends FileError end
+
+fun open_file() -> Result<int, OpenFileError>
+  Err(OpenFileError { message: "impossible d'ouvrir" })
+end
+
+fun read_file() -> Result<string, ReadAccessFileError>
+  Err(ReadAccessFileError { message: "impossible de lire" })
+end
+
+fun handle() -> Result<int, FileError>
+  open_file()?     -- l'erreur garde son type OpenFileError
+  read_file()?
+  Ok(0)
+end
+```
+
+Cela vaut pour le résultat (`Result<Chat, E>` s'utilise comme `Result<Animal, E>`) comme pour l'erreur. Un
+type sans lien d'héritage reste refusé (`T002`, `T282`). Les autres types génériques (`array<T>`, `map<K, V>`,
+`Shared<T>`) restent **exacts**, parce qu'ils se modifient : un `array<Chien>` n'est pas un `array<Animal>`.
+`T?` accepte déjà un type fils.
+
+*Niveau : stable depuis la 1.3.*
 
 ### Prélude : JSON
 
@@ -3406,7 +3440,7 @@ end
 
 ### Prélude : fichiers et environnement
 
-*Niveau : **stable** depuis la 1.2 pour `fs` (lire, écrire, lister, `env`) ; `File`, `Dir` et `fs.append`, `remove`, `rename`, `copy` restent **provisoires** (depuis la 1.1).*
+*Niveau : **stable** depuis la 1.2 pour `fs` (lire, écrire, lister, `env`) ; **stable** depuis la 1.3 pour `File`, `Dir` et `fs.append`, `remove`, `remove_dir`, `rename`, `copy`, `is_file`.*
 
 `fs.read(chemin)` lit le contenu entier d'un fichier, `fs.write(chemin,
 contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
@@ -3466,7 +3500,7 @@ tant qu'on n'appelle pas une méthode (le chemin est relu à chaque appel).
 | Appel | Résultat |
 | --- | --- |
 | `f.name()`, `f.stem()`, `f.ext()`, `f.parent()` | `a.txt`, `a`, `txt`, le `Dir` qui le contient |
-| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` |
+| `f.exists()`, `f.is_file()`, `f.is_link()` | des `Result<bool, Error>` ; `false` quand rien n'est à ce chemin |
 | `f.size()`, `f.modified()` | la taille en octets, la date de modification (un [`datetime`](#dates-et-heures--datetime)), dans un `Result` |
 | `f.read()`, `f.read_bytes()`, `f.lines()` | comme `fs.read`, `fs.read_bytes`, `fs.lines` |
 | `f.write(texte)`, `f.append(texte)` | remplace, ajoute à la fin |
@@ -3503,6 +3537,44 @@ let lang = env.get("LANG")
 print(lang != none)
 print(env.args())
 ```
+
+#### Lire une variable avec son type : `require`, `parse`, `optional`
+
+`env.get` ne rend que du texte. Pour un nombre ou un booléen, trois méthodes lisent la variable **et** la convertissent,
+et une valeur mal écrite est une erreur (`ParseEnvError`), jamais un `none` ou un défaut pris en silence :
+
+| Variable | `env.require<T>(nom)` | `env.parse(nom, defaut)` | `env.optional<T>(nom)` |
+| --- | --- | --- | --- |
+| absente | `err` | le défaut | `ok(none)` |
+| présente et valide | `ok(valeur)` | `ok(valeur)` | `ok(valeur)` |
+| présente et invalide | `err` | `err` | `err` |
+
+```
+let db_host: string = env.require<string>("DB_HOST").unwrap()
+let db_port: int = env.parse("DB_PORT", 3306).unwrap()      -- T se déduit du défaut
+let db_ssl: bool? = env.optional<bool>("DB_SSL").unwrap()   -- none si DB_SSL n'existe pas
+
+fun config() -> Result<int, Error>
+  let host = env.require<string>("DB_HOST")?    -- ParseEnvError, accepté grâce à Result covariant
+  let text = fs.read("conf.json")?              -- Error
+  Ok(host.length() + text.length())
+end
+```
+
+- `require` et `optional` demandent `<T>` ou un type attendu (`let p: int = ...`) : sans l'un des deux,
+  `T171`. `parse` prend `T` du défaut.
+- `ParseEnvError` hérite de `Error` : `message` dit ce qui ne va pas, `name` est la variable. Comme `Result` accepte
+  les types fils, `?` le propage dans une fonction qui rend `Result<_, Error>`.
+- Les types lisibles sont ceux qui implémentent `ParsableFromString` (`fun from_text(value: string) -> Self?`, `none`
+  si le texte n'est pas valide). Le prélude l'implémente pour `string` (tout texte, même vide), `int` et `float` (comme
+  `int.parse` et `float.parse`) et `bool` : `true`, `1`, `yes`, `on` donnent `true`, `false`, `0`, `no`, `off` donnent
+  `false`, sans tenir compte de la casse ni des espaces autour, et le reste est invalide. Tes propres types
+  l'implémentent de la même façon (`impl ParsableFromString for Port`).
+- Une variable **présente mais vide** (`DB_PORT=`) est lue comme le texte vide : `string` l'accepte, `int`, `float` et
+  `bool` la refusent, donc `env.parse("DB_PORT", 3306)` rend `err` et non 3306. Pour traiter le vide comme absent,
+  passer par `env.get` et `!= ""`.
+
+*Niveau : stable depuis la 1.3.*
 
 Besoin d'un accès au disque (`fs`) ou à l'environnement du processus (`env`)
 côté hôte : un hôte qui ne les offre pas (un bac à sable, par exemple) fait

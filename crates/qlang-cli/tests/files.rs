@@ -301,3 +301,20 @@ print(fs.append("../outside.txt", "more").is_err())
     assert_eq!(fs::read(base.0.join("outside.txt")).unwrap(), b"out\n");
     assert!(!base.0.join("escaped.txt").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn is_link_tells_a_symbolic_link_from_a_file() {
+    let d = Dir::new("links");
+    d.write("real.txt", b"x");
+    std::os::unix::fs::symlink(d.0.join("real.txt"), d.0.join("link.txt")).unwrap();
+    let (out, err) = d.run(
+        r#"print(File.of("real.txt").is_link().unwrap())
+print(File.of("link.txt").is_link().unwrap())
+print(File.of("nope.txt").is_link().unwrap())
+"#,
+        &[],
+    );
+    assert_eq!(err, "");
+    assert_eq!(out, "false\ntrue\nfalse\n");
+}

@@ -2738,13 +2738,14 @@ impl File
         Result<bool, Error>.Ok(found != none and found[0] % 2 == 1)
     end
 
-    --" Whether this path is a link. --"
+    --" Whether this path is a link. `false` when nothing is there, like `is_file`. --"
     public fun is_link(self) -> Result<bool, Error>
-        let st = stat_of(self.path)
+        let st = fs_stat(self.path)
         if st.is_err() then
             return Result<bool, Error>.Err(st.unwrap_err())
         end
-        Result<bool, Error>.Ok(st.unwrap()[0] >= 4)
+        let found = st.unwrap()
+        Result<bool, Error>.Ok(found != none and found[0] >= 4)
     end
 
     --" The size in bytes. --"
@@ -3584,6 +3585,101 @@ impl env
     --" The program's own command-line arguments. Needs a process environment. --"
     public fun args() -> array<string>
         env_args()
+    end
+
+    --" The environment variable `name` read as a `T` (`env.require<int>("DB_PORT")`): `err` when it is not set
+    or when its text is not a valid `T`. A variable that is set but empty is read as the empty text. Needs a
+    process environment. --"
+    public fun require<T: ParsableFromString>(name: string) -> Result<T, ParseEnvError>
+        let raw = env_get(name)
+        if raw == none then
+            return Err(ParseEnvError { message: "the environment variable {name} is not set", name: name })
+        end
+        let value = T.from_text(raw)
+        if value == none then
+            return Err(ParseEnvError { message: "the environment variable {name} has the value \"{raw}\", which is not valid", name: name })
+        end
+        Ok(value)
+    end
+
+    --" The environment variable `name` read as the type of `default`, which is the answer when it is not set
+    (`env.parse("DB_PORT", 3306)`). A variable that is set but not valid is an `err`, never the default. Needs a
+    process environment. --"
+    public fun parse<T: ParsableFromString>(name: string, default: T) -> Result<T, ParseEnvError>
+        let raw = env_get(name)
+        if raw == none then
+            return Ok(default)
+        end
+        let value = T.from_text(raw)
+        if value == none then
+            return Err(ParseEnvError { message: "the environment variable {name} has the value \"{raw}\", which is not valid", name: name })
+        end
+        Ok(value)
+    end
+
+    --" The environment variable `name` read as a `T`, or `none` when it is not set
+    (`env.optional<bool>("DB_SSL")`). A variable that is set but not valid is an `err`. Needs a process
+    environment. --"
+    public fun optional<T: ParsableFromString>(name: string) -> Result<T?, ParseEnvError>
+        let raw = env_get(name)
+        if raw == none then
+            return Ok(none)
+        end
+        let value = T.from_text(raw)
+        if value == none then
+            return Err(ParseEnvError { message: "the environment variable {name} has the value \"{raw}\", which is not valid", name: name })
+        end
+        Ok(value)
+    end
+end
+
+--" The error of `env.require`, `env.parse` and `env.optional`: `name` is the variable, `message` says what is wrong. --"
+struct ParseEnvError extends Error
+    --" The name of the environment variable. --"
+    public name: string
+end
+
+--" A type that can be read from a text, as `env.require<T>` does: `from_text` gives the value, or `none` when the
+text is not a valid one (`int` for `"abc"`). Implemented for `string`, `int`, `float` and `bool`; implement it for
+your own types to read them from the environment. --"
+trait ParsableFromString
+    --" The value written in `value`, or `none` if it is not valid. --"
+    fun from_text(value: string) -> Self?
+end
+
+impl ParsableFromString for string
+    --" The text itself, even when it is empty. --"
+    public fun from_text(value: string) -> string?
+        value
+    end
+end
+
+impl ParsableFromString for int
+    --" Like `int.parse`: `none` unless the text is a whole number. --"
+    public fun from_text(value: string) -> int?
+        int.parse(value)
+    end
+end
+
+impl ParsableFromString for float
+    --" Like `float.parse`: `none` unless the text is a number. --"
+    public fun from_text(value: string) -> float?
+        float.parse(value)
+    end
+end
+
+impl ParsableFromString for bool
+    --" `true`, `1`, `yes`, `on` give `true`; `false`, `0`, `no`, `off` give `false`, whatever the case and the spaces
+    around; anything else is `none`. --"
+    public fun from_text(value: string) -> bool?
+        let text = value.trim().lower()
+        if ["true", "1", "yes", "on"].contains(text) then
+            return true
+        end
+        if ["false", "0", "no", "off"].contains(text) then
+            return false
+        end
+        none
     end
 end
 

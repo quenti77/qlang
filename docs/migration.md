@@ -22,6 +22,13 @@ reste décrit ici, à la main.
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
+## 1.3 : `File.is_link()` d'un chemin absent (provisoire)
+
+- **Avant** : `File.of("absent").is_link()` rendait `err` (« not found »), alors que `exists()` et `is_file()` rendaient `ok(false)`.
+- **Après** : `ok(false)`, comme les deux autres.
+- **S'adapter** : un programme qui comptait sur l'`err` pour savoir si le chemin existe doit appeler `exists()`.
+  Ce changement touche une partie qui était provisoire (`File`, stable depuis la 1.3).
+
 ## 1.1 : les jetons de `datetime.format` (provisoire)
 
 - **Avant** : seuls `YYYY`, `MM`, `DD`, `HH`, `mm`, `ss` et `SSS` étaient des jetons ; toute autre lettre était gardée telle quelle, donc

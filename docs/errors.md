@@ -137,7 +137,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `T270` | ```{shown}` cannot be a map key: some of its variants carry data`` <br> ```{shown}` cannot be a map key (use int, float, string, bool, uuid, ulid, datetime or an enum)`` |
 | `T280` | ```?` can only be used inside a function (it leaves the function when there is an error)`` |
 | `T281` | ```?` needs a `Result` or a nullable value, found `{shown}``` |
-| `T282` | ```?` on a `Result` leaves the function with its error, so the function must return a `Result<_, {er}>`, not `{shown}``` <br> ```?` on a nullable value leaves the function with `none`, so the function must return a nullable (`T?`), not `{shown}``` |
+| `T282` | ```?` on a `Result` leaves the function with its error, so the function must return a `Result<_, {er}>` (or one whose error is a parent type of `{er}`), not `{shown}``` <br> ```?` on a nullable value leaves the function with `none`, so the function must return a nullable (`T?`), not `{shown}``` |
 | `T286` | ```{shown}` has {} elements, so `.{index}` does not exist (they are numbered from 0)`` |
 | `T287` | ```.{index}` needs a tuple, found `{shown}``` |
 | `T288` | `the assignment takes {n} values, but the tuple has {}` |

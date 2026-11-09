@@ -1,6 +1,6 @@
 # qlang for VS Code
 
-Support for the [qlang](../../README.md) language in VS Code (files ending in `.q`).
+Support for the [qlang](https://github.com/quenti77/qlang#readme) language in VS Code (files ending in `.q`).
 
 - **Syntax highlighting**: keywords, types, numbers (`0xFF_FF`, `0b0101`, `1_000`), strings with
   `{interpolation}`, the three comment forms (`--`, `--( … --)`, `--" … --"`).

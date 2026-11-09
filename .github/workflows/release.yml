@@ -242,6 +242,13 @@ jobs:
           GH_TOKEN="$SITE_TOKEN" gh api "repos/${GITHUB_REPOSITORY_OWNER}/qlang-learn/dispatches" \
             -f event_type=qlang-release -f "client_payload[version]=${GITHUB_REF_NAME#v}"
 
+      # the extension goes to the Visual Studio Marketplace without a token: the job's OIDC identity (id-token: write
+      # above) is exchanged for a short-lived credential, thanks to a trusted publishing policy on the publisher
+      # (docs/release.md). No failure here undoes the release.
+      - name: Publish the VS Code extension
+        continue-on-error: true
+        run: npx --yes @vscode/vsce@4.1.0 publish --packagePath dist/qlang.vsix --oidc
+
   docker:
     name: Docker image
     needs: [version, build]

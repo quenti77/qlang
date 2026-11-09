@@ -73,6 +73,21 @@ release construite avec le binaire local :
 cargo build --release && scripts/test-install.sh
 ```
 
+## L'extension sur la Marketplace de VS Code
+
+Le workflow publie `qlang.vsix` sur la Marketplace à la fin de la publication (étape *Publish the VS Code extension*),
+sous l'identifiant **`qlang.qlang-vscode`** (éditeur `qlang`, nom `qlang-vscode` : le nom `qlang` était pris). Un
+échec de cette étape n'annule pas la release.
+
+- **Sans jeton** : l'étape utilise *Trusted Publishing* (`vsce publish --oidc`). Le job `publish` (qui a
+  `id-token: write`) prouve son identité à la Marketplace, qui lui donne un accès de courte durée. Rien à renouveler.
+- **La politique** : sur https://marketplace.visualstudio.com/manage/publishers/qlang, onglet *Trusted Publishing* :
+  fournisseur GitHub Actions, propriétaire `quenti77`, dépôt `qlang`, workflow `release.yml`, environnement vide.
+  Si le workflow change de nom, la politique doit changer aussi.
+- **Rattraper une version** : depuis un poste, `npx @vscode/vsce publish --packagePath qlang.vsix -p <jeton>` avec le
+  fichier de la release et un jeton Azure DevOps (scope *Marketplace > Manage*), ou le téléverser à la main sur la page de
+  gestion de l'éditeur.
+
 ## Windows, Docker et gestionnaires de paquets
 
 - **Windows** : `qlang-x86_64-pc-windows-msvc.zip` est dans la release (compilé et lancé une fois sur
@@ -105,4 +120,4 @@ cargo build --release && scripts/test-install.sh
 
 - Les binaires ne sont pas signés (macOS peut demander une confirmation au premier lancement :
   `xattr -d com.apple.quarantine ~/.local/bin/qlang`).
-- Publication sur la Marketplace de VS Code ou sur crates.io : non faite.
+- Publication sur Open VSX (VSCodium, Cursor…) et sur crates.io : non faite.

@@ -1,5 +1,5 @@
 {
-  "name": "qlang",
+  "name": "qlang-vscode",
   "displayName": "qlang",
   "description": "Language support for qlang: syntax highlighting, errors as you type, hovers, completion, go to definition, references, rename, symbols, snippets and a Run command.",
   "version": "1.3.0",

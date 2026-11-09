@@ -47,9 +47,9 @@ irm https://raw.githubusercontent.com/quenti77/qlang/main/install.ps1 | iex
 
 Le programme va dans `%LOCALAPPDATA%\qlang\bin` (ajouté au `PATH` de l'utilisateur), après vérification
 de la somme de contrôle. Le script n'a été exécuté que dans la CI, pas encore sur beaucoup de machines :
-dis-le si quelque chose coince. L'extension VS Code (`qlang.vsix`, sur la page
-[Releases](https://github.com/quenti77/qlang/releases)) s'installe avec
-`code --install-extension qlang.vsix`.
+dis-le si quelque chose coince. L'extension VS Code est sur la Marketplace (`qlang.qlang-vscode`) ; son fichier
+`qlang.vsix` est aussi sur la page [Releases](https://github.com/quenti77/qlang/releases)
+(`code --install-extension qlang.vsix`).
 
 **Docker** : une image légère (le seul programme `qlang`, utilisateur non root), pour Linux amd64 et arm64 :
 
@@ -577,7 +577,8 @@ Le texte non enregistré des fichiers ouverts est pris en compte ; les imports s
 dossier ouvert dans l'éditeur, et les paquets `@nom` sont suivis.
 
 L'extension VS Code (coloration, serveur de langage, bouton ▶ pour exécuter, snippets) est dans
-[`editors/vscode`](editors/vscode) :
+[`editors/vscode`](editors/vscode). Elle s'installe depuis la Marketplace (`qlang.qlang-vscode`, ou
+`code --install-extension qlang.qlang-vscode`), ou avec le script :
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/quenti77/qlang/main/install.sh | sh -s -- --vscode

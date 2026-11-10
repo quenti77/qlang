@@ -89,7 +89,7 @@ dossier d'installation.
 **Sans script** : les programmes, `SHA256SUMS` et l'extension (`qlang.vsix`) sont aussi sur la page
 [Releases](https://github.com/quenti77/qlang/releases) du dépôt.
 
-**Depuis les sources** (Rust 1.88 ou plus récent, `rustup update`) :
+**Depuis les sources** (Rust 1.95 ou plus récent, `rustup update`) :
 
 ```sh
 cargo install --git https://github.com/quenti77/qlang qlang-cli          # installer ou mettre à jour avec --force

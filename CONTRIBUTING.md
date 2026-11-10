@@ -23,7 +23,7 @@ cargo test --workspace           # plusieurs minutes (certains tests lancent de 
 cargo fmt && cargo clippy --workspace --all-targets
 ```
 
-Rust 1.88 au moins (une CI le vérifie). Le fuzzing demande le compilateur nightly : voir
+Rust 1.95 au moins (une CI le vérifie). Le fuzzing demande le compilateur nightly : voir
 [docs/security.md](docs/security.md#fuzzing). La suite de conformité se lance avec le programme que tu viens de
 compiler : `QLANG=target/debug/qlang target/debug/qlang run --allow-process run.q` dans `qlang-conformance`.
 
@@ -41,7 +41,7 @@ compiler : `QLANG=target/debug/qlang target/debug/qlang run --allow-process run.
   (`content/en/reference/` dans `qlang-learn`) se met à jour à la main.
 - **La version** : chaque pull request qui change le comportement monte la version de `Cargo.toml`, de
   `editors/vscode/package.json` et de son `package-lock.json` (le workflow « Release » vérifie qu'elles sont d'accord).
-- **Une CI verte** : tests sous Linux, macOS et Windows, `cargo fmt`, `clippy`, `cargo audit`, Rust 1.88, build
+- **Une CI verte** : tests sous Linux, macOS et Windows, `cargo fmt`, `clippy`, `cargo audit`, Rust 1.95, build
   WebAssembly, extension VS Code, suite de conformité.
 
 Les pull requests sont fusionnées par rebase. Un message de commit dit **pourquoi**, pas seulement quoi.

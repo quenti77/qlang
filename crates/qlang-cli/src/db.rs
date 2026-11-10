@@ -226,7 +226,7 @@ fn from_sqlite_value(v: rusqlite::types::ValueRef) -> SqlValue {
 impl SqlConn for SqliteConn {
     fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>, String> {
         let mut stmt = self.0.prepare(sql).map_err(|e| e.to_string())?;
-        let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
         let bind = rusqlite::params_from_iter(params.iter().map(to_sqlite_value));
         let rows = stmt
             .query_map(bind, |row| {

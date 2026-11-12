@@ -97,6 +97,7 @@ pub fn std_has(caps: Capabilities, name: &str) -> bool {
             caps.fs
         }
         "env_get" | "env_args" => caps.env,
+        "read_prompt" => caps.read,
         "secure_random_bytes" => caps.random,
         // pure functions, and the log: every host has them
         "constant_time_eq" | "log_write" => true,
@@ -202,6 +203,13 @@ pub fn std_call<H: Host + ?Sized>(
         ("env_get", [HostValue::Str(name)]) => host
             .env_var(name)
             .map(|v| v.map_or(HostValue::Null, HostValue::Str)),
+        ("read_prompt", [HostValue::Str(prompt)]) => {
+            if !prompt.is_empty() {
+                host.print(prompt);
+            }
+            host.read_line()
+                .map(|line| line.map_or(HostValue::Null, HostValue::Str))
+        }
         ("env_args", []) => host
             .args()
             .map(|xs| HostValue::Array(xs.into_iter().map(HostValue::Str).collect())),
@@ -243,6 +251,7 @@ pub fn std_call<H: Host + ?Sized>(
             | "fs_copy"
             | "env_get"
             | "env_args"
+            | "read_prompt"
             | "http_send"
             | "http_send_all"
             | "secure_random_bytes"

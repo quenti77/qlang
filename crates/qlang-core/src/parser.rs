@@ -1690,6 +1690,19 @@ impl<'a> Parser<'a> {
                     self.nl.pop();
                     let (args, end) = r?;
                     let span = e.span.to(end);
+                    // `read("Name? ")` and `read<int>("Port? ")` are the prelude's `read_text` and
+                    // `read_typed`; `read()` stays the built-in
+                    if let ExprKind::Ident(name, targs) = &mut e.kind
+                        && name == "read"
+                        && (!args.is_empty() || !targs.is_empty())
+                    {
+                        *name = if targs.is_empty() {
+                            "read_text"
+                        } else {
+                            "read_typed"
+                        }
+                        .into();
+                    }
                     e = self.mk(
                         span,
                         ExprKind::Call {

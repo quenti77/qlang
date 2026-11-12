@@ -1073,6 +1073,48 @@ fn input_output() {
 }
 
 #[test]
+fn read_with_a_prompt_and_read_as_a_type() {
+    let run =
+        |src: &str, input: &[&str]| run_files(&[("main.q", src)], Some(input), Limits::default());
+    // `read(prompt)` shows the prompt, with no new line, and gives the line as text
+    let o = run("let n = read(\"Name? \")\nprint(\"hi {n}\")", &["Zoe"]);
+    assert_eq!(o.output, "Name? hi Zoe\n");
+    // `read<T>(prompt)` reads the line as a T
+    let o = run(
+        "let p = read<int>(\"Port? \").unwrap()\nlet f = read<float>(\"\").unwrap()\nlet b = read<bool>(\"\").unwrap()\nlet s = read<string>(\"\").unwrap()\nprint(\"{p + 1} {f} {b} {s}\")",
+        &["8080", "1.5", "yes", "a b"],
+    );
+    assert_eq!(o.output, "Port? 8081 1.5 true a b\n");
+    // a line that is not a T, and no more input, are errors of the result, never a default
+    let o = run(
+        "let r = read<int>(\"\")\nprint(r.is_err())\nprint(r.unwrap_err().text)\nprint(read<int>(\"\").unwrap_err().message)",
+        &["abc"],
+    );
+    assert_eq!(o.output, "true\nabc\nno more input to read\n");
+    // `?` hands the error over to a function that returns a `Result<_, Error>`
+    let o = run(
+        "fun f() -> Result<int, Error>\n  let n = read<int>(\"\")?\n  Ok(n)\nend\nprint(f().is_err())",
+        &["x"],
+    );
+    assert_eq!(o.output, "true\n");
+    // `read()` is the same as before
+    let o = run("print(read())", &["plain"]);
+    assert_eq!(o.output, "plain\n");
+    let o = run("let a = read(\"x\")", &[]);
+    assert!(o.error.unwrap().contains("no more input"));
+    // a type that is not readable from a text is refused
+    let o = run("let a = read<array<int>>(\"\")", &["1"]);
+    assert!(o.error.unwrap().starts_with("COMPILE"));
+    // a host without input says so
+    let o = run_files(
+        &[("main.q", "let n = read<int>(\"\")")],
+        None,
+        Limits::default(),
+    );
+    assert!(o.error.is_some());
+}
+
+#[test]
 fn runtime_failures() {
     assert!(err("panic(\"boom\")").contains("panic: boom"));
     assert!(err("assert(1 > 2, \"math\")").contains("assertion failed: math"));

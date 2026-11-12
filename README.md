@@ -167,6 +167,8 @@ champs, méthodes et variantes `public` de leurs types. Les fichiers de test son
 qlang fmt              # remet en forme tous les fichiers .q du projet
 qlang fmt lib.q        # un fichier (ou un dossier)
 qlang fmt --check      # liste ceux qui changeraient, sans les toucher (code de sortie 1 : pour la CI)
+qlang fmt --check --diff  # montre ce qui changerait, en diff unifié (couleurs dans un terminal), sans rien écrire
+qlang fmt --diff       # met en forme et montre le diff de chaque fichier modifié
 qlang fmt --stdin      # un programme sur l'entrée, mis en forme sur la sortie (éditeur, pre-commit)
 ```
 

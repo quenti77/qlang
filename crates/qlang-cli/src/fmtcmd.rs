@@ -27,18 +27,62 @@ fn find(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn usage(why: &str) -> ExitCode {
-    eprintln!("qlang fmt: {why}\nusage: qlang fmt [path...] [--check] | qlang fmt --stdin");
+    eprintln!(
+        "qlang fmt: {why}\nusage: qlang fmt [path...] [--check] [--diff] | qlang fmt --stdin [--diff]"
+    );
     ExitCode::from(64)
+}
+
+/// The unified diff from `before` to `after` (three lines of context), coloured when `color` is set.
+fn unified_diff(name: &str, before: &str, after: &str, color: bool) -> String {
+    let diff = similar::TextDiff::from_lines(before, after);
+    let text = diff
+        .unified_diff()
+        .context_radius(3)
+        .header(name, &format!("{name} (formatted)"))
+        .to_string();
+    if !color {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len() + 64);
+    for line in text.split_inclusive('\n') {
+        let code = if line.starts_with("---") || line.starts_with("+++") {
+            "1"
+        } else if line.starts_with("@@") {
+            "36"
+        } else if line.starts_with('+') {
+            "32"
+        } else if line.starts_with('-') {
+            "31"
+        } else {
+            out.push_str(line);
+            continue;
+        };
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        out.push_str(&format!("\x1b[{code}m{body}\x1b[0m"));
+        if line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Colours only for a terminal, and not when `NO_COLOR` is set.
+fn use_color() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }
 
 pub fn run(args: &[&str]) -> ExitCode {
     let mut check = false;
+    let mut diff = false;
     let mut stdin = false;
     let mut paths: Vec<PathBuf> = Vec::new();
     for a in args {
         match *a {
             "--check" => check = true,
             "--stdin" => stdin = true,
+            "--diff" => diff = true,
             a if a.starts_with('-') => return usage(&format!("unknown option `{a}`")),
             a => paths.push(PathBuf::from(a)),
         }
@@ -51,6 +95,10 @@ pub fn run(args: &[&str]) -> ExitCode {
             return ExitCode::from(66);
         }
         return match qlang_core::fmt::format(&src) {
+            Ok(out) if diff => {
+                print!("{}", unified_diff("<stdin>", &src, &out, use_color()));
+                ExitCode::SUCCESS
+            }
             Ok(out) => {
                 print!("{out}");
                 ExitCode::SUCCESS
@@ -99,12 +147,20 @@ pub fn run(args: &[&str]) -> ExitCode {
             Ok(out) if out == src => {}
             Ok(out) => {
                 changed += 1;
+                if diff {
+                    print!(
+                        "{}",
+                        unified_diff(&f.display().to_string(), &src, &out, use_color())
+                    );
+                }
                 if check {
-                    println!("{}", f.display());
+                    if !diff {
+                        println!("{}", f.display());
+                    }
                 } else if let Err(e) = std::fs::write(f, out) {
                     eprintln!("{}: {e}", f.display());
                     failed = true;
-                } else {
+                } else if !diff {
                     println!("formatted {}", f.display());
                 }
             }

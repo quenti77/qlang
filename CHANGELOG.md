@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.4.0
+
+`qlang fmt --diff`. Aucun changement cassant.
+
+- **`qlang fmt --diff` montre les changements en diff unifié** (non cassant, stable). `qlang fmt --check --diff` affiche, pour chaque fichier qui changerait, un vrai diff (`---` / `+++`, blocs `@@`, trois lignes de contexte) sans rien écrire et sort avec le code 1 : pratique en CI pour voir ce qu'il faut corriger. `qlang fmt --diff` seul met en forme puis montre le diff de chaque fichier modifié. Avec `--stdin`, le diff remplace le texte mis en forme (le fichier s'appelle `<stdin>`). Les couleurs ne sont utilisées que dans un terminal et si `NO_COLOR` n'est pas défini. Sans `--diff`, rien ne change.
+
 ## 1.3.2
 
 Une mise à jour des dépendances, sans aucun changement du langage ni du comportement.

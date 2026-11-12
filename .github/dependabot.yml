@@ -9,6 +9,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # Pinned by hand to a toolchain branch (1.95.0 for the MSRV job); dependabot would
+      # move the SHA to the latest branch (stable) and keep the old version in the comment.
+      - dependency-name: dtolnay/rust-toolchain
   - package-ecosystem: cargo
     directory: /
     schedule:

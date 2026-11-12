@@ -2478,6 +2478,7 @@ extern fun fs_read_line(handle: int) -> Result<string?, Error>
 extern fun fs_close_lines(handle: int) -> Result<bool, Error>
 extern fun env_get(name: string) -> string?
 extern fun env_args() -> array<string>
+extern fun read_prompt(prompt: string) -> string?
 extern fun http_send(req: Request) -> Result<Response, Error>
 extern fun http_send_all(reqs: array<Request>) -> Result<array<Response>, Error>
 
@@ -3631,6 +3632,37 @@ impl env
         end
         Ok(value)
     end
+end
+
+--" `read("Name? ")`: shows `prompt`, then reads a line like `read()` does. The call `read(prompt)` is written
+`read_text(prompt)` by the parser. Needs input to read. --"
+fun read_text(prompt: string) -> string
+    let line = read_prompt(prompt)
+    if line == none then
+        panic("no more input to read")
+    end
+    line
+end
+
+--" `read<int>("Port? ")`: shows `prompt`, reads a line and reads it as a `T`: `err` when there is no more input
+or when the line is not a valid `T`. The call `read<T>(prompt)` is written `read_typed<T>(prompt)` by the
+parser. Needs input to read. --"
+fun read_typed<T: ParsableFromString>(prompt: string) -> Result<T, ReadError>
+    let line = read_prompt(prompt)
+    if line == none then
+        return Err(ReadError { message: "no more input to read", text: "" })
+    end
+    let value = T.from_text(line)
+    if value == none then
+        return Err(ReadError { message: "\"{line}\" is not a valid answer", text: line })
+    end
+    Ok(value)
+end
+
+--" The error of `read<T>(prompt)`: `text` is the line that was typed (empty when there was no more input). --"
+struct ReadError extends Error
+    --" The line that was read. --"
+    public text: string
 end
 
 --" The error of `env.require`, `env.parse` and `env.optional`: `name` is the variable, `message` says what is wrong. --"

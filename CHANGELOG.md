@@ -4,8 +4,9 @@
 
 ## 1.4.0
 
-`qlang fmt --diff`. Aucun changement cassant.
+`qlang fmt --diff` et `read` avec un message et un type. Aucun changement cassant.
 
+- **`read(message)` et `read<T>(message)` : lire au clavier avec un message et un type** (non cassant, provisoire). `read("Nom ? ")` affiche le message (sans retour à la ligne) puis lit une ligne et la rend en `string`, comme `read()`. `read<int>("Port ? ")` lit la ligne **et** la convertit avec le trait `ParsableFromString` (`string`, `int`, `float`, `bool`, ou ton type avec un `impl`) : `Result<int, ReadError>`, une ligne mal écrite ou plus d'entrée donne une erreur, jamais un défaut pris en silence. `ReadError` hérite de `Error` (`message`, et `text` pour la ligne tapée). `read()` sans argument ne change pas. Une entrée est nécessaire, comme pour `read()` ; sans entrée, l'erreur est à l'exécution.
 - **`qlang fmt --diff` montre les changements en diff unifié** (non cassant, stable). `qlang fmt --check --diff` affiche, pour chaque fichier qui changerait, un vrai diff (`---` / `+++`, blocs `@@`, trois lignes de contexte) sans rien écrire et sort avec le code 1 : pratique en CI pour voir ce qu'il faut corriger. `qlang fmt --diff` seul met en forme puis montre le diff de chaque fichier modifié. Avec `--stdin`, le diff remplace le texte mis en forme (le fichier s'appelle `<stdin>`). Les couleurs ne sont utilisées que dans un terminal et si `NO_COLOR` n'est pas défini. Sans `--diff`, rien ne change.
 
 ## 1.3.2

@@ -1968,6 +1968,8 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 | `write(x)`               | affiche `x` sans retour à la ligne                                    |
 | `eprint(x)`, `ewrite(x)` | comme `print` et `write`, sur la sortie d'erreur (jamais mêlée aux résultats ; un hôte sans sortie d'erreur les jette). Voir [Sortie et sortie d'erreur](#sortie-et-sortie-derreur) |
 | `read()`                 | lit une ligne et renvoie une `string` (sans le retour à la ligne)     |
+| `read("Nom ? ")`         | affiche le message (sans retour à la ligne), puis lit une ligne comme `read()`    |
+| `read<int>("Port ? ")`   | affiche le message, lit une ligne et la lit comme un `int` : `Result<int, ReadError>` (voir ci-dessous) |
 | `read_all()`             | lit toutes les lignes restantes, reliées par des retours à la ligne (aucun après la dernière) |
 | `exit(code?)`            | termine le programme tout de suite avec ce code de sortie (0 par défaut) ; rien ne s'exécute après |
 | `panic(message)`         | arrête le programme avec une erreur                                   |
@@ -1988,7 +1990,21 @@ par l'**environnement d'exécution** (le terminal, un serveur web…).
 `print` et `write` acceptent n'importe quelle valeur (voir
 [Conversions](#conversions)) : les tableaux s'affichent `[1, 2, 3]`, les
 chaînes dans un tableau sont entre guillemets. `read()` renvoie toujours une
-`string` ; pour un nombre : `int.parse(read())`.
+`string` ; pour un nombre : `read<int>("Port ? ")` ou `int.parse(read())`.
+
+`read<T>(message)` lit une ligne **et** la convertit, avec le trait `ParsableFromString` (`string`, `int`, `float`,
+`bool`, ou ton type avec un `impl`) : une ligne mal écrite, ou plus d'entrée, est une erreur (`ReadError`), jamais un
+défaut pris en silence. Le message est affiché tel quel, sans retour à la ligne. Il faut une entrée, comme pour
+`read()`.
+
+```
+let port = read<int>("Port ? ")?          -- ReadError, accepté grâce à Result covariant
+let nom = read("Nom ? ")                  -- une string, avec un message
+let age = read<int>("Age ? ").unwrap()   -- arrête le programme sur une erreur
+```
+
+- `ReadError` hérite de `Error` : `message` dit ce qui ne va pas, `text` est la ligne tapée (vide s'il n'y avait plus d'entrée).
+- `read("message")` s'arrête avec l'erreur « no more input to read » quand il n'y a plus d'entrée (`read()` : `R040`).
 
 #### Nombres partagés entre les workers : `Shared`
 

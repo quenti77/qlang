@@ -1128,7 +1128,7 @@ pub const FUNCTIONS: &[(&str, &str, &str)] = &[
     (
         "read",
         "read() -> string",
-        "Reads a line and returns it without the new line. Not available everywhere (a web server has no keyboard).",
+        "Reads a line and returns it without the new line. Not available everywhere (a web server has no keyboard). `read(\"Name? \")` shows the message first, and `read<int>(\"Port? \")` reads the line as an `int` (a `Result<int, ReadError>`).",
     ),
     (
         "read_all",

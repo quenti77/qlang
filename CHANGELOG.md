@@ -2,6 +2,14 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.3.1
+
+Un correctif de sécurité des dépendances, la publication de l'extension sur le Marketplace de VS Code, et une version de Rust minimale qui monte à 1.95. Aucun changement du langage ni cassant pour les programmes qlang.
+
+- **Correctif `RUSTSEC-2026-0459` (SQLite)** (non cassant). `rusqlite` passe de 0.40 à 0.41, ce qui embarque `libsqlite3-sys` 0.39 (la 0.38 était touchée). `Db` et les connexions SQLite se comportent comme avant. Dans la foulée, les dépendances sont à jour (`toml` 1.2, `ureq` 3.5.1, `flate2`, `zip` 9.4).
+- **Extension VS Code sur le Marketplace** (non cassant). Elle se publie sous `qlang.qlang-vscode` à chaque release, par « Trusted Publishing » (OIDC, sans jeton stocké dans le dépôt). La publication ne bloque pas la release si elle échoue. `install.sh` et le fichier `qlang.vsix` de la release restent disponibles.
+- **Rust 1.95 au moins pour compiler qlang depuis les sources** (avant : 1.88). Les programmes déjà compilés (release, `install.sh`) ne sont pas touchés. `rustyline` 19 utilise `cfg_select!`, stable depuis Rust 1.95 ; la valeur 1.88 annoncée n'était plus vraie, parce que le job « Rust minimal » de la CI testait en réalité la version stable. Il épingle maintenant la 1.95.0, et dependabot ne touche plus à cette épingle.
+
 ## 1.3.0
 
 Une version de langage : `Result` accepte les types fils (donc plusieurs erreurs précises avec `?`), des variables d'environnement typées, et quatre ensembles qui passent de provisoire à stable. Un seul changement de comportement, dans une partie qui était provisoire (`File.is_link()`).

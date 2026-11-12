@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.3.2
+
+Une mise à jour des dépendances, sans aucun changement du langage ni du comportement.
+
+- **Dépendances à jour** (non cassant). `toml` 1.2.1, `toml_edit` 0.25.19 et `zip` 9.5.0. `cargo audit` ne signale aucune alerte.
+
 ## 1.3.1
 
 Un correctif de sécurité des dépendances, la publication de l'extension sur le Marketplace de VS Code, et une version de Rust minimale qui monte à 1.95. Aucun changement du langage ni cassant pour les programmes qlang.

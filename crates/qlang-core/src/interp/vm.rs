@@ -55,6 +55,14 @@ fn elem_bits(v: &Value, ety: Ety) -> Option<i64> {
     }
 }
 
+/// An integer literal that fits an instruction's immediate operand.
+fn small_int(e: &Expr) -> Option<i32> {
+    match e.kind {
+        ExprKind::Int(v) => i32::try_from(v).ok(),
+        _ => None,
+    }
+}
+
 fn elem_value(bits: i64, ety: Ety) -> Value {
     match ety {
         Ety::I => Value::Int(bits),
@@ -72,6 +80,9 @@ enum Op {
     MovO(Reg, Reg),
     AddI(Reg, Reg, Reg),
     SubI(Reg, Reg, Reg),
+    /// `a + imm`, `a - imm` with a small constant.
+    AddImm(Reg, Reg, i32),
+    SubImm(Reg, Reg, i32),
     MulI(Reg, Reg, Reg),
     IntDivI(Reg, Reg, Reg),
     ModI(Reg, Reg, Reg),
@@ -132,6 +143,13 @@ enum Op {
     JnGeI(Reg, Reg, u32),
     JnEqI(Reg, Reg, u32),
     JnNeI(Reg, Reg, u32),
+    /// The same against a small constant (no register to load it into at each call).
+    JnLtImm(Reg, i32, u32),
+    JnLeImm(Reg, i32, u32),
+    JnGtImm(Reg, i32, u32),
+    JnGeImm(Reg, i32, u32),
+    JnEqImm(Reg, i32, u32),
+    JnNeImm(Reg, i32, u32),
     JnF {
         a: Reg,
         b: Reg,
@@ -1257,6 +1275,12 @@ impl Gen<'_> {
             | Op::JnGeI(_, _, t)
             | Op::JnEqI(_, _, t)
             | Op::JnNeI(_, _, t)
+            | Op::JnLtImm(_, _, t)
+            | Op::JnLeImm(_, _, t)
+            | Op::JnGtImm(_, _, t)
+            | Op::JnGeImm(_, _, t)
+            | Op::JnEqImm(_, _, t)
+            | Op::JnNeImm(_, _, t)
             | Op::JnF { t, .. }
             | Op::JnEnum { t, .. }
             | Op::ForCheck { exit: t, .. } => *t = target,
@@ -1276,6 +1300,23 @@ impl Gen<'_> {
         ) = &cond.kind
         {
             let (a, ta) = self.value(l)?;
+            if ta == Ty::Int {
+                if let Some(k) = small_int(r) {
+                    let at = self.emit(
+                        match op {
+                            BinOp::Lt => Op::JnLtImm(a, k, 0),
+                            BinOp::LtEq => Op::JnLeImm(a, k, 0),
+                            BinOp::Gt => Op::JnGtImm(a, k, 0),
+                            BinOp::GtEq => Op::JnGeImm(a, k, 0),
+                            BinOp::Eq => Op::JnEqImm(a, k, 0),
+                            _ => Op::JnNeImm(a, k, 0),
+                        },
+                        cond.span,
+                    );
+                    self.top = mark;
+                    return Some(at);
+                }
+            }
             let (b, tb) = self.value(r)?;
             let cmp = match op {
                 BinOp::Lt => Cmp::Lt,
@@ -1881,6 +1922,20 @@ impl Gen<'_> {
             ExprKind::Binary(op, l, r) => {
                 let mark = self.top;
                 let (mut a, mut ta) = self.value(l)?;
+                if ta == Ty::Int && matches!(op, BinOp::Add | BinOp::Sub) {
+                    if let Some(k) = small_int(r) {
+                        self.emit(
+                            if matches!(op, BinOp::Add) {
+                                Op::AddImm(dst, a, k)
+                            } else {
+                                Op::SubImm(dst, a, k)
+                            },
+                            span,
+                        );
+                        self.top = mark;
+                        return Some(Ty::Int);
+                    }
+                }
                 let (mut b, mut tb) = self.value(r)?;
                 // an `int` next to a `float` is turned into a float first (as the tree walker does)
                 if !matches!(op, BinOp::IntDiv) && matches!((&ta, &tb), (Ty::Int, Ty::Float)) {
@@ -3607,6 +3662,14 @@ impl Interp<'_> {
                     Some(v) => r!(d) = v,
                     None => fail!("R010", "integer overflow"),
                 },
+                Op::AddImm(d, a, k) => match r!(a).checked_add(i64::from(k)) {
+                    Some(v) => r!(d) = v,
+                    None => fail!("R010", "integer overflow"),
+                },
+                Op::SubImm(d, a, k) => match r!(a).checked_sub(i64::from(k)) {
+                    Some(v) => r!(d) = v,
+                    None => fail!("R010", "integer overflow"),
+                },
                 Op::SubI(d, a, b) => match r!(a).checked_sub(r!(b)) {
                     Some(v) => r!(d) = v,
                     None => fail!("R010", "integer overflow"),
@@ -4009,6 +4072,36 @@ impl Interp<'_> {
                         }
                     }
                     pc = t as usize;
+                }
+                Op::JnLtImm(a, k, t) => {
+                    if r!(a) >= i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnLeImm(a, k, t) => {
+                    if r!(a) > i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGtImm(a, k, t) => {
+                    if r!(a) <= i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGeImm(a, k, t) => {
+                    if r!(a) < i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnEqImm(a, k, t) => {
+                    if r!(a) != i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnNeImm(a, k, t) => {
+                    if r!(a) == i64::from(k) {
+                        pc = t as usize;
+                    }
                 }
                 Op::JnLtI(a, b, t) => {
                     if r!(a) >= r!(b) {

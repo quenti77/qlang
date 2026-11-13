@@ -76,6 +76,22 @@ fn recursion_loops_and_mixed_numbers() {
 }
 
 #[test]
+fn small_constants_are_operands_of_the_instruction() {
+    // the six comparisons against a literal, both sides of it, negative and at the edges of an i32
+    let src = "fun cmp(n: int) -> string\n  let r = \"\"\n  if n < 5 then r += \"a\" end\n  if n <= 5 then r += \"b\" end\n  if n > 5 then r += \"c\" end\n  if n >= 5 then r += \"d\" end\n  if n == 5 then r += \"e\" end\n  if n != 5 then r += \"f\" end\n  if n < -2147483648 then r += \"g\" end\n  if n > 2147483647 then r += \"h\" end\n  r\nend\nfor n in [4, 5, 6, -3000000000, 3000000000] do print(cmp(n)) end";
+    assert_eq!(same(src), "abf\nbde\ncdf\nabfg\ncdfh\n");
+    // + and - with a literal, and the overflow it must still report
+    assert_eq!(
+        same("fun f(n: int) -> int\n  n + 7 - 10 + -3 - -1\nend\nprint(f(100))"),
+        "95\n"
+    );
+    let out = same("fun f(n: int) -> int\n  n + 1\nend\nprint(f(9223372036854775807))");
+    assert!(out.contains("R010"), "{out}");
+    let out = same("fun f(n: int) -> int\n  n - 1\nend\nprint(f(-9223372036854775807 - 1))");
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

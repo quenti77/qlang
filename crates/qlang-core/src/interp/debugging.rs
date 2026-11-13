@@ -42,7 +42,7 @@ impl Interp<'_> {
             let name = if i == 0 {
                 "(program)".to_string()
             } else {
-                self.frames[i - 1].0.as_str().to_string()
+                self.frame_name(&self.frames[i - 1].0).to_string()
             };
             let mut scopes = Vec::new();
             if let Some(env) = env {

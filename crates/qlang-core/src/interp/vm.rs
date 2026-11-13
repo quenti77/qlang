@@ -1300,22 +1300,22 @@ impl Gen<'_> {
         ) = &cond.kind
         {
             let (a, ta) = self.value(l)?;
-            if ta == Ty::Int {
-                if let Some(k) = small_int(r) {
-                    let at = self.emit(
-                        match op {
-                            BinOp::Lt => Op::JnLtImm(a, k, 0),
-                            BinOp::LtEq => Op::JnLeImm(a, k, 0),
-                            BinOp::Gt => Op::JnGtImm(a, k, 0),
-                            BinOp::GtEq => Op::JnGeImm(a, k, 0),
-                            BinOp::Eq => Op::JnEqImm(a, k, 0),
-                            _ => Op::JnNeImm(a, k, 0),
-                        },
-                        cond.span,
-                    );
-                    self.top = mark;
-                    return Some(at);
-                }
+            if ta == Ty::Int
+                && let Some(k) = small_int(r)
+            {
+                let at = self.emit(
+                    match op {
+                        BinOp::Lt => Op::JnLtImm(a, k, 0),
+                        BinOp::LtEq => Op::JnLeImm(a, k, 0),
+                        BinOp::Gt => Op::JnGtImm(a, k, 0),
+                        BinOp::GtEq => Op::JnGeImm(a, k, 0),
+                        BinOp::Eq => Op::JnEqImm(a, k, 0),
+                        _ => Op::JnNeImm(a, k, 0),
+                    },
+                    cond.span,
+                );
+                self.top = mark;
+                return Some(at);
             }
             let (b, tb) = self.value(r)?;
             let cmp = match op {
@@ -1922,19 +1922,20 @@ impl Gen<'_> {
             ExprKind::Binary(op, l, r) => {
                 let mark = self.top;
                 let (mut a, mut ta) = self.value(l)?;
-                if ta == Ty::Int && matches!(op, BinOp::Add | BinOp::Sub) {
-                    if let Some(k) = small_int(r) {
-                        self.emit(
-                            if matches!(op, BinOp::Add) {
-                                Op::AddImm(dst, a, k)
-                            } else {
-                                Op::SubImm(dst, a, k)
-                            },
-                            span,
-                        );
-                        self.top = mark;
-                        return Some(Ty::Int);
-                    }
+                if ta == Ty::Int
+                    && matches!(op, BinOp::Add | BinOp::Sub)
+                    && let Some(k) = small_int(r)
+                {
+                    self.emit(
+                        if matches!(op, BinOp::Add) {
+                            Op::AddImm(dst, a, k)
+                        } else {
+                            Op::SubImm(dst, a, k)
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(Ty::Int);
                 }
                 let (mut b, mut tb) = self.value(r)?;
                 // an `int` next to a `float` is turned into a float first (as the tree walker does)

@@ -114,8 +114,7 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// qlang source (same checker, same diagnostics), just loaded as module 0 before the
 /// entry file. A name declared locally always shadows one from here (`lookup_item`
 /// checks the current module first).
-const PRELUDE_BASE: &str = concat!(
-    r#"
+const PRELUDE_BASE: &str = r#"
 --" What a failed call gives back in a `Result`. --"
 struct Error
     --" What went wrong, for a person to read. --"
@@ -5165,8 +5164,7 @@ impl Db
         outcome
     end
 end
-"#
-);
+"#;
 
 /// Big numbers and dates are most of the prelude and few programs use them: they are loaded
 /// when the program mentions one of these words, or when a first try without them fails.

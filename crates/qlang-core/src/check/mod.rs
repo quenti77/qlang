@@ -1131,6 +1131,7 @@ end
 array) can be used directly as a `json_object` field, with no need to call
 `json_array` by hand. --"
 impl<T: ToJson> ToJson for array<T>
+    --" The JSON text of the array: each item through its own `to_json()`. --"
     public fun to_json(self) -> string
         json_array(self)
     end

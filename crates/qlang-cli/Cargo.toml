@@ -39,3 +39,8 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 chrono-tz = "0.10"
 rustyline = { version = "19.0.0", default-features = false, features = ["with-file-history"] }
+
+# The static Linux binaries use musl, whose allocator is much slower than glibc's
+# (a third more time on call-heavy programs): mimalloc closes the gap.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { version = "0.1", default-features = false }

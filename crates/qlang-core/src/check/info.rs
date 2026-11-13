@@ -550,6 +550,21 @@ impl Checker {
             }
             _ => {}
         }
+        // the methods a program (or the prelude) adds to a built-in type with an `impl`
+        if matches!(
+            ty,
+            Ty::Array(_)
+                | Ty::Map(..)
+                | Ty::Str
+                | Ty::Uuid
+                | Ty::Ulid
+                | Ty::DateTime
+                | Ty::Bytes
+                | Ty::Int
+                | Ty::Float
+        ) {
+            self.impl_methods(ty, true, &mut out);
+        }
         if matches!(
             ty,
             Ty::Struct(..) | Ty::Enum(..) | Ty::Trait(..) | Ty::Param(_)
@@ -622,6 +637,18 @@ impl Checker {
                             }
                         })
                         .collect(),
+                    // `impl<T> array<T>`, `impl int`...: an impl on a built-in type
+                    (Ty::Array(a), Ty::Array(b)) => bind_param(a, b).into_iter().collect(),
+                    (Ty::Map(k1, v1), Ty::Map(k2, v2)) => bind_param(k1, k2)
+                        .into_iter()
+                        .chain(bind_param(v1, v2))
+                        .collect(),
+                    (a, b)
+                        if is_plain_builtin(a)
+                            && std::mem::discriminant(a) == std::mem::discriminant(b) =>
+                    {
+                        HashMap::new()
+                    }
                     _ => continue,
                 };
                 for (_, fid) in &imp.methods {
@@ -1076,6 +1103,21 @@ fn show_default(e: &ast::Expr) -> String {
     }
 }
 
+/// `T` of an impl target against the type of the value: what the parameter stands for.
+fn bind_param(target: &Ty, value: &Ty) -> Option<(ParamId, Ty)> {
+    match target {
+        Ty::Param(p) => Some((*p, value.clone())),
+        _ => None,
+    }
+}
+
+fn is_plain_builtin(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Str | Ty::Uuid | Ty::Ulid | Ty::DateTime | Ty::Bytes | Ty::Int | Ty::Float
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1130,18 @@ mod tests {
             Ok(p) => p.info.expect("info"),
             Err(e) => *e.info.expect("info even on errors"),
         }
+    }
+
+    /// The methods a program adds to a built-in type with an `impl` show up after the dot.
+    #[test]
+    fn impl_methods_of_builtin_types_are_offered() {
+        let info = info_of(
+            "impl<T> array<T>\n  public fun duplicate(self) -> Self\n    self.slice(0, self.len())\n  end\nend\nimpl string\n  public fun shout(self) -> string\n    self.upper()\n  end\nend\nlet a = [1, 2]\nlet s = \"x\"\nprint(a.duplicate())\nprint(s.shout())\n",
+        );
+        let has = |ty: &str, name: &str| info.members[ty].iter().any(|m| m.name == name);
+        assert!(has("array<int>", "duplicate") && has("array<int>", "chunk"));
+        assert!(has("string", "shout") && has("string", "upper"));
+        assert!(!has("string", "duplicate"));
     }
 
     /// Every method documented in the catalog must exist in the checker, and the other
@@ -1104,7 +1158,12 @@ mod tests {
             ("float", "float"),
         ] {
             let documented: Vec<&str> = catalog::methods(owner).iter().map(|e| e.0).collect();
-            let known: Vec<&str> = info.members[ty].iter().map(|m| m.name.as_str()).collect();
+            // (the prelude's own `impl`s on these types add more, with a location in the prelude)
+            let known: Vec<&str> = info.members[ty]
+                .iter()
+                .filter(|m| m.loc.is_none())
+                .map(|m| m.name.as_str())
+                .collect();
             assert_eq!(documented, known, "methods of {ty}");
         }
     }

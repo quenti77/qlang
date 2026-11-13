@@ -36,7 +36,7 @@ pub struct Parser<'a> {
     next_id: u32,
     /// Documentation comments not attached yet, by the line where they end: (end offset, text).
     docs: std::collections::HashMap<usize, (usize, Rc<str>)>,
-    line_starts: Vec<usize>,
+    line_starts: std::rc::Rc<Vec<usize>>,
     /// Current nesting of expressions, blocks and types (bounded).
     depth: u32,
     /// Annotations read, waiting for the declaration they belong to, and where the first began.
@@ -60,7 +60,7 @@ pub fn parse_module_from(
 ) -> (Module, u32) {
     let mut docs = Vec::new();
     let toks = lex_with_docs(src, file, 0, diags, &mut docs);
-    let mut p = Parser::new(src, file, toks, first_id);
+    let mut p = Parser::new(src, file, toks, first_id, None);
     for d in docs {
         let line = p.line_of(d.end.saturating_sub(1));
         p.docs.insert(line, (d.end, Rc::from(d.text.as_str())));
@@ -71,7 +71,13 @@ pub fn parse_module_from(
 }
 
 impl<'a> Parser<'a> {
-    fn new(src: &'a str, file: u32, toks: Vec<Token>, next_id: u32) -> Parser<'a> {
+    fn new(
+        src: &'a str,
+        file: u32,
+        toks: Vec<Token>,
+        next_id: u32,
+        line_starts: Option<std::rc::Rc<Vec<usize>>>,
+    ) -> Parser<'a> {
         Parser {
             src,
             file,
@@ -80,9 +86,13 @@ impl<'a> Parser<'a> {
             nl: vec![true],
             next_id,
             docs: std::collections::HashMap::new(),
-            line_starts: std::iter::once(0)
-                .chain(src.match_indices('\n').map(|(i, _)| i + 1))
-                .collect(),
+            line_starts: line_starts.unwrap_or_else(|| {
+                std::rc::Rc::new(
+                    std::iter::once(0)
+                        .chain(src.match_indices('\n').map(|(i, _)| i + 1))
+                        .collect(),
+                )
+            }),
             depth: 0,
             pending: Vec::new(),
             pending_start: None,
@@ -2359,7 +2369,13 @@ impl<'a> Parser<'a> {
 
     fn parse_interpolation(&mut self, inner: &str, base: usize) -> Option<Expr> {
         let toks = lex(inner, self.file, base, &mut self.diags);
-        let mut sub = Parser::new(self.src, self.file, toks, self.next_id);
+        let mut sub = Parser::new(
+            self.src,
+            self.file,
+            toks,
+            self.next_id,
+            Some(self.line_starts.clone()),
+        );
         sub.nl = vec![false];
         let e = sub.parse_expr();
         if e.is_ok() && !sub.at(&Tok::Eof) {

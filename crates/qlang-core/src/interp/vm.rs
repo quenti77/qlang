@@ -395,7 +395,7 @@ enum Op {
 
 /// A compiled function.
 pub(super) struct Code {
-    name: String,
+    pub(super) name: String,
     nregs: usize,
     ops: Vec<Op>,
     spans: Vec<Span>,
@@ -3608,7 +3608,7 @@ impl Interp<'_> {
         let own = usize::from(code.is_loop);
         if own == 0 {
             self.depth += 1;
-            self.frames.push((Name::new(&code.name), span));
+            self.frames.push((FrameName::Vm(root), span));
         }
         let r = self.vm_loop(&mut stack, &mut ostack, &mut frames, root);
         // leave the interpreter's own call bookkeeping as it was
@@ -3621,6 +3621,15 @@ impl Interp<'_> {
         r
     }
 
+    /// The compiled code `i`, without the count of references a clone of its `Rc` costs at each
+    /// call and return.
+    fn code_at<'c>(&self, i: u32) -> &'c Code {
+        // SAFETY: `vm_codes` only grows (nothing is ever removed or replaced), and the `Rc`s
+        // are only dropped with the interpreter, which outlives every run of the machine; a
+        // push moves the `Rc` pointers, not the `Code` they point to.
+        unsafe { &*Rc::as_ptr(&self.vm_codes[i as usize]) }
+    }
+
     fn vm_loop(
         &mut self,
         stack: &mut Vec<i64>,
@@ -3629,12 +3638,21 @@ impl Interp<'_> {
         root: u32,
     ) -> R<i64> {
         let mut cur = root;
-        let mut code = self.vm_codes[cur as usize].clone();
+        let mut code = self.code_at(cur);
         let mut pc = 0usize;
         let mut base = 0usize;
+        // The registers of the code that runs are inside `stack` (`vm_run` and `Call` make
+        // room for `nregs` of them from `base`, and the stack never shrinks), and the compiler
+        // only names registers it has allocated (below `nregs`). Debug builds, which run the
+        // whole test suite, check every access; release builds do not.
         macro_rules! r {
             ($x:expr) => {
-                stack[base + $x as usize]
+                *{
+                    let at = base + $x as usize;
+                    debug_assert!(at < stack.len() && ($x as usize) < code.nregs);
+                    // SAFETY: see above.
+                    unsafe { stack.get_unchecked_mut(at) }
+                }
             };
         }
         macro_rules! o {
@@ -3797,7 +3815,7 @@ impl Interp<'_> {
                 | Op::NewTuple { .. }
                 | Op::TupleGet { .. }
                 | Op::CallValue { .. }
-                | Op::EqG { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                | Op::EqG { .. } => self.vm_rare(op, code, pc, base, stack, ostack)?,
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
                     Value::Enum(e, v, _) if *e == u32::from(eid) && *v == u32::from(vi) => {}
                     _ => pc = t as usize,
@@ -4193,7 +4211,7 @@ impl Interp<'_> {
                         fail!("R901", "too many nested calls (infinite recursion?)");
                     }
                     let span = code.spans[pc - 1];
-                    let callee = self.vm_codes[target as usize].clone();
+                    let callee = self.code_at(target);
                     frames.push(Frame {
                         code: cur,
                         pc,
@@ -4208,7 +4226,7 @@ impl Interp<'_> {
                         ostack.resize(base + callee.nregs + 64, Value::Unit);
                     }
                     self.depth += 1;
-                    self.frames.push((Name::new(&callee.name), span));
+                    self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
                     pc = 0;
@@ -4239,7 +4257,7 @@ impl Interp<'_> {
                             self.frames.pop();
                             self.depth -= 1;
                             cur = f.code;
-                            code = self.vm_codes[cur as usize].clone();
+                            code = self.code_at(cur);
                             pc = f.pc;
                             base = f.base;
                             match obj {

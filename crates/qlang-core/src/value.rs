@@ -191,6 +191,9 @@ const NO_ENTRY: u32 = u32::MAX;
 
 /// An insertion-ordered map: the entries in order, and a table (open addressing) of their
 /// positions, each with the top bits of its key's hash to skip most comparisons.
+///
+/// While the keys are the integers `0, 1, 2…` in that order (a map filled like an array), the
+/// table is left empty: the entry of key `k` is at position `k`, with no hashing at all.
 #[derive(Default)]
 pub struct MapObj {
     pub entries: Vec<(Value, Value)>,
@@ -261,6 +264,12 @@ impl MapObj {
             // still a key that cannot be one is not found either way
             return None;
         }
+        if self.table.is_empty() {
+            return match k {
+                Value::Int(i) => self.entries.get(usize::try_from(*i).ok()?).map(|e| &e.1),
+                _ => None,
+            };
+        }
         let key = KeyVal::of_checked(k)?;
         let slot = self.table[self.find(&key, Self::hash(&key))];
         (slot.0 != NO_ENTRY).then(|| &self.entries[slot.0 as usize].1)
@@ -268,10 +277,25 @@ impl MapObj {
 
     /// Insert or replace; false if `k` cannot be a key.
     pub fn insert(&mut self, k: Value, v: Value) -> bool {
+        if self.table.is_empty() {
+            // still in order: the key is the next position, or one that is there
+            if let Value::Int(i) = k {
+                if let Ok(i) = usize::try_from(i) {
+                    if i < self.entries.len() {
+                        self.entries[i].1 = v;
+                        return true;
+                    }
+                    if i == self.entries.len() && i < NO_ENTRY as usize - 1 {
+                        self.entries.push((k, v));
+                        return true;
+                    }
+                }
+            }
+        }
         let Some(key) = KeyVal::of_checked(&k) else {
             return false;
         };
-        if (self.entries.len() + 1) * 2 > self.table.len() {
+        if self.table.is_empty() || (self.entries.len() + 1) * 2 > self.table.len() {
             self.rebuild(self.entries.len() + 1);
         }
         let hash = Self::hash(&key);
@@ -291,6 +315,9 @@ impl MapObj {
             return None;
         }
         let key = KeyVal::of_checked(k)?;
+        if self.table.is_empty() {
+            self.rebuild(self.entries.len());
+        }
         let slot = self.table[self.find(&key, Self::hash(&key))];
         if slot.0 == NO_ENTRY {
             return None;
@@ -635,5 +662,51 @@ impl Value {
                 | Value::Enum(_, _, Some(_))
                 | Value::Func(_)
         )
+    }
+}
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+
+    fn get(m: &MapObj, k: i64) -> Option<i64> {
+        match m.get(&Value::Int(k)) {
+            Some(Value::Int(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_map_filled_in_order_then_mixed_still_finds_everything() {
+        let mut m = MapObj::default();
+        for i in 0..100 {
+            assert!(m.insert(Value::Int(i), Value::Int(i * 3)));
+        }
+        assert_eq!(get(&m, 7), Some(21));
+        assert_eq!(get(&m, 100), None);
+        assert_eq!(get(&m, -1), None);
+        assert!(m.get(&Value::str("a")).is_none());
+        m.insert(Value::Int(7), Value::Int(1));
+        assert_eq!(get(&m, 7), Some(1));
+        assert_eq!(m.len(), 100);
+        // a gap leaves the dense mode
+        m.insert(Value::Int(500), Value::Int(5));
+        m.insert(Value::str("a"), Value::Int(9));
+        assert_eq!(get(&m, 500), Some(5));
+        assert_eq!(get(&m, 99), Some(297));
+        assert_eq!(m.len(), 102);
+        // removal from a dense map
+        let mut d = MapObj::default();
+        for i in 0..10 {
+            d.insert(Value::Int(i), Value::Int(i));
+        }
+        assert!(d.remove(&Value::Int(3)).is_some());
+        assert_eq!(get(&d, 3), None);
+        assert_eq!(get(&d, 4), Some(4));
+        d.insert(Value::Int(3), Value::Int(33));
+        assert_eq!(get(&d, 3), Some(33));
+        d.clear();
+        d.insert(Value::Int(0), Value::Int(1));
+        assert_eq!(get(&d, 0), Some(1));
     }
 }

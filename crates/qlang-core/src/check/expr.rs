@@ -1984,6 +1984,9 @@ impl Checker {
             .map(|r| self.resolve_type(r))
             .unwrap_or(Ty::Unit);
         self.tparam_scope.truncate(mark);
+        self.res
+            .lambda_sigs
+            .insert(f.id, (params.clone(), ret.clone()));
         let saved_loop = std::mem::replace(&mut self.loop_depth, 0);
         self.ret_stack.push(ret.clone());
         self.push_scope();

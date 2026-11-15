@@ -80,7 +80,8 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::Yes(_)))
                 .count()
-                + it.vm_loops.values().filter(|l| l.is_some()).count(),
+                + it.vm_loops.values().filter(|l| l.is_some()).count()
+                + it.vm_lambdas.values().filter(|l| l.is_some()).count(),
             it.vm_state
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::No))
@@ -663,6 +664,8 @@ struct Interp<'a> {
     coverage: bool,
     /// Loop statements compiled for the machine (by address), `None` for those it refused.
     vm_loops: HashMap<usize, Option<u32>>,
+    /// The same for anonymous functions, by the address of their declaration.
+    vm_lambdas: crate::fx::FxHashMap<usize, Option<u32>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.
@@ -724,6 +727,7 @@ impl<'a> Interp<'a> {
             vm_enabled: !crate::coverage::enabled() && !dbg_on,
             coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
+            vm_lambdas: Default::default(),
             vm_ostack: Vec::new(),
             vm_result: Value::Unit,
         }
@@ -1397,6 +1401,7 @@ impl<'a> Interp<'a> {
                 decl: f.clone(),
                 env: env.clone(),
                 name: "<function>".into(),
+                fid: None,
                 tenv: self.tenv.last().map(|t| Rc::new(t.clone())),
             }))),
         }
@@ -1592,6 +1597,7 @@ impl<'a> Interp<'a> {
             decl: def.decl.clone().expect("function without declaration"),
             env: self.envs[def.module].clone(),
             name: def.name.clone(),
+            fid: Some(fid),
             tenv: None,
         }))
     }
@@ -1905,6 +1911,15 @@ impl<'a> Interp<'a> {
         match f {
             Value::Func(fv) => {
                 let fv = fv.clone();
+                if fv.tenv.is_none() {
+                    let ran = match fv.fid {
+                        Some(fid) => self.try_vm(fid, &None, &args, span),
+                        None => self.try_vm_lambda(&fv, &args, span),
+                    };
+                    if let Some(r) = ran {
+                        return r;
+                    }
+                }
                 if let Some(t) = &fv.tenv {
                     self.tenv.push((**t).clone());
                     let r = self.call_function(&fv.decl, &fv.env, None, args, &fv.name, span);

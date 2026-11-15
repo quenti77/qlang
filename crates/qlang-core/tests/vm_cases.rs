@@ -120,6 +120,35 @@ fn for_loops_end_where_the_tree_walker_ends_them() {
 }
 
 #[test]
+fn anonymous_functions_run_on_the_machine_like_on_the_walker() {
+    // reads a captured variable, writes another, and a module variable
+    let out = same(
+        "let hits = 0\nfun run() -> int\n  let k = 3\n  let total = 0\n  let f = fun(x: int) -> int\n    total += x\n    hits += 1\n    x * k + total\n  end\n  let r = 0\n  for i in 0..5 do r += f(i) end\n  r + total\nend\nprint(run())\nprint(hits)",
+    );
+    assert_eq!(out, "60\n5\n");
+    // `return` inside, a text parameter, a float, a bool result
+    let out = same(
+        "fun pick(f: fun(string, float) -> bool, n: int) -> int\n  let c = 0\n  for i in 0..n do\n    if f(\"ab\", i as float / 2) then c += 1 end\n  end\n  c\nend\nlet limit = 2.0\nprint(pick(fun(s: string, x: float) -> bool\n  if s.len() < 3 then return x > limit end\n  false\nend, 10))",
+    );
+    assert_eq!(out, "5\n");
+    // an error inside: same code, same trace
+    let out = same(
+        "fun each3(f: fun(int) -> int) -> int\n  f(1) + f(0)\nend\nprint(each3(fun(x: int) -> int\n  10 div x\nend))",
+    );
+    assert!(out.contains("R011") && out.contains("called from"), "{out}");
+    // a closure that calls a closure which changes a captured variable
+    let out = same(
+        "fun run() -> int\n  let c = 0\n  let inc = fun() -> int\n    c += 10\n    c\n  end\n  let both = fun(x: int) -> int\n    c += x\n    inc() + c\n  end\n  both(1) + both(2) + c\nend\nprint(run())",
+    );
+    assert_eq!(out, "91\n");
+    // named functions passed as values, and a recursive closure
+    let out = same(
+        "fun sq(x: int) -> int\n  x * x\nend\nfun twice(f: fun(int) -> int, x: int) -> int\n  f(f(x))\nend\nfun run() -> int\n  let fact = fun(n: int) -> int\n    0\n  end\n  twice(sq, 3) + twice(fun(x: int) -> int x + 1 end, 5) + fact(3)\nend\nprint(run())",
+    );
+    assert_eq!(out, "88\n");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

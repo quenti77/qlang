@@ -613,6 +613,9 @@ struct Gen<'a> {
     enum_tys: Vec<Vec<Ty>>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
+    /// Compiling an anonymous function: the variables it takes from the code around it are
+    /// shared like those of a loop (but `return` and `?` are the function's own).
+    lambda: bool,
     /// The free variables are known (second pass): no new one may appear.
     preset: bool,
     frees: Vec<Free>,
@@ -1385,7 +1388,7 @@ impl Gen<'_> {
         match self.prog.res.paths.get(&e.id) {
             Some(PathRes::Global(m, n)) => {
                 let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
-                if self.loop_mode && !self.direct_globals {
+                if (self.loop_mode || self.lambda) && !self.direct_globals {
                     let r = self.free(n, Some(*m), &ty, write)?;
                     Some(Access::Reg(r, ty))
                 } else {
@@ -1397,7 +1400,7 @@ impl Gen<'_> {
                 if let Some((r, t)) = self.lookup(name) {
                     return Some(Access::Reg(r, t));
                 }
-                if !self.loop_mode {
+                if !self.loop_mode && !self.lambda {
                     return None;
                 }
                 let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
@@ -3116,6 +3119,7 @@ struct Frame {
 pub(super) enum Unit<'a> {
     Fn(FnId),
     Loop(&'a Stmt),
+    Lambda(&'a FunDecl),
 }
 
 /// Compiles one unit; also the functions it calls.
@@ -3141,6 +3145,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         tuple_tys: Vec::new(),
         enum_tys: Vec::new(),
         loop_mode,
+        lambda: false,
         preset: false,
         frees: Vec::new(),
         has_call: false,
@@ -3236,6 +3241,99 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     tuples: g.tuple_tys,
                     enum_tys: g.enum_tys,
                     frees: Vec::new(),
+                    is_loop: false,
+                    uses_objs,
+                },
+                g.callees,
+            ))
+        }
+        Unit::Lambda(decl) => {
+            let (ptys, ret) = prog.res.lambda_sigs.get(&decl.id)?.clone();
+            let body = decl.body.as_ref()?;
+            if decl.has_self
+                || !decl.tparams.is_empty()
+                || !ptys.iter().all(vty)
+                || !(vty(&ret) || ret == Ty::Unit)
+            {
+                return None;
+            }
+            let attempt = |pre: Option<&Gen>| -> Option<Gen> {
+                let mut g = new_gen(ret.clone(), false);
+                g.lambda = true;
+                for (p, t) in decl.params.iter().zip(&ptys) {
+                    let r = g.alloc()?;
+                    g.scopes[0].push((p.name.name.clone(), r, t.clone()));
+                }
+                if let Some(probe) = pre {
+                    g.preset = true;
+                    g.direct_globals =
+                        probe.has_call && probe.frees.iter().any(|f| f.global.is_some());
+                    let shared: Vec<Free> = probe
+                        .frees
+                        .iter()
+                        .filter(|f| !g.direct_globals || f.global.is_none())
+                        .cloned()
+                        .collect();
+                    for f in shared {
+                        let reg = g.alloc()?;
+                        g.frees.push(Free {
+                            reg,
+                            assigned: false,
+                            ..f
+                        });
+                    }
+                    for &(bits, _) in &probe.consts {
+                        let r = g.alloc()?;
+                        g.consts.push((bits, r));
+                        g.emit(Op::ConstI(r, bits), decl.span);
+                    }
+                    g.consts_ready = true;
+                }
+                if ret == Ty::Unit {
+                    g.block(body, None)?;
+                    g.emit(Op::RetUnit, decl.span);
+                } else {
+                    let res = g.alloc()?;
+                    if g.block_as(body, Some(res), Some(&ret))? != ret {
+                        return None;
+                    }
+                    let op = if is_obj(&ret) {
+                        Op::RetO(res)
+                    } else {
+                        Op::Ret(res)
+                    };
+                    g.emit(op, decl.span);
+                }
+                Some(g)
+            };
+            let probe = attempt(None)?;
+            // a call could change a variable of the code around that the function keeps in a
+            // register: only module variables are looked at again after a call
+            if probe.has_call && probe.frees.iter().any(|f| f.global.is_none()) {
+                return None;
+            }
+            let g = attempt(Some(&probe))?;
+            let frees_tys: Vec<Ty> = g.frees.iter().map(|f| f.ty.clone()).collect();
+            let all_tys: Vec<Ty> = ptys.iter().cloned().chain(frees_tys).collect();
+            let uses_objs = uses_objects(&g.ops, &all_tys, &g.sites, &g.globals);
+            Some((
+                Code {
+                    name: "<function>".to_string(),
+                    nregs: g.max + 1,
+                    ops: g.ops,
+                    spans: g.spans,
+                    param_tys: ptys,
+                    ret,
+                    sites: g.sites,
+                    globals: g.globals,
+                    strs: g.strs,
+                    fmts: g.fmts,
+                    fields: g.fields,
+                    lits: g.lits,
+                    enums: g.enums,
+                    tuples: g.tuple_tys,
+                    enum_tys: g.enum_tys,
+                    frees: g.frees,
                     is_loop: false,
                     uses_objs,
                 },
@@ -3435,6 +3533,81 @@ impl Interp<'_> {
         Some(out)
     }
 
+    /// Calls an anonymous function on the machine when its body compiles: the variables it
+    /// takes from the code around it are loaded into registers, and the ones it assigns are
+    /// written back at the end. `None` when it cannot (the tree walker runs it).
+    pub(super) fn try_vm_lambda(
+        &mut self,
+        fv: &FuncVal,
+        args: &[Value],
+        span: Span,
+    ) -> Option<R<Value>> {
+        if !self.vm_enabled {
+            return None;
+        }
+        let key = Rc::as_ptr(&fv.decl) as usize;
+        let idx = match self.vm_lambdas.get(&key) {
+            Some(None) => return None,
+            Some(Some(i)) => *i,
+            None => {
+                if !self.prog.res.lambda_sigs.contains_key(&fv.decl.id) {
+                    self.vm_lambdas.insert(key, None);
+                    return None;
+                }
+                let r = self.vm_compile_unit(Unit::Lambda(&fv.decl));
+                self.vm_lambdas.insert(key, r);
+                r?
+            }
+        };
+        let code = self.vm_codes[idx as usize].clone();
+        if args.len() != code.param_tys.len() {
+            return None;
+        }
+        self.vm_release();
+        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(args.len() + code.frees.len());
+        for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
+            init.push((k as Reg, slot_of(a, t)?));
+        }
+        for f in &code.frees {
+            let v = match f.global {
+                Some(m) => self.envs[m].get(&f.name),
+                None => fv.env.get(&f.name),
+            };
+            init.push((f.reg, v.and_then(|v| slot_of(&v, &f.ty))?));
+        }
+        let r = self.vm_run(idx, init, span);
+        let bits = match r {
+            Ok(b) => b,
+            Err(e) => {
+                self.vm_release();
+                return Some(Err(e));
+            }
+        };
+        for f in code.frees.iter().filter(|f| f.assigned) {
+            let v = reg_value(&self.vm_stack, &self.vm_ostack, f.reg as usize, &f.ty);
+            match f.global {
+                Some(m) => self.envs[m].assign(&f.name, v),
+                None => fv.env.assign(&f.name, v),
+            };
+        }
+        let out = match &code.ret {
+            Ty::Int => Value::Int(bits),
+            Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+            Ty::Bool => Value::Bool(bits != 0),
+            Ty::Array(_)
+            | Ty::Str
+            | Ty::Struct(..)
+            | Ty::Nullable(_)
+            | Ty::Map(..)
+            | Ty::Enum(..)
+            | Ty::Tuple(_)
+            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            _ => Value::Unit,
+        };
+        self.vm_release();
+        Some(Ok(out))
+    }
+
     /// Compiles the function `fid` and everything it calls.
     fn vm_compile(&mut self, fid: FnId) -> Option<u32> {
         let r = self.vm_compile_unit(Unit::Fn(fid));
@@ -3490,7 +3663,7 @@ impl Interp<'_> {
                 batch.push((
                     match unit {
                         Unit::Fn(f) => Some(f),
-                        Unit::Loop(_) => None,
+                        Unit::Loop(_) | Unit::Lambda(_) => None,
                     },
                     code,
                 ));

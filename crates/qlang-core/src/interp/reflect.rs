@@ -152,6 +152,7 @@ impl Interp<'_> {
             decl: def.decl.clone().expect("method without declaration"),
             env: scope,
             name: def.name.clone(),
+            fid: None,
             tenv: None,
         }))
     }

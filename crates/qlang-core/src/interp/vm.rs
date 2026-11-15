@@ -4176,7 +4176,7 @@ impl Interp<'_> {
                     let (k, m) = code.divs[i as usize];
                     let x = r!(a);
                     r!(d) = if x as u64 >> 32 == 0 {
-                        (u128::from(m.wrapping_mul(x as u64)) * u128::from(k) >> 64) as i64
+                        ((u128::from(m.wrapping_mul(x as u64)) * u128::from(k)) >> 64) as i64
                     } else {
                         x % i64::from(k)
                     };

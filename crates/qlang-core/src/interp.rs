@@ -674,8 +674,7 @@ struct Interp<'a> {
     str_pos: (usize, usize),
     /// `find_method` for a structure without an argument: the answer by class and trait, then
     /// by name (the impls of a program do not change while it runs).
-    method_cache:
-        RefCell<crate::fx::FxHashMap<(StructId, Option<TraitId>), Vec<(Box<str>, Option<FnId>)>>>,
+    method_cache: RefCell<crate::fx::FxHashMap<(StructId, Option<TraitId>), MethodAnswers>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.
@@ -689,6 +688,9 @@ const MAX_CMP_DEPTH: usize = 1000;
 
 /// Deeper values print as `...` (this also stops cyclic structures).
 const MAX_FMT_DEPTH: usize = 64;
+
+/// The answers of `find_method` for a class and a trait: by method name.
+type MethodAnswers = Vec<(Box<str>, Option<FnId>)>;
 
 /// A call in the trace: the walker keeps the name, the machine only the code it runs (a call
 /// must not copy a name, which allocates when it is longer than a few bytes).

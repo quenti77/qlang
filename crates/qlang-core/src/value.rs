@@ -36,7 +36,7 @@ pub enum Value {
     /// Bytes: never changed, so a copy is just another handle.
     Bytes(Rc<[u8]>),
     /// Arrays and structs are shared: copying a value copies the reference.
-    Array(Rc<RefCell<Vec<Value>>>),
+    Array(Rc<ArrObj>),
     /// Keys keep their insertion order.
     Map(Rc<RefCell<MapObj>>),
     Struct(Rc<StructObj>),
@@ -191,6 +191,9 @@ const NO_ENTRY: u32 = u32::MAX;
 
 /// An insertion-ordered map: the entries in order, and a table (open addressing) of their
 /// positions, each with the top bits of its key's hash to skip most comparisons.
+///
+/// While the keys are the integers `0, 1, 2…` in that order (a map filled like an array), the
+/// table is left empty: the entry of key `k` is at position `k`, with no hashing at all.
 #[derive(Default)]
 pub struct MapObj {
     pub entries: Vec<(Value, Value)>,
@@ -261,6 +264,12 @@ impl MapObj {
             // still a key that cannot be one is not found either way
             return None;
         }
+        if self.table.is_empty() {
+            return match k {
+                Value::Int(i) => self.entries.get(usize::try_from(*i).ok()?).map(|e| &e.1),
+                _ => None,
+            };
+        }
         let key = KeyVal::of_checked(k)?;
         let slot = self.table[self.find(&key, Self::hash(&key))];
         (slot.0 != NO_ENTRY).then(|| &self.entries[slot.0 as usize].1)
@@ -268,10 +277,25 @@ impl MapObj {
 
     /// Insert or replace; false if `k` cannot be a key.
     pub fn insert(&mut self, k: Value, v: Value) -> bool {
+        if self.table.is_empty() {
+            // still in order: the key is the next position, or one that is there
+            if let Value::Int(i) = k
+                && let Ok(i) = usize::try_from(i)
+            {
+                if i < self.entries.len() {
+                    self.entries[i].1 = v;
+                    return true;
+                }
+                if i == self.entries.len() && i < NO_ENTRY as usize - 1 {
+                    self.entries.push((k, v));
+                    return true;
+                }
+            }
+        }
         let Some(key) = KeyVal::of_checked(&k) else {
             return false;
         };
-        if (self.entries.len() + 1) * 2 > self.table.len() {
+        if self.table.is_empty() || (self.entries.len() + 1) * 2 > self.table.len() {
             self.rebuild(self.entries.len() + 1);
         }
         let hash = Self::hash(&key);
@@ -291,6 +315,9 @@ impl MapObj {
             return None;
         }
         let key = KeyVal::of_checked(k)?;
+        if self.table.is_empty() {
+            self.rebuild(self.entries.len());
+        }
         let slot = self.table[self.find(&key, Self::hash(&key))];
         if slot.0 == NO_ENTRY {
             return None;
@@ -303,6 +330,156 @@ impl MapObj {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.table.clear();
+    }
+}
+
+/// What an array holds. An array of numbers or booleans built by the machine is kept as bare
+/// numbers (a third of the memory, and no value to build or drop for each element); anything
+/// else that touches it sees it as values, and it becomes values for good.
+pub enum Arr {
+    Vals(Vec<Value>),
+    Ints(Vec<i64>),
+    Floats(Vec<f64>),
+    Bools(Vec<bool>),
+}
+
+impl Arr {
+    pub fn len(&self) -> usize {
+        match self {
+            Arr::Vals(v) => v.len(),
+            Arr::Ints(v) => v.len(),
+            Arr::Floats(v) => v.len(),
+            Arr::Bools(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The items as values.
+    fn into_vals(self) -> Vec<Value> {
+        match self {
+            Arr::Vals(v) => v,
+            Arr::Ints(v) => v.into_iter().map(Value::Int).collect(),
+            Arr::Floats(v) => v.into_iter().map(Value::Float).collect(),
+            Arr::Bools(v) => v.into_iter().map(Value::Bool).collect(),
+        }
+    }
+}
+
+/// A shared, changeable array: see [`Arr`]. [`ArrObj::borrow`] and [`ArrObj::borrow_mut`] give
+/// the items as values (changing the representation if need be); the machine reads and writes
+/// the compact forms through [`ArrObj::raw`] and [`ArrObj::raw_mut`].
+pub struct ArrObj {
+    cell: RefCell<Arr>,
+}
+
+impl ArrObj {
+    pub fn new(items: Vec<Value>) -> ArrObj {
+        ArrObj {
+            cell: RefCell::new(Arr::Vals(items)),
+        }
+    }
+
+    /// An array of `items`, kept compactly when `el` (the type of its elements) is a number or a
+    /// boolean and they all are.
+    pub fn typed(items: Vec<Value>, el: &Ty) -> ArrObj {
+        let arr = match el {
+            Ty::Int if items.iter().all(|v| matches!(v, Value::Int(_))) => Arr::Ints(
+                items
+                    .iter()
+                    .map(|v| if let Value::Int(i) = v { *i } else { 0 })
+                    .collect(),
+            ),
+            Ty::Float if items.iter().all(|v| matches!(v, Value::Float(_))) => Arr::Floats(
+                items
+                    .iter()
+                    .map(|v| if let Value::Float(f) = v { *f } else { 0.0 })
+                    .collect(),
+            ),
+            Ty::Bool if items.iter().all(|v| matches!(v, Value::Bool(_))) => Arr::Bools(
+                items
+                    .iter()
+                    .map(|v| matches!(v, Value::Bool(true)))
+                    .collect(),
+            ),
+            _ => Arr::Vals(items),
+        };
+        ArrObj {
+            cell: RefCell::new(arr),
+        }
+    }
+
+    /// An empty array that will hold numbers or booleans (`kind` says which), compactly.
+    pub fn empty_of(kind: &Ty) -> ArrObj {
+        let arr = match kind {
+            Ty::Int => Arr::Ints(Vec::new()),
+            Ty::Float => Arr::Floats(Vec::new()),
+            Ty::Bool => Arr::Bools(Vec::new()),
+            _ => Arr::Vals(Vec::new()),
+        };
+        ArrObj {
+            cell: RefCell::new(arr),
+        }
+    }
+
+    /// The array as it is stored.
+    #[inline]
+    pub fn raw(&self) -> std::cell::Ref<'_, Arr> {
+        self.cell.borrow()
+    }
+
+    #[inline]
+    pub fn raw_mut(&self) -> std::cell::RefMut<'_, Arr> {
+        self.cell.borrow_mut()
+    }
+
+    pub fn try_raw_mut(&self) -> Result<std::cell::RefMut<'_, Arr>, std::cell::BorrowMutError> {
+        self.cell.try_borrow_mut()
+    }
+
+    /// Makes sure the items are values.
+    #[inline]
+    fn as_values(&self) {
+        if !matches!(&*self.cell.borrow(), Arr::Vals(_)) {
+            self.deopt();
+        }
+    }
+
+    #[inline(never)]
+    fn deopt(&self) {
+        let mut a = self.cell.borrow_mut();
+        let old = std::mem::replace(&mut *a, Arr::Vals(Vec::new()));
+        *a = Arr::Vals(old.into_vals());
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<Value>> {
+        self.as_values();
+        std::cell::Ref::map(self.cell.borrow(), |a| match a {
+            Arr::Vals(v) => v,
+            _ => unreachable!("made into values just above"),
+        })
+    }
+
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, Vec<Value>> {
+        self.as_values();
+        std::cell::RefMut::map(self.cell.borrow_mut(), |a| match a {
+            Arr::Vals(v) => v,
+            _ => unreachable!("made into values just above"),
+        })
+    }
+
+    pub fn try_borrow_mut(
+        &self,
+    ) -> Result<std::cell::RefMut<'_, Vec<Value>>, std::cell::BorrowMutError> {
+        self.as_values();
+        self.cell.try_borrow_mut().map(|g| {
+            std::cell::RefMut::map(g, |a| match a {
+                Arr::Vals(v) => v,
+                _ => unreachable!("made into values just above"),
+            })
+        })
     }
 }
 
@@ -333,7 +510,7 @@ impl Value {
     }
 
     pub fn array(items: Vec<Value>) -> Value {
-        Value::Array(Rc::new(RefCell::new(items)))
+        Value::Array(Rc::new(ArrObj::new(items)))
     }
 }
 
@@ -635,5 +812,51 @@ impl Value {
                 | Value::Enum(_, _, Some(_))
                 | Value::Func(_)
         )
+    }
+}
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+
+    fn get(m: &MapObj, k: i64) -> Option<i64> {
+        match m.get(&Value::Int(k)) {
+            Some(Value::Int(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_map_filled_in_order_then_mixed_still_finds_everything() {
+        let mut m = MapObj::default();
+        for i in 0..100 {
+            assert!(m.insert(Value::Int(i), Value::Int(i * 3)));
+        }
+        assert_eq!(get(&m, 7), Some(21));
+        assert_eq!(get(&m, 100), None);
+        assert_eq!(get(&m, -1), None);
+        assert!(m.get(&Value::str("a")).is_none());
+        m.insert(Value::Int(7), Value::Int(1));
+        assert_eq!(get(&m, 7), Some(1));
+        assert_eq!(m.len(), 100);
+        // a gap leaves the dense mode
+        m.insert(Value::Int(500), Value::Int(5));
+        m.insert(Value::str("a"), Value::Int(9));
+        assert_eq!(get(&m, 500), Some(5));
+        assert_eq!(get(&m, 99), Some(297));
+        assert_eq!(m.len(), 102);
+        // removal from a dense map
+        let mut d = MapObj::default();
+        for i in 0..10 {
+            d.insert(Value::Int(i), Value::Int(i));
+        }
+        assert!(d.remove(&Value::Int(3)).is_some());
+        assert_eq!(get(&d, 3), None);
+        assert_eq!(get(&d, 4), Some(4));
+        d.insert(Value::Int(3), Value::Int(33));
+        assert_eq!(get(&d, 3), Some(33));
+        d.clear();
+        d.insert(Value::Int(0), Value::Int(1));
+        assert_eq!(get(&d, 0), Some(1));
     }
 }

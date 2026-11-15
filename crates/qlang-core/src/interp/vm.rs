@@ -63,6 +63,24 @@ fn small_int(e: &Expr) -> Option<i32> {
     }
 }
 
+/// The comparison as a set of outcomes (bit 0: less, bit 1: equal, bit 2: greater), so that
+/// testing it takes no branch.
+fn outcomes(c: Cmp) -> u8 {
+    match c {
+        Cmp::Lt => 0b001,
+        Cmp::Le => 0b011,
+        Cmp::Gt => 0b100,
+        Cmp::Ge => 0b110,
+        Cmp::Eq => 0b010,
+        Cmp::Ne => 0b101,
+    }
+}
+
+#[inline(always)]
+fn holds(outcomes: u8, x: i64, y: i64) -> bool {
+    (outcomes >> (u32::from(x >= y) + u32::from(x > y))) & 1 != 0
+}
+
 fn elem_value(bits: i64, ety: Ety) -> Value {
     match ety {
         Ety::I => Value::Int(bits),
@@ -70,6 +88,71 @@ fn elem_value(bits: i64, ety: Ety) -> Value {
         Ety::B => Value::Bool(bits != 0),
         Ety::O => Value::Unit,
     }
+}
+
+/// What came of reading or writing an element of an array.
+enum Elem {
+    Ok(i64),
+    OutOfBounds(usize),
+    Unexpected,
+}
+
+/// The element `i` of `a`, as register bits.
+#[inline(always)]
+fn arr_get(a: &Arr, i: i64, ety: Ety) -> Elem {
+    let u = i as usize;
+    let got = match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v.get(u).map(|x| Some(*x)),
+        (Arr::Floats(v), Ety::F) => v.get(u).map(|x| Some(x.to_bits() as i64)),
+        (Arr::Bools(v), Ety::B) => v.get(u).map(|x| Some(i64::from(*x))),
+        (Arr::Vals(v), _) => v.get(u).map(|x| elem_bits(x, ety)),
+        _ => (u < a.len()).then_some(None),
+    };
+    match got {
+        Some(Some(b)) => Elem::Ok(b),
+        Some(None) => Elem::Unexpected,
+        None => Elem::OutOfBounds(a.len()),
+    }
+}
+
+/// Writes the register bits `bits` as the element `i` of `a`.
+#[inline(always)]
+fn arr_set(a: &mut Arr, i: i64, bits: i64, ety: Ety) -> Elem {
+    let u = i as usize;
+    let len = a.len();
+    if u >= len {
+        return Elem::OutOfBounds(len);
+    }
+    match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v[u] = bits,
+        (Arr::Floats(v), Ety::F) => v[u] = f64::from_bits(bits as u64),
+        (Arr::Bools(v), Ety::B) => v[u] = bits != 0,
+        (Arr::Vals(v), _) => {
+            debug_assert!(matches!(
+                v[u],
+                Value::Int(_) | Value::Float(_) | Value::Bool(_)
+            ));
+            // SAFETY: `u < len`, and the old value has nothing to drop (a number or a
+            // boolean), so it is overwritten without being read: a read of a far-away element
+            // waits for the memory.
+            unsafe { std::ptr::write(v.as_mut_ptr().add(u), elem_value(bits, ety)) }
+        }
+        _ => return Elem::Unexpected,
+    }
+    Elem::Ok(0)
+}
+
+/// Adds the register bits `bits` at the end of `a`.
+#[inline(always)]
+fn arr_push(a: &mut Arr, bits: i64, ety: Ety) -> bool {
+    match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v.push(bits),
+        (Arr::Floats(v), Ety::F) => v.push(f64::from_bits(bits as u64)),
+        (Arr::Bools(v), Ety::B) => v.push(bits != 0),
+        (Arr::Vals(v), _) => v.push(elem_value(bits, ety)),
+        _ => return false,
+    }
+    true
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -158,6 +241,21 @@ enum Op {
     JnGeImm(Reg, i32, u32),
     JnEqImm(Reg, i32, u32),
     JnNeImm(Reg, i32, u32),
+    /// The end of a loop that tests a comparison of two integers: jumps back to the body when
+    /// it holds (the `Jmp` back and the comparison of the loop in one instruction).
+    JBack {
+        cmp: u8,
+        a: Reg,
+        b: Reg,
+        t: u32,
+    },
+    /// The same, comparing with a constant.
+    JBackImm {
+        cmp: u8,
+        a: Reg,
+        k: i32,
+        t: u32,
+    },
     JnF {
         a: Reg,
         b: Reg,
@@ -257,7 +355,7 @@ enum Op {
         exit: u32,
     },
     /// A new empty array.
-    NewArr(Reg),
+    NewArr(Reg, Ety),
     /// A new empty map.
     NewMap(Reg),
     /// Jump unless the enumeration value in `obj` is the variant `vi` of the enumeration `eid`.
@@ -570,7 +668,7 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                 op,
                 Op::MovO(..)
                     | Op::RetO(_)
-                    | Op::NewArr(_)
+                    | Op::NewArr(..)
                     | Op::NewMap(_)
                     | Op::EnumField { .. }
                     | Op::NewEnum { .. }
@@ -1677,7 +1775,7 @@ impl Gen<'_> {
                 let Ty::Array(el) = &ty else { return None };
                 let ety = ety_of(el)?;
                 let tmp = self.alloc()?;
-                self.emit(Op::NewArr(tmp), span);
+                self.emit(Op::NewArr(tmp, ety), span);
                 for it in items {
                     let mark = self.top;
                     let r = self.value_as(it, el)?;
@@ -3213,6 +3311,48 @@ thread_local! {
 /// A jump to another jump or to a return goes there directly: one dispatch less per taken
 /// branch (`if n < 2 then n else ... end` leaves its function from the `then` branch).
 fn thread_jumps(mut ops: Vec<Op>) -> Vec<Op> {
+    // a loop whose test is one comparison of integers ends with that comparison, jumping back
+    // when it holds, instead of a jump to the test at the top (one dispatch less per turn)
+    for i in 0..ops.len() {
+        let Op::Jmp(t) = ops[i] else { continue };
+        if t as usize >= i {
+            continue;
+        }
+        let back = |c: Cmp, a: Reg, b: Reg, x: u32| {
+            (x as usize == i + 1).then_some(Op::JBack {
+                cmp: outcomes(c),
+                a,
+                b,
+                t: t + 1,
+            })
+        };
+        let back_imm = |c: Cmp, a: Reg, k: i32, x: u32| {
+            (x as usize == i + 1).then_some(Op::JBackImm {
+                cmp: outcomes(c),
+                a,
+                k,
+                t: t + 1,
+            })
+        };
+        let fused = match ops[t as usize] {
+            Op::JnLtI(a, b, x) => back(Cmp::Lt, a, b, x),
+            Op::JnLeI(a, b, x) => back(Cmp::Le, a, b, x),
+            Op::JnGtI(a, b, x) => back(Cmp::Gt, a, b, x),
+            Op::JnGeI(a, b, x) => back(Cmp::Ge, a, b, x),
+            Op::JnEqI(a, b, x) => back(Cmp::Eq, a, b, x),
+            Op::JnNeI(a, b, x) => back(Cmp::Ne, a, b, x),
+            Op::JnLtImm(a, k, x) => back_imm(Cmp::Lt, a, k, x),
+            Op::JnLeImm(a, k, x) => back_imm(Cmp::Le, a, k, x),
+            Op::JnGtImm(a, k, x) => back_imm(Cmp::Gt, a, k, x),
+            Op::JnGeImm(a, k, x) => back_imm(Cmp::Ge, a, k, x),
+            Op::JnEqImm(a, k, x) => back_imm(Cmp::Eq, a, k, x),
+            Op::JnNeImm(a, k, x) => back_imm(Cmp::Ne, a, k, x),
+            _ => None,
+        };
+        if let Some(op) = fused {
+            ops[i] = op;
+        }
+    }
     for i in 0..ops.len() {
         let Op::Jmp(mut t) = ops[i] else { continue };
         // a few hops at most (a loop of jumps must not hang the compiler)
@@ -4087,8 +4227,19 @@ impl Interp<'_> {
     ) -> R<i64> {
         let mut cur = root;
         let mut code = self.code_at(cur);
+        // where the instructions of `code` are (kept next to it, so that a fetch is one add)
+        let mut ops: *const Op = code.ops.as_ptr();
         let mut pc = 0usize;
         let mut base = 0usize;
+        // Where the numeric registers of the code that runs start (`stack` from `base`). It is
+        // made again each time `base` changes or `stack` grows (a call, a return).
+        let mut regs: *mut i64 = stack.as_mut_ptr();
+        macro_rules! sync_regs {
+            () => {
+                // SAFETY: `base` is inside the stack, which holds the registers of this frame.
+                regs = unsafe { stack.as_mut_ptr().add(base) }
+            };
+        }
         // The registers of the code that runs are inside `stack` (`vm_run` and `Call` make
         // room for `nregs` of them from `base`, and the stack never shrinks), and the compiler
         // only names registers it has allocated (below `nregs`). Debug builds, which run the
@@ -4096,10 +4247,10 @@ impl Interp<'_> {
         macro_rules! r {
             ($x:expr) => {
                 *{
-                    let at = base + $x as usize;
-                    debug_assert!(at < stack.len() && ($x as usize) < code.nregs);
+                    debug_assert!(base + ($x as usize) < stack.len() && ($x as usize) < code.nregs);
+                    debug_assert!(regs == unsafe { stack.as_mut_ptr().add(base) });
                     // SAFETY: see above.
-                    unsafe { stack.get_unchecked_mut(at) }
+                    unsafe { &mut *regs.add($x as usize) }
                 }
             };
         }
@@ -4118,11 +4269,26 @@ impl Interp<'_> {
                 f64::from_bits(r!($x) as u64)
             };
         }
+        // what a jump back counts: a step, and now and then a look at the memory
+        macro_rules! back_edge {
+            () => {
+                self.steps += 4;
+                if self.steps > self.limits.max_steps {
+                    fail!(
+                        "R900",
+                        "the program ran for too long (step limit reached: infinite loop?)"
+                    );
+                }
+                if self.steps & 0x3FFF < 64 {
+                    self.check_memory(code.spans[pc - 1])?;
+                }
+            };
+        }
         loop {
             debug_assert!(pc < code.ops.len());
             // SAFETY: every compiled code ends with a return and its jumps stay inside it
             // (debug builds, which run the whole test suite, check).
-            let opr = unsafe { code.ops.get_unchecked(pc) };
+            let opr = unsafe { &*ops.add(pc) };
             pc += 1;
             match *opr {
                 Op::ConstI(d, v) => r!(d) = v,
@@ -4401,30 +4567,20 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    r!(d) = rc.borrow().len() as i64;
+                    r!(d) = rc.raw().len() as i64;
                 }
                 Op::ALoad { dst, arr, idx, ety } => {
                     let i = r!(idx);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let a = rc.borrow();
-                    match usize::try_from(i).ok().and_then(|u| a.get(u)) {
-                        Some(v) => match elem_bits(v, ety) {
-                            Some(b) => {
-                                drop(a);
-                                r!(dst) = b;
-                            }
-                            None => {
-                                drop(a);
-                                fail!("R001", "an element of an unexpected type");
-                            }
-                        },
-                        None => {
-                            let len = a.len();
-                            drop(a);
+                    let got = arr_get(&rc.raw(), i, ety);
+                    match got {
+                        Elem::Ok(b) => r!(dst) = b,
+                        Elem::OutOfBounds(len) => {
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
                         }
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::ACheck { arr, idx } => {
@@ -4432,34 +4588,23 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let len = rc.borrow().len();
+                    let len = rc.raw().len();
                     if usize::try_from(i).ok().filter(|u| *u < len).is_none() {
                         fail!("R020", format!("index {i} is out of bounds (length {len})"));
                     }
                 }
                 Op::AStore { arr, idx, src, ety } => {
-                    let (i, v) = (r!(idx), elem_value(r!(src), ety));
+                    let (i, bits) = (r!(idx), r!(src));
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let mut a = rc.borrow_mut();
-                    let len = a.len();
-                    match usize::try_from(i).ok().filter(|u| *u < len) {
-                        Some(u) => {
-                            // an element of an array of numbers or booleans owns nothing: it
-                            // is overwritten without being read (a read of a far-away element
-                            // waits for the memory)
-                            debug_assert!(matches!(
-                                a[u],
-                                Value::Int(_) | Value::Float(_) | Value::Bool(_)
-                            ));
-                            // SAFETY: `u < len`, and the old value has nothing to drop.
-                            unsafe { std::ptr::write(a.as_mut_ptr().add(u), v) }
-                        }
-                        None => {
-                            drop(a);
+                    let done = arr_set(&mut rc.raw_mut(), i, bits, ety);
+                    match done {
+                        Elem::Ok(_) => {}
+                        Elem::OutOfBounds(len) => {
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
                         }
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
@@ -4518,8 +4663,14 @@ impl Interp<'_> {
                         _ => fail!("R005", format!("this value has no field `{}`", site.name)),
                     }
                 }
-                Op::NewArr(dst) => {
-                    o!(dst) = Value::Array(Rc::new(RefCell::new(Vec::new())));
+                Op::NewArr(dst, ety) => {
+                    let obj = match ety {
+                        Ety::I => ArrObj::empty_of(&Ty::Int),
+                        Ety::F => ArrObj::empty_of(&Ty::Float),
+                        Ety::B => ArrObj::empty_of(&Ty::Bool),
+                        Ety::O => ArrObj::new(Vec::new()),
+                    };
+                    o!(dst) = Value::Array(Rc::new(obj));
                 }
                 Op::ALoadO { dst, arr, idx } => {
                     let i = r!(idx);
@@ -4586,16 +4737,19 @@ impl Interp<'_> {
                     }
                 }
                 Op::APush { arr, src, ety } => {
-                    let v = elem_value(r!(src), ety);
+                    let bits = r!(src);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let rc = rc.clone();
-                    let len = rc.borrow().len();
-                    if len + 1 > self.limits.max_alloc {
+                    let mut a = rc.raw_mut();
+                    if a.len() + 1 > self.limits.max_alloc {
+                        drop(a);
                         fail!("R903", "a value became too large (memory limit reached)");
                     }
-                    rc.borrow_mut().push(v);
+                    if !arr_push(&mut a, bits, ety) {
+                        drop(a);
+                        fail!("R001", "an element of an unexpected type");
+                    }
                 }
                 Op::ForArr {
                     dst,
@@ -4608,22 +4762,11 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let a = rc.borrow();
-                    match a.get(i as usize) {
-                        Some(v) => match elem_bits(v, ety) {
-                            Some(b) => {
-                                drop(a);
-                                r!(dst) = b;
-                            }
-                            None => {
-                                drop(a);
-                                fail!("R001", "an element of an unexpected type");
-                            }
-                        },
-                        None => {
-                            drop(a);
-                            pc = exit as usize;
-                        }
+                    let got = arr_get(&rc.raw(), i, ety);
+                    match got {
+                        Elem::Ok(b) => r!(dst) = b,
+                        Elem::OutOfBounds(_) => pc = exit as usize,
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::IncI(a) => r!(a) += 1,
@@ -4715,6 +4858,18 @@ impl Interp<'_> {
                         }
                     }
                     pc = t as usize;
+                }
+                Op::JBack { cmp, a, b, t } => {
+                    if holds(cmp, r!(a), r!(b)) {
+                        back_edge!();
+                        pc = t as usize;
+                    }
+                }
+                Op::JBackImm { cmp, a, k, t } => {
+                    if holds(cmp, r!(a), i64::from(k)) {
+                        back_edge!();
+                        pc = t as usize;
+                    }
                 }
                 Op::JnLtImm(a, k, t) => {
                     if r!(a) >= i64::from(k) {
@@ -4850,10 +5005,12 @@ impl Interp<'_> {
                     if callee.uses_objs && ostack.len() < base + callee.nregs {
                         ostack.resize(base + callee.nregs + 64, Value::Unit);
                     }
+                    sync_regs!();
                     self.depth += 1;
                     self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
+                    ops = code.ops.as_ptr();
                     pc = 0;
                 }
                 Op::CallValue {
@@ -4891,6 +5048,7 @@ impl Interp<'_> {
                     if callee.uses_objs && ostack.len() < nb + callee.nregs {
                         ostack.resize(nb + callee.nregs + 64, Value::Unit);
                     }
+                    sync_regs!();
                     // the variables it takes from the code around it
                     let mut env = None;
                     if !callee.frees.is_empty() {
@@ -4934,10 +5092,12 @@ impl Interp<'_> {
                         env,
                     });
                     base = nb;
+                    sync_regs!();
                     self.depth += 1;
                     self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
+                    ops = code.ops.as_ptr();
                     pc = 0;
                 }
                 Op::Ret(_) | Op::RetO(_) | Op::RetUnit => {
@@ -4977,8 +5137,10 @@ impl Interp<'_> {
                             self.depth -= 1;
                             cur = f.code;
                             code = self.code_at(cur);
+                            ops = code.ops.as_ptr();
                             pc = f.pc;
                             base = f.base;
+                            sync_regs!();
                             match obj {
                                 Some(o) => o!(f.dst) = o,
                                 None => r!(f.dst) = v,

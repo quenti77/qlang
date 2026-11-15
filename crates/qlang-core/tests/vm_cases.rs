@@ -537,3 +537,31 @@ fn function_values_on_the_machine() {
     );
     assert!(out.contains("R011"), "{out}");
 }
+
+#[test]
+fn compact_arrays_of_numbers_and_booleans() {
+    let src = "fun fill(n: int) -> array<int>\n  let a: array<int> = []\n  for i in 0..n do\n    a[] = i * i\n  end\n  a\nend\nfun halves(n: int) -> array<float>\n  let a: array<float> = []\n  for i in 0..n do\n    a[] = i / 2.0\n  end\n  a\nend\nfun flags(n: int) -> array<bool>\n  let a: array<bool> = [true, false]\n  for i in 0..n do\n    a[] = i mod 3 == 0\n  end\n  a\nend\nfun bump(a: array<int>, k: int) -> int\n  let t = 0\n  for i in 0..a.len() do\n    a[i] = a[i] + k\n    t += a[i]\n  end\n  for x in a do\n    t += x\n  end\n  t\nend\nfun at(a: array<int>, i: int) -> int\n  a[i]\nend\nlet a = fill(6)\nprint(a)\nprint(bump(a, 2))\nprint(a)\nprint(a.map(fun(x: int) -> int\n  x + 1\nend))\nprint(a.sum())\nlet h = halves(4)\nprint(h)\nprint(h[3] + 0.25)\nlet f = flags(5)\nprint(f)\nprint(f.len())\nprint(f == [true, false, true, false, false, true, false])\nlet c = [1, 2, 3]\nprint(bump(c, 1))\nprint(c)\nc.push(9)\nprint(c)\nprint(at(c, 3))\nprint(at(c, 4))";
+    let out = same_compiled(src, 5);
+    assert!(out.starts_with("[0, 1, 4, 9, 16, 25]\n"), "{out}");
+    assert!(out.contains("[2, 3, 6, 11, 18, 27]"), "{out}");
+    assert!(out.contains("[0.0, 0.5, 1.0, 1.5]"), "{out}");
+    assert!(
+        out.contains("true\n") && out.contains("[2, 3, 4, 9]"),
+        "{out}"
+    );
+    assert!(out.contains("R020") && out.contains("length 4"), "{out}");
+}
+
+#[test]
+fn loops_that_end_with_their_own_test() {
+    let src = "fun count(n: int) -> int\n  let i = 0\n  let t = 0\n  while i < n do\n    i += 1\n    if i mod 3 == 0 then continue end\n    if i > 40 then break end\n    t += i\n  end\n  t\nend\nfun down(n: int) -> int\n  let i = n\n  let t = 0\n  while i >= 1 do\n    let j = 0\n    while j != i do\n      j += 1\n      t += 1\n    end\n    i -= 2\n  end\n  t\nend\nfun nothing(n: int) -> int\n  let i = 5\n  while i < n do\n    i += 1\n  end\n  i\nend\nprint(count(10))\nprint(count(100))\nprint(down(9))\nprint(nothing(2))\nprint(nothing(8))";
+    assert_eq!(same_compiled(src, 3), "37\n547\n25\n5\n8\n");
+}
+
+#[test]
+fn a_loop_that_ends_with_its_own_test_still_hits_the_step_limit() {
+    let src = "fun never(n: int) -> int\n  let i = 0\n  while i <= n do\n    i = i * 1\n  end\n  i\nend\nprint(never(3))";
+    let (vm, _, used) = both(src, Limits::default());
+    assert!(used.0 >= 1, "{vm}");
+    assert!(vm.contains("R900"), "{vm}");
+}

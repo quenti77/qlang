@@ -83,6 +83,14 @@ impl<V> Default for SmallMap<V> {
     }
 }
 
+/// Two names are the same: field names are short, so this compares them byte by byte, with
+/// no call to the library's comparison.
+#[inline(always)]
+fn same_name(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y)
+}
+
 impl<V> SmallMap<V> {
     /// An empty map with room for `n` entries.
     pub fn with_capacity(n: usize) -> SmallMap<V> {
@@ -104,7 +112,7 @@ impl<V> SmallMap<V> {
     #[inline]
     pub fn get_at(&self, index: usize, key: &str) -> Option<&V> {
         match self.entries.get(index) {
-            Some((k, v)) if k.as_str() == key => Some(v),
+            Some((k, v)) if same_name(k.as_str(), key) => Some(v),
             _ => None,
         }
     }
@@ -112,7 +120,7 @@ impl<V> SmallMap<V> {
     #[inline]
     pub fn get_mut_at(&mut self, index: usize, key: &str) -> Option<&mut V> {
         match self.entries.get_mut(index) {
-            Some((k, v)) if k.as_str() == key => Some(v),
+            Some((k, v)) if same_name(k.as_str(), key) => Some(v),
             _ => None,
         }
     }

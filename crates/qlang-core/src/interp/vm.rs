@@ -451,6 +451,9 @@ pub(super) struct Code {
 struct FieldSite {
     name: String,
     ty: Ty,
+    /// Where the field was last found in a structure (the same place in the program finds
+    /// it in the same place again): a hint, checked against the name each time.
+    slot: Cell<u32>,
 }
 
 /// A structure literal: the structure and the names of the fields written, in order.
@@ -748,6 +751,7 @@ impl Gen<'_> {
                 self.fields.push(FieldSite {
                     name: name.to_string(),
                     ty: ty.clone(),
+                    slot: Cell::new(u32::MAX),
                 });
                 self.fields.len() - 1
             }
@@ -4374,15 +4378,38 @@ impl Interp<'_> {
                 Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
                 Op::Field { dst, obj, fld } => {
                     let site = &code.fields[fld as usize];
-                    let v = match &o!(obj) {
-                        Value::Struct(st) => st.fields.borrow().get(&site.name).cloned(),
-                        _ => None,
+                    // a number goes from the structure to its register without a copy of the
+                    // value; anything else is copied out first
+                    let (num, other) = {
+                        let Value::Struct(st) = &o!(obj) else {
+                            fail!("R005", format!("this value has no field `{}`", site.name));
+                        };
+                        let f = st.fields.borrow();
+                        let mut found = f.get_at(site.slot.get() as usize, &site.name);
+                        if found.is_none()
+                            && let Some(i) = f.position(&site.name)
+                        {
+                            site.slot.set(i as u32);
+                            found = f.get_at(i, &site.name);
+                        }
+                        match (found, &site.ty) {
+                            (Some(Value::Int(i)), Ty::Int) => (Some(*i), None),
+                            (Some(Value::Float(x)), Ty::Float) => (Some(x.to_bits() as i64), None),
+                            (Some(Value::Bool(x)), Ty::Bool) => (Some(i64::from(*x)), None),
+                            (Some(v), _) => (None, Some(v.clone())),
+                            (None, _) => (None, None),
+                        }
                     };
-                    let Some(v) = v else {
-                        fail!("R005", format!("this value has no field `{}`", site.name));
-                    };
-                    if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
-                        fail!("R001", "a field of an unexpected type");
+                    match (num, other) {
+                        (Some(n), _) => r!(dst) = n,
+                        (None, Some(v)) => {
+                            if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
+                                fail!("R001", "a field of an unexpected type");
+                            }
+                        }
+                        (None, None) => {
+                            fail!("R005", format!("this value has no field `{}`", site.name));
+                        }
                     }
                 }
                 Op::SetField { obj, src, fld } => {
@@ -4390,7 +4417,16 @@ impl Interp<'_> {
                     let v = reg_value(stack, ostack, base + src as usize, &site.ty);
                     match &o!(obj) {
                         Value::Struct(st) => {
-                            st.fields.borrow_mut().insert(&site.name, v);
+                            let mut f = st.fields.borrow_mut();
+                            match f.get_mut_at(site.slot.get() as usize, &site.name) {
+                                Some(slot) => *slot = v,
+                                None => {
+                                    f.insert(&site.name, v);
+                                    if let Some(i) = f.position(&site.name) {
+                                        site.slot.set(i as u32);
+                                    }
+                                }
+                            }
                         }
                         _ => fail!("R005", format!("this value has no field `{}`", site.name)),
                     }

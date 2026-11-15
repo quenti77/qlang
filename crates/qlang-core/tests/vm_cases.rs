@@ -189,6 +189,15 @@ fn long_texts_are_walked_without_counting_again() {
 }
 
 #[test]
+fn struct_fields_found_by_a_remembered_place() {
+    // literals that write the fields in other orders, a copy with changes, text and nested fields
+    let out = same(
+        "struct In\n  public n: int\nend\nstruct P\n  public a: int\n  public b: float\n  public c: bool\n  public name: string\n  public inner: In\nend\nfun probe(p: P) -> int\n  p.a = p.a + 1\n  p.name = p.name + \"!\"\n  p.b = p.b * 2.0\n  if p.c then p.a + p.inner.n + p.name.len() else p.a - p.inner.n + p.inner.n end\nend\nlet x = P { a: 1, b: 2.5, c: true, name: \"x\", inner: In { n: 10 } }\nlet y = P { inner: In { n: 20 }, name: \"y\", c: false, b: 0.5, a: 7 }\nlet z = P { ..x, a: 100 }\nfor i in 0..2 do\n  print(probe(x))\n  print(probe(y))\n  print(probe(z))\nend\nprint(\"{x.name} {y.name} {z.name} {z.b}\")",
+    );
+    assert_eq!(out.lines().count(), 7, "{out}");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

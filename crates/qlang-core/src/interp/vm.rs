@@ -108,11 +108,15 @@ enum Op {
         base: Reg,
         site: u32,
     },
-    /// `cnt += step`, or jump to the end of the loop when that overflows.
-    ForNext {
+    /// The end of a `for` turn, in one instruction: `cnt += step`, then, when `cnt` is still in
+    /// the range, a jump back to the start of the body (counting a step, as any jump back does).
+    /// The loop is left (the next instruction) on an overflow or when `cnt` is out of range.
+    ForLoop {
         cnt: Reg,
+        lim: Reg,
         step: Reg,
-        exit: u32,
+        incl: bool,
+        body: u32,
     },
     /// The `step` of a `for` must not be 0.
     StepCheck(Reg),
@@ -2968,20 +2972,19 @@ impl Gen<'_> {
                 for j in ctx.continues {
                     self.patch(j, next);
                 }
-                let step_at = self.emit(
-                    Op::ForNext {
+                // the body starts right after the check of the range
+                self.emit(
+                    Op::ForLoop {
                         cnt,
+                        lim,
                         step: stp,
-                        exit: 0,
+                        incl: *inclusive,
+                        body: head + 1,
                     },
                     span,
                 );
-                self.emit(Op::Jmp(head), span);
                 let end = self.here();
                 self.patch(exit, end);
-                if let Op::ForNext { exit, .. } = &mut self.ops[step_at] {
-                    *exit = end;
-                }
                 for j in ctx.breaks {
                     self.patch(j, end);
                 }
@@ -4075,10 +4078,40 @@ impl Interp<'_> {
                     }
                 }
                 Op::IncI(a) => r!(a) += 1,
-                Op::ForNext { cnt, step, exit } => match r!(cnt).checked_add(r!(step)) {
-                    Some(v) => r!(cnt) = v,
-                    None => pc = exit as usize,
-                },
+                Op::ForLoop {
+                    cnt,
+                    lim,
+                    step,
+                    incl,
+                    body,
+                } => {
+                    let Some(i) = r!(cnt).checked_add(r!(step)) else {
+                        continue;
+                    };
+                    r!(cnt) = i;
+                    // the jump back of a loop counts a step, whether or not another turn follows
+                    self.steps += 4;
+                    if self.steps > self.limits.max_steps {
+                        fail!(
+                            "R900",
+                            "the program ran for too long (step limit reached: infinite loop?)"
+                        );
+                    }
+                    if self.steps & 0x3FFF < 64 {
+                        self.check_memory(code.spans[pc - 1])?;
+                    }
+                    let (end, st) = (r!(lim), r!(step));
+                    let inside = if st > 0 {
+                        if incl { i <= end } else { i < end }
+                    } else if incl {
+                        i >= end
+                    } else {
+                        i > end
+                    };
+                    if inside {
+                        pc = body as usize;
+                    }
+                }
                 Op::StepCheck(st) => {
                     if r!(st) == 0 {
                         fail!("R031", "`step` cannot be 0");

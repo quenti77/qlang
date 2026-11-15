@@ -109,6 +109,17 @@ fn text_length_and_substring_on_the_machine() {
 }
 
 #[test]
+fn for_loops_end_where_the_tree_walker_ends_them() {
+    let src = "fun f() -> string\n  let r = \"\"\n  for i in 0..3 do r += \"{i}\" end\n  for i in 0..=3 do r += \"{i}\" end\n  for i in 5..0 step -2 do r += \"{i}\" end\n  for i in 5..=1 step -2 do r += \"{i}\" end\n  for i in 3..3 do r += \"x\" end\n  for i in 9223372036854775805..=9223372036854775807 do r += \"o\" end\n  for i in -9223372036854775807 - 1..=-9223372036854775807 step 1 do r += \"u\" end\n  for i in 0..10 do\n    if i == 2 then continue end\n    if i == 5 then break end\n    r += \"{i}\"\n  end\n  r\nend\nprint(f())";
+    assert_eq!(same(src), "0120123531531ooouu0134\n");
+    // a loop that never ends is stopped by the step limit
+    let out = same(
+        "fun f() -> int\n  let t = 0\n  for i in 0..9223372036854775807 do t += 1 end\n  t\nend\nprint(f())",
+    );
+    assert!(out.contains("R900"), "{out}");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

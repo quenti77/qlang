@@ -168,6 +168,18 @@ fn text_compared_with_a_literal_on_the_machine() {
 }
 
 #[test]
+fn division_by_a_constant_on_the_machine() {
+    let out = same(
+        "fun f(x: int) -> int\n  (x div 7) * 1000 + x mod 7 + (x div 1) + (x mod 1) + (x div 2147483647) + (x mod 3)\nend\nfor x in [0, 1, 6, 7, 8, 100, 4294967295, 4294967296, 4294967297, 9000000000, 900000000000, -1, -7, -8, -9000000000] do\n  print(f(x))\nend",
+    );
+    assert_eq!(out.lines().count(), 15, "{out}");
+    let out = same(
+        "fun g(x: int) -> int\n  x div 7 + x mod 7\nend\nprint(g(9223372036854775807))\nprint(g(-9223372036854775807))",
+    );
+    assert_eq!(out, "1317624576693539401\n-1317624576693539401\n");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

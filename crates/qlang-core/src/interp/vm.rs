@@ -82,6 +82,10 @@ enum Op {
     SubI(Reg, Reg, Reg),
     /// `a + imm`, `a - imm` with a small constant.
     AddImm(Reg, Reg, i32),
+    /// `a div k` / `a mod k` for a constant `k > 0` (`Code::divs[idx]`: the constant and the
+    /// multiplier that replaces the division).
+    DivK(Reg, Reg, u32),
+    ModK(Reg, Reg, u32),
     SubImm(Reg, Reg, i32),
     MulI(Reg, Reg, Reg),
     IntDivI(Reg, Reg, Reg),
@@ -428,6 +432,7 @@ pub(super) struct Code {
     globals: Vec<GlobalRef>,
     /// The text constants and the shapes of the interpolated strings.
     strs: Vec<Value>,
+    divs: Vec<(u32, u64)>,
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
@@ -621,6 +626,7 @@ struct Gen<'a> {
     sites: Vec<Site>,
     globals: Vec<GlobalRef>,
     strs: Vec<Value>,
+    divs: Vec<(u32, u64)>,
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
@@ -1967,6 +1973,25 @@ impl Gen<'_> {
                     self.top = mark;
                     return Some(Ty::Int);
                 }
+                if ta == Ty::Int
+                    && matches!(op, BinOp::Mod | BinOp::IntDiv)
+                    && let Some(k) = small_int(r)
+                    && k > 1
+                {
+                    // a constant divisor: a multiplication replaces the division
+                    let idx = self.divs.len() as u32;
+                    self.divs.push((k as u32, u64::MAX / u64::from(k as u32) + 1));
+                    self.emit(
+                        if matches!(op, BinOp::Mod) {
+                            Op::ModK(dst, a, idx)
+                        } else {
+                            Op::DivK(dst, a, idx)
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(Ty::Int);
+                }
                 let (mut b, mut tb) = self.value(r)?;
                 // an `int` next to a `float` is turned into a float first (as the tree walker does)
                 if !matches!(op, BinOp::IntDiv) && matches!((&ta, &tb), (Ty::Int, Ty::Float)) {
@@ -3154,6 +3179,26 @@ thread_local! {
     static ONE_LETTER: Vec<Rc<str>> = (0u8..128).map(|c| Rc::from(char::from(c).to_string())).collect();
 }
 
+/// A jump to another jump or to a return goes there directly: one dispatch less per taken
+/// branch (`if n < 2 then n else ... end` leaves its function from the `then` branch).
+fn thread_jumps(mut ops: Vec<Op>) -> Vec<Op> {
+    for i in 0..ops.len() {
+        let Op::Jmp(mut t) = ops[i] else { continue };
+        // a few hops at most (a loop of jumps must not hang the compiler)
+        for _ in 0..8 {
+            match ops.get(t as usize) {
+                Some(Op::Jmp(n)) if *n != t => t = *n,
+                _ => break,
+            }
+        }
+        ops[i] = match ops.get(t as usize) {
+            Some(r @ (Op::Ret(_) | Op::RetO(_) | Op::RetUnit)) => *r,
+            _ => Op::Jmp(t),
+        };
+    }
+    ops
+}
+
 /// A frame of the machine's own call stack.
 struct Frame {
     code: u32,
@@ -3190,6 +3235,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         sites: Vec::new(),
         globals: Vec::new(),
         strs: Vec::new(),
+        divs: Vec::new(),
         fmts: Vec::new(),
         fields: Vec::new(),
         lits: Vec::new(),
@@ -3279,13 +3325,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: def.name.clone(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys,
                     ret: def.ret.clone(),
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3372,13 +3419,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: "<function>".to_string(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys: ptys,
                     ret,
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3438,13 +3486,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: "<loop>".to_string(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys: Vec::new(),
                     ret: Ty::Unit,
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3925,9 +3974,12 @@ impl Interp<'_> {
             };
         }
         loop {
-            let op = code.ops[pc];
+            debug_assert!(pc < code.ops.len());
+            // SAFETY: every compiled code ends with a return and its jumps stay inside it
+            // (debug builds, which run the whole test suite, check).
+            let opr = unsafe { code.ops.get_unchecked(pc) };
             pc += 1;
-            match op {
+            match *opr {
                 Op::ConstI(d, v) => r!(d) = v,
                 Op::Mov(d, a) => r!(d) = r!(a),
                 Op::MovO(d, a) => o!(d) = o!(a).clone(),
@@ -3965,6 +4017,24 @@ impl Interp<'_> {
                             None => fail!("R010", "integer overflow"),
                         }
                     }
+                }
+                Op::DivK(d, a, i) => {
+                    let (k, m) = code.divs[i as usize];
+                    let x = r!(a);
+                    r!(d) = if x as u64 >> 32 == 0 {
+                        ((u128::from(m) * x as u128) >> 64) as i64
+                    } else {
+                        x / i64::from(k)
+                    };
+                }
+                Op::ModK(d, a, i) => {
+                    let (k, m) = code.divs[i as usize];
+                    let x = r!(a);
+                    r!(d) = if x as u64 >> 32 == 0 {
+                        (u128::from(m.wrapping_mul(x as u64)) * u128::from(k) >> 64) as i64
+                    } else {
+                        x % i64::from(k)
+                    };
                 }
                 Op::ModI(d, a, b) => {
                     let (x, y) = (r!(a), r!(b));
@@ -4067,7 +4137,7 @@ impl Interp<'_> {
                 | Op::MapSnap { .. }
                 | Op::NewEnum { .. }
                 | Op::NewTuple { .. }
-                | Op::EqG { .. } => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                | Op::EqG { .. } => self.vm_rare(*opr, code, pc, base, stack, ostack)?,
                 Op::TupleGet { dst, src, idx, fld } => {
                     // a number out of a tuple goes straight to its register
                     let fast = match (&o!(src), &code.fields[fld as usize].ty) {
@@ -4083,7 +4153,7 @@ impl Interp<'_> {
                     };
                     match fast {
                         Some(v) => r!(dst) = v,
-                        None => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                        None => self.vm_rare(*opr, code, pc, base, stack, ostack)?,
                     }
                 }
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
@@ -4623,7 +4693,7 @@ impl Interp<'_> {
                         _ => None,
                     };
                     let Some(target) = target else {
-                        self.vm_rare(op, code, pc, base, stack, ostack)?;
+                        self.vm_rare(*opr, code, pc, base, stack, ostack)?;
                         continue;
                     };
                     self.steps += 4;
@@ -4673,7 +4743,7 @@ impl Interp<'_> {
                                     ostack[nb + fr.reg as usize] = Value::Unit;
                                 }
                             }
-                            self.vm_rare(op, code, pc, base, stack, ostack)?;
+                            self.vm_rare(*opr, code, pc, base, stack, ostack)?;
                             continue;
                         }
                         if callee.frees.iter().any(|fr| fr.assigned) {
@@ -4695,11 +4765,11 @@ impl Interp<'_> {
                     pc = 0;
                 }
                 Op::Ret(_) | Op::RetO(_) | Op::RetUnit => {
-                    let v = match op {
+                    let v = match *opr {
                         Op::Ret(a) => r!(a),
                         _ => 0,
                     };
-                    let obj = match op {
+                    let obj = match *opr {
                         Op::RetO(a) => Some(std::mem::replace(&mut o!(a), Value::Unit)),
                         _ => None,
                     };

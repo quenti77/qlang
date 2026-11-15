@@ -63,6 +63,24 @@ fn small_int(e: &Expr) -> Option<i32> {
     }
 }
 
+/// The comparison as a set of outcomes (bit 0: less, bit 1: equal, bit 2: greater), so that
+/// testing it takes no branch.
+fn outcomes(c: Cmp) -> u8 {
+    match c {
+        Cmp::Lt => 0b001,
+        Cmp::Le => 0b011,
+        Cmp::Gt => 0b100,
+        Cmp::Ge => 0b110,
+        Cmp::Eq => 0b010,
+        Cmp::Ne => 0b101,
+    }
+}
+
+#[inline(always)]
+fn holds(outcomes: u8, x: i64, y: i64) -> bool {
+    (outcomes >> (u32::from(x >= y) + u32::from(x > y))) & 1 != 0
+}
+
 fn elem_value(bits: i64, ety: Ety) -> Value {
     match ety {
         Ety::I => Value::Int(bits),
@@ -223,6 +241,21 @@ enum Op {
     JnGeImm(Reg, i32, u32),
     JnEqImm(Reg, i32, u32),
     JnNeImm(Reg, i32, u32),
+    /// The end of a loop that tests a comparison of two integers: jumps back to the body when
+    /// it holds (the `Jmp` back and the comparison of the loop in one instruction).
+    JBack {
+        cmp: u8,
+        a: Reg,
+        b: Reg,
+        t: u32,
+    },
+    /// The same, comparing with a constant.
+    JBackImm {
+        cmp: u8,
+        a: Reg,
+        k: i32,
+        t: u32,
+    },
     JnF {
         a: Reg,
         b: Reg,
@@ -3278,6 +3311,48 @@ thread_local! {
 /// A jump to another jump or to a return goes there directly: one dispatch less per taken
 /// branch (`if n < 2 then n else ... end` leaves its function from the `then` branch).
 fn thread_jumps(mut ops: Vec<Op>) -> Vec<Op> {
+    // a loop whose test is one comparison of integers ends with that comparison, jumping back
+    // when it holds, instead of a jump to the test at the top (one dispatch less per turn)
+    for i in 0..ops.len() {
+        let Op::Jmp(t) = ops[i] else { continue };
+        if t as usize >= i {
+            continue;
+        }
+        let back = |c: Cmp, a: Reg, b: Reg, x: u32| {
+            (x as usize == i + 1).then_some(Op::JBack {
+                cmp: outcomes(c),
+                a,
+                b,
+                t: t + 1,
+            })
+        };
+        let back_imm = |c: Cmp, a: Reg, k: i32, x: u32| {
+            (x as usize == i + 1).then_some(Op::JBackImm {
+                cmp: outcomes(c),
+                a,
+                k,
+                t: t + 1,
+            })
+        };
+        let fused = match ops[t as usize] {
+            Op::JnLtI(a, b, x) => back(Cmp::Lt, a, b, x),
+            Op::JnLeI(a, b, x) => back(Cmp::Le, a, b, x),
+            Op::JnGtI(a, b, x) => back(Cmp::Gt, a, b, x),
+            Op::JnGeI(a, b, x) => back(Cmp::Ge, a, b, x),
+            Op::JnEqI(a, b, x) => back(Cmp::Eq, a, b, x),
+            Op::JnNeI(a, b, x) => back(Cmp::Ne, a, b, x),
+            Op::JnLtImm(a, k, x) => back_imm(Cmp::Lt, a, k, x),
+            Op::JnLeImm(a, k, x) => back_imm(Cmp::Le, a, k, x),
+            Op::JnGtImm(a, k, x) => back_imm(Cmp::Gt, a, k, x),
+            Op::JnGeImm(a, k, x) => back_imm(Cmp::Ge, a, k, x),
+            Op::JnEqImm(a, k, x) => back_imm(Cmp::Eq, a, k, x),
+            Op::JnNeImm(a, k, x) => back_imm(Cmp::Ne, a, k, x),
+            _ => None,
+        };
+        if let Some(op) = fused {
+            ops[i] = op;
+        }
+    }
     for i in 0..ops.len() {
         let Op::Jmp(mut t) = ops[i] else { continue };
         // a few hops at most (a loop of jumps must not hang the compiler)
@@ -4152,8 +4227,19 @@ impl Interp<'_> {
     ) -> R<i64> {
         let mut cur = root;
         let mut code = self.code_at(cur);
+        // where the instructions of `code` are (kept next to it, so that a fetch is one add)
+        let mut ops: *const Op = code.ops.as_ptr();
         let mut pc = 0usize;
         let mut base = 0usize;
+        // Where the numeric registers of the code that runs start (`stack` from `base`). It is
+        // made again each time `base` changes or `stack` grows (a call, a return).
+        let mut regs: *mut i64 = stack.as_mut_ptr();
+        macro_rules! sync_regs {
+            () => {
+                // SAFETY: `base` is inside the stack, which holds the registers of this frame.
+                regs = unsafe { stack.as_mut_ptr().add(base) }
+            };
+        }
         // The registers of the code that runs are inside `stack` (`vm_run` and `Call` make
         // room for `nregs` of them from `base`, and the stack never shrinks), and the compiler
         // only names registers it has allocated (below `nregs`). Debug builds, which run the
@@ -4161,10 +4247,10 @@ impl Interp<'_> {
         macro_rules! r {
             ($x:expr) => {
                 *{
-                    let at = base + $x as usize;
-                    debug_assert!(at < stack.len() && ($x as usize) < code.nregs);
+                    debug_assert!(base + ($x as usize) < stack.len() && ($x as usize) < code.nregs);
+                    debug_assert!(regs == unsafe { stack.as_mut_ptr().add(base) });
                     // SAFETY: see above.
-                    unsafe { stack.get_unchecked_mut(at) }
+                    unsafe { &mut *regs.add($x as usize) }
                 }
             };
         }
@@ -4183,11 +4269,26 @@ impl Interp<'_> {
                 f64::from_bits(r!($x) as u64)
             };
         }
+        // what a jump back counts: a step, and now and then a look at the memory
+        macro_rules! back_edge {
+            () => {
+                self.steps += 4;
+                if self.steps > self.limits.max_steps {
+                    fail!(
+                        "R900",
+                        "the program ran for too long (step limit reached: infinite loop?)"
+                    );
+                }
+                if self.steps & 0x3FFF < 64 {
+                    self.check_memory(code.spans[pc - 1])?;
+                }
+            };
+        }
         loop {
             debug_assert!(pc < code.ops.len());
             // SAFETY: every compiled code ends with a return and its jumps stay inside it
             // (debug builds, which run the whole test suite, check).
-            let opr = unsafe { code.ops.get_unchecked(pc) };
+            let opr = unsafe { &*ops.add(pc) };
             pc += 1;
             match *opr {
                 Op::ConstI(d, v) => r!(d) = v,
@@ -4758,6 +4859,18 @@ impl Interp<'_> {
                     }
                     pc = t as usize;
                 }
+                Op::JBack { cmp, a, b, t } => {
+                    if holds(cmp, r!(a), r!(b)) {
+                        back_edge!();
+                        pc = t as usize;
+                    }
+                }
+                Op::JBackImm { cmp, a, k, t } => {
+                    if holds(cmp, r!(a), i64::from(k)) {
+                        back_edge!();
+                        pc = t as usize;
+                    }
+                }
                 Op::JnLtImm(a, k, t) => {
                     if r!(a) >= i64::from(k) {
                         pc = t as usize;
@@ -4892,10 +5005,12 @@ impl Interp<'_> {
                     if callee.uses_objs && ostack.len() < base + callee.nregs {
                         ostack.resize(base + callee.nregs + 64, Value::Unit);
                     }
+                    sync_regs!();
                     self.depth += 1;
                     self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
+                    ops = code.ops.as_ptr();
                     pc = 0;
                 }
                 Op::CallValue {
@@ -4933,6 +5048,7 @@ impl Interp<'_> {
                     if callee.uses_objs && ostack.len() < nb + callee.nregs {
                         ostack.resize(nb + callee.nregs + 64, Value::Unit);
                     }
+                    sync_regs!();
                     // the variables it takes from the code around it
                     let mut env = None;
                     if !callee.frees.is_empty() {
@@ -4976,10 +5092,12 @@ impl Interp<'_> {
                         env,
                     });
                     base = nb;
+                    sync_regs!();
                     self.depth += 1;
                     self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
+                    ops = code.ops.as_ptr();
                     pc = 0;
                 }
                 Op::Ret(_) | Op::RetO(_) | Op::RetUnit => {
@@ -5019,8 +5137,10 @@ impl Interp<'_> {
                             self.depth -= 1;
                             cur = f.code;
                             code = self.code_at(cur);
+                            ops = code.ops.as_ptr();
                             pc = f.pc;
                             base = f.base;
+                            sync_regs!();
                             match obj {
                                 Some(o) => o!(f.dst) = o,
                                 None => r!(f.dst) = v,

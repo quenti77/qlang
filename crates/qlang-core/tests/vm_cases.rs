@@ -551,3 +551,17 @@ fn compact_arrays_of_numbers_and_booleans() {
     );
     assert!(out.contains("R020") && out.contains("length 4"), "{out}");
 }
+
+#[test]
+fn loops_that_end_with_their_own_test() {
+    let src = "fun count(n: int) -> int\n  let i = 0\n  let t = 0\n  while i < n do\n    i += 1\n    if i mod 3 == 0 then continue end\n    if i > 40 then break end\n    t += i\n  end\n  t\nend\nfun down(n: int) -> int\n  let i = n\n  let t = 0\n  while i >= 1 do\n    let j = 0\n    while j != i do\n      j += 1\n      t += 1\n    end\n    i -= 2\n  end\n  t\nend\nfun nothing(n: int) -> int\n  let i = 5\n  while i < n do\n    i += 1\n  end\n  i\nend\nprint(count(10))\nprint(count(100))\nprint(down(9))\nprint(nothing(2))\nprint(nothing(8))";
+    assert_eq!(same_compiled(src, 3), "37\n547\n25\n5\n8\n");
+}
+
+#[test]
+fn a_loop_that_ends_with_its_own_test_still_hits_the_step_limit() {
+    let src = "fun never(n: int) -> int\n  let i = 0\n  while i <= n do\n    i = i * 1\n  end\n  i\nend\nprint(never(3))";
+    let (vm, _, used) = both(src, Limits::default());
+    assert!(used.0 >= 1, "{vm}");
+    assert!(vm.contains("R900"), "{vm}");
+}

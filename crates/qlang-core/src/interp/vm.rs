@@ -72,6 +72,71 @@ fn elem_value(bits: i64, ety: Ety) -> Value {
     }
 }
 
+/// What came of reading or writing an element of an array.
+enum Elem {
+    Ok(i64),
+    OutOfBounds(usize),
+    Unexpected,
+}
+
+/// The element `i` of `a`, as register bits.
+#[inline(always)]
+fn arr_get(a: &Arr, i: i64, ety: Ety) -> Elem {
+    let u = i as usize;
+    let got = match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v.get(u).map(|x| Some(*x)),
+        (Arr::Floats(v), Ety::F) => v.get(u).map(|x| Some(x.to_bits() as i64)),
+        (Arr::Bools(v), Ety::B) => v.get(u).map(|x| Some(i64::from(*x))),
+        (Arr::Vals(v), _) => v.get(u).map(|x| elem_bits(x, ety)),
+        _ => (u < a.len()).then_some(None),
+    };
+    match got {
+        Some(Some(b)) => Elem::Ok(b),
+        Some(None) => Elem::Unexpected,
+        None => Elem::OutOfBounds(a.len()),
+    }
+}
+
+/// Writes the register bits `bits` as the element `i` of `a`.
+#[inline(always)]
+fn arr_set(a: &mut Arr, i: i64, bits: i64, ety: Ety) -> Elem {
+    let u = i as usize;
+    let len = a.len();
+    if u >= len {
+        return Elem::OutOfBounds(len);
+    }
+    match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v[u] = bits,
+        (Arr::Floats(v), Ety::F) => v[u] = f64::from_bits(bits as u64),
+        (Arr::Bools(v), Ety::B) => v[u] = bits != 0,
+        (Arr::Vals(v), _) => {
+            debug_assert!(matches!(
+                v[u],
+                Value::Int(_) | Value::Float(_) | Value::Bool(_)
+            ));
+            // SAFETY: `u < len`, and the old value has nothing to drop (a number or a
+            // boolean), so it is overwritten without being read: a read of a far-away element
+            // waits for the memory.
+            unsafe { std::ptr::write(v.as_mut_ptr().add(u), elem_value(bits, ety)) }
+        }
+        _ => return Elem::Unexpected,
+    }
+    Elem::Ok(0)
+}
+
+/// Adds the register bits `bits` at the end of `a`.
+#[inline(always)]
+fn arr_push(a: &mut Arr, bits: i64, ety: Ety) -> bool {
+    match (a, ety) {
+        (Arr::Ints(v), Ety::I) => v.push(bits),
+        (Arr::Floats(v), Ety::F) => v.push(f64::from_bits(bits as u64)),
+        (Arr::Bools(v), Ety::B) => v.push(bits != 0),
+        (Arr::Vals(v), _) => v.push(elem_value(bits, ety)),
+        _ => return false,
+    }
+    true
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Op {
     ConstI(Reg, i64),
@@ -257,7 +322,7 @@ enum Op {
         exit: u32,
     },
     /// A new empty array.
-    NewArr(Reg),
+    NewArr(Reg, Ety),
     /// A new empty map.
     NewMap(Reg),
     /// Jump unless the enumeration value in `obj` is the variant `vi` of the enumeration `eid`.
@@ -570,7 +635,7 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                 op,
                 Op::MovO(..)
                     | Op::RetO(_)
-                    | Op::NewArr(_)
+                    | Op::NewArr(..)
                     | Op::NewMap(_)
                     | Op::EnumField { .. }
                     | Op::NewEnum { .. }
@@ -1677,7 +1742,7 @@ impl Gen<'_> {
                 let Ty::Array(el) = &ty else { return None };
                 let ety = ety_of(el)?;
                 let tmp = self.alloc()?;
-                self.emit(Op::NewArr(tmp), span);
+                self.emit(Op::NewArr(tmp, ety), span);
                 for it in items {
                     let mark = self.top;
                     let r = self.value_as(it, el)?;
@@ -4401,30 +4466,20 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    r!(d) = rc.borrow().len() as i64;
+                    r!(d) = rc.raw().len() as i64;
                 }
                 Op::ALoad { dst, arr, idx, ety } => {
                     let i = r!(idx);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let a = rc.borrow();
-                    match usize::try_from(i).ok().and_then(|u| a.get(u)) {
-                        Some(v) => match elem_bits(v, ety) {
-                            Some(b) => {
-                                drop(a);
-                                r!(dst) = b;
-                            }
-                            None => {
-                                drop(a);
-                                fail!("R001", "an element of an unexpected type");
-                            }
-                        },
-                        None => {
-                            let len = a.len();
-                            drop(a);
+                    let got = arr_get(&rc.raw(), i, ety);
+                    match got {
+                        Elem::Ok(b) => r!(dst) = b,
+                        Elem::OutOfBounds(len) => {
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
                         }
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::ACheck { arr, idx } => {
@@ -4432,34 +4487,23 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let len = rc.borrow().len();
+                    let len = rc.raw().len();
                     if usize::try_from(i).ok().filter(|u| *u < len).is_none() {
                         fail!("R020", format!("index {i} is out of bounds (length {len})"));
                     }
                 }
                 Op::AStore { arr, idx, src, ety } => {
-                    let (i, v) = (r!(idx), elem_value(r!(src), ety));
+                    let (i, bits) = (r!(idx), r!(src));
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let mut a = rc.borrow_mut();
-                    let len = a.len();
-                    match usize::try_from(i).ok().filter(|u| *u < len) {
-                        Some(u) => {
-                            // an element of an array of numbers or booleans owns nothing: it
-                            // is overwritten without being read (a read of a far-away element
-                            // waits for the memory)
-                            debug_assert!(matches!(
-                                a[u],
-                                Value::Int(_) | Value::Float(_) | Value::Bool(_)
-                            ));
-                            // SAFETY: `u < len`, and the old value has nothing to drop.
-                            unsafe { std::ptr::write(a.as_mut_ptr().add(u), v) }
-                        }
-                        None => {
-                            drop(a);
+                    let done = arr_set(&mut rc.raw_mut(), i, bits, ety);
+                    match done {
+                        Elem::Ok(_) => {}
+                        Elem::OutOfBounds(len) => {
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
                         }
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
@@ -4518,8 +4562,14 @@ impl Interp<'_> {
                         _ => fail!("R005", format!("this value has no field `{}`", site.name)),
                     }
                 }
-                Op::NewArr(dst) => {
-                    o!(dst) = Value::Array(Rc::new(RefCell::new(Vec::new())));
+                Op::NewArr(dst, ety) => {
+                    let obj = match ety {
+                        Ety::I => ArrObj::empty_of(&Ty::Int),
+                        Ety::F => ArrObj::empty_of(&Ty::Float),
+                        Ety::B => ArrObj::empty_of(&Ty::Bool),
+                        Ety::O => ArrObj::new(Vec::new()),
+                    };
+                    o!(dst) = Value::Array(Rc::new(obj));
                 }
                 Op::ALoadO { dst, arr, idx } => {
                     let i = r!(idx);
@@ -4586,16 +4636,19 @@ impl Interp<'_> {
                     }
                 }
                 Op::APush { arr, src, ety } => {
-                    let v = elem_value(r!(src), ety);
+                    let bits = r!(src);
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let rc = rc.clone();
-                    let len = rc.borrow().len();
-                    if len + 1 > self.limits.max_alloc {
+                    let mut a = rc.raw_mut();
+                    if a.len() + 1 > self.limits.max_alloc {
+                        drop(a);
                         fail!("R903", "a value became too large (memory limit reached)");
                     }
-                    rc.borrow_mut().push(v);
+                    if !arr_push(&mut a, bits, ety) {
+                        drop(a);
+                        fail!("R001", "an element of an unexpected type");
+                    }
                 }
                 Op::ForArr {
                     dst,
@@ -4608,22 +4661,11 @@ impl Interp<'_> {
                     let Value::Array(rc) = &ostack[base + arr as usize] else {
                         fail!("R001", "an array was expected");
                     };
-                    let a = rc.borrow();
-                    match a.get(i as usize) {
-                        Some(v) => match elem_bits(v, ety) {
-                            Some(b) => {
-                                drop(a);
-                                r!(dst) = b;
-                            }
-                            None => {
-                                drop(a);
-                                fail!("R001", "an element of an unexpected type");
-                            }
-                        },
-                        None => {
-                            drop(a);
-                            pc = exit as usize;
-                        }
+                    let got = arr_get(&rc.raw(), i, ety);
+                    match got {
+                        Elem::Ok(b) => r!(dst) = b,
+                        Elem::OutOfBounds(_) => pc = exit as usize,
+                        Elem::Unexpected => fail!("R001", "an element of an unexpected type"),
                     }
                 }
                 Op::IncI(a) => r!(a) += 1,

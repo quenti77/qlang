@@ -537,3 +537,17 @@ fn function_values_on_the_machine() {
     );
     assert!(out.contains("R011"), "{out}");
 }
+
+#[test]
+fn compact_arrays_of_numbers_and_booleans() {
+    let src = "fun fill(n: int) -> array<int>\n  let a: array<int> = []\n  for i in 0..n do\n    a[] = i * i\n  end\n  a\nend\nfun halves(n: int) -> array<float>\n  let a: array<float> = []\n  for i in 0..n do\n    a[] = i / 2.0\n  end\n  a\nend\nfun flags(n: int) -> array<bool>\n  let a: array<bool> = [true, false]\n  for i in 0..n do\n    a[] = i mod 3 == 0\n  end\n  a\nend\nfun bump(a: array<int>, k: int) -> int\n  let t = 0\n  for i in 0..a.len() do\n    a[i] = a[i] + k\n    t += a[i]\n  end\n  for x in a do\n    t += x\n  end\n  t\nend\nfun at(a: array<int>, i: int) -> int\n  a[i]\nend\nlet a = fill(6)\nprint(a)\nprint(bump(a, 2))\nprint(a)\nprint(a.map(fun(x: int) -> int\n  x + 1\nend))\nprint(a.sum())\nlet h = halves(4)\nprint(h)\nprint(h[3] + 0.25)\nlet f = flags(5)\nprint(f)\nprint(f.len())\nprint(f == [true, false, true, false, false, true, false])\nlet c = [1, 2, 3]\nprint(bump(c, 1))\nprint(c)\nc.push(9)\nprint(c)\nprint(at(c, 3))\nprint(at(c, 4))";
+    let out = same_compiled(src, 5);
+    assert!(out.starts_with("[0, 1, 4, 9, 16, 25]\n"), "{out}");
+    assert!(out.contains("[2, 3, 6, 11, 18, 27]"), "{out}");
+    assert!(out.contains("[0.0, 0.5, 1.0, 1.5]"), "{out}");
+    assert!(
+        out.contains("true\n") && out.contains("[2, 3, 4, 9]"),
+        "{out}"
+    );
+    assert!(out.contains("R020") && out.contains("length 4"), "{out}");
+}

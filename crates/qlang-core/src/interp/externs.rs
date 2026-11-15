@@ -286,14 +286,7 @@ impl Interp<'_> {
                 for item in items {
                     out.push(self.host_to_json(item, depth + 1, work, span)?);
                 }
-                self.json_value(
-                    "array",
-                    none(),
-                    none(),
-                    none(),
-                    Value::Array(Rc::new(RefCell::new(out))),
-                    none(),
-                )
+                self.json_value("array", none(), none(), none(), Value::array(out), none())
             }
             HostValue::Map(entries) => {
                 self.check_size(entries.len(), span)?;
@@ -396,7 +389,7 @@ impl Interp<'_> {
                 for item in items {
                     out.push(self.host_to_value(item, t, depth + 1, work, span)?);
                 }
-                Ok(Value::Array(Rc::new(RefCell::new(out))))
+                Ok(Value::array(out))
             }
             (Ty::Tuple(ts), HostValue::Array(items)) if ts.len() == items.len() => {
                 let mut out = Vec::new();

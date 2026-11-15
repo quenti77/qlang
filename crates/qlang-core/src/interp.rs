@@ -608,7 +608,7 @@ enum Place {
     Global(ModId, String),
     Field(Rc<StructObj>, String),
     Static(StructId, String),
-    Elem(Rc<RefCell<Vec<Value>>>, usize),
+    Elem(Rc<ArrObj>, usize),
     MapEntry(Rc<RefCell<MapObj>>, Value),
     UserIndex(Value, Value),
     Append(Value),
@@ -1334,7 +1334,7 @@ impl<'a> Interp<'a> {
             ExprKind::Spread(_) => {
                 self.fail("R001", "`...` outside a call, an array or a map", e.span)
             }
-            ExprKind::Array(items) => self.eval_array(items, env),
+            ExprKind::Array(items) => self.eval_array(e.id, items, env),
             ExprKind::Map(items) => self.eval_map(e, items, env),
             ExprKind::StructLit(lit) => self.eval_struct_lit(e, lit, env),
             ExprKind::Unary(op, inner) => self.eval_unary(e, op, inner, env),
@@ -1440,7 +1440,7 @@ impl<'a> Interp<'a> {
     }
 
     #[inline(never)]
-    fn eval_array(&mut self, items: &[Expr], env: &Env) -> R<Value> {
+    fn eval_array(&mut self, id: NodeId, items: &[Expr], env: &Env) -> R<Value> {
         let mut out = Vec::with_capacity(items.len());
         for it in items {
             if let ExprKind::Spread(inner) = &it.kind {
@@ -1458,6 +1458,9 @@ impl<'a> Interp<'a> {
                 continue;
             }
             out.push(self.eval(it, env)?);
+        }
+        if let Some(Ty::Array(el)) = self.prog.res.array_lits.get(&id) {
+            return Ok(Value::Array(Rc::new(ArrObj::typed(out, el))));
         }
         Ok(Value::array(out))
     }

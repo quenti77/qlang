@@ -666,6 +666,12 @@ struct Interp<'a> {
     vm_loops: HashMap<usize, Option<u32>>,
     /// The same for anonymous functions, by the address of their declaration.
     vm_lambdas: crate::fx::FxHashMap<usize, Option<u32>>,
+    /// The last long text whose length in letters the machine counted (it keeps the text, so
+    /// that its address stands for it): a loop over `s.len()` and `s.substring(..)` counts once.
+    str_len: Option<(Rc<str>, usize)>,
+    /// For that text when it is not ASCII: a letter index and its byte offset, where the last
+    /// `substring` ended (a walk along the text goes on from there).
+    str_pos: (usize, usize),
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.
@@ -728,6 +734,8 @@ impl<'a> Interp<'a> {
             coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
             vm_lambdas: Default::default(),
+            str_len: None,
+            str_pos: (0, 0),
             vm_ostack: Vec::new(),
             vm_result: Value::Unit,
         }

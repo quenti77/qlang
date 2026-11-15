@@ -180,6 +180,15 @@ fn division_by_a_constant_on_the_machine() {
 }
 
 #[test]
+fn long_texts_are_walked_without_counting_again() {
+    // more than 64 bytes, with letters of several sizes; forwards, backwards, ends and errors
+    let out = same(
+        "fun f(s: string) -> string\n  let out = \"\"\n  let n = s.len()\n  let i = 0\n  while i < n do\n    let c = s.substring(i, i + 1)\n    if c == \"é\" or c == \"€\" then out += \"<\" + c + \">\" end\n    if s.substring(n - 1 - i, n - i) == \"z\" then out += \"Z\" end\n    i += 7\n  end\n  out + s.substring(n, n) + s.substring(0, 0) + s.substring(n - 3, n)\nend\nlet base = \"aé€z-bcdéfg€hijzkl-mnoé€pqzrstuvwxyz-0123456789-éé€€zz-end\"\nprint(f(base))\nprint(f(base + base))\nprint(base.substring(3, 99))",
+    );
+    assert!(out.contains("R020"), "{out}");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

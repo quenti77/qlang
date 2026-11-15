@@ -3583,6 +3583,60 @@ impl Interp<'_> {
         (c.param_tys == site.tys && c.ret == site.ret && !c.is_loop).then_some(idx)
     }
 
+    /// The number of letters of `t`; a long text is counted once while a loop works on it.
+    fn text_len(&mut self, t: &Rc<str>) -> usize {
+        if t.len() < 64 {
+            return if t.is_ascii() {
+                t.len()
+            } else {
+                t.chars().count()
+            };
+        }
+        if let Some((c, n)) = &self.str_len
+            && Rc::ptr_eq(c, t)
+        {
+            return *n;
+        }
+        let n = if t.is_ascii() {
+            t.len()
+        } else {
+            t.chars().count()
+        };
+        self.str_len = Some((t.clone(), n));
+        self.str_pos = (0, 0);
+        n
+    }
+
+    /// The byte range of the letters `from..to` of a text that is not ASCII (`to` is in range).
+    /// A long text remembers where the last range ended: a walk along it is not quadratic.
+    fn char_span(&mut self, t: &Rc<str>, from: usize, to: usize) -> (usize, usize) {
+        let mut start = (0usize, 0usize);
+        let long = t.len() >= 64;
+        if long
+            && matches!(&self.str_len, Some((c, _)) if Rc::ptr_eq(c, t))
+            && self.str_pos.0 <= from
+        {
+            start = self.str_pos;
+        }
+        let mut it = t[start.1..].char_indices();
+        let a = match it.nth(from - start.0) {
+            Some((i, _)) => start.1 + i,
+            None => t.len(),
+        };
+        let b = if to == from {
+            a
+        } else {
+            match t[a..].char_indices().nth(to - from) {
+                Some((i, _)) => a + i,
+                None => t.len(),
+            }
+        };
+        if long && matches!(&self.str_len, Some((c, _)) if Rc::ptr_eq(c, t)) {
+            self.str_pos = (to, b);
+        }
+        (a, b)
+    }
+
     fn vm_release(&mut self) {
         self.vm_ostack.clear();
         self.vm_result = Value::Unit;
@@ -4189,11 +4243,8 @@ impl Interp<'_> {
                     let Value::Str(t) = &ostack[base + a as usize] else {
                         fail!("R001", "a text was expected");
                     };
-                    r!(d) = if t.is_ascii() {
-                        t.len()
-                    } else {
-                        t.chars().count()
-                    } as i64;
+                    let t = t.clone();
+                    r!(d) = self.text_len(&t) as i64;
                 }
                 Op::CmpSK { dst, a, k, ne } => {
                     let (Value::Str(x), Value::Str(y)) = (&o!(a), &code.strs[k as usize]) else {
@@ -4208,8 +4259,9 @@ impl Interp<'_> {
                     else {
                         fail!("R001", "a text was expected");
                     };
-                    let ascii = t.is_ascii();
-                    let n = if ascii { t.len() } else { t.chars().count() };
+                    let t = t.clone();
+                    let n = self.text_len(&t);
+                    let ascii = n == t.len();
                     if from < 0 || to < from || to as usize > n {
                         fail!(
                             "R020",
@@ -4220,7 +4272,10 @@ impl Interp<'_> {
                     let same = if ascii {
                         t[from..to] == **lit
                     } else {
-                        t.chars().skip(from).take(to - from).eq(lit.chars())
+                        {
+                            let (a, b) = self.char_span(&t, from, to);
+                            t[a..b] == **lit
+                        }
                     };
                     r!(dst) = i64::from(same != ne);
                 }
@@ -4229,11 +4284,8 @@ impl Interp<'_> {
                     let Value::Str(t) = &ostack[base + a as usize] else {
                         fail!("R001", "a text was expected");
                     };
-                    let n = if t.is_ascii() {
-                        t.len()
-                    } else {
-                        t.chars().count()
-                    };
+                    let t = t.clone();
+                    let n = self.text_len(&t);
                     if from < 0 || to < from || to as usize > n {
                         fail!(
                             "R020",
@@ -4241,7 +4293,7 @@ impl Interp<'_> {
                         );
                     }
                     let (from, to) = (from as usize, to as usize);
-                    let part: Rc<str> = if t.is_ascii() {
+                    let part: Rc<str> = if n == t.len() {
                         if to - from == 1 {
                             // one letter: a shared text, nothing to allocate
                             ONE_LETTER.with(|l| l[usize::from(t.as_bytes()[from])].clone())
@@ -4249,7 +4301,8 @@ impl Interp<'_> {
                             Rc::from(&t[from..to])
                         }
                     } else {
-                        Rc::from(t.chars().skip(from).take(to - from).collect::<String>())
+                        let (a, b) = self.char_span(&t, from, to);
+                        Rc::from(&t[a..b])
                     };
                     ostack[base + d as usize] = Value::Str(part);
                 }

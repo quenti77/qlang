@@ -674,7 +674,8 @@ struct Interp<'a> {
     str_pos: (usize, usize),
     /// `find_method` for a structure without an argument: the answer by class and trait, then
     /// by name (the impls of a program do not change while it runs).
-    method_cache: RefCell<crate::fx::FxHashMap<(StructId, Option<TraitId>), Vec<(Box<str>, Option<FnId>)>>>,
+    method_cache:
+        RefCell<crate::fx::FxHashMap<(StructId, Option<TraitId>), Vec<(Box<str>, Option<FnId>)>>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.

@@ -481,6 +481,8 @@ struct GlobalRef {
 /// when the loop starts and written back when it ends (when the loop assigned it).
 #[derive(Clone)]
 struct Free {
+    /// Where the variable was last found in its scopes (a hint, checked against the name).
+    cache: Cell<u32>,
     name: String,
     reg: Reg,
     ty: Ty,
@@ -1587,6 +1589,7 @@ impl Gen<'_> {
         }
         let reg = self.alloc()?;
         self.frees.push(Free {
+            cache: Cell::new(NO_SLOT),
             name: name.to_string(),
             reg,
             ty: ty.clone(),
@@ -1986,7 +1989,8 @@ impl Gen<'_> {
                 {
                     // a constant divisor: a multiplication replaces the division
                     let idx = self.divs.len() as u32;
-                    self.divs.push((k as u32, u64::MAX / u64::from(k as u32) + 1));
+                    self.divs
+                        .push((k as u32, u64::MAX / u64::from(k as u32) + 1));
                     self.emit(
                         if matches!(op, BinOp::Mod) {
                             Op::ModK(dst, a, idx)
@@ -3403,6 +3407,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     for f in shared {
                         let reg = g.alloc()?;
                         g.frees.push(Free {
+                            cache: Cell::new(NO_SLOT),
                             reg,
                             assigned: false,
                             ..f
@@ -3490,6 +3495,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 .collect();
             for (k, f) in shared.into_iter().enumerate() {
                 g.frees.push(Free {
+                    cache: Cell::new(NO_SLOT),
                     reg: k as Reg,
                     assigned: false,
                     ..f.clone()
@@ -3706,18 +3712,29 @@ impl Interp<'_> {
             VmState::Yes(i) => *i,
             VmState::Unknown => self.vm_compile(fid)?,
         };
-        let code = self.vm_codes[idx as usize].clone();
+        let code = self.code_at(idx);
         // a method takes its `self` first
-        let all: Vec<&Value> = this.iter().chain(args.iter()).collect();
-        if all.len() != code.param_tys.len() || this.is_some() != self.prog.defs.fns[fid].has_self {
+        if this.iter().len() + args.len() != code.param_tys.len()
+            || this.is_some() != self.prog.defs.fns[fid].has_self
+        {
             return None;
         }
         self.vm_release();
-        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(all.len());
-        for (k, (a, t)) in all.iter().zip(&code.param_tys).enumerate() {
-            init.push((k as Reg, slot_of(a, t)?));
-        }
-        let r = self.vm_run(idx, init, span);
+        let r = self.vm_run_with(idx, span, |_, stack, ostack| {
+            for (k, (a, t)) in this
+                .iter()
+                .chain(args.iter())
+                .zip(&code.param_tys)
+                .enumerate()
+            {
+                match slot_of(a, t) {
+                    Some(Slot::N(b)) => stack[k] = b,
+                    Some(Slot::O(o)) => ostack[k] = o,
+                    None => return false,
+                }
+            }
+            true
+        })?;
         let out = r.map(|bits| match &code.ret {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
@@ -3763,23 +3780,34 @@ impl Interp<'_> {
                 r?
             }
         };
-        let code = self.vm_codes[idx as usize].clone();
+        let code = self.code_at(idx);
         if args.len() != code.param_tys.len() {
             return None;
         }
         self.vm_release();
-        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(args.len() + code.frees.len());
-        for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
-            init.push((k as Reg, slot_of(a, t)?));
-        }
-        for f in &code.frees {
-            let v = match f.global {
-                Some(m) => self.envs[m].get(&f.name),
-                None => fv.env.get(&f.name),
-            };
-            init.push((f.reg, v.and_then(|v| slot_of(&v, &f.ty))?));
-        }
-        let r = self.vm_run(idx, init, span);
+        let r = self.vm_run_with(idx, span, |envs, stack, ostack| {
+            for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
+                match slot_of(a, t) {
+                    Some(Slot::N(b)) => stack[k] = b,
+                    Some(Slot::O(o)) => ostack[k] = o,
+                    None => return false,
+                }
+            }
+            for f in &code.frees {
+                let mut c = f.cache.get();
+                let v = match f.global {
+                    Some(m) => envs[m].get_cached(&f.name, &mut c),
+                    None => fv.env.get_cached(&f.name, &mut c),
+                };
+                f.cache.set(c);
+                match v.and_then(|v| slot_of(&v, &f.ty)) {
+                    Some(Slot::N(b)) => stack[f.reg as usize] = b,
+                    Some(Slot::O(o)) => ostack[f.reg as usize] = o,
+                    None => return false,
+                }
+            }
+            true
+        })?;
         let bits = match r {
             Ok(b) => b,
             Err(e) => {
@@ -3971,22 +3999,53 @@ impl Interp<'_> {
     }
 
     fn vm_run(&mut self, root: u32, init: Vec<(Reg, Slot)>, span: Span) -> R<i64> {
+        self.vm_run_with(root, span, |_, stack, ostack| {
+            for (r, slot) in init {
+                match slot {
+                    Slot::N(b) => stack[r as usize] = b,
+                    Slot::O(o) => ostack[r as usize] = o,
+                }
+            }
+            true
+        })
+        .expect("the registers of a loop are always filled")
+    }
+
+    /// Runs the code `root` with the registers that `fill` sets (`false`: a value that does
+    /// not fit its register, nothing runs and the result is `None`).
+    fn vm_run_with(
+        &mut self,
+        root: u32,
+        span: Span,
+        fill: impl FnOnce(&[Env], &mut [i64], &mut [Value]) -> bool,
+    ) -> Option<R<i64>> {
         let mut stack = std::mem::take(&mut self.vm_stack);
         let mut ostack = std::mem::take(&mut self.vm_ostack);
         stack.clear();
         ostack.clear();
-        let code = self.vm_codes[root as usize].clone();
-        let n = code.nregs.max(init.len());
+        let code = self.code_at(root);
+        let n = code.nregs;
         stack.resize(n, 0);
         if code.uses_objs {
             ostack.resize(n, Value::Unit);
         }
-        for (r, slot) in init {
-            match slot {
-                Slot::N(b) => stack[r as usize] = b,
-                Slot::O(o) => ostack[r as usize] = o,
-            }
+        if !fill(&self.envs, &mut stack, &mut ostack) {
+            ostack.clear();
+            self.vm_stack = stack;
+            self.vm_ostack = ostack;
+            return None;
         }
+        Some(self.vm_run_ready(root, span, stack, ostack))
+    }
+
+    fn vm_run_ready(
+        &mut self,
+        root: u32,
+        span: Span,
+        mut stack: Vec<i64>,
+        mut ostack: Vec<Value>,
+    ) -> R<i64> {
+        let code = self.code_at(root);
         let mut frames: Vec<Frame> = Vec::new();
         if self.depth >= self.limits.max_depth {
             self.vm_stack = stack;

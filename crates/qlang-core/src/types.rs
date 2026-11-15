@@ -748,6 +748,9 @@ pub struct Resolutions {
     /// The type of each use of a variable whose type is `int`, `float` or `bool` (the typed
     /// register machine needs it for the variables a loop shares with the code around it).
     pub ident_tys: FxHashMap<NodeId, Ty>,
+    /// The parameter and result types of each anonymous function (keyed by its declaration),
+    /// for the typed register machine.
+    pub lambda_sigs: FxHashMap<NodeId, (Vec<Ty>, Ty)>,
     /// For a use of a `T?` variable that a test narrowed to `T`: the narrowed type (the type
     /// in `ident_tys` is then the declared one).
     pub ident_narrow: FxHashMap<NodeId, Ty>,

@@ -80,7 +80,8 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::Yes(_)))
                 .count()
-                + it.vm_loops.values().filter(|l| l.is_some()).count(),
+                + it.vm_loops.values().filter(|l| l.is_some()).count()
+                + it.vm_lambdas.values().filter(|l| l.is_some()).count(),
             it.vm_state
                 .iter()
                 .filter(|s| matches!(s, vm::VmState::No))
@@ -622,7 +623,7 @@ struct Interp<'a> {
     out_bytes: usize,
     envs: Vec<Env>,
     statics: HashMap<(StructId, String), Value>,
-    frames: Vec<(Name, Span)>,
+    frames: Vec<(FrameName, Span)>,
     /// With a debugger: the debugger, and for the program and each call in progress the last statement
     /// it ran and the scope it ran in.
     dbg: Option<Box<dyn crate::debug::Hook>>,
@@ -663,6 +664,8 @@ struct Interp<'a> {
     coverage: bool,
     /// Loop statements compiled for the machine (by address), `None` for those it refused.
     vm_loops: HashMap<usize, Option<u32>>,
+    /// The same for anonymous functions, by the address of their declaration.
+    vm_lambdas: crate::fx::FxHashMap<usize, Option<u32>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.
@@ -676,6 +679,13 @@ const MAX_CMP_DEPTH: usize = 1000;
 
 /// Deeper values print as `...` (this also stops cyclic structures).
 const MAX_FMT_DEPTH: usize = 64;
+
+/// A call in the trace: the walker keeps the name, the machine only the code it runs (a call
+/// must not copy a name, which allocates when it is longer than a few bytes).
+enum FrameName {
+    Owned(Name),
+    Vm(u32),
+}
 
 impl<'a> Interp<'a> {
     fn new(prog: &'a Program, host: &'a mut dyn Host, limits: Limits) -> Interp<'a> {
@@ -717,8 +727,17 @@ impl<'a> Interp<'a> {
             vm_enabled: !crate::coverage::enabled() && !dbg_on,
             coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
+            vm_lambdas: Default::default(),
             vm_ostack: Vec::new(),
             vm_result: Value::Unit,
+        }
+    }
+
+    /// The name of a function in the call trace.
+    fn frame_name<'s>(&'s self, f: &'s FrameName) -> &'s str {
+        match f {
+            FrameName::Owned(n) => n.as_str(),
+            FrameName::Vm(code) => &self.vm_codes[*code as usize].name,
         }
     }
 
@@ -738,7 +757,7 @@ impl<'a> Interp<'a> {
                 .rposition(|(_, call_span)| call_span.file != prelude_file)
         {
             span = self.frames[i].1;
-            inside = Some(self.frames[i].0.as_str().to_string());
+            inside = Some(self.frame_name(&self.frames[i].0).to_string());
             outer = i;
         }
         let mut d = Diagnostic::error(code, msg, span);
@@ -751,9 +770,10 @@ impl<'a> Interp<'a> {
         // innermost call first; identical consecutive calls (recursion) are merged
         let mut groups: Vec<(&str, Span, usize)> = Vec::new();
         for (name, call_span) in self.frames[..outer].iter().rev() {
+            let name = self.frame_name(name);
             match groups.last_mut() {
-                Some((n, s, count)) if *n == name.as_str() && *s == *call_span => *count += 1,
-                _ => groups.push((name.as_str(), *call_span, 1)),
+                Some((n, s, count)) if *n == name && *s == *call_span => *count += 1,
+                _ => groups.push((name, *call_span, 1)),
             }
         }
         for (name, call_span, count) in groups.into_iter().take(8) {
@@ -1381,6 +1401,7 @@ impl<'a> Interp<'a> {
                 decl: f.clone(),
                 env: env.clone(),
                 name: "<function>".into(),
+                fid: None,
                 tenv: self.tenv.last().map(|t| Rc::new(t.clone())),
             }))),
         }
@@ -1576,6 +1597,7 @@ impl<'a> Interp<'a> {
             decl: def.decl.clone().expect("function without declaration"),
             env: self.envs[def.module].clone(),
             name: def.name.clone(),
+            fid: Some(fid),
             tenv: None,
         }))
     }
@@ -1889,6 +1911,15 @@ impl<'a> Interp<'a> {
         match f {
             Value::Func(fv) => {
                 let fv = fv.clone();
+                if fv.tenv.is_none() {
+                    let ran = match fv.fid {
+                        Some(fid) => self.try_vm(fid, &None, &args, span),
+                        None => self.try_vm_lambda(&fv, &args, span),
+                    };
+                    if let Some(r) = ran {
+                        return r;
+                    }
+                }
                 if let Some(t) = &fv.tenv {
                     self.tenv.push((**t).clone());
                     let r = self.call_function(&fv.decl, &fv.env, None, args, &fv.name, span);
@@ -2013,7 +2044,7 @@ impl<'a> Interp<'a> {
         span: Span,
     ) -> R<Value> {
         if decl.external {
-            self.frames.push((Name::new(name), span));
+            self.frames.push((FrameName::Owned(Name::new(name)), span));
             let r = self.call_extern(decl, args, span);
             self.frames.pop();
             return r;
@@ -2022,7 +2053,7 @@ impl<'a> Interp<'a> {
             return self.fail("R901", "too many nested calls (infinite recursion?)", span);
         }
         self.depth += 1;
-        self.frames.push((Name::new(name), span));
+        self.frames.push((FrameName::Owned(Name::new(name)), span));
         if self.dbg.is_some() {
             self.dbg_stack.push((span, None));
         }

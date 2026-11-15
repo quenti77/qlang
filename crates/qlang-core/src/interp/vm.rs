@@ -55,6 +55,14 @@ fn elem_bits(v: &Value, ety: Ety) -> Option<i64> {
     }
 }
 
+/// An integer literal that fits an instruction's immediate operand.
+fn small_int(e: &Expr) -> Option<i32> {
+    match e.kind {
+        ExprKind::Int(v) => i32::try_from(v).ok(),
+        _ => None,
+    }
+}
+
 fn elem_value(bits: i64, ety: Ety) -> Value {
     match ety {
         Ety::I => Value::Int(bits),
@@ -72,6 +80,9 @@ enum Op {
     MovO(Reg, Reg),
     AddI(Reg, Reg, Reg),
     SubI(Reg, Reg, Reg),
+    /// `a + imm`, `a - imm` with a small constant.
+    AddImm(Reg, Reg, i32),
+    SubImm(Reg, Reg, i32),
     MulI(Reg, Reg, Reg),
     IntDivI(Reg, Reg, Reg),
     ModI(Reg, Reg, Reg),
@@ -97,11 +108,15 @@ enum Op {
         base: Reg,
         site: u32,
     },
-    /// `cnt += step`, or jump to the end of the loop when that overflows.
-    ForNext {
+    /// The end of a `for` turn, in one instruction: `cnt += step`, then, when `cnt` is still in
+    /// the range, a jump back to the start of the body (counting a step, as any jump back does).
+    /// The loop is left (the next instruction) on an overflow or when `cnt` is out of range.
+    ForLoop {
         cnt: Reg,
+        lim: Reg,
         step: Reg,
-        exit: u32,
+        incl: bool,
+        body: u32,
     },
     /// The `step` of a `for` must not be 0.
     StepCheck(Reg),
@@ -132,6 +147,13 @@ enum Op {
     JnGeI(Reg, Reg, u32),
     JnEqI(Reg, Reg, u32),
     JnNeI(Reg, Reg, u32),
+    /// The same against a small constant (no register to load it into at each call).
+    JnLtImm(Reg, i32, u32),
+    JnLeImm(Reg, i32, u32),
+    JnGtImm(Reg, i32, u32),
+    JnGeImm(Reg, i32, u32),
+    JnEqImm(Reg, i32, u32),
+    JnNeImm(Reg, i32, u32),
     JnF {
         a: Reg,
         b: Reg,
@@ -168,6 +190,10 @@ enum Op {
     },
     /// Arrays live in the object registers (`vm_ostack`).
     ALen(Reg, Reg),
+    /// `text.len()` (in characters) and `text.substring(from, to)`: the arguments are in the
+    /// registers after `s`.
+    SLen(Reg, Reg),
+    SSub(Reg, Reg),
     ALoad {
         dst: Reg,
         arr: Reg,
@@ -377,7 +403,7 @@ enum Op {
 
 /// A compiled function.
 pub(super) struct Code {
-    name: String,
+    pub(super) name: String,
     nregs: usize,
     ops: Vec<Op>,
     spans: Vec<Span>,
@@ -545,6 +571,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::CallMethod { .. }
                     | Op::CallFn { .. }
                     | Op::ALen(..)
+                    | Op::SLen(..)
+                    | Op::SSub(..)
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
                     | Op::AStore { .. }
@@ -585,6 +613,9 @@ struct Gen<'a> {
     enum_tys: Vec<Vec<Ty>>,
     /// Compiling a loop (not a function): its free variables live in registers.
     loop_mode: bool,
+    /// Compiling an anonymous function: the variables it takes from the code around it are
+    /// shared like those of a loop (but `return` and `?` are the function's own).
+    lambda: bool,
     /// The free variables are known (second pass): no new one may appear.
     preset: bool,
     frees: Vec<Free>,
@@ -1257,6 +1288,12 @@ impl Gen<'_> {
             | Op::JnGeI(_, _, t)
             | Op::JnEqI(_, _, t)
             | Op::JnNeI(_, _, t)
+            | Op::JnLtImm(_, _, t)
+            | Op::JnLeImm(_, _, t)
+            | Op::JnGtImm(_, _, t)
+            | Op::JnGeImm(_, _, t)
+            | Op::JnEqImm(_, _, t)
+            | Op::JnNeImm(_, _, t)
             | Op::JnF { t, .. }
             | Op::JnEnum { t, .. }
             | Op::ForCheck { exit: t, .. } => *t = target,
@@ -1276,6 +1313,23 @@ impl Gen<'_> {
         ) = &cond.kind
         {
             let (a, ta) = self.value(l)?;
+            if ta == Ty::Int
+                && let Some(k) = small_int(r)
+            {
+                let at = self.emit(
+                    match op {
+                        BinOp::Lt => Op::JnLtImm(a, k, 0),
+                        BinOp::LtEq => Op::JnLeImm(a, k, 0),
+                        BinOp::Gt => Op::JnGtImm(a, k, 0),
+                        BinOp::GtEq => Op::JnGeImm(a, k, 0),
+                        BinOp::Eq => Op::JnEqImm(a, k, 0),
+                        _ => Op::JnNeImm(a, k, 0),
+                    },
+                    cond.span,
+                );
+                self.top = mark;
+                return Some(at);
+            }
             let (b, tb) = self.value(r)?;
             let cmp = match op {
                 BinOp::Lt => Cmp::Lt,
@@ -1334,7 +1388,7 @@ impl Gen<'_> {
         match self.prog.res.paths.get(&e.id) {
             Some(PathRes::Global(m, n)) => {
                 let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
-                if self.loop_mode && !self.direct_globals {
+                if (self.loop_mode || self.lambda) && !self.direct_globals {
                     let r = self.free(n, Some(*m), &ty, write)?;
                     Some(Access::Reg(r, ty))
                 } else {
@@ -1346,7 +1400,7 @@ impl Gen<'_> {
                 if let Some((r, t)) = self.lookup(name) {
                     return Some(Access::Reg(r, t));
                 }
-                if !self.loop_mode {
+                if !self.loop_mode && !self.lambda {
                     return None;
                 }
                 let ty = self.prog.res.ident_tys.get(&e.id)?.clone();
@@ -1881,6 +1935,21 @@ impl Gen<'_> {
             ExprKind::Binary(op, l, r) => {
                 let mark = self.top;
                 let (mut a, mut ta) = self.value(l)?;
+                if ta == Ty::Int
+                    && matches!(op, BinOp::Add | BinOp::Sub)
+                    && let Some(k) = small_int(r)
+                {
+                    self.emit(
+                        if matches!(op, BinOp::Add) {
+                            Op::AddImm(dst, a, k)
+                        } else {
+                            Op::SubImm(dst, a, k)
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(Ty::Int);
+                }
                 let (mut b, mut tb) = self.value(r)?;
                 // an `int` next to a `float` is turned into a float first (as the tree walker does)
                 if !matches!(op, BinOp::IntDiv) && matches!((&ta, &tb), (Ty::Int, Ty::Float)) {
@@ -2322,6 +2391,8 @@ impl Gen<'_> {
             (Ty::Float, "min") => Some(Op::MinF(dst, recv, recv + 1)),
             (Ty::Float, "max") => Some(Op::MaxF(dst, recv, recv + 1)),
             (Ty::Array(_), "len") => Some(Op::ALen(dst, recv)),
+            (Ty::Str, "len") => Some(Op::SLen(dst, recv)),
+            (Ty::Str, "substring") => Some(Op::SSub(dst, recv)),
             (Ty::Array(el), "push") => Some(Op::APush {
                 arr: recv,
                 src: recv + 1,
@@ -2904,20 +2975,19 @@ impl Gen<'_> {
                 for j in ctx.continues {
                     self.patch(j, next);
                 }
-                let step_at = self.emit(
-                    Op::ForNext {
+                // the body starts right after the check of the range
+                self.emit(
+                    Op::ForLoop {
                         cnt,
+                        lim,
                         step: stp,
-                        exit: 0,
+                        incl: *inclusive,
+                        body: head + 1,
                     },
                     span,
                 );
-                self.emit(Op::Jmp(head), span);
                 let end = self.here();
                 self.patch(exit, end);
-                if let Op::ForNext { exit, .. } = &mut self.ops[step_at] {
-                    *exit = end;
-                }
                 for j in ctx.breaks {
                     self.patch(j, end);
                 }
@@ -3049,6 +3119,7 @@ struct Frame {
 pub(super) enum Unit<'a> {
     Fn(FnId),
     Loop(&'a Stmt),
+    Lambda(&'a FunDecl),
 }
 
 /// Compiles one unit; also the functions it calls.
@@ -3074,6 +3145,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         tuple_tys: Vec::new(),
         enum_tys: Vec::new(),
         loop_mode,
+        lambda: false,
         preset: false,
         frees: Vec::new(),
         has_call: false,
@@ -3169,6 +3241,99 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     tuples: g.tuple_tys,
                     enum_tys: g.enum_tys,
                     frees: Vec::new(),
+                    is_loop: false,
+                    uses_objs,
+                },
+                g.callees,
+            ))
+        }
+        Unit::Lambda(decl) => {
+            let (ptys, ret) = prog.res.lambda_sigs.get(&decl.id)?.clone();
+            let body = decl.body.as_ref()?;
+            if decl.has_self
+                || !decl.tparams.is_empty()
+                || !ptys.iter().all(vty)
+                || !(vty(&ret) || ret == Ty::Unit)
+            {
+                return None;
+            }
+            let attempt = |pre: Option<&Gen>| -> Option<Gen> {
+                let mut g = new_gen(ret.clone(), false);
+                g.lambda = true;
+                for (p, t) in decl.params.iter().zip(&ptys) {
+                    let r = g.alloc()?;
+                    g.scopes[0].push((p.name.name.clone(), r, t.clone()));
+                }
+                if let Some(probe) = pre {
+                    g.preset = true;
+                    g.direct_globals =
+                        probe.has_call && probe.frees.iter().any(|f| f.global.is_some());
+                    let shared: Vec<Free> = probe
+                        .frees
+                        .iter()
+                        .filter(|f| !g.direct_globals || f.global.is_none())
+                        .cloned()
+                        .collect();
+                    for f in shared {
+                        let reg = g.alloc()?;
+                        g.frees.push(Free {
+                            reg,
+                            assigned: false,
+                            ..f
+                        });
+                    }
+                    for &(bits, _) in &probe.consts {
+                        let r = g.alloc()?;
+                        g.consts.push((bits, r));
+                        g.emit(Op::ConstI(r, bits), decl.span);
+                    }
+                    g.consts_ready = true;
+                }
+                if ret == Ty::Unit {
+                    g.block(body, None)?;
+                    g.emit(Op::RetUnit, decl.span);
+                } else {
+                    let res = g.alloc()?;
+                    if g.block_as(body, Some(res), Some(&ret))? != ret {
+                        return None;
+                    }
+                    let op = if is_obj(&ret) {
+                        Op::RetO(res)
+                    } else {
+                        Op::Ret(res)
+                    };
+                    g.emit(op, decl.span);
+                }
+                Some(g)
+            };
+            let probe = attempt(None)?;
+            // a call could change a variable of the code around that the function keeps in a
+            // register: only module variables are looked at again after a call
+            if probe.has_call && probe.frees.iter().any(|f| f.global.is_none()) {
+                return None;
+            }
+            let g = attempt(Some(&probe))?;
+            let frees_tys: Vec<Ty> = g.frees.iter().map(|f| f.ty.clone()).collect();
+            let all_tys: Vec<Ty> = ptys.iter().cloned().chain(frees_tys).collect();
+            let uses_objs = uses_objects(&g.ops, &all_tys, &g.sites, &g.globals);
+            Some((
+                Code {
+                    name: "<function>".to_string(),
+                    nregs: g.max + 1,
+                    ops: g.ops,
+                    spans: g.spans,
+                    param_tys: ptys,
+                    ret,
+                    sites: g.sites,
+                    globals: g.globals,
+                    strs: g.strs,
+                    fmts: g.fmts,
+                    fields: g.fields,
+                    lits: g.lits,
+                    enums: g.enums,
+                    tuples: g.tuple_tys,
+                    enum_tys: g.enum_tys,
+                    frees: g.frees,
                     is_loop: false,
                     uses_objs,
                 },
@@ -3368,6 +3533,81 @@ impl Interp<'_> {
         Some(out)
     }
 
+    /// Calls an anonymous function on the machine when its body compiles: the variables it
+    /// takes from the code around it are loaded into registers, and the ones it assigns are
+    /// written back at the end. `None` when it cannot (the tree walker runs it).
+    pub(super) fn try_vm_lambda(
+        &mut self,
+        fv: &FuncVal,
+        args: &[Value],
+        span: Span,
+    ) -> Option<R<Value>> {
+        if !self.vm_enabled {
+            return None;
+        }
+        let key = Rc::as_ptr(&fv.decl) as usize;
+        let idx = match self.vm_lambdas.get(&key) {
+            Some(None) => return None,
+            Some(Some(i)) => *i,
+            None => {
+                if !self.prog.res.lambda_sigs.contains_key(&fv.decl.id) {
+                    self.vm_lambdas.insert(key, None);
+                    return None;
+                }
+                let r = self.vm_compile_unit(Unit::Lambda(&fv.decl));
+                self.vm_lambdas.insert(key, r);
+                r?
+            }
+        };
+        let code = self.vm_codes[idx as usize].clone();
+        if args.len() != code.param_tys.len() {
+            return None;
+        }
+        self.vm_release();
+        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(args.len() + code.frees.len());
+        for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
+            init.push((k as Reg, slot_of(a, t)?));
+        }
+        for f in &code.frees {
+            let v = match f.global {
+                Some(m) => self.envs[m].get(&f.name),
+                None => fv.env.get(&f.name),
+            };
+            init.push((f.reg, v.and_then(|v| slot_of(&v, &f.ty))?));
+        }
+        let r = self.vm_run(idx, init, span);
+        let bits = match r {
+            Ok(b) => b,
+            Err(e) => {
+                self.vm_release();
+                return Some(Err(e));
+            }
+        };
+        for f in code.frees.iter().filter(|f| f.assigned) {
+            let v = reg_value(&self.vm_stack, &self.vm_ostack, f.reg as usize, &f.ty);
+            match f.global {
+                Some(m) => self.envs[m].assign(&f.name, v),
+                None => fv.env.assign(&f.name, v),
+            };
+        }
+        let out = match &code.ret {
+            Ty::Int => Value::Int(bits),
+            Ty::Float => Value::Float(f64::from_bits(bits as u64)),
+            Ty::Bool => Value::Bool(bits != 0),
+            Ty::Array(_)
+            | Ty::Str
+            | Ty::Struct(..)
+            | Ty::Nullable(_)
+            | Ty::Map(..)
+            | Ty::Enum(..)
+            | Ty::Tuple(_)
+            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            _ => Value::Unit,
+        };
+        self.vm_release();
+        Some(Ok(out))
+    }
+
     /// Compiles the function `fid` and everything it calls.
     fn vm_compile(&mut self, fid: FnId) -> Option<u32> {
         let r = self.vm_compile_unit(Unit::Fn(fid));
@@ -3423,7 +3663,7 @@ impl Interp<'_> {
                 batch.push((
                     match unit {
                         Unit::Fn(f) => Some(f),
-                        Unit::Loop(_) => None,
+                        Unit::Loop(_) | Unit::Lambda(_) => None,
                     },
                     code,
                 ));
@@ -3552,7 +3792,7 @@ impl Interp<'_> {
         let own = usize::from(code.is_loop);
         if own == 0 {
             self.depth += 1;
-            self.frames.push((Name::new(&code.name), span));
+            self.frames.push((FrameName::Vm(root), span));
         }
         let r = self.vm_loop(&mut stack, &mut ostack, &mut frames, root);
         // leave the interpreter's own call bookkeeping as it was
@@ -3565,6 +3805,15 @@ impl Interp<'_> {
         r
     }
 
+    /// The compiled code `i`, without the count of references a clone of its `Rc` costs at each
+    /// call and return.
+    fn code_at<'c>(&self, i: u32) -> &'c Code {
+        // SAFETY: `vm_codes` only grows (nothing is ever removed or replaced), and the `Rc`s
+        // are only dropped with the interpreter, which outlives every run of the machine; a
+        // push moves the `Rc` pointers, not the `Code` they point to.
+        unsafe { &*Rc::as_ptr(&self.vm_codes[i as usize]) }
+    }
+
     fn vm_loop(
         &mut self,
         stack: &mut Vec<i64>,
@@ -3573,12 +3822,21 @@ impl Interp<'_> {
         root: u32,
     ) -> R<i64> {
         let mut cur = root;
-        let mut code = self.vm_codes[cur as usize].clone();
+        let mut code = self.code_at(cur);
         let mut pc = 0usize;
         let mut base = 0usize;
+        // The registers of the code that runs are inside `stack` (`vm_run` and `Call` make
+        // room for `nregs` of them from `base`, and the stack never shrinks), and the compiler
+        // only names registers it has allocated (below `nregs`). Debug builds, which run the
+        // whole test suite, check every access; release builds do not.
         macro_rules! r {
             ($x:expr) => {
-                stack[base + $x as usize]
+                *{
+                    let at = base + $x as usize;
+                    debug_assert!(at < stack.len() && ($x as usize) < code.nregs);
+                    // SAFETY: see above.
+                    unsafe { stack.get_unchecked_mut(at) }
+                }
             };
         }
         macro_rules! o {
@@ -3604,6 +3862,14 @@ impl Interp<'_> {
                 Op::Mov(d, a) => r!(d) = r!(a),
                 Op::MovO(d, a) => o!(d) = o!(a).clone(),
                 Op::AddI(d, a, b) => match r!(a).checked_add(r!(b)) {
+                    Some(v) => r!(d) = v,
+                    None => fail!("R010", "integer overflow"),
+                },
+                Op::AddImm(d, a, k) => match r!(a).checked_add(i64::from(k)) {
+                    Some(v) => r!(d) = v,
+                    None => fail!("R010", "integer overflow"),
+                },
+                Op::SubImm(d, a, k) => match r!(a).checked_sub(i64::from(k)) {
                     Some(v) => r!(d) = v,
                     None => fail!("R010", "integer overflow"),
                 },
@@ -3733,7 +3999,7 @@ impl Interp<'_> {
                 | Op::NewTuple { .. }
                 | Op::TupleGet { .. }
                 | Op::CallValue { .. }
-                | Op::EqG { .. } => self.vm_rare(op, &code, pc, base, stack, ostack)?,
+                | Op::EqG { .. } => self.vm_rare(op, code, pc, base, stack, ostack)?,
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
                     Value::Enum(e, v, _) if *e == u32::from(eid) && *v == u32::from(vi) => {}
                     _ => pc = t as usize,
@@ -3763,6 +4029,40 @@ impl Interp<'_> {
                     _ => fail!("R001", "a value of an unexpected type"),
                 },
                 Op::IsNone(d, a) => r!(d) = i64::from(matches!(o!(a), Value::None)),
+                Op::SLen(d, a) => {
+                    let Value::Str(t) = &ostack[base + a as usize] else {
+                        fail!("R001", "a text was expected");
+                    };
+                    r!(d) = if t.is_ascii() {
+                        t.len()
+                    } else {
+                        t.chars().count()
+                    } as i64;
+                }
+                Op::SSub(d, a) => {
+                    let (from, to) = (r!(a + 1), r!(a + 2));
+                    let Value::Str(t) = &ostack[base + a as usize] else {
+                        fail!("R001", "a text was expected");
+                    };
+                    let n = if t.is_ascii() {
+                        t.len()
+                    } else {
+                        t.chars().count()
+                    };
+                    if from < 0 || to < from || to as usize > n {
+                        fail!(
+                            "R020",
+                            format!("invalid substring range {from}..{to} (length {n})")
+                        );
+                    }
+                    let (from, to) = (from as usize, to as usize);
+                    let part: Rc<str> = if t.is_ascii() {
+                        Rc::from(&t[from..to])
+                    } else {
+                        Rc::from(t.chars().skip(from).take(to - from).collect::<String>())
+                    };
+                    ostack[base + d as usize] = Value::Str(part);
+                }
                 Op::ALen(d, a) => {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");
@@ -3951,10 +4251,40 @@ impl Interp<'_> {
                     }
                 }
                 Op::IncI(a) => r!(a) += 1,
-                Op::ForNext { cnt, step, exit } => match r!(cnt).checked_add(r!(step)) {
-                    Some(v) => r!(cnt) = v,
-                    None => pc = exit as usize,
-                },
+                Op::ForLoop {
+                    cnt,
+                    lim,
+                    step,
+                    incl,
+                    body,
+                } => {
+                    let Some(i) = r!(cnt).checked_add(r!(step)) else {
+                        continue;
+                    };
+                    r!(cnt) = i;
+                    // the jump back of a loop counts a step, whether or not another turn follows
+                    self.steps += 4;
+                    if self.steps > self.limits.max_steps {
+                        fail!(
+                            "R900",
+                            "the program ran for too long (step limit reached: infinite loop?)"
+                        );
+                    }
+                    if self.steps & 0x3FFF < 64 {
+                        self.check_memory(code.spans[pc - 1])?;
+                    }
+                    let (end, st) = (r!(lim), r!(step));
+                    let inside = if st > 0 {
+                        if incl { i <= end } else { i < end }
+                    } else if incl {
+                        i >= end
+                    } else {
+                        i > end
+                    };
+                    if inside {
+                        pc = body as usize;
+                    }
+                }
                 Op::StepCheck(st) => {
                     if r!(st) == 0 {
                         fail!("R031", "`step` cannot be 0");
@@ -4009,6 +4339,36 @@ impl Interp<'_> {
                         }
                     }
                     pc = t as usize;
+                }
+                Op::JnLtImm(a, k, t) => {
+                    if r!(a) >= i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnLeImm(a, k, t) => {
+                    if r!(a) > i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGtImm(a, k, t) => {
+                    if r!(a) <= i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnGeImm(a, k, t) => {
+                    if r!(a) < i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnEqImm(a, k, t) => {
+                    if r!(a) != i64::from(k) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JnNeImm(a, k, t) => {
+                    if r!(a) == i64::from(k) {
+                        pc = t as usize;
+                    }
                 }
                 Op::JnLtI(a, b, t) => {
                     if r!(a) >= r!(b) {
@@ -4099,7 +4459,7 @@ impl Interp<'_> {
                         fail!("R901", "too many nested calls (infinite recursion?)");
                     }
                     let span = code.spans[pc - 1];
-                    let callee = self.vm_codes[target as usize].clone();
+                    let callee = self.code_at(target);
                     frames.push(Frame {
                         code: cur,
                         pc,
@@ -4114,7 +4474,7 @@ impl Interp<'_> {
                         ostack.resize(base + callee.nregs + 64, Value::Unit);
                     }
                     self.depth += 1;
-                    self.frames.push((Name::new(&callee.name), span));
+                    self.frames.push((FrameName::Vm(target), span));
                     cur = target;
                     code = callee;
                     pc = 0;
@@ -4145,7 +4505,7 @@ impl Interp<'_> {
                             self.frames.pop();
                             self.depth -= 1;
                             cur = f.code;
-                            code = self.vm_codes[cur as usize].clone();
+                            code = self.code_at(cur);
                             pc = f.pc;
                             base = f.base;
                             match obj {

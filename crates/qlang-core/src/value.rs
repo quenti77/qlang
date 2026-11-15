@@ -191,6 +191,8 @@ pub struct FuncVal {
     pub decl: Rc<FunDecl>,
     pub env: Env,
     pub name: String,
+    /// The function this value stands for, when it is a named one (not an anonymous function).
+    pub fid: Option<crate::types::FnId>,
     /// The type arguments of the generic function that created this closure, for the
     /// reflection it does later (`a.as<T>()`).
     pub tenv: Option<Rc<std::collections::HashMap<crate::types::ParamId, crate::types::Ty>>>,

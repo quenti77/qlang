@@ -114,8 +114,7 @@ pub(crate) const PRELUDE_MOD: ModId = 0;
 /// qlang source (same checker, same diagnostics), just loaded as module 0 before the
 /// entry file. A name declared locally always shadows one from here (`lookup_item`
 /// checks the current module first).
-const PRELUDE_SOURCE: &str = concat!(
-    r#"
+const PRELUDE_BASE: &str = r#"
 --" What a failed call gives back in a `Result`. --"
 struct Error
     --" What went wrong, for a person to read. --"
@@ -1132,6 +1131,7 @@ end
 array) can be used directly as a `json_object` field, with no need to call
 `json_array` by hand. --"
 impl<T: ToJson> ToJson for array<T>
+    --" The JSON text of the array: each item through its own `to_json()`. --"
     public fun to_json(self) -> string
         json_array(self)
     end
@@ -5165,16 +5165,52 @@ impl Db
         outcome
     end
 end
-"#,
-    include_str!("prelude_big.q"),
-    include_str!("prelude_dates.q")
-);
+"#;
+
+/// Big numbers and dates are most of the prelude and few programs use them: they are loaded
+/// when the program mentions one of these words, or when a first try without them fails.
+const PRELUDE_BIG: &str = include_str!("prelude_big.q");
+const PRELUDE_DATES: &str = include_str!("prelude_dates.q");
+const BIG_WORDS: &[&str] = &["Big"];
+const DATES_WORDS: &[&str] = &["Date", "Time", "Zoned", "datetime", "Duration"];
+
+fn prelude_source(big: bool, dates: bool) -> String {
+    let mut s = String::from(PRELUDE_BASE);
+    if big {
+        s.push_str(PRELUDE_BIG);
+    }
+    if dates {
+        s.push_str(PRELUDE_DATES);
+    }
+    s
+}
 
 fn compile_inner(
     entry: &str,
     source: &str,
     host: &mut dyn Host,
     options: &CompileOptions,
+) -> Result<Program, CompileError> {
+    // Editors and the reference want the whole prelude. A program that fails without the
+    // parts it did not seem to need (an imported module may use them) is compiled again with them.
+    if options.info {
+        return compile_with_prelude(entry, source, host, options, prelude_source(true, true));
+    }
+    let big = BIG_WORDS.iter().any(|w| source.contains(w));
+    let dates = DATES_WORDS.iter().any(|w| source.contains(w));
+    let first = compile_with_prelude(entry, source, host, options, prelude_source(big, dates));
+    if first.is_ok() || (big && dates) {
+        return first;
+    }
+    compile_with_prelude(entry, source, host, options, prelude_source(true, true))
+}
+
+fn compile_with_prelude(
+    entry: &str,
+    source: &str,
+    host: &mut dyn Host,
+    options: &CompileOptions,
+    prelude: String,
 ) -> Result<Program, CompileError> {
     let caps = host.capabilities();
     let mut loader = Loader {
@@ -5186,11 +5222,7 @@ fn compile_inner(
         done: HashMap::new(),
         next_id: 0,
     };
-    loader.discover(
-        PRELUDE_PATH,
-        PRELUDE_PATH.to_string(),
-        PRELUDE_SOURCE.to_string(),
-    );
+    loader.discover(PRELUDE_PATH, PRELUDE_PATH.to_string(), prelude);
     let entry_key = loader.host.canonical_path(entry);
     loader.discover(entry, entry_key, source.to_string());
     let (sources, mut diags, modules) = loader.finish();

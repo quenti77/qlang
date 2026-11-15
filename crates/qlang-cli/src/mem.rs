@@ -1,7 +1,14 @@
 //! Counting the memory the process holds, so that a run can be stopped before the machine
 //! runs out (`R904`). The core cannot count by itself: it hands the job to this allocator.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
+
+/// What the counter forwards to. musl's own allocator is slow (a third more time on call-heavy
+/// programs), so the static Linux binaries use mimalloc; everywhere else it is the system's.
+#[cfg(target_env = "musl")]
+static BASE: mimalloc::MiMalloc = mimalloc::MiMalloc;
+#[cfg(not(target_env = "musl"))]
+static BASE: std::alloc::System = std::alloc::System;
 use std::sync::atomic::{AtomicIsize, Ordering::Relaxed};
 
 /// What every thread has handed over. Signed on purpose: memory allocated by one thread and freed by another is
@@ -45,14 +52,14 @@ fn count(delta: isize) {
     }
 }
 
-/// The system allocator, counting the bytes it has handed out and not got back.
+/// The base allocator, counting the bytes it has handed out and not got back.
 pub struct Counting;
 
-// SAFETY: every call is forwarded unchanged to the system allocator; the counter is only
+// SAFETY: every call is forwarded unchanged to the base allocator; the counter is only
 // bookkeeping on the side.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let p = unsafe { System.alloc(layout) };
+        let p = unsafe { BASE.alloc(layout) };
         if !p.is_null() {
             count(layout.size() as isize);
         }
@@ -60,7 +67,7 @@ unsafe impl GlobalAlloc for Counting {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let p = unsafe { System.alloc_zeroed(layout) };
+        let p = unsafe { BASE.alloc_zeroed(layout) };
         if !p.is_null() {
             count(layout.size() as isize);
         }
@@ -68,12 +75,12 @@ unsafe impl GlobalAlloc for Counting {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) };
+        unsafe { BASE.dealloc(ptr, layout) };
         count(-(layout.size() as isize));
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let p = unsafe { System.realloc(ptr, layout, new_size) };
+        let p = unsafe { BASE.realloc(ptr, layout, new_size) };
         if !p.is_null() {
             count(new_size as isize - layout.size() as isize);
         }

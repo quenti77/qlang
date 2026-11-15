@@ -76,6 +76,79 @@ fn recursion_loops_and_mixed_numbers() {
 }
 
 #[test]
+fn small_constants_are_operands_of_the_instruction() {
+    // the six comparisons against a literal, both sides of it, negative and at the edges of an i32
+    let src = "fun cmp(n: int) -> string\n  let r = \"\"\n  if n < 5 then r += \"a\" end\n  if n <= 5 then r += \"b\" end\n  if n > 5 then r += \"c\" end\n  if n >= 5 then r += \"d\" end\n  if n == 5 then r += \"e\" end\n  if n != 5 then r += \"f\" end\n  if n < -2147483648 then r += \"g\" end\n  if n > 2147483647 then r += \"h\" end\n  r\nend\nfor n in [4, 5, 6, -3000000000, 3000000000] do print(cmp(n)) end";
+    assert_eq!(same(src), "abf\nbde\ncdf\nabfg\ncdfh\n");
+    // + and - with a literal, and the overflow it must still report
+    assert_eq!(
+        same("fun f(n: int) -> int\n  n + 7 - 10 + -3 - -1\nend\nprint(f(100))"),
+        "95\n"
+    );
+    let out = same("fun f(n: int) -> int\n  n + 1\nend\nprint(f(9223372036854775807))");
+    assert!(out.contains("R010"), "{out}");
+    let out = same("fun f(n: int) -> int\n  n - 1\nend\nprint(f(-9223372036854775807 - 1))");
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
+fn text_length_and_substring_on_the_machine() {
+    let src = "fun f(s: string, a: int, b: int) -> string\n  \"{s.len()}:{s.substring(a, b)}\"\nend\nprint(f(\"hello\", 1, 3))\nprint(f(\"héllo wörld\", 1, 8))\nprint(f(\"日本語\", 1, 3))\nprint(f(\"abc\", 3, 3))\nprint(f(\"\", 0, 0))";
+    assert_eq!(same(src), "5:el\n11:éllo wö\n3:本語\n3:\n0:\n");
+    for bad in [
+        "f(\"abc\", 2, 5)",
+        "f(\"abc\", -1, 2)",
+        "f(\"abc\", 2, 1)",
+        "f(\"日本\", 0, 3)",
+    ] {
+        let out = same(&format!(
+            "fun f(s: string, a: int, b: int) -> string\n  s.substring(a, b)\nend\nprint({bad})"
+        ));
+        assert!(out.contains("R020"), "{bad}: {out}");
+    }
+}
+
+#[test]
+fn for_loops_end_where_the_tree_walker_ends_them() {
+    let src = "fun f() -> string\n  let r = \"\"\n  for i in 0..3 do r += \"{i}\" end\n  for i in 0..=3 do r += \"{i}\" end\n  for i in 5..0 step -2 do r += \"{i}\" end\n  for i in 5..=1 step -2 do r += \"{i}\" end\n  for i in 3..3 do r += \"x\" end\n  for i in 9223372036854775805..=9223372036854775807 do r += \"o\" end\n  for i in -9223372036854775807 - 1..=-9223372036854775807 step 1 do r += \"u\" end\n  for i in 0..10 do\n    if i == 2 then continue end\n    if i == 5 then break end\n    r += \"{i}\"\n  end\n  r\nend\nprint(f())";
+    assert_eq!(same(src), "0120123531531ooouu0134\n");
+    // a loop that never ends is stopped by the step limit
+    let out = same(
+        "fun f() -> int\n  let t = 0\n  for i in 0..9223372036854775807 do t += 1 end\n  t\nend\nprint(f())",
+    );
+    assert!(out.contains("R900"), "{out}");
+}
+
+#[test]
+fn anonymous_functions_run_on_the_machine_like_on_the_walker() {
+    // reads a captured variable, writes another, and a module variable
+    let out = same(
+        "let hits = 0\nfun run() -> int\n  let k = 3\n  let total = 0\n  let f = fun(x: int) -> int\n    total += x\n    hits += 1\n    x * k + total\n  end\n  let r = 0\n  for i in 0..5 do r += f(i) end\n  r + total\nend\nprint(run())\nprint(hits)",
+    );
+    assert_eq!(out, "60\n5\n");
+    // `return` inside, a text parameter, a float, a bool result
+    let out = same(
+        "fun pick(f: fun(string, float) -> bool, n: int) -> int\n  let c = 0\n  for i in 0..n do\n    if f(\"ab\", i as float / 2) then c += 1 end\n  end\n  c\nend\nlet limit = 2.0\nprint(pick(fun(s: string, x: float) -> bool\n  if s.len() < 3 then return x > limit end\n  false\nend, 10))",
+    );
+    assert_eq!(out, "5\n");
+    // an error inside: same code, same trace
+    let out = same(
+        "fun each3(f: fun(int) -> int) -> int\n  f(1) + f(0)\nend\nprint(each3(fun(x: int) -> int\n  10 div x\nend))",
+    );
+    assert!(out.contains("R011") && out.contains("called from"), "{out}");
+    // a closure that calls a closure which changes a captured variable
+    let out = same(
+        "fun run() -> int\n  let c = 0\n  let inc = fun() -> int\n    c += 10\n    c\n  end\n  let both = fun(x: int) -> int\n    c += x\n    inc() + c\n  end\n  both(1) + both(2) + c\nend\nprint(run())",
+    );
+    assert_eq!(out, "91\n");
+    // named functions passed as values, and a recursive closure
+    let out = same(
+        "fun sq(x: int) -> int\n  x * x\nend\nfun twice(f: fun(int) -> int, x: int) -> int\n  f(f(x))\nend\nfun run() -> int\n  let fact = fun(n: int) -> int\n    0\n  end\n  twice(sq, 3) + twice(fun(x: int) -> int x + 1 end, 5) + fact(3)\nend\nprint(run())",
+    );
+    assert_eq!(out, "88\n");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

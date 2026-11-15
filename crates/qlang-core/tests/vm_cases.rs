@@ -92,6 +92,23 @@ fn small_constants_are_operands_of_the_instruction() {
 }
 
 #[test]
+fn text_length_and_substring_on_the_machine() {
+    let src = "fun f(s: string, a: int, b: int) -> string\n  \"{s.len()}:{s.substring(a, b)}\"\nend\nprint(f(\"hello\", 1, 3))\nprint(f(\"héllo wörld\", 1, 8))\nprint(f(\"日本語\", 1, 3))\nprint(f(\"abc\", 3, 3))\nprint(f(\"\", 0, 0))";
+    assert_eq!(same(src), "5:el\n11:éllo wö\n3:本語\n3:\n0:\n");
+    for bad in [
+        "f(\"abc\", 2, 5)",
+        "f(\"abc\", -1, 2)",
+        "f(\"abc\", 2, 1)",
+        "f(\"日本\", 0, 3)",
+    ] {
+        let out = same(&format!(
+            "fun f(s: string, a: int, b: int) -> string\n  s.substring(a, b)\nend\nprint({bad})"
+        ));
+        assert!(out.contains("R020"), "{bad}: {out}");
+    }
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

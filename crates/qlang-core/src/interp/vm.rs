@@ -186,6 +186,10 @@ enum Op {
     },
     /// Arrays live in the object registers (`vm_ostack`).
     ALen(Reg, Reg),
+    /// `text.len()` (in characters) and `text.substring(from, to)`: the arguments are in the
+    /// registers after `s`.
+    SLen(Reg, Reg),
+    SSub(Reg, Reg),
     ALoad {
         dst: Reg,
         arr: Reg,
@@ -563,6 +567,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::CallMethod { .. }
                     | Op::CallFn { .. }
                     | Op::ALen(..)
+                    | Op::SLen(..)
+                    | Op::SSub(..)
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
                     | Op::AStore { .. }
@@ -2378,6 +2384,8 @@ impl Gen<'_> {
             (Ty::Float, "min") => Some(Op::MinF(dst, recv, recv + 1)),
             (Ty::Float, "max") => Some(Op::MaxF(dst, recv, recv + 1)),
             (Ty::Array(_), "len") => Some(Op::ALen(dst, recv)),
+            (Ty::Str, "len") => Some(Op::SLen(dst, recv)),
+            (Ty::Str, "substring") => Some(Op::SSub(dst, recv)),
             (Ty::Array(el), "push") => Some(Op::APush {
                 arr: recv,
                 src: recv + 1,
@@ -3845,6 +3853,40 @@ impl Interp<'_> {
                     _ => fail!("R001", "a value of an unexpected type"),
                 },
                 Op::IsNone(d, a) => r!(d) = i64::from(matches!(o!(a), Value::None)),
+                Op::SLen(d, a) => {
+                    let Value::Str(t) = &ostack[base + a as usize] else {
+                        fail!("R001", "a text was expected");
+                    };
+                    r!(d) = if t.is_ascii() {
+                        t.len()
+                    } else {
+                        t.chars().count()
+                    } as i64;
+                }
+                Op::SSub(d, a) => {
+                    let (from, to) = (r!(a + 1), r!(a + 2));
+                    let Value::Str(t) = &ostack[base + a as usize] else {
+                        fail!("R001", "a text was expected");
+                    };
+                    let n = if t.is_ascii() {
+                        t.len()
+                    } else {
+                        t.chars().count()
+                    };
+                    if from < 0 || to < from || to as usize > n {
+                        fail!(
+                            "R020",
+                            format!("invalid substring range {from}..{to} (length {n})")
+                        );
+                    }
+                    let (from, to) = (from as usize, to as usize);
+                    let part: Rc<str> = if t.is_ascii() {
+                        Rc::from(&t[from..to])
+                    } else {
+                        Rc::from(t.chars().skip(from).take(to - from).collect::<String>())
+                    };
+                    ostack[base + d as usize] = Value::Str(part);
+                }
                 Op::ALen(d, a) => {
                     let Value::Array(rc) = &ostack[base + a as usize] else {
                         fail!("R001", "an array was expected");

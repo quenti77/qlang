@@ -279,16 +279,16 @@ impl MapObj {
     pub fn insert(&mut self, k: Value, v: Value) -> bool {
         if self.table.is_empty() {
             // still in order: the key is the next position, or one that is there
-            if let Value::Int(i) = k {
-                if let Ok(i) = usize::try_from(i) {
-                    if i < self.entries.len() {
-                        self.entries[i].1 = v;
-                        return true;
-                    }
-                    if i == self.entries.len() && i < NO_ENTRY as usize - 1 {
-                        self.entries.push((k, v));
-                        return true;
-                    }
+            if let Value::Int(i) = k
+                && let Ok(i) = usize::try_from(i)
+            {
+                if i < self.entries.len() {
+                    self.entries[i].1 = v;
+                    return true;
+                }
+                if i == self.entries.len() && i < NO_ENTRY as usize - 1 {
+                    self.entries.push((k, v));
+                    return true;
                 }
             }
         }

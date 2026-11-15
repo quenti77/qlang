@@ -2240,7 +2240,7 @@ impl Checker {
 pub(crate) fn register_ty(t: &Ty) -> bool {
     match t {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
-        Ty::Struct(_, args) => args.is_empty(),
+        Ty::Struct(_, args) | Ty::Trait(_, args) => args.is_empty(),
         Ty::Array(e) => register_ty(e),
         Ty::Nullable(e) => register_ty(e),
         Ty::Enum(_, args) => args.iter().all(register_ty),

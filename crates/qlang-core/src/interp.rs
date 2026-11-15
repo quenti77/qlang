@@ -666,6 +666,15 @@ struct Interp<'a> {
     vm_loops: HashMap<usize, Option<u32>>,
     /// The same for anonymous functions, by the address of their declaration.
     vm_lambdas: crate::fx::FxHashMap<usize, Option<u32>>,
+    /// The last long text whose length in letters the machine counted (it keeps the text, so
+    /// that its address stands for it): a loop over `s.len()` and `s.substring(..)` counts once.
+    str_len: Option<(Rc<str>, usize)>,
+    /// For that text when it is not ASCII: a letter index and its byte offset, where the last
+    /// `substring` ended (a walk along the text goes on from there).
+    str_pos: (usize, usize),
+    /// `find_method` for a structure without an argument: the answer by class and trait, then
+    /// by name (the impls of a program do not change while it runs).
+    method_cache: RefCell<crate::fx::FxHashMap<(StructId, Option<TraitId>), MethodAnswers>>,
     /// The arrays a run of the machine works on (a register holds an index in this table), and
     /// where each one is, by address.
     /// The registers that hold objects (arrays): parallel to `vm_stack`, same indexes.
@@ -679,6 +688,9 @@ const MAX_CMP_DEPTH: usize = 1000;
 
 /// Deeper values print as `...` (this also stops cyclic structures).
 const MAX_FMT_DEPTH: usize = 64;
+
+/// The answers of `find_method` for a class and a trait: by method name.
+type MethodAnswers = Vec<(Box<str>, Option<FnId>)>;
 
 /// A call in the trace: the walker keeps the name, the machine only the code it runs (a call
 /// must not copy a name, which allocates when it is longer than a few bytes).
@@ -728,6 +740,9 @@ impl<'a> Interp<'a> {
             coverage: crate::coverage::enabled(),
             vm_loops: HashMap::new(),
             vm_lambdas: Default::default(),
+            str_len: None,
+            str_pos: (0, 0),
+            method_cache: Default::default(),
             vm_ostack: Vec::new(),
             vm_result: Value::Unit,
         }
@@ -2168,6 +2183,33 @@ impl<'a> Interp<'a> {
     /// The impl method `name` for a value, optionally restricted to a trait and
     /// to the impl whose first parameter accepts `arg`.
     fn find_method(
+        &self,
+        recv: &Value,
+        name: &str,
+        tid: Option<TraitId>,
+        arg: Option<&Value>,
+    ) -> Option<FnId> {
+        if arg.is_none()
+            && let Value::Struct(o) = recv
+        {
+            let key = (o.def, tid);
+            if let Some(list) = self.method_cache.borrow().get(&key)
+                && let Some((_, r)) = list.iter().find(|(n, _)| &**n == name)
+            {
+                return *r;
+            }
+            let r = self.find_method_slow(recv, name, tid, arg);
+            self.method_cache
+                .borrow_mut()
+                .entry(key)
+                .or_default()
+                .push((name.into(), r));
+            return r;
+        }
+        self.find_method_slow(recv, name, tid, arg)
+    }
+
+    fn find_method_slow(
         &self,
         recv: &Value,
         name: &str,

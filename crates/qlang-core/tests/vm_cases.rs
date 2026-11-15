@@ -168,6 +168,44 @@ fn text_compared_with_a_literal_on_the_machine() {
 }
 
 #[test]
+fn division_by_a_constant_on_the_machine() {
+    let out = same(
+        "fun f(x: int) -> int\n  (x div 7) * 1000 + x mod 7 + (x div 1) + (x mod 1) + (x div 2147483647) + (x mod 3)\nend\nfor x in [0, 1, 6, 7, 8, 100, 4294967295, 4294967296, 4294967297, 9000000000, 900000000000, -1, -7, -8, -9000000000] do\n  print(f(x))\nend",
+    );
+    assert_eq!(out.lines().count(), 15, "{out}");
+    let out = same(
+        "fun g(x: int) -> int\n  x div 7 + x mod 7\nend\nprint(g(9223372036854775807))\nprint(g(-9223372036854775807))",
+    );
+    assert_eq!(out, "1317624576693539401\n-1317624576693539401\n");
+}
+
+#[test]
+fn long_texts_are_walked_without_counting_again() {
+    // more than 64 bytes, with letters of several sizes; forwards, backwards, ends and errors
+    let out = same(
+        "fun f(s: string) -> string\n  let out = \"\"\n  let n = s.len()\n  let i = 0\n  while i < n do\n    let c = s.substring(i, i + 1)\n    if c == \"é\" or c == \"€\" then out += \"<\" + c + \">\" end\n    if s.substring(n - 1 - i, n - i) == \"z\" then out += \"Z\" end\n    i += 7\n  end\n  out + s.substring(n, n) + s.substring(0, 0) + s.substring(n - 3, n)\nend\nlet base = \"aé€z-bcdéfg€hijzkl-mnoé€pqzrstuvwxyz-0123456789-éé€€zz-end\"\nprint(f(base))\nprint(f(base + base))\nprint(base.substring(3, 99))",
+    );
+    assert!(out.contains("R020"), "{out}");
+}
+
+#[test]
+fn struct_fields_found_by_a_remembered_place() {
+    // literals that write the fields in other orders, a copy with changes, text and nested fields
+    let out = same(
+        "struct In\n  public n: int\nend\nstruct P\n  public a: int\n  public b: float\n  public c: bool\n  public name: string\n  public inner: In\nend\nfun probe(p: P) -> int\n  p.a = p.a + 1\n  p.name = p.name + \"!\"\n  p.b = p.b * 2.0\n  if p.c then p.a + p.inner.n + p.name.len() else p.a - p.inner.n + p.inner.n end\nend\nlet x = P { a: 1, b: 2.5, c: true, name: \"x\", inner: In { n: 10 } }\nlet y = P { inner: In { n: 20 }, name: \"y\", c: false, b: 0.5, a: 7 }\nlet z = P { ..x, a: 100 }\nfor i in 0..2 do\n  print(probe(x))\n  print(probe(y))\n  print(probe(z))\nend\nprint(\"{x.name} {y.name} {z.name} {z.b}\")",
+    );
+    assert_eq!(out.lines().count(), 7, "{out}");
+}
+
+#[test]
+fn methods_of_trait_typed_values_on_the_machine() {
+    let out = same(
+        "trait Shape\n  fun area(self) -> int\n  fun scaled(self, k: int) -> int\n    self.area() * k\n  end\nend\nstruct Sq\n  public s: int\nend\nstruct Rect\n  public w: int\n  public h: int\nend\nimpl Shape for Sq\n  public fun area(self) -> int\n    self.s * self.s\n  end\nend\nimpl Shape for Rect\n  public fun area(self) -> int\n    self.w * self.h\n  end\n  public fun scaled(self, k: int) -> int\n    self.area() + k\n  end\nend\nimpl Shape for int\n  public fun area(self) -> int\n    self\n  end\nend\nfun total(xs: array<Shape>, k: int) -> int\n  let t = 0\n  for s in xs do\n    t += s.area() + s.scaled(k)\n  end\n  t\nend\nlet xs: array<Shape> = [Sq { s: 3 }, Rect { w: 2, h: 5 }, 7, Sq { s: 1 }]\nprint(total(xs, 10))\nprint(total(xs, 0))",
+    );
+    assert_eq!(out, "217\n37\n");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

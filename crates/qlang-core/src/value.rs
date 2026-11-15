@@ -4,7 +4,6 @@ use crate::ast::FunDecl;
 use crate::smallmap::SmallMap;
 use crate::types::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 /// A 128-bit identifier, as two halves so that a `Value` stays small.
@@ -115,17 +114,93 @@ impl KeyVal {
 /// Tuples nested deeper than this cannot be map keys or set values.
 const MAX_KEY_DEPTH: usize = 64;
 
-/// An insertion-ordered map.
+/// The hash of the keys of a map: a multiply-and-fold hash with secrets drawn at random when
+/// the process starts, so that nobody can choose keys that collide (a map is filled from data
+/// the program receives). Much faster than the standard SipHash.
+struct KeyHasher {
+    acc: u64,
+    mul: u64,
+}
+
+thread_local! {
+    static SECRETS: (u64, u64) = {
+        use std::hash::BuildHasher;
+        let s = std::collections::hash_map::RandomState::new();
+        (s.hash_one(0x51u8), s.hash_one(0xa7u8) | 1)
+    };
+}
+
+impl KeyHasher {
+    fn new() -> KeyHasher {
+        let (acc, mul) = SECRETS.with(|s| *s);
+        KeyHasher { acc, mul }
+    }
+
+    #[inline]
+    fn add(&mut self, w: u64) {
+        let r = u128::from(self.acc ^ w) * u128::from(self.mul);
+        self.acc = (r as u64) ^ ((r >> 64) as u64);
+    }
+}
+
+impl std::hash::Hasher for KeyHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut rest = bytes;
+        while rest.len() >= 8 {
+            let (w, tail) = rest.split_at(8);
+            self.add(u64::from_le_bytes(w.try_into().expect("8 bytes")));
+            rest = tail;
+        }
+        if !rest.is_empty() {
+            let mut buf = [0u8; 8];
+            buf[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(buf) ^ ((rest.len() as u64) << 56));
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.add(u64::from(i));
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.add(u64::from(i));
+    }
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.add(i);
+    }
+    #[inline]
+    fn write_i64(&mut self, i: i64) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        // one more fold, so that the low bits (the slot) depend on every bit of the key
+        let r = u128::from(self.acc) * u128::from(self.mul.rotate_left(32) | 1);
+        (r as u64) ^ ((r >> 64) as u64)
+    }
+}
+
+/// An empty slot of the table of a map.
+const NO_ENTRY: u32 = u32::MAX;
+
+/// An insertion-ordered map: the entries in order, and a table (open addressing) of their
+/// positions, each with the top bits of its key's hash to skip most comparisons.
 #[derive(Default)]
 pub struct MapObj {
     pub entries: Vec<(Value, Value)>,
-    index: HashMap<KeyVal, usize>,
+    table: Vec<(u32, u32)>,
 }
 
 impl MapObj {
     /// Takes keys and values out (for dropping a map without deep recursion).
     pub fn take_values(&mut self) -> Vec<Value> {
-        self.index.clear();
+        self.table.clear();
         std::mem::take(&mut self.entries)
             .into_iter()
             .flat_map(|(k, v)| [k, v])
@@ -140,9 +215,55 @@ impl MapObj {
         self.entries.is_empty()
     }
 
+    fn hash(key: &KeyVal) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = KeyHasher::new();
+        key.hash(&mut h);
+        h.finish()
+    }
+
+    /// The slot of `key` in the table: where it is, or the empty slot where it would go.
+    fn find(&self, key: &KeyVal, hash: u64) -> usize {
+        let mask = self.table.len() - 1;
+        let tag = (hash >> 32) as u32;
+        let mut i = hash as usize & mask;
+        loop {
+            let (idx, t) = self.table[i];
+            if idx == NO_ENTRY {
+                return i;
+            }
+            if t == tag && KeyVal::of(&self.entries[idx as usize].0).as_ref() == Some(key) {
+                return i;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    /// The table made again for the entries (after a removal, or to make room).
+    fn rebuild(&mut self, room: usize) {
+        let size = (room * 2).next_power_of_two().max(8);
+        self.table.clear();
+        self.table.resize(size, (NO_ENTRY, 0));
+        let mask = size - 1;
+        for (n, (k, _)) in self.entries.iter().enumerate() {
+            let Some(key) = KeyVal::of(k) else { continue };
+            let hash = Self::hash(&key);
+            let mut i = hash as usize & mask;
+            while self.table[i].0 != NO_ENTRY {
+                i = (i + 1) & mask;
+            }
+            self.table[i] = (n as u32, (hash >> 32) as u32);
+        }
+    }
+
     pub fn get(&self, k: &Value) -> Option<&Value> {
-        let i = *self.index.get(&KeyVal::of_checked(k)?)?;
-        Some(&self.entries[i].1)
+        if self.entries.is_empty() {
+            // still a key that cannot be one is not found either way
+            return None;
+        }
+        let key = KeyVal::of_checked(k)?;
+        let slot = self.table[self.find(&key, Self::hash(&key))];
+        (slot.0 != NO_ENTRY).then(|| &self.entries[slot.0 as usize].1)
     }
 
     /// Insert or replace; false if `k` cannot be a key.
@@ -150,30 +271,38 @@ impl MapObj {
         let Some(key) = KeyVal::of_checked(&k) else {
             return false;
         };
-        match self.index.get(&key) {
-            Some(&i) => self.entries[i].1 = v,
-            None => {
-                self.index.insert(key, self.entries.len());
+        if (self.entries.len() + 1) * 2 > self.table.len() {
+            self.rebuild(self.entries.len() + 1);
+        }
+        let hash = Self::hash(&key);
+        let i = self.find(&key, hash);
+        match self.table[i] {
+            (NO_ENTRY, _) => {
+                self.table[i] = (self.entries.len() as u32, (hash >> 32) as u32);
                 self.entries.push((k, v));
             }
+            (idx, _) => self.entries[idx as usize].1 = v,
         }
         true
     }
 
     pub fn remove(&mut self, k: &Value) -> Option<Value> {
-        let i = self.index.remove(&KeyVal::of_checked(k)?)?;
-        let (_, v) = self.entries.remove(i);
-        for slot in self.index.values_mut() {
-            if *slot > i {
-                *slot -= 1;
-            }
+        if self.entries.is_empty() {
+            return None;
         }
+        let key = KeyVal::of_checked(k)?;
+        let slot = self.table[self.find(&key, Self::hash(&key))];
+        if slot.0 == NO_ENTRY {
+            return None;
+        }
+        let (_, v) = self.entries.remove(slot.0 as usize);
+        self.rebuild(self.entries.len());
         Some(v)
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.index.clear();
+        self.table.clear();
     }
 }
 

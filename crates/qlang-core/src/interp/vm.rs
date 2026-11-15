@@ -82,6 +82,10 @@ enum Op {
     SubI(Reg, Reg, Reg),
     /// `a + imm`, `a - imm` with a small constant.
     AddImm(Reg, Reg, i32),
+    /// `a div k` / `a mod k` for a constant `k > 0` (`Code::divs[idx]`: the constant and the
+    /// multiplier that replaces the division).
+    DivK(Reg, Reg, u32),
+    ModK(Reg, Reg, u32),
     SubImm(Reg, Reg, i32),
     MulI(Reg, Reg, Reg),
     IntDivI(Reg, Reg, Reg),
@@ -428,6 +432,7 @@ pub(super) struct Code {
     globals: Vec<GlobalRef>,
     /// The text constants and the shapes of the interpolated strings.
     strs: Vec<Value>,
+    divs: Vec<(u32, u64)>,
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
@@ -446,6 +451,9 @@ pub(super) struct Code {
 struct FieldSite {
     name: String,
     ty: Ty,
+    /// Where the field was last found in a structure (the same place in the program finds
+    /// it in the same place again): a hint, checked against the name each time.
+    slot: Cell<u32>,
 }
 
 /// A structure literal: the structure and the names of the fields written, in order.
@@ -473,6 +481,8 @@ struct GlobalRef {
 /// when the loop starts and written back when it ends (when the loop assigned it).
 #[derive(Clone)]
 struct Free {
+    /// Where the variable was last found in its scopes (a hint, checked against the name).
+    cache: Cell<u32>,
     name: String,
     reg: Reg,
     ty: Ty,
@@ -522,6 +532,7 @@ fn vty(t: &Ty) -> bool {
         || *t == Ty::Str
         || matches!(t, Ty::Array(e) | Ty::Nullable(e) if vty(e))
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
+        || matches!(t, Ty::Trait(_, args) if args.is_empty())
         || matches!(t, Ty::Map(k, v) if matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && vty(v))
         || matches!(t, Ty::Enum(_, args) if args.iter().all(vty))
         || matches!(t, Ty::Tuple(items) if items.iter().all(vty))
@@ -535,6 +546,7 @@ fn is_obj(t: &Ty) -> bool {
         Ty::Array(_)
             | Ty::Str
             | Ty::Struct(..)
+            | Ty::Trait(..)
             | Ty::Nullable(_)
             | Ty::Map(..)
             | Ty::Enum(..)
@@ -621,6 +633,7 @@ struct Gen<'a> {
     sites: Vec<Site>,
     globals: Vec<GlobalRef>,
     strs: Vec<Value>,
+    divs: Vec<(u32, u64)>,
     fmts: Vec<Vec<FmtPart>>,
     fields: Vec<FieldSite>,
     lits: Vec<LitSite>,
@@ -742,6 +755,7 @@ impl Gen<'_> {
                 self.fields.push(FieldSite {
                     name: name.to_string(),
                     ty: ty.clone(),
+                    slot: Cell::new(u32::MAX),
                 });
                 self.fields.len() - 1
             }
@@ -1575,6 +1589,7 @@ impl Gen<'_> {
         }
         let reg = self.alloc()?;
         self.frees.push(Free {
+            cache: Cell::new(NO_SLOT),
             name: name.to_string(),
             reg,
             ty: ty.clone(),
@@ -1961,6 +1976,26 @@ impl Gen<'_> {
                             Op::AddImm(dst, a, k)
                         } else {
                             Op::SubImm(dst, a, k)
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(Ty::Int);
+                }
+                if ta == Ty::Int
+                    && matches!(op, BinOp::Mod | BinOp::IntDiv)
+                    && let Some(k) = small_int(r)
+                    && k > 1
+                {
+                    // a constant divisor: a multiplication replaces the division
+                    let idx = self.divs.len() as u32;
+                    self.divs
+                        .push((k as u32, u64::MAX / u64::from(k as u32) + 1));
+                    self.emit(
+                        if matches!(op, BinOp::Mod) {
+                            Op::ModK(dst, a, idx)
+                        } else {
+                            Op::DivK(dst, a, idx)
                         },
                         span,
                     );
@@ -2388,7 +2423,6 @@ impl Gen<'_> {
             || args.iter().any(|a| a.name.is_some())
             || (self.prog.res.arg_order.contains_key(&e.id)
                 || self.prog.res.packs.contains_key(&e.id))
-            || self.prog.res.trait_calls.contains(&e.id)
             || self.prog.res.class_calls.contains(&e.id)
             || matches!(
                 self.prog.res.paths.get(&callee.id),
@@ -2403,9 +2437,31 @@ impl Gen<'_> {
         let base = self.top as Reg;
         let recv = self.alloc()?;
         let rt = self.into(obj, recv)?;
-        let user = matches!(&rt, Ty::Struct(..));
+        // a call through a trait is made on a value of a trait type (not on a type parameter)
+        if self.prog.res.trait_calls.contains(&e.id)
+            && !matches!(&rt, Ty::Trait(_, a) if a.is_empty())
+        {
+            return None;
+        }
+        let user = matches!(&rt, Ty::Struct(..) | Ty::Trait(..));
         let (want, ret) = match &rt {
             Ty::Struct(sid, _) => self.user_method(*sid, &name.name)?,
+            // a method of a trait: found by the class of the value when it is called
+            Ty::Trait(tid, targs) if targs.is_empty() => {
+                let sig = self.prog.defs.traits[*tid]
+                    .sigs
+                    .iter()
+                    .find(|s| s.name == name.name)?;
+                let ret = sig.ret.clone()?;
+                if !sig.has_self
+                    || !sig.tparams.is_empty()
+                    || !sig.params.iter().all(vty)
+                    || !(vty(&ret) || ret == Ty::Unit)
+                {
+                    return None;
+                }
+                (sig.params.clone(), ret)
+            }
             // a built-in method: the signature the checker found for this call
             _ => {
                 let (srt, params, ret) = self.prog.res.builtin_sigs.get(&e.id)?;
@@ -3154,6 +3210,26 @@ thread_local! {
     static ONE_LETTER: Vec<Rc<str>> = (0u8..128).map(|c| Rc::from(char::from(c).to_string())).collect();
 }
 
+/// A jump to another jump or to a return goes there directly: one dispatch less per taken
+/// branch (`if n < 2 then n else ... end` leaves its function from the `then` branch).
+fn thread_jumps(mut ops: Vec<Op>) -> Vec<Op> {
+    for i in 0..ops.len() {
+        let Op::Jmp(mut t) = ops[i] else { continue };
+        // a few hops at most (a loop of jumps must not hang the compiler)
+        for _ in 0..8 {
+            match ops.get(t as usize) {
+                Some(Op::Jmp(n)) if *n != t => t = *n,
+                _ => break,
+            }
+        }
+        ops[i] = match ops.get(t as usize) {
+            Some(r @ (Op::Ret(_) | Op::RetO(_) | Op::RetUnit)) => *r,
+            _ => Op::Jmp(t),
+        };
+    }
+    ops
+}
+
 /// A frame of the machine's own call stack.
 struct Frame {
     code: u32,
@@ -3190,6 +3266,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         sites: Vec::new(),
         globals: Vec::new(),
         strs: Vec::new(),
+        divs: Vec::new(),
         fmts: Vec::new(),
         fields: Vec::new(),
         lits: Vec::new(),
@@ -3279,13 +3356,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: def.name.clone(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys,
                     ret: def.ret.clone(),
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3329,6 +3407,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     for f in shared {
                         let reg = g.alloc()?;
                         g.frees.push(Free {
+                            cache: Cell::new(NO_SLOT),
                             reg,
                             assigned: false,
                             ..f
@@ -3372,13 +3451,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: "<function>".to_string(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys: ptys,
                     ret,
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3415,6 +3495,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 .collect();
             for (k, f) in shared.into_iter().enumerate() {
                 g.frees.push(Free {
+                    cache: Cell::new(NO_SLOT),
                     reg: k as Reg,
                     assigned: false,
                     ..f.clone()
@@ -3438,13 +3519,14 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                 Code {
                     name: "<loop>".to_string(),
                     nregs: g.max + 1,
-                    ops: g.ops,
+                    ops: thread_jumps(g.ops),
                     spans: g.spans,
                     param_tys: Vec::new(),
                     ret: Ty::Unit,
                     sites: g.sites,
                     globals: g.globals,
                     strs: g.strs,
+                    divs: g.divs,
                     fmts: g.fmts,
                     fields: g.fields,
                     lits: g.lits,
@@ -3480,6 +3562,8 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         | (Value::Enum(..), Ty::Enum(..))
         | (Value::Tuple(_), Ty::Tuple(_))
         | (Value::Func(_), Ty::Fn(..)) => Some(Slot::O(v.clone())),
+        // a value of a trait type: any value whose type implements it
+        (_, Ty::Trait(..)) => Some(Slot::O(v.clone())),
         // `T?`: `none`, or a `T` (always in an object register, a number too)
         (Value::None, Ty::Nullable(_)) => Some(Slot::O(Value::None)),
         (_, Ty::Nullable(inner)) => slot_of(v, inner).map(|_| Slot::O(v.clone())),
@@ -3500,7 +3584,8 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         | Ty::Map(..)
         | Ty::Enum(..)
         | Ty::Tuple(_)
-        | Ty::Fn(..) => ostack[i].clone(),
+        | Ty::Fn(..)
+        | Ty::Trait(..) => ostack[i].clone(),
         _ => Value::Unit,
     }
 }
@@ -3532,6 +3617,60 @@ impl Interp<'_> {
         };
         let c = self.code_at(idx);
         (c.param_tys == site.tys && c.ret == site.ret && !c.is_loop).then_some(idx)
+    }
+
+    /// The number of letters of `t`; a long text is counted once while a loop works on it.
+    fn text_len(&mut self, t: &Rc<str>) -> usize {
+        if t.len() < 64 {
+            return if t.is_ascii() {
+                t.len()
+            } else {
+                t.chars().count()
+            };
+        }
+        if let Some((c, n)) = &self.str_len
+            && Rc::ptr_eq(c, t)
+        {
+            return *n;
+        }
+        let n = if t.is_ascii() {
+            t.len()
+        } else {
+            t.chars().count()
+        };
+        self.str_len = Some((t.clone(), n));
+        self.str_pos = (0, 0);
+        n
+    }
+
+    /// The byte range of the letters `from..to` of a text that is not ASCII (`to` is in range).
+    /// A long text remembers where the last range ended: a walk along it is not quadratic.
+    fn char_span(&mut self, t: &Rc<str>, from: usize, to: usize) -> (usize, usize) {
+        let mut start = (0usize, 0usize);
+        let long = t.len() >= 64;
+        if long
+            && matches!(&self.str_len, Some((c, _)) if Rc::ptr_eq(c, t))
+            && self.str_pos.0 <= from
+        {
+            start = self.str_pos;
+        }
+        let mut it = t[start.1..].char_indices();
+        let a = match it.nth(from - start.0) {
+            Some((i, _)) => start.1 + i,
+            None => t.len(),
+        };
+        let b = if to == from {
+            a
+        } else {
+            match t[a..].char_indices().nth(to - from) {
+                Some((i, _)) => a + i,
+                None => t.len(),
+            }
+        };
+        if long && matches!(&self.str_len, Some((c, _)) if Rc::ptr_eq(c, t)) {
+            self.str_pos = (to, b);
+        }
+        (a, b)
     }
 
     fn vm_release(&mut self) {
@@ -3573,18 +3712,29 @@ impl Interp<'_> {
             VmState::Yes(i) => *i,
             VmState::Unknown => self.vm_compile(fid)?,
         };
-        let code = self.vm_codes[idx as usize].clone();
+        let code = self.code_at(idx);
         // a method takes its `self` first
-        let all: Vec<&Value> = this.iter().chain(args.iter()).collect();
-        if all.len() != code.param_tys.len() || this.is_some() != self.prog.defs.fns[fid].has_self {
+        if this.iter().len() + args.len() != code.param_tys.len()
+            || this.is_some() != self.prog.defs.fns[fid].has_self
+        {
             return None;
         }
         self.vm_release();
-        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(all.len());
-        for (k, (a, t)) in all.iter().zip(&code.param_tys).enumerate() {
-            init.push((k as Reg, slot_of(a, t)?));
-        }
-        let r = self.vm_run(idx, init, span);
+        let r = self.vm_run_with(idx, span, |_, stack, ostack| {
+            for (k, (a, t)) in this
+                .iter()
+                .chain(args.iter())
+                .zip(&code.param_tys)
+                .enumerate()
+            {
+                match slot_of(a, t) {
+                    Some(Slot::N(b)) => stack[k] = b,
+                    Some(Slot::O(o)) => ostack[k] = o,
+                    None => return false,
+                }
+            }
+            true
+        })?;
         let out = r.map(|bits| match &code.ret {
             Ty::Int => Value::Int(bits),
             Ty::Float => Value::Float(f64::from_bits(bits as u64)),
@@ -3596,7 +3746,8 @@ impl Interp<'_> {
             | Ty::Map(..)
             | Ty::Enum(..)
             | Ty::Tuple(_)
-            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            | Ty::Fn(..)
+            | Ty::Trait(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         });
         self.vm_release();
@@ -3629,23 +3780,34 @@ impl Interp<'_> {
                 r?
             }
         };
-        let code = self.vm_codes[idx as usize].clone();
+        let code = self.code_at(idx);
         if args.len() != code.param_tys.len() {
             return None;
         }
         self.vm_release();
-        let mut init: Vec<(Reg, Slot)> = Vec::with_capacity(args.len() + code.frees.len());
-        for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
-            init.push((k as Reg, slot_of(a, t)?));
-        }
-        for f in &code.frees {
-            let v = match f.global {
-                Some(m) => self.envs[m].get(&f.name),
-                None => fv.env.get(&f.name),
-            };
-            init.push((f.reg, v.and_then(|v| slot_of(&v, &f.ty))?));
-        }
-        let r = self.vm_run(idx, init, span);
+        let r = self.vm_run_with(idx, span, |envs, stack, ostack| {
+            for (k, (a, t)) in args.iter().zip(&code.param_tys).enumerate() {
+                match slot_of(a, t) {
+                    Some(Slot::N(b)) => stack[k] = b,
+                    Some(Slot::O(o)) => ostack[k] = o,
+                    None => return false,
+                }
+            }
+            for f in &code.frees {
+                let mut c = f.cache.get();
+                let v = match f.global {
+                    Some(m) => envs[m].get_cached(&f.name, &mut c),
+                    None => fv.env.get_cached(&f.name, &mut c),
+                };
+                f.cache.set(c);
+                match v.and_then(|v| slot_of(&v, &f.ty)) {
+                    Some(Slot::N(b)) => stack[f.reg as usize] = b,
+                    Some(Slot::O(o)) => ostack[f.reg as usize] = o,
+                    None => return false,
+                }
+            }
+            true
+        })?;
         let bits = match r {
             Ok(b) => b,
             Err(e) => {
@@ -3671,7 +3833,8 @@ impl Interp<'_> {
             | Ty::Map(..)
             | Ty::Enum(..)
             | Ty::Tuple(_)
-            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            | Ty::Fn(..)
+            | Ty::Trait(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         };
         self.vm_release();
@@ -3836,22 +3999,53 @@ impl Interp<'_> {
     }
 
     fn vm_run(&mut self, root: u32, init: Vec<(Reg, Slot)>, span: Span) -> R<i64> {
+        self.vm_run_with(root, span, |_, stack, ostack| {
+            for (r, slot) in init {
+                match slot {
+                    Slot::N(b) => stack[r as usize] = b,
+                    Slot::O(o) => ostack[r as usize] = o,
+                }
+            }
+            true
+        })
+        .expect("the registers of a loop are always filled")
+    }
+
+    /// Runs the code `root` with the registers that `fill` sets (`false`: a value that does
+    /// not fit its register, nothing runs and the result is `None`).
+    fn vm_run_with(
+        &mut self,
+        root: u32,
+        span: Span,
+        fill: impl FnOnce(&[Env], &mut [i64], &mut [Value]) -> bool,
+    ) -> Option<R<i64>> {
         let mut stack = std::mem::take(&mut self.vm_stack);
         let mut ostack = std::mem::take(&mut self.vm_ostack);
         stack.clear();
         ostack.clear();
-        let code = self.vm_codes[root as usize].clone();
-        let n = code.nregs.max(init.len());
+        let code = self.code_at(root);
+        let n = code.nregs;
         stack.resize(n, 0);
         if code.uses_objs {
             ostack.resize(n, Value::Unit);
         }
-        for (r, slot) in init {
-            match slot {
-                Slot::N(b) => stack[r as usize] = b,
-                Slot::O(o) => ostack[r as usize] = o,
-            }
+        if !fill(&self.envs, &mut stack, &mut ostack) {
+            ostack.clear();
+            self.vm_stack = stack;
+            self.vm_ostack = ostack;
+            return None;
         }
+        Some(self.vm_run_ready(root, span, stack, ostack))
+    }
+
+    fn vm_run_ready(
+        &mut self,
+        root: u32,
+        span: Span,
+        mut stack: Vec<i64>,
+        mut ostack: Vec<Value>,
+    ) -> R<i64> {
+        let code = self.code_at(root);
         let mut frames: Vec<Frame> = Vec::new();
         if self.depth >= self.limits.max_depth {
             self.vm_stack = stack;
@@ -3925,9 +4119,12 @@ impl Interp<'_> {
             };
         }
         loop {
-            let op = code.ops[pc];
+            debug_assert!(pc < code.ops.len());
+            // SAFETY: every compiled code ends with a return and its jumps stay inside it
+            // (debug builds, which run the whole test suite, check).
+            let opr = unsafe { code.ops.get_unchecked(pc) };
             pc += 1;
-            match op {
+            match *opr {
                 Op::ConstI(d, v) => r!(d) = v,
                 Op::Mov(d, a) => r!(d) = r!(a),
                 Op::MovO(d, a) => o!(d) = o!(a).clone(),
@@ -3965,6 +4162,24 @@ impl Interp<'_> {
                             None => fail!("R010", "integer overflow"),
                         }
                     }
+                }
+                Op::DivK(d, a, i) => {
+                    let (k, m) = code.divs[i as usize];
+                    let x = r!(a);
+                    r!(d) = if x as u64 >> 32 == 0 {
+                        ((u128::from(m) * x as u128) >> 64) as i64
+                    } else {
+                        x / i64::from(k)
+                    };
+                }
+                Op::ModK(d, a, i) => {
+                    let (k, m) = code.divs[i as usize];
+                    let x = r!(a);
+                    r!(d) = if x as u64 >> 32 == 0 {
+                        ((u128::from(m.wrapping_mul(x as u64)) * u128::from(k)) >> 64) as i64
+                    } else {
+                        x % i64::from(k)
+                    };
                 }
                 Op::ModI(d, a, b) => {
                     let (x, y) = (r!(a), r!(b));
@@ -4067,7 +4282,7 @@ impl Interp<'_> {
                 | Op::MapSnap { .. }
                 | Op::NewEnum { .. }
                 | Op::NewTuple { .. }
-                | Op::EqG { .. } => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                | Op::EqG { .. } => self.vm_rare(*opr, code, pc, base, stack, ostack)?,
                 Op::TupleGet { dst, src, idx, fld } => {
                     // a number out of a tuple goes straight to its register
                     let fast = match (&o!(src), &code.fields[fld as usize].ty) {
@@ -4083,7 +4298,7 @@ impl Interp<'_> {
                     };
                     match fast {
                         Some(v) => r!(dst) = v,
-                        None => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                        None => self.vm_rare(*opr, code, pc, base, stack, ostack)?,
                     }
                 }
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
@@ -4119,11 +4334,8 @@ impl Interp<'_> {
                     let Value::Str(t) = &ostack[base + a as usize] else {
                         fail!("R001", "a text was expected");
                     };
-                    r!(d) = if t.is_ascii() {
-                        t.len()
-                    } else {
-                        t.chars().count()
-                    } as i64;
+                    let t = t.clone();
+                    r!(d) = self.text_len(&t) as i64;
                 }
                 Op::CmpSK { dst, a, k, ne } => {
                     let (Value::Str(x), Value::Str(y)) = (&o!(a), &code.strs[k as usize]) else {
@@ -4138,8 +4350,9 @@ impl Interp<'_> {
                     else {
                         fail!("R001", "a text was expected");
                     };
-                    let ascii = t.is_ascii();
-                    let n = if ascii { t.len() } else { t.chars().count() };
+                    let t = t.clone();
+                    let n = self.text_len(&t);
+                    let ascii = n == t.len();
                     if from < 0 || to < from || to as usize > n {
                         fail!(
                             "R020",
@@ -4150,7 +4363,10 @@ impl Interp<'_> {
                     let same = if ascii {
                         t[from..to] == **lit
                     } else {
-                        t.chars().skip(from).take(to - from).eq(lit.chars())
+                        {
+                            let (a, b) = self.char_span(&t, from, to);
+                            t[a..b] == **lit
+                        }
                     };
                     r!(dst) = i64::from(same != ne);
                 }
@@ -4159,11 +4375,8 @@ impl Interp<'_> {
                     let Value::Str(t) = &ostack[base + a as usize] else {
                         fail!("R001", "a text was expected");
                     };
-                    let n = if t.is_ascii() {
-                        t.len()
-                    } else {
-                        t.chars().count()
-                    };
+                    let t = t.clone();
+                    let n = self.text_len(&t);
                     if from < 0 || to < from || to as usize > n {
                         fail!(
                             "R020",
@@ -4171,7 +4384,7 @@ impl Interp<'_> {
                         );
                     }
                     let (from, to) = (from as usize, to as usize);
-                    let part: Rc<str> = if t.is_ascii() {
+                    let part: Rc<str> = if n == t.len() {
                         if to - from == 1 {
                             // one letter: a shared text, nothing to allocate
                             ONE_LETTER.with(|l| l[usize::from(t.as_bytes()[from])].clone())
@@ -4179,7 +4392,8 @@ impl Interp<'_> {
                             Rc::from(&t[from..to])
                         }
                     } else {
-                        Rc::from(t.chars().skip(from).take(to - from).collect::<String>())
+                        let (a, b) = self.char_span(&t, from, to);
+                        Rc::from(&t[a..b])
                     };
                     ostack[base + d as usize] = Value::Str(part);
                 }
@@ -4251,15 +4465,38 @@ impl Interp<'_> {
                 Op::ConstS(dst, i) => o!(dst) = code.strs[i as usize].clone(),
                 Op::Field { dst, obj, fld } => {
                     let site = &code.fields[fld as usize];
-                    let v = match &o!(obj) {
-                        Value::Struct(st) => st.fields.borrow().get(&site.name).cloned(),
-                        _ => None,
+                    // a number goes from the structure to its register without a copy of the
+                    // value; anything else is copied out first
+                    let (num, other) = {
+                        let Value::Struct(st) = &o!(obj) else {
+                            fail!("R005", format!("this value has no field `{}`", site.name));
+                        };
+                        let f = st.fields.borrow();
+                        let mut found = f.get_at(site.slot.get() as usize, &site.name);
+                        if found.is_none()
+                            && let Some(i) = f.position(&site.name)
+                        {
+                            site.slot.set(i as u32);
+                            found = f.get_at(i, &site.name);
+                        }
+                        match (found, &site.ty) {
+                            (Some(Value::Int(i)), Ty::Int) => (Some(*i), None),
+                            (Some(Value::Float(x)), Ty::Float) => (Some(x.to_bits() as i64), None),
+                            (Some(Value::Bool(x)), Ty::Bool) => (Some(i64::from(*x)), None),
+                            (Some(v), _) => (None, Some(v.clone())),
+                            (None, _) => (None, None),
+                        }
                     };
-                    let Some(v) = v else {
-                        fail!("R005", format!("this value has no field `{}`", site.name));
-                    };
-                    if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
-                        fail!("R001", "a field of an unexpected type");
+                    match (num, other) {
+                        (Some(n), _) => r!(dst) = n,
+                        (None, Some(v)) => {
+                            if !set_reg(stack, ostack, base + dst as usize, &v, &site.ty) {
+                                fail!("R001", "a field of an unexpected type");
+                            }
+                        }
+                        (None, None) => {
+                            fail!("R005", format!("this value has no field `{}`", site.name));
+                        }
                     }
                 }
                 Op::SetField { obj, src, fld } => {
@@ -4267,7 +4504,16 @@ impl Interp<'_> {
                     let v = reg_value(stack, ostack, base + src as usize, &site.ty);
                     match &o!(obj) {
                         Value::Struct(st) => {
-                            st.fields.borrow_mut().insert(&site.name, v);
+                            let mut f = st.fields.borrow_mut();
+                            match f.get_mut_at(site.slot.get() as usize, &site.name) {
+                                Some(slot) => *slot = v,
+                                None => {
+                                    f.insert(&site.name, v);
+                                    if let Some(i) = f.position(&site.name) {
+                                        site.slot.set(i as u32);
+                                    }
+                                }
+                            }
                         }
                         _ => fail!("R005", format!("this value has no field `{}`", site.name)),
                     }
@@ -4623,7 +4869,7 @@ impl Interp<'_> {
                         _ => None,
                     };
                     let Some(target) = target else {
-                        self.vm_rare(op, code, pc, base, stack, ostack)?;
+                        self.vm_rare(*opr, code, pc, base, stack, ostack)?;
                         continue;
                     };
                     self.steps += 4;
@@ -4673,7 +4919,7 @@ impl Interp<'_> {
                                     ostack[nb + fr.reg as usize] = Value::Unit;
                                 }
                             }
-                            self.vm_rare(op, code, pc, base, stack, ostack)?;
+                            self.vm_rare(*opr, code, pc, base, stack, ostack)?;
                             continue;
                         }
                         if callee.frees.iter().any(|fr| fr.assigned) {
@@ -4695,11 +4941,11 @@ impl Interp<'_> {
                     pc = 0;
                 }
                 Op::Ret(_) | Op::RetO(_) | Op::RetUnit => {
-                    let v = match op {
+                    let v = match *opr {
                         Op::Ret(a) => r!(a),
                         _ => 0,
                     };
-                    let obj = match op {
+                    let obj = match *opr {
                         Op::RetO(a) => Some(std::mem::replace(&mut o!(a), Value::Unit)),
                         _ => None,
                     };

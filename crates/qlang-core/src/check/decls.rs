@@ -1183,18 +1183,25 @@ impl Checker {
         let Some((tid, targs)) = def.trait_.clone() else {
             // inherent: names must not clash with other inherent impls of the same type
             for (name, fid) in &def.methods {
-                for (oi, other) in self.defs.impls.clone().iter().enumerate() {
-                    if oi == impl_id || other.trait_.is_some() || other.target != def.target {
-                        continue;
-                    }
-                    if other.methods.iter().any(|(n, _)| n == name) {
-                        let sp = self.defs.fns[*fid].span;
-                        self.err(
-                            "T131",
-                            format!("method `{name}` is already defined for this type"),
-                            sp,
-                        );
-                    }
+                let clashes = self
+                    .defs
+                    .impls
+                    .iter()
+                    .enumerate()
+                    .filter(|(oi, other)| {
+                        *oi != impl_id
+                            && other.trait_.is_none()
+                            && other.target == def.target
+                            && other.methods.iter().any(|(n, _)| n == name)
+                    })
+                    .count();
+                for _ in 0..clashes {
+                    let sp = self.defs.fns[*fid].span;
+                    self.err(
+                        "T131",
+                        format!("method `{name}` is already defined for this type"),
+                        sp,
+                    );
                 }
                 if self.defs.fns[*fid].is_override && !self.defs.fns[*fid].has_self {
                     let sp = self.defs.fns[*fid].span;

@@ -194,6 +194,21 @@ enum Op {
     /// registers after `s`.
     SLen(Reg, Reg),
     SSub(Reg, Reg),
+    /// `a == "text"` (or `!=` when `ne`) with the text `Code::strs[k]`, without loading the text.
+    CmpSK {
+        dst: Reg,
+        a: Reg,
+        k: u32,
+        ne: bool,
+    },
+    /// `s.substring(from, to) == "text"` (or `!=`): `s`, `from` and `to` are in the registers
+    /// from `recv`; the part is not made.
+    SSubEq {
+        dst: Reg,
+        recv: Reg,
+        k: u32,
+        ne: bool,
+    },
     ALoad {
         dst: Reg,
         arr: Reg,
@@ -573,6 +588,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::ALen(..)
                     | Op::SLen(..)
                     | Op::SSub(..)
+                    | Op::CmpSK { .. }
+                    | Op::SSubEq { .. }
                     | Op::ALoad { .. }
                     | Op::ACheck { .. }
                     | Op::AStore { .. }
@@ -1962,6 +1979,33 @@ impl Gen<'_> {
                     self.emit(Op::ItoF(t, b), span);
                     (b, tb) = (t, Ty::Float);
                 }
+                if ta == Ty::Str
+                    && tb == Ty::Str
+                    && matches!(op, BinOp::Eq | BinOp::NotEq)
+                    && matches!(r.kind, ExprKind::Str(_))
+                    && let Some(Op::ConstS(rb, k)) = self.ops.last().copied()
+                    && rb == b
+                {
+                    // a comparison with a text written in the program: no need to load it
+                    self.ops.pop();
+                    self.spans.pop();
+                    let ne = matches!(op, BinOp::NotEq);
+                    let direct = matches!(&l.kind, ExprKind::Call { callee, .. }
+                        if matches!(&callee.kind, ExprKind::Field(_, n, _) if n.name == "substring"));
+                    match self.ops.last().copied() {
+                        Some(Op::SSub(d, recv)) if direct && d == a => {
+                            self.ops.pop();
+                            // an error is the substring's, not the comparison's
+                            let sub_span = self.spans.pop().unwrap_or(span);
+                            self.emit(Op::SSubEq { dst, recv, k, ne }, sub_span);
+                        }
+                        _ => {
+                            self.emit(Op::CmpSK { dst, a, k, ne }, span);
+                        }
+                    }
+                    self.top = mark;
+                    return Some(Ty::Bool);
+                }
                 if ta == Ty::Str && tb == Ty::Str {
                     let cmp = |c| Op::CmpS { dst, a, b, cmp: c };
                     let opc = match op {
@@ -3105,6 +3149,11 @@ impl Gen<'_> {
     }
 }
 
+thread_local! {
+    /// The texts of one ASCII letter, by code.
+    static ONE_LETTER: Vec<Rc<str>> = (0u8..128).map(|c| Rc::from(char::from(c).to_string())).collect();
+}
+
 /// A frame of the machine's own call stack.
 struct Frame {
     code: u32,
@@ -3112,6 +3161,9 @@ struct Frame {
     base: usize,
     /// Register of the caller that receives the result.
     dst: Reg,
+    /// The scope of the anonymous function that this frame's callee is, when it assigns variables
+    /// of it: they are written back there when it returns.
+    env: Option<Env>,
 }
 
 /// What is compiled: a function, or a loop statement.
@@ -3464,6 +3516,24 @@ fn set_reg(stack: &mut [i64], ostack: &mut [Value], i: usize, v: &Value, t: &Ty)
 }
 
 impl Interp<'_> {
+    /// The compiled code of the function value `fv` when a call of it from `site` can run in the
+    /// machine's own loop.
+    #[inline]
+    fn vm_func_target(&self, fv: &FuncVal, site: &Site) -> Option<u32> {
+        let idx = match fv.fid {
+            Some(fid) => match self.vm_state.get(fid) {
+                Some(VmState::Yes(i)) if !self.prog.defs.fns[fid].has_self => *i,
+                _ => return None,
+            },
+            None => match self.vm_lambdas.get(&(Rc::as_ptr(&fv.decl) as usize)) {
+                Some(Some(i)) => *i,
+                _ => return None,
+            },
+        };
+        let c = self.code_at(idx);
+        (c.param_tys == site.tys && c.ret == site.ret && !c.is_loop).then_some(idx)
+    }
+
     fn vm_release(&mut self) {
         self.vm_ostack.clear();
         self.vm_result = Value::Unit;
@@ -3997,9 +4067,25 @@ impl Interp<'_> {
                 | Op::MapSnap { .. }
                 | Op::NewEnum { .. }
                 | Op::NewTuple { .. }
-                | Op::TupleGet { .. }
-                | Op::CallValue { .. }
                 | Op::EqG { .. } => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                Op::TupleGet { dst, src, idx, fld } => {
+                    // a number out of a tuple goes straight to its register
+                    let fast = match (&o!(src), &code.fields[fld as usize].ty) {
+                        (Value::Tuple(items), Ty::Int) => match items.get(idx as usize) {
+                            Some(Value::Int(i)) => Some(*i),
+                            _ => None,
+                        },
+                        (Value::Tuple(items), Ty::Float) => match items.get(idx as usize) {
+                            Some(Value::Float(f)) => Some(f.to_bits() as i64),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    match fast {
+                        Some(v) => r!(dst) = v,
+                        None => self.vm_rare(op, code, pc, base, stack, ostack)?,
+                    }
+                }
                 Op::JnEnum { obj, eid, vi, t } => match &o!(obj) {
                     Value::Enum(e, v, _) if *e == u32::from(eid) && *v == u32::from(vi) => {}
                     _ => pc = t as usize,
@@ -4039,6 +4125,35 @@ impl Interp<'_> {
                         t.chars().count()
                     } as i64;
                 }
+                Op::CmpSK { dst, a, k, ne } => {
+                    let (Value::Str(x), Value::Str(y)) = (&o!(a), &code.strs[k as usize]) else {
+                        fail!("R001", "a string was expected");
+                    };
+                    r!(dst) = i64::from((**x == **y) != ne);
+                }
+                Op::SSubEq { dst, recv, k, ne } => {
+                    let (from, to) = (r!(recv + 1), r!(recv + 2));
+                    let (Value::Str(t), Value::Str(lit)) =
+                        (&ostack[base + recv as usize], &code.strs[k as usize])
+                    else {
+                        fail!("R001", "a text was expected");
+                    };
+                    let ascii = t.is_ascii();
+                    let n = if ascii { t.len() } else { t.chars().count() };
+                    if from < 0 || to < from || to as usize > n {
+                        fail!(
+                            "R020",
+                            format!("invalid substring range {from}..{to} (length {n})")
+                        );
+                    }
+                    let (from, to) = (from as usize, to as usize);
+                    let same = if ascii {
+                        t[from..to] == **lit
+                    } else {
+                        t.chars().skip(from).take(to - from).eq(lit.chars())
+                    };
+                    r!(dst) = i64::from(same != ne);
+                }
                 Op::SSub(d, a) => {
                     let (from, to) = (r!(a + 1), r!(a + 2));
                     let Value::Str(t) = &ostack[base + a as usize] else {
@@ -4057,7 +4172,12 @@ impl Interp<'_> {
                     }
                     let (from, to) = (from as usize, to as usize);
                     let part: Rc<str> = if t.is_ascii() {
-                        Rc::from(&t[from..to])
+                        if to - from == 1 {
+                            // one letter: a shared text, nothing to allocate
+                            ONE_LETTER.with(|l| l[usize::from(t.as_bytes()[from])].clone())
+                        } else {
+                            Rc::from(&t[from..to])
+                        }
                     } else {
                         Rc::from(t.chars().skip(from).take(to - from).collect::<String>())
                     };
@@ -4111,7 +4231,17 @@ impl Interp<'_> {
                     let mut a = rc.borrow_mut();
                     let len = a.len();
                     match usize::try_from(i).ok().filter(|u| *u < len) {
-                        Some(u) => a[u] = v,
+                        Some(u) => {
+                            // an element of an array of numbers or booleans owns nothing: it
+                            // is overwritten without being read (a read of a far-away element
+                            // waits for the memory)
+                            debug_assert!(matches!(
+                                a[u],
+                                Value::Int(_) | Value::Float(_) | Value::Bool(_)
+                            ));
+                            // SAFETY: `u < len`, and the old value has nothing to drop.
+                            unsafe { std::ptr::write(a.as_mut_ptr().add(u), v) }
+                        }
                         None => {
                             drop(a);
                             fail!("R020", format!("index {i} is out of bounds (length {len})"));
@@ -4465,6 +4595,7 @@ impl Interp<'_> {
                         pc,
                         base,
                         dst,
+                        env: None,
                     });
                     base += b as usize;
                     if stack.len() < base + callee.nregs {
@@ -4473,6 +4604,90 @@ impl Interp<'_> {
                     if callee.uses_objs && ostack.len() < base + callee.nregs {
                         ostack.resize(base + callee.nregs + 64, Value::Unit);
                     }
+                    self.depth += 1;
+                    self.frames.push((FrameName::Vm(target), span));
+                    cur = target;
+                    code = callee;
+                    pc = 0;
+                }
+                Op::CallValue {
+                    dst,
+                    f,
+                    base: b,
+                    site,
+                } => {
+                    // a function value that is compiled runs in this loop, like any call
+                    let st = &code.sites[site as usize];
+                    let target = match &o!(f) {
+                        Value::Func(fv) if fv.tenv.is_none() => self.vm_func_target(fv, st),
+                        _ => None,
+                    };
+                    let Some(target) = target else {
+                        self.vm_rare(op, code, pc, base, stack, ostack)?;
+                        continue;
+                    };
+                    self.steps += 4;
+                    if self.steps > self.limits.max_steps {
+                        fail!(
+                            "R900",
+                            "the program ran for too long (step limit reached: infinite loop?)"
+                        );
+                    }
+                    if self.depth >= self.limits.max_depth {
+                        fail!("R901", "too many nested calls (infinite recursion?)");
+                    }
+                    let span = code.spans[pc - 1];
+                    let callee = self.code_at(target);
+                    let nb = base + b as usize;
+                    if stack.len() < nb + callee.nregs {
+                        stack.resize(nb + callee.nregs + 64, 0);
+                    }
+                    if callee.uses_objs && ostack.len() < nb + callee.nregs {
+                        ostack.resize(nb + callee.nregs + 64, Value::Unit);
+                    }
+                    // the variables it takes from the code around it
+                    let mut env = None;
+                    if !callee.frees.is_empty() {
+                        let fv = match &o!(f) {
+                            Value::Func(fv) => fv.clone(),
+                            _ => unreachable!(),
+                        };
+                        let mut ok = true;
+                        for fr in &callee.frees {
+                            let v = match fr.global {
+                                Some(m) => self.envs[m].get(&fr.name),
+                                None => fv.env.get(&fr.name),
+                            };
+                            match v.and_then(|v| slot_of(&v, &fr.ty)) {
+                                Some(Slot::N(x)) => stack[nb + fr.reg as usize] = x,
+                                Some(Slot::O(x)) => ostack[nb + fr.reg as usize] = x,
+                                None => {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if !ok {
+                            if callee.uses_objs {
+                                for fr in &callee.frees {
+                                    ostack[nb + fr.reg as usize] = Value::Unit;
+                                }
+                            }
+                            self.vm_rare(op, code, pc, base, stack, ostack)?;
+                            continue;
+                        }
+                        if callee.frees.iter().any(|fr| fr.assigned) {
+                            env = Some(fv.env.clone());
+                        }
+                    }
+                    frames.push(Frame {
+                        code: cur,
+                        pc,
+                        base,
+                        dst,
+                        env,
+                    });
+                    base = nb;
                     self.depth += 1;
                     self.frames.push((FrameName::Vm(target), span));
                     cur = target;
@@ -4496,6 +4711,16 @@ impl Interp<'_> {
                             return Ok(v);
                         }
                         Some(f) => {
+                            if let Some(env) = &f.env {
+                                for fr in code.frees.iter().filter(|fr| fr.assigned) {
+                                    let v =
+                                        reg_value(stack, ostack, base + fr.reg as usize, &fr.ty);
+                                    match fr.global {
+                                        Some(m) => self.envs[m].assign(&fr.name, v),
+                                        None => env.assign(&fr.name, v),
+                                    };
+                                }
+                            }
                             // the objects of the frame that ends are released
                             if code.uses_objs {
                                 for x in &mut ostack[base..base + code.nregs] {

@@ -149,6 +149,25 @@ fn anonymous_functions_run_on_the_machine_like_on_the_walker() {
 }
 
 #[test]
+fn closures_called_in_a_loop_run_in_the_machine_loop() {
+    let out = same(
+        "let calls = 0\nlet total = 0\nlet add = fun(x: int) -> int\n  calls += 1\n  total += x\n  x + 1\nend\nlet names: array<string> = []\nlet push = fun(s: string) -> int\n  names[] = s\n  names.len()\nend\nfun run(f: fun(int) -> int, n: int) -> int\n  let v = 0\n  for i in 0..n do v = f(v) end\n  v\nend\nprint(run(add, 10))\nprint(calls)\nprint(total)\nprint(push(\"a\") + push(\"b\"))\nprint(names)",
+    );
+    assert_eq!(out, "10\n10\n45\n3\n[\"a\", \"b\"]\n");
+}
+
+#[test]
+fn text_compared_with_a_literal_on_the_machine() {
+    let out = same(
+        "fun f(s: string) -> int\n  let n = 0\n  for i in 0..s.len() do\n    if s.substring(i, i + 1) == \"a\" then n += 1 end\n    if s.substring(i, i + 1) != \"é\" then n += 10 end\n    let c = s.substring(i, i + 1)\n    if c == \"b\" or c != \"a\" then n += 100 end\n  end\n  n\nend\nprint(f(\"abaé\"))\nprint(f(\"\"))",
+    );
+    assert_eq!(out, "232\n0\n");
+    let out =
+        same("fun f(s: string) -> bool\n  s.substring(2, 9) == \"a\"\nend\nprint(f(\"abc\"))");
+    assert!(out.contains("R020"), "{out}");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

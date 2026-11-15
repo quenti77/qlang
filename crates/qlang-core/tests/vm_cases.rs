@@ -198,6 +198,14 @@ fn struct_fields_found_by_a_remembered_place() {
 }
 
 #[test]
+fn methods_of_trait_typed_values_on_the_machine() {
+    let out = same(
+        "trait Shape\n  fun area(self) -> int\n  fun scaled(self, k: int) -> int\n    self.area() * k\n  end\nend\nstruct Sq\n  public s: int\nend\nstruct Rect\n  public w: int\n  public h: int\nend\nimpl Shape for Sq\n  public fun area(self) -> int\n    self.s * self.s\n  end\nend\nimpl Shape for Rect\n  public fun area(self) -> int\n    self.w * self.h\n  end\n  public fun scaled(self, k: int) -> int\n    self.area() + k\n  end\nend\nimpl Shape for int\n  public fun area(self) -> int\n    self\n  end\nend\nfun total(xs: array<Shape>, k: int) -> int\n  let t = 0\n  for s in xs do\n    t += s.area() + s.scaled(k)\n  end\n  t\nend\nlet xs: array<Shape> = [Sq { s: 3 }, Rect { w: 2, h: 5 }, 7, Sq { s: 1 }]\nprint(total(xs, 10))\nprint(total(xs, 0))",
+    );
+    assert_eq!(out, "217\n37\n");
+}
+
+#[test]
 fn errors_are_the_same_with_the_same_trace() {
     let out = same(
         "fun f(a: int) -> int\n  9223372036854775807 + a\nend\nfun g(a: int) -> int\n  f(a) * 2\nend\nprint(g(1))",

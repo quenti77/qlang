@@ -530,6 +530,7 @@ fn vty(t: &Ty) -> bool {
         || *t == Ty::Str
         || matches!(t, Ty::Array(e) | Ty::Nullable(e) if vty(e))
         || matches!(t, Ty::Struct(_, args) if args.is_empty())
+        || matches!(t, Ty::Trait(_, args) if args.is_empty())
         || matches!(t, Ty::Map(k, v) if matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && vty(v))
         || matches!(t, Ty::Enum(_, args) if args.iter().all(vty))
         || matches!(t, Ty::Tuple(items) if items.iter().all(vty))
@@ -543,6 +544,7 @@ fn is_obj(t: &Ty) -> bool {
         Ty::Array(_)
             | Ty::Str
             | Ty::Struct(..)
+            | Ty::Trait(..)
             | Ty::Nullable(_)
             | Ty::Map(..)
             | Ty::Enum(..)
@@ -2417,7 +2419,6 @@ impl Gen<'_> {
             || args.iter().any(|a| a.name.is_some())
             || (self.prog.res.arg_order.contains_key(&e.id)
                 || self.prog.res.packs.contains_key(&e.id))
-            || self.prog.res.trait_calls.contains(&e.id)
             || self.prog.res.class_calls.contains(&e.id)
             || matches!(
                 self.prog.res.paths.get(&callee.id),
@@ -2432,9 +2433,31 @@ impl Gen<'_> {
         let base = self.top as Reg;
         let recv = self.alloc()?;
         let rt = self.into(obj, recv)?;
-        let user = matches!(&rt, Ty::Struct(..));
+        // a call through a trait is made on a value of a trait type (not on a type parameter)
+        if self.prog.res.trait_calls.contains(&e.id)
+            && !matches!(&rt, Ty::Trait(_, a) if a.is_empty())
+        {
+            return None;
+        }
+        let user = matches!(&rt, Ty::Struct(..) | Ty::Trait(..));
         let (want, ret) = match &rt {
             Ty::Struct(sid, _) => self.user_method(*sid, &name.name)?,
+            // a method of a trait: found by the class of the value when it is called
+            Ty::Trait(tid, targs) if targs.is_empty() => {
+                let sig = self.prog.defs.traits[*tid]
+                    .sigs
+                    .iter()
+                    .find(|s| s.name == name.name)?;
+                let ret = sig.ret.clone()?;
+                if !sig.has_self
+                    || !sig.tparams.is_empty()
+                    || !sig.params.iter().all(vty)
+                    || !(vty(&ret) || ret == Ty::Unit)
+                {
+                    return None;
+                }
+                (sig.params.clone(), ret)
+            }
             // a built-in method: the signature the checker found for this call
             _ => {
                 let (srt, params, ret) = self.prog.res.builtin_sigs.get(&e.id)?;
@@ -3533,6 +3556,8 @@ fn slot_of(v: &Value, t: &Ty) -> Option<Slot> {
         | (Value::Enum(..), Ty::Enum(..))
         | (Value::Tuple(_), Ty::Tuple(_))
         | (Value::Func(_), Ty::Fn(..)) => Some(Slot::O(v.clone())),
+        // a value of a trait type: any value whose type implements it
+        (_, Ty::Trait(..)) => Some(Slot::O(v.clone())),
         // `T?`: `none`, or a `T` (always in an object register, a number too)
         (Value::None, Ty::Nullable(_)) => Some(Slot::O(Value::None)),
         (_, Ty::Nullable(inner)) => slot_of(v, inner).map(|_| Slot::O(v.clone())),
@@ -3553,7 +3578,8 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         | Ty::Map(..)
         | Ty::Enum(..)
         | Ty::Tuple(_)
-        | Ty::Fn(..) => ostack[i].clone(),
+        | Ty::Fn(..)
+        | Ty::Trait(..) => ostack[i].clone(),
         _ => Value::Unit,
     }
 }
@@ -3703,7 +3729,8 @@ impl Interp<'_> {
             | Ty::Map(..)
             | Ty::Enum(..)
             | Ty::Tuple(_)
-            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            | Ty::Fn(..)
+            | Ty::Trait(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         });
         self.vm_release();
@@ -3778,7 +3805,8 @@ impl Interp<'_> {
             | Ty::Map(..)
             | Ty::Enum(..)
             | Ty::Tuple(_)
-            | Ty::Fn(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
+            | Ty::Fn(..)
+            | Ty::Trait(..) => std::mem::replace(&mut self.vm_result, Value::Unit),
             _ => Value::Unit,
         };
         self.vm_release();

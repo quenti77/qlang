@@ -4939,6 +4939,30 @@ impl Interp<'_> {
                 }
                 Op::SetField { obj, src, fld } => {
                     let site = &code.fields[fld as usize];
+                    // a number replaces the number that is there: no value to build, no old value
+                    // to drop
+                    if let Value::Struct(st) = &o!(obj)
+                        && let Some(slot) = st
+                            .fields
+                            .borrow_mut()
+                            .get_mut_at(site.slot.get() as usize, &site.name)
+                    {
+                        match (slot, &site.ty) {
+                            (Value::Int(x), Ty::Int) => {
+                                *x = r!(src);
+                                continue;
+                            }
+                            (Value::Float(x), Ty::Float) => {
+                                *x = f64::from_bits(r!(src) as u64);
+                                continue;
+                            }
+                            (Value::Bool(x), Ty::Bool) => {
+                                *x = r!(src) != 0;
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
                     let v = reg_value(stack, ostack, base + src as usize, &site.ty);
                     match &o!(obj) {
                         Value::Struct(st) => {

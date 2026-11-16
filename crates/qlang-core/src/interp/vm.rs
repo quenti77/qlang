@@ -450,11 +450,13 @@ enum Op {
         val: Reg,
         site: u32,
     },
-    /// `map[key]` for a map with integer keys: the value, or `none`, in an object register.
+    /// `map[key]` for a map with integer keys: the value, or `none`, in an object register
+    /// (`ety` is the kind of the value, to build a number without copying a `Value` around).
     MapGetI {
         dst: Reg,
         map: Reg,
         key: Reg,
+        ety: Ety,
     },
     /// `map[key] = val` for a map with integer keys; `ety` is the kind of the value.
     MapSetI {
@@ -468,7 +470,11 @@ enum Op {
         dst: Reg,
         map: Reg,
         key: Reg,
+        ety: Ety,
     },
+    /// Jump when the nullable value in the register is `none` / is not `none`.
+    JNone(Reg, u32),
+    JSome(Reg, u32),
     MapSetS {
         map: Reg,
         key: Reg,
@@ -809,6 +815,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::Box { .. }
                     | Op::Unbox { .. }
                     | Op::IsNone(..)
+                    | Op::JNone(..)
+                    | Op::JSome(..)
                     | Op::IndexG { .. }
                     | Op::MapReq { .. }
                     | Op::MapSet { .. }
@@ -1546,6 +1554,8 @@ impl Gen<'_> {
             Op::Jmp(t)
             | Op::JmpF(_, t)
             | Op::JmpT(_, t)
+            | Op::JNone(_, t)
+            | Op::JSome(_, t)
             | Op::JnLtI(_, _, t)
             | Op::JnLeI(_, _, t)
             | Op::JnGtI(_, _, t)
@@ -1570,6 +1580,32 @@ impl Gen<'_> {
     fn jump_if_false(&mut self, cond: &Expr) -> Option<usize> {
         let mark = self.top;
         let (len, slen) = (self.ops.len(), self.spans.len());
+        // `x != none` / `x == none` on a nullable value: one jump
+        if let ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), l, r) = &cond.kind
+            && matches!(l.kind, ExprKind::None) != matches!(r.kind, ExprKind::None)
+        {
+            let other = if matches!(l.kind, ExprKind::None) {
+                r
+            } else {
+                l
+            };
+            let (a, ta) = self.value(other)?;
+            if matches!(ta, Ty::Nullable(_)) {
+                let at = self.emit(
+                    if matches!(op, BinOp::NotEq) {
+                        Op::JNone(a, 0)
+                    } else {
+                        Op::JSome(a, 0)
+                    },
+                    cond.span,
+                );
+                self.top = mark;
+                return Some(at);
+            }
+            self.ops.truncate(len);
+            self.spans.truncate(slen);
+            self.top = mark;
+        }
         if let ExprKind::Binary(
             op @ (BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq | BinOp::Eq | BinOp::NotEq),
             l,
@@ -1741,15 +1777,24 @@ impl Gen<'_> {
                 .map(|_| ());
         }
         let mark = self.top;
-        let tmp = self.alloc()?;
+        // an element read ends with one instruction that reads its operands before it writes its
+        // result: it can write straight to `dst`
+        let tmp = if matches!(e.kind, ExprKind::Index(..)) {
+            dst
+        } else {
+            self.alloc()?
+        };
         let t = self.into(e, tmp)?;
         if t == *want {
-            self.mov(dst, tmp, want, e.span);
+            if tmp != dst {
+                self.mov(dst, tmp, want, e.span);
+            }
         } else if t == **inner {
             match scalar_ety(&t) {
                 Some(ety) => {
                     self.emit(Op::Box { dst, src: tmp, ety }, e.span);
                 }
+                None if tmp == dst => {}
                 None => {
                     self.emit(Op::MovO(dst, tmp), e.span);
                 }
@@ -2372,17 +2417,20 @@ impl Gen<'_> {
                     && matches!(**k, Ty::Int | Ty::Str)
                     && !matches!(**v, Ty::Nullable(_))
                 {
+                    let ety = ety_of(v)?;
                     let op = if **k == Ty::Int {
                         Op::MapGetI {
                             dst,
                             map: arr,
                             key: i,
+                            ety,
                         }
                     } else {
                         Op::MapGetS {
                             dst,
                             map: arr,
                             key: i,
+                            ety,
                         }
                     };
                     self.emit(op, span);
@@ -3473,6 +3521,19 @@ impl Gen<'_> {
                     // read the variable first, as the tree walker does, then the right side
                     self.emit(Op::LoadG { dst: reg, g }, e.span);
                 }
+                // `x = f(..)`: the arguments are copied before the call and the result is written
+                // when it returns, so it can go straight to the variable
+                if global.is_none()
+                    && op.is_none()
+                    && matches!(value.kind, ExprKind::Call { .. })
+                    && !matches!(ty, Ty::Nullable(_))
+                {
+                    if self.into(value, reg)? != ty {
+                        return None;
+                    }
+                    self.top = mark;
+                    return Some(());
+                }
                 let r = self.value_as(value, &ty)?;
                 match op {
                     None => {
@@ -3969,6 +4030,43 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
         | Ty::Fn(..)
         | Ty::Trait(..) => ostack[i].clone(),
         _ => Value::Unit,
+    }
+}
+
+/// What a map holds under a key, as a nullable register wants it. A number is kept as its bits so
+/// that it can replace the number that the register holds, without building a `Value`.
+enum Got {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Other(Value),
+    Missing,
+}
+
+#[inline(always)]
+fn map_got(found: Option<&Value>, ety: Ety) -> Got {
+    match (found, ety) {
+        (Some(Value::Int(x)), Ety::I) => Got::Int(*x),
+        (Some(Value::Float(x)), Ety::F) => Got::Float(*x),
+        (Some(Value::Bool(x)), Ety::B) => Got::Bool(*x),
+        (Some(v), _) => Got::Other(v.clone()),
+        (None, _) => Got::Missing,
+    }
+}
+
+/// Puts what a map held into a nullable register, in place when it holds the same kind of number.
+#[inline(always)]
+fn put_got(slot: &mut Value, got: Got) {
+    match (&mut *slot, got) {
+        (Value::Int(d), Got::Int(x)) => *d = x,
+        (Value::Float(d), Got::Float(x)) => *d = x,
+        (Value::Bool(d), Got::Bool(x)) => *d = x,
+        (Value::None, Got::Missing) => {}
+        (slot, Got::Int(x)) => *slot = Value::Int(x),
+        (slot, Got::Float(x)) => *slot = Value::Float(x),
+        (slot, Got::Bool(x)) => *slot = Value::Bool(x),
+        (slot, Got::Other(v)) => *slot = v,
+        (slot, Got::Missing) => *slot = Value::None,
     }
 }
 
@@ -4693,12 +4791,12 @@ impl Interp<'_> {
                         fail!("R002", format!("`{}` has no value yet", gr.name));
                     }
                 }
-                Op::MapGetI { dst, map, key } => {
-                    let found = match &o!(map) {
-                        Value::Map(m) => m.borrow().get(&Value::Int(r!(key))).cloned(),
-                        _ => fail!("R001", "a map was expected"),
+                Op::MapGetI { dst, map, key, ety } => {
+                    let Value::Map(m) = &o!(map) else {
+                        fail!("R001", "a map was expected");
                     };
-                    o!(dst) = found.unwrap_or(Value::None);
+                    let got = map_got(m.borrow().get(&Value::Int(r!(key))), ety);
+                    put_got(&mut o!(dst), got);
                 }
                 Op::MapSetI { map, key, val, ety } => {
                     let v = match ety {
@@ -4723,12 +4821,22 @@ impl Interp<'_> {
                         m.insert(Value::Int(r!(key)), v);
                     }
                 }
-                Op::MapGetS { dst, map, key } => {
-                    let found = match (&o!(map), &o!(key)) {
-                        (Value::Map(m), k @ Value::Str(_)) => m.borrow().get(k).cloned(),
-                        _ => fail!("R001", "a map and a text were expected"),
+                Op::MapGetS { dst, map, key, ety } => {
+                    let (Value::Map(m), k @ Value::Str(_)) = (&o!(map), &o!(key)) else {
+                        fail!("R001", "a map and a text were expected");
                     };
-                    o!(dst) = found.unwrap_or(Value::None);
+                    let got = map_got(m.borrow().get(k), ety);
+                    put_got(&mut o!(dst), got);
+                }
+                Op::JNone(a, t) => {
+                    if matches!(o!(a), Value::None) {
+                        pc = t as usize;
+                    }
+                }
+                Op::JSome(a, t) => {
+                    if !matches!(o!(a), Value::None) {
+                        pc = t as usize;
+                    }
                 }
                 Op::MapSetS { map, key, val, ety } => {
                     let v = match ety {

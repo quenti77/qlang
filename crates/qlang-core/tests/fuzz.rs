@@ -107,6 +107,7 @@ fn mutated_programs_do_not_panic() {
                                 max_depth: 200,
                                 max_output: 100_000,
                                 max_alloc: 100_000,
+                                leak_at_exit: false,
                             };
                             let _ = p.run(&mut host, limits);
                             true

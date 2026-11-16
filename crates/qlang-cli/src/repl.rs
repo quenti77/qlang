@@ -175,6 +175,7 @@ impl Session {
                 max_depth: self.limits.max_depth,
                 max_output: self.limits.max_output,
                 max_alloc: self.limits.max_alloc,
+                leak_at_exit: false,
             },
         );
         crate::term::restore();

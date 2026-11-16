@@ -53,6 +53,7 @@ impl Program {
 }
 
 pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> RunResult {
+    let leak = limits.leak_at_exit;
     let mut it = Interp::new(prog, host, limits);
     it.vm_enabled = vm && it.dbg.is_none();
     // A bug in the interpreter must not take the caller down with it (a server, an editor).
@@ -71,7 +72,7 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
         Ok(Err(_)) => None,
         Err(payload) => Some(crate::check::internal_error(&payload)),
     };
-    RunResult {
+    let result = RunResult {
         error,
         exit_code,
         steps: it.steps,
@@ -87,7 +88,11 @@ pub fn run(prog: &Program, host: &mut dyn Host, limits: Limits, vm: bool) -> Run
                 .filter(|s| matches!(s, vm::VmState::No))
                 .count(),
         ),
+    };
+    if leak {
+        std::mem::forget(it);
     }
+    result
 }
 
 /// An HTTP request for a program started with [`Program::start_app`]: the fields of the

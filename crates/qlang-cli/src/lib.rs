@@ -1399,6 +1399,11 @@ fn run_file(args: &[&str], execute: bool) -> ExitCode {
         eprintln!("ok");
         return ExitCode::SUCCESS;
     }
+    // the process ends right after: what the program still holds is not freed one value at a time
+    let limits = Limits {
+        leak_at_exit: true,
+        ..limits
+    };
     let result = program.run(&mut host, limits);
     // an error must not be written on the alternate screen, nor in raw mode
     term::restore();

@@ -285,6 +285,7 @@ fn limits_of(l: &Limits) -> Limits {
         max_depth: l.max_depth,
         max_output: l.max_output,
         max_alloc: l.max_alloc,
+        leak_at_exit: false,
     }
 }
 

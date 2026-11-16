@@ -257,6 +257,23 @@ fn a_function_calls_a_closure_held_in_a_module_variable() {
 }
 
 #[test]
+fn a_nullable_read_from_a_map_is_tested_and_reused() {
+    // `!= none`, `== none`, the same register read again with and without a value, and floats
+    let out = same(
+        "fun f(n: int) -> string\n  let m: map<int, int> = {}\n  let g: map<string, float> = {}\n  for i in 0..n do\n    m[i * 2] = i\n    g[\"k{i}\"] = i * 0.5\n  end\n  let hits = 0\n  let misses = 0\n  let sum = 0\n  for i in 0..n * 2 do\n    let v = m[i]\n    if v != none then\n      hits += 1\n      sum += v\n    end\n    if v == none then\n      misses += 1\n    end\n  end\n  let total = 0.0\n  for i in 0..n + 3 do\n    let x = g[\"k{i}\"]\n    if x != none then\n      total += x\n    end\n  end\n  \"{hits} {misses} {sum} {total}\"\nend\nprint(f(10))",
+    );
+    assert_eq!(out, "10 10 45 22.5\n");
+    // a read assigned to a variable declared with a nullable type (the machine may not compile
+    // this one: both engines must still agree)
+    let (vm, walker, _) = both(
+        "fun f() -> int\n  let m: map<int, int> = {}\n  m[1] = 7\n  let a: int? = m[1]\n  let b: int? = m[2]\n  (a ?? 0) * 10 + (b ?? 3)\nend\nprint(f())",
+        Limits::default(),
+    );
+    assert_eq!(vm, walker);
+    assert_eq!(vm, "73\n");
+}
+
+#[test]
 fn a_number_field_is_updated_in_place() {
     let out = same(
         "struct S\n  public n: int\n  public f: float\n  public b: bool\n  public t: string\nend\nfun bump(s: S, k: int) -> int\n  s.n = s.n + k\n  s.f = s.f * 2.0\n  s.b = not s.b\n  s.t = \"x{k}\"\n  s.n\nend\nfun run() -> string\n  let s = S { n: 1, f: 1.5, b: false, t: \"a\" }\n  let alias = s\n  for i in 0..3 do\n    bump(s, i)\n  end\n  \"{alias.n} {alias.f} {alias.b} {alias.t}\"\nend\nprint(run())",

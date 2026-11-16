@@ -3969,6 +3969,18 @@ fn reg_value(stack: &[i64], ostack: &[Value], i: usize, t: &Ty) -> Value {
     }
 }
 
+/// Writes the value of register `i`, of type `t`, into a variable: a number replaces the number
+/// that is there, so that no value is built and no old value dropped.
+#[inline(always)]
+fn store_reg(slot: &mut Value, stack: &[i64], ostack: &[Value], i: usize, t: &Ty) {
+    match (&mut *slot, t) {
+        (Value::Int(x), Ty::Int) => *x = stack[i],
+        (Value::Float(x), Ty::Float) => *x = f64::from_bits(stack[i] as u64),
+        (Value::Bool(x), Ty::Bool) => *x = stack[i] != 0,
+        _ => *slot = reg_value(stack, ostack, i, t),
+    }
+}
+
 /// Puts `v`, of type `t`, in register `i`; `false` when it has another shape.
 fn set_reg(stack: &mut [i64], ostack: &mut [Value], i: usize, v: &Value, t: &Ty) -> bool {
     match slot_of(v, t) {
@@ -4651,23 +4663,28 @@ impl Interp<'_> {
                 Op::LoadG { dst, g } => {
                     let gr = &code.globals[g as usize];
                     let mut c = gr.slot.get();
-                    let v = self.envs[gr.module].get_cached(&gr.name, &mut c);
+                    let at = base + dst as usize;
+                    let done = self.envs[gr.module]
+                        .with_cached(&gr.name, &mut c, |v| set_reg(stack, ostack, at, v, &gr.ty));
                     gr.slot.set(c);
-                    let Some(v) = v else {
-                        fail!(
+                    match done {
+                        None => fail!(
                             "R002",
                             format!("`{}` is used before it has a value", gr.name)
-                        );
-                    };
-                    if !set_reg(stack, ostack, base + dst as usize, &v, &gr.ty) {
-                        fail!("R001", "unexpected type of a variable");
+                        ),
+                        Some(false) => fail!("R001", "unexpected type of a variable"),
+                        Some(true) => {}
                     }
                 }
                 Op::StoreG { src, g } => {
                     let gr = &code.globals[g as usize];
-                    let value = reg_value(stack, ostack, base + src as usize, &gr.ty);
                     let mut c = gr.slot.get();
-                    let ok = self.envs[gr.module].assign_cached(&gr.name, value, &mut c);
+                    let at = base + src as usize;
+                    let ok = self.envs[gr.module]
+                        .update_cached(&gr.name, &mut c, |slot| {
+                            store_reg(slot, stack, ostack, at, &gr.ty)
+                        })
+                        .is_some();
                     gr.slot.set(c);
                     if !ok {
                         fail!("R002", format!("`{}` has no value yet", gr.name));
@@ -5376,18 +5393,19 @@ impl Interp<'_> {
                         let mut ok = true;
                         for fr in &callee.frees {
                             let mut c = fr.cache.get();
-                            let v = match fr.global {
-                                Some(m) => self.envs[m].get_cached(&fr.name, &mut c),
-                                None => fv.env.get_cached(&fr.name, &mut c),
+                            let at = nb + fr.reg as usize;
+                            let got = match fr.global {
+                                Some(m) => self.envs[m].with_cached(&fr.name, &mut c, |v| {
+                                    set_reg(stack, ostack, at, v, &fr.ty)
+                                }),
+                                None => fv.env.with_cached(&fr.name, &mut c, |v| {
+                                    set_reg(stack, ostack, at, v, &fr.ty)
+                                }),
                             };
                             fr.cache.set(c);
-                            match v.and_then(|v| slot_of(&v, &fr.ty)) {
-                                Some(Slot::N(x)) => stack[nb + fr.reg as usize] = x,
-                                Some(Slot::O(x)) => ostack[nb + fr.reg as usize] = x,
-                                None => {
-                                    ok = false;
-                                    break;
-                                }
+                            if got != Some(true) {
+                                ok = false;
+                                break;
                             }
                         }
                         if !ok {
@@ -5438,12 +5456,17 @@ impl Interp<'_> {
                         Some(f) => {
                             if let Some(env) = &f.env {
                                 for fr in code.frees.iter().filter(|fr| fr.assigned) {
-                                    let v =
-                                        reg_value(stack, ostack, base + fr.reg as usize, &fr.ty);
+                                    let at = base + fr.reg as usize;
                                     let mut c = fr.cache.get();
                                     match fr.global {
-                                        Some(m) => self.envs[m].assign_cached(&fr.name, v, &mut c),
-                                        None => env.assign_cached(&fr.name, v, &mut c),
+                                        Some(m) => {
+                                            self.envs[m].update_cached(&fr.name, &mut c, |slot| {
+                                                store_reg(slot, stack, ostack, at, &fr.ty)
+                                            })
+                                        }
+                                        None => env.update_cached(&fr.name, &mut c, |slot| {
+                                            store_reg(slot, stack, ostack, at, &fr.ty)
+                                        }),
                                     };
                                     fr.cache.set(c);
                                 }

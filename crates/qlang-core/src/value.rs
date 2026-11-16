@@ -665,6 +665,93 @@ impl Scope {
         self.find_slot(name, cache)
     }
 
+    /// Runs `f` on the value of a variable, found through the cache, without copying it out.
+    #[inline]
+    pub fn with_cached<R>(
+        &self,
+        name: &str,
+        cache: &mut u32,
+        f: impl FnOnce(&Value) -> R,
+    ) -> Option<R> {
+        let c = *cache;
+        if c != NO_SLOT {
+            let mut cur: &Scope = self;
+            let mut hops = c >> 16;
+            while hops > 0 {
+                match &cur.parent {
+                    Some(p) => cur = p,
+                    None => break,
+                }
+                hops -= 1;
+            }
+            if hops == 0
+                && let Some(v) = cur.vars.borrow().get_at((c & 0xFFFF) as usize, name)
+            {
+                return Some(f(v));
+            }
+        }
+        let mut cur: &Scope = self;
+        let mut hops = 0u32;
+        loop {
+            {
+                let vars = cur.vars.borrow();
+                if let Some(i) = vars.position(name) {
+                    if hops < 0xFFFF && i < 0xFFFF {
+                        *cache = (hops << 16) | i as u32;
+                    }
+                    return vars.get_at(i, name).map(f);
+                }
+            }
+            cur = cur.parent.as_ref()?;
+            hops += 1;
+        }
+    }
+
+    /// Runs `f` on the value of a variable, found through the cache, to change it in place.
+    #[inline]
+    pub fn update_cached<R>(
+        &self,
+        name: &str,
+        cache: &mut u32,
+        f: impl FnOnce(&mut Value) -> R,
+    ) -> Option<R> {
+        let c = *cache;
+        if c != NO_SLOT {
+            let mut cur: &Scope = self;
+            let mut hops = c >> 16;
+            while hops > 0 {
+                match &cur.parent {
+                    Some(p) => cur = p,
+                    None => break,
+                }
+                hops -= 1;
+            }
+            if hops == 0
+                && let Some(v) = cur
+                    .vars
+                    .borrow_mut()
+                    .get_mut_at((c & 0xFFFF) as usize, name)
+            {
+                return Some(f(v));
+            }
+        }
+        let mut cur: &Scope = self;
+        let mut hops = 0u32;
+        loop {
+            {
+                let mut vars = cur.vars.borrow_mut();
+                if let Some(i) = vars.position(name) {
+                    if hops < 0xFFFF && i < 0xFFFF {
+                        *cache = (hops << 16) | i as u32;
+                    }
+                    return vars.get_mut_at(i, name).map(f);
+                }
+            }
+            cur = cur.parent.as_ref()?;
+            hops += 1;
+        }
+    }
+
     #[inline(never)]
     fn find_slot(&self, name: &str, cache: &mut u32) -> Option<Value> {
         let mut cur: &Scope = self;

@@ -463,6 +463,18 @@ enum Op {
         val: Reg,
         ety: Ety,
     },
+    /// The same two for a map with text keys (the key is in an object register).
+    MapGetS {
+        dst: Reg,
+        map: Reg,
+        key: Reg,
+    },
+    MapSetS {
+        map: Reg,
+        key: Reg,
+        val: Reg,
+        ety: Ety,
+    },
     /// Strings: a constant of `Code::strs`, concatenation, comparison.
     ConstS(Reg, u32),
     AddS(Reg, Reg, Reg),
@@ -800,6 +812,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::MapSet { .. }
                     | Op::MapGetI { .. }
                     | Op::MapSetI { .. }
+                    | Op::MapGetS { .. }
+                    | Op::MapSetS { .. }
                     | Op::ConstS(..)
                     | Op::AddS(..)
                     | Op::CmpS { .. }
@@ -2352,17 +2366,23 @@ impl Gen<'_> {
                     return None;
                 }
                 if let Ty::Map(k, v) = &at
-                    && **k == Ty::Int
+                    && matches!(**k, Ty::Int | Ty::Str)
                     && !matches!(**v, Ty::Nullable(_))
                 {
-                    self.emit(
+                    let op = if **k == Ty::Int {
                         Op::MapGetI {
                             dst,
                             map: arr,
                             key: i,
-                        },
-                        span,
-                    );
+                        }
+                    } else {
+                        Op::MapGetS {
+                            dst,
+                            map: arr,
+                            key: i,
+                        }
+                    };
+                    self.emit(op, span);
                     self.top = mark;
                     return Some(el);
                 }
@@ -2811,22 +2831,32 @@ impl Gen<'_> {
                         return None;
                     }
                     let int_key = kt == Ty::Int;
+                    let text_key = kt == Ty::Str;
                     let site =
                         self.new_site(vec![at.clone(), kt, (**v).clone()], (**v).clone(), e.id);
                     match op {
                         None => {
                             let r = self.value_as(value, v)?;
                             match ety_of(v) {
-                                Some(ety) if int_key && !matches!(**v, Ty::Nullable(_)) => {
-                                    self.emit(
+                                Some(ety)
+                                    if (int_key || text_key) && !matches!(**v, Ty::Nullable(_)) =>
+                                {
+                                    let op = if int_key {
                                         Op::MapSetI {
                                             map: arr,
                                             key: kr,
                                             val: r,
                                             ety,
-                                        },
-                                        e.span,
-                                    );
+                                        }
+                                    } else {
+                                        Op::MapSetS {
+                                            map: arr,
+                                            key: kr,
+                                            val: r,
+                                            ety,
+                                        }
+                                    };
+                                    self.emit(op, e.span);
                                 }
                                 _ => {
                                     self.emit(
@@ -4673,6 +4703,30 @@ impl Interp<'_> {
                         m.insert(Value::Int(r!(key)), v);
                     }
                 }
+                Op::MapGetS { dst, map, key } => {
+                    let found = match (&o!(map), &o!(key)) {
+                        (Value::Map(m), k @ Value::Str(_)) => m.borrow().get(k).cloned(),
+                        _ => fail!("R001", "a map and a text were expected"),
+                    };
+                    o!(dst) = found.unwrap_or(Value::None);
+                }
+                Op::MapSetS { map, key, val, ety } => {
+                    let v = match ety {
+                        Ety::I => Value::Int(r!(val)),
+                        Ety::F => Value::Float(fl!(val)),
+                        Ety::B => Value::Bool(r!(val) != 0),
+                        Ety::O => o!(val).clone(),
+                    };
+                    let (Value::Map(m), Value::Str(k)) = (&o!(map), &o!(key)) else {
+                        fail!("R001", "a map and a text were expected");
+                    };
+                    let len = m.borrow().len();
+                    if len + 1 >= 1 << 16 || len + 1 > self.limits.max_alloc {
+                        let span = code.spans[pc - 1];
+                        self.guard_alloc(len + 1, span)?;
+                    }
+                    m.borrow_mut().insert(Value::Str(k.clone()), v);
+                }
                 Op::Method { .. }
                 | Op::NewStruct { .. }
                 | Op::CallFn { .. }
@@ -4885,6 +4939,30 @@ impl Interp<'_> {
                 }
                 Op::SetField { obj, src, fld } => {
                     let site = &code.fields[fld as usize];
+                    // a number replaces the number that is there: no value to build, no old value
+                    // to drop
+                    if let Value::Struct(st) = &o!(obj)
+                        && let Some(slot) = st
+                            .fields
+                            .borrow_mut()
+                            .get_mut_at(site.slot.get() as usize, &site.name)
+                    {
+                        match (slot, &site.ty) {
+                            (Value::Int(x), Ty::Int) => {
+                                *x = r!(src);
+                                continue;
+                            }
+                            (Value::Float(x), Ty::Float) => {
+                                *x = f64::from_bits(r!(src) as u64);
+                                continue;
+                            }
+                            (Value::Bool(x), Ty::Bool) => {
+                                *x = r!(src) != 0;
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
                     let v = reg_value(stack, ostack, base + src as usize, &site.ty);
                     match &o!(obj) {
                         Value::Struct(st) => {

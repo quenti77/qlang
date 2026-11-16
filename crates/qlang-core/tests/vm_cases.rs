@@ -257,6 +257,26 @@ fn a_function_calls_a_closure_held_in_a_module_variable() {
 }
 
 #[test]
+fn a_number_field_is_updated_in_place() {
+    let out = same(
+        "struct S\n  public n: int\n  public f: float\n  public b: bool\n  public t: string\nend\nfun bump(s: S, k: int) -> int\n  s.n = s.n + k\n  s.f = s.f * 2.0\n  s.b = not s.b\n  s.t = \"x{k}\"\n  s.n\nend\nfun run() -> string\n  let s = S { n: 1, f: 1.5, b: false, t: \"a\" }\n  let alias = s\n  for i in 0..3 do\n    bump(s, i)\n  end\n  \"{alias.n} {alias.f} {alias.b} {alias.t}\"\nend\nprint(run())",
+    );
+    assert_eq!(out, "4 12.0 true x2\n");
+}
+
+#[test]
+fn maps_with_integer_or_text_keys_are_read_and_written_in_the_machine() {
+    let out = same(
+        "fun count(words: array<string>) -> int\n  let m: map<string, int> = {}\n  for w in words do\n    let cur = m[w]\n    if cur == none then\n      m[w] = 1\n    else\n      m[w] = cur + 1\n    end\n  end\n  (m[\"a\"] ?? 0) * 100 + (m[\"b\"] ?? 0) * 10 + (m[\"z\"] ?? 0)\nend\nprint(count([\"a\", \"b\", \"a\", \"c\", \"a\", \"b\"]))",
+    );
+    assert_eq!(out, "320\n");
+    let out = same(
+        "fun f(n: int) -> int\n  let m: map<int, int> = {}\n  for i in 0..n do\n    m[i * 3] = i\n  end\n  let t = 0\n  for i in 0..n * 3 do\n    let v = m[i]\n    if v != none then\n      t += v\n    end\n  end\n  t\nend\nprint(f(50))",
+    );
+    assert_eq!(out, "1225\n");
+}
+
+#[test]
 fn a_small_array_only_read_by_literal_indexes_needs_no_allocation() {
     // read with literal indexes only: kept in registers
     let out = same(

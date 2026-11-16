@@ -111,6 +111,34 @@ impl KeyVal {
     }
 }
 
+/// A key looked up without building a [`KeyVal`] (no text to share): it hashes like the
+/// `KeyVal` of the same value, as its variants come in the same order.
+#[derive(Hash)]
+enum KeyRef<'a> {
+    Int(i64),
+    #[allow(dead_code)]
+    Float(u64),
+    Str(&'a str),
+}
+
+impl KeyRef<'_> {
+    fn of(v: &Value) -> Option<KeyRef<'_>> {
+        match v {
+            Value::Int(i) => Some(KeyRef::Int(*i)),
+            Value::Str(s) => Some(KeyRef::Str(s)),
+            _ => None,
+        }
+    }
+
+    fn holds(&self, v: &Value) -> bool {
+        match (self, v) {
+            (KeyRef::Int(a), Value::Int(b)) => a == b,
+            (KeyRef::Str(a), Value::Str(b)) => *a == &**b,
+            _ => false,
+        }
+    }
+}
+
 /// Tuples nested deeper than this cannot be map keys or set values.
 const MAX_KEY_DEPTH: usize = 64;
 
@@ -225,6 +253,27 @@ impl MapObj {
         h.finish()
     }
 
+    fn hash_ref(key: &KeyRef) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = KeyHasher::new();
+        key.hash(&mut h);
+        h.finish()
+    }
+
+    /// [`MapObj::find`] for a key that is not built as a `KeyVal`.
+    fn find_ref(&self, key: &KeyRef, hash: u64) -> usize {
+        let mask = self.table.len() - 1;
+        let tag = (hash >> 32) as u32;
+        let mut i = hash as usize & mask;
+        loop {
+            let (idx, t) = self.table[i];
+            if idx == NO_ENTRY || (t == tag && key.holds(&self.entries[idx as usize].0)) {
+                return i;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
     /// The slot of `key` in the table: where it is, or the empty slot where it would go.
     fn find(&self, key: &KeyVal, hash: u64) -> usize {
         let mask = self.table.len() - 1;
@@ -270,8 +319,13 @@ impl MapObj {
                 _ => None,
             };
         }
-        let key = KeyVal::of_checked(k)?;
-        let slot = self.table[self.find(&key, Self::hash(&key))];
+        let slot = match KeyRef::of(k) {
+            Some(r) => self.table[self.find_ref(&r, Self::hash_ref(&r))],
+            None => {
+                let key = KeyVal::of_checked(k)?;
+                self.table[self.find(&key, Self::hash(&key))]
+            }
+        };
         (slot.0 != NO_ENTRY).then(|| &self.entries[slot.0 as usize].1)
     }
 
@@ -292,14 +346,27 @@ impl MapObj {
                 }
             }
         }
-        let Some(key) = KeyVal::of_checked(&k) else {
-            return false;
+        let key = match KeyRef::of(&k) {
+            Some(_) => None,
+            None => match KeyVal::of_checked(&k) {
+                Some(key) => Some(key),
+                None => return false,
+            },
         };
         if self.table.is_empty() || (self.entries.len() + 1) * 2 > self.table.len() {
             self.rebuild(self.entries.len() + 1);
         }
-        let hash = Self::hash(&key);
-        let i = self.find(&key, hash);
+        let (hash, i) = match (&key, KeyRef::of(&k)) {
+            (None, Some(r)) => {
+                let hash = Self::hash_ref(&r);
+                (hash, self.find_ref(&r, hash))
+            }
+            (Some(key), _) => {
+                let hash = Self::hash(key);
+                (hash, self.find(key, hash))
+            }
+            (None, None) => return false,
+        };
         match self.table[i] {
             (NO_ENTRY, _) => {
                 self.table[i] = (self.entries.len() as u32, (hash >> 32) as u32);
@@ -822,6 +889,40 @@ impl Value {
 #[cfg(test)]
 mod map_tests {
     use super::*;
+
+    #[test]
+    fn a_borrowed_key_hashes_like_the_key_it_stands_for() {
+        for s in ["", "a", "key-7", "a longer text than eight bytes"] {
+            let key = KeyVal::Str(Rc::from(s));
+            assert_eq!(MapObj::hash(&key), MapObj::hash_ref(&KeyRef::Str(s)), "{s}");
+        }
+        for i in [0, 1, -1, 1 << 40] {
+            assert_eq!(
+                MapObj::hash(&KeyVal::Int(i)),
+                MapObj::hash_ref(&KeyRef::Int(i))
+            );
+        }
+    }
+
+    #[test]
+    fn text_and_integer_keys_are_found_after_the_table_grows() {
+        let mut m = MapObj::default();
+        for i in 0..200 {
+            assert!(m.insert(
+                Value::Str(Rc::from(format!("k{i}").as_str())),
+                Value::Int(i)
+            ));
+        }
+        for i in (0..200).step_by(7) {
+            let got = m.get(&Value::Str(Rc::from(format!("k{i}").as_str())));
+            assert!(matches!(got, Some(Value::Int(v)) if *v == i));
+        }
+        assert!(m.get(&Value::Str(Rc::from("missing"))).is_none());
+        assert!(m.insert(Value::Int(5), Value::Int(1)));
+        assert!(m.insert(Value::Int(5), Value::Int(2)));
+        assert!(matches!(m.get(&Value::Int(5)), Some(Value::Int(2))));
+        assert_eq!(m.len(), 201);
+    }
 
     fn get(m: &MapObj, k: i64) -> Option<i64> {
         match m.get(&Value::Int(k)) {

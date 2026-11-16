@@ -2,6 +2,21 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.5.0
+
+Une version de performances : la machine à registres compile et exécute plus de programmes, et plusieurs chemins chauds (variables, maps, tableaux, champs de struct, appels de fermetures) sont plus rapides. Aucun changement du langage ni de son comportement, aucun changement cassant pour les programmes qlang.
+
+- **Les fermetures rangées dans une variable de module sont compilées** (non cassant). Une fonction ou une boucle qui lisait une variable de module contenant une fermeture retombait sur l'interpréteur ; elle tourne maintenant sur la machine (un appel en boucle : 501 → 208 ms pour 3 millions d'appels).
+- **Les maps à clés entières ou texte sont lues et écrites dans la boucle de la machine** (non cassant). Une clé texte ou entière est cherchée sans copie, `x != none` / `x == none` sur une lecture de map se compile en un seul saut, et un nombre lu remplace sur place celui du registre : jusqu'à −31 % sur une boucle de lectures, −20 % sur un compteur de mots.
+- **Un petit tableau lu seulement par des indices littéraux n'est plus alloué** (non cassant). `let p = [x, y]` suivi de `p[0]`, `p[1]` garde les éléments dans des registres ; un tableau de nombres qu'on jette n'est plus converti en valeurs d'abord.
+- **Les variables de module et celles qu'une fermeture capture sont lues et écrites sur place** (non cassant) : −3 à −22 % selon les programmes (fermetures et structs −11 %).
+- **Les champs de struct sont plus rapides** (non cassant) : les noms de champ sont comparés comme les mots qui les contiennent, un nombre écrit dans un champ remplace le nombre qui y est, et un appel ne détruit plus les registres déjà vides (jusqu'à −18 % sur des lectures de champ).
+- **`qlang run` ne libère plus les données du programme quand il se termine** (non cassant) : défaire une très grosse map valeur par valeur juste avant d'arrêter le processus coûtait jusqu'à 33 % du temps (−39 % sur une map de 20 millions d'entrées). Le REPL, `qlang test`, le serveur et l'éditeur libèrent toujours tout.
+- **Deux petits gains sur les appels** : le résultat de `x = f(..)` est écrit directement dans `x`, et un `if` sans `else` ne se termine plus par un saut vers l'instruction suivante.
+- **Pour les programmes Rust qui embarquent `qlang-core`** : `Limits` a un nouveau champ, `leak_at_exit` (faux par défaut). Un `Limits { .. }` écrit champ par champ doit ajouter `..Limits::default()`.
+
+Face à PHP 8.5 sans JIT (charges agrandies, même machine), qlang est plus rapide sur les boucles et le calcul (0,7 à 0,8×), les petits tableaux (0,7×) ; proche sur le texte (1,3×) ; et reste à 1,75 à 2× sur les fermetures, les méthodes de struct et l'insertion dans les maps.
+
 ## 1.4.0
 
 `qlang fmt --diff` et `read` avec un message et un type. Aucun changement cassant.

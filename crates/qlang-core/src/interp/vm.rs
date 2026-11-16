@@ -450,6 +450,19 @@ enum Op {
         val: Reg,
         site: u32,
     },
+    /// `map[key]` for a map with integer keys: the value, or `none`, in an object register.
+    MapGetI {
+        dst: Reg,
+        map: Reg,
+        key: Reg,
+    },
+    /// `map[key] = val` for a map with integer keys; `ety` is the kind of the value.
+    MapSetI {
+        map: Reg,
+        key: Reg,
+        val: Reg,
+        ety: Ety,
+    },
     /// Strings: a constant of `Code::strs`, concatenation, comparison.
     ConstS(Reg, u32),
     AddS(Reg, Reg, Reg),
@@ -685,6 +698,8 @@ fn uses_objects(ops: &[Op], tys: &[Ty], sites: &[Site], globals: &[GlobalRef]) -
                     | Op::IndexG { .. }
                     | Op::MapReq { .. }
                     | Op::MapSet { .. }
+                    | Op::MapGetI { .. }
+                    | Op::MapSetI { .. }
                     | Op::ConstS(..)
                     | Op::AddS(..)
                     | Op::CmpS { .. }
@@ -2224,6 +2239,21 @@ impl Gen<'_> {
                 if ti != key {
                     return None;
                 }
+                if let Ty::Map(k, v) = &at
+                    && **k == Ty::Int
+                    && !matches!(**v, Ty::Nullable(_))
+                {
+                    self.emit(
+                        Op::MapGetI {
+                            dst,
+                            map: arr,
+                            key: i,
+                        },
+                        span,
+                    );
+                    self.top = mark;
+                    return Some(el);
+                }
                 if !matches!(at, Ty::Array(_)) {
                     let site = self.new_site(vec![at.clone(), ti], el.clone(), e.id);
                     self.emit(
@@ -2668,20 +2698,36 @@ impl Gen<'_> {
                     if kt != **k {
                         return None;
                     }
+                    let int_key = kt == Ty::Int;
                     let site =
                         self.new_site(vec![at.clone(), kt, (**v).clone()], (**v).clone(), e.id);
                     match op {
                         None => {
                             let r = self.value_as(value, v)?;
-                            self.emit(
-                                Op::MapSet {
-                                    map: arr,
-                                    key: kr,
-                                    val: r,
-                                    site,
-                                },
-                                e.span,
-                            );
+                            match ety_of(v) {
+                                Some(ety) if int_key && !matches!(**v, Ty::Nullable(_)) => {
+                                    self.emit(
+                                        Op::MapSetI {
+                                            map: arr,
+                                            key: kr,
+                                            val: r,
+                                            ety,
+                                        },
+                                        e.span,
+                                    );
+                                }
+                                _ => {
+                                    self.emit(
+                                        Op::MapSet {
+                                            map: arr,
+                                            key: kr,
+                                            val: r,
+                                            site,
+                                        },
+                                        e.span,
+                                    );
+                                }
+                            }
                         }
                         Some(bop) => {
                             let cur = self.alloc()?;
@@ -4432,6 +4478,36 @@ impl Interp<'_> {
                     gr.slot.set(c);
                     if !ok {
                         fail!("R002", format!("`{}` has no value yet", gr.name));
+                    }
+                }
+                Op::MapGetI { dst, map, key } => {
+                    let found = match &o!(map) {
+                        Value::Map(m) => m.borrow().get(&Value::Int(r!(key))).cloned(),
+                        _ => fail!("R001", "a map was expected"),
+                    };
+                    o!(dst) = found.unwrap_or(Value::None);
+                }
+                Op::MapSetI { map, key, val, ety } => {
+                    let v = match ety {
+                        Ety::I => Value::Int(r!(val)),
+                        Ety::F => Value::Float(fl!(val)),
+                        Ety::B => Value::Bool(r!(val) != 0),
+                        Ety::O => o!(val).clone(),
+                    };
+                    let Value::Map(m) = &o!(map) else {
+                        fail!("R001", "a map was expected");
+                    };
+                    let mut m = m.borrow_mut();
+                    let len = m.len();
+                    if len + 1 >= 1 << 16 || len + 1 > self.limits.max_alloc {
+                        let span = code.spans[pc - 1];
+                        drop(m);
+                        self.guard_alloc(len + 1, span)?;
+                        if let Value::Map(m) = &o!(map) {
+                            m.borrow_mut().insert(Value::Int(r!(key)), v);
+                        }
+                    } else {
+                        m.insert(Value::Int(r!(key)), v);
                     }
                 }
                 Op::Method { .. }

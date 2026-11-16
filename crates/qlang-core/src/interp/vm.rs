@@ -637,6 +637,106 @@ fn scalar(t: &Ty) -> bool {
     matches!(t, Ty::Int | Ty::Float | Ty::Bool)
 }
 
+/// Whether, in `stmts`, the variable `name` (an array of `len` items) is only read as
+/// `name[0]`..`name[len - 1]` with a literal index: never assigned, passed on, captured,
+/// shadowed or indexed another way. Anything the walk does not know counts as a use.
+fn items_only_read_by_literal_index(stmts: &[Stmt], name: &str, len: usize) -> bool {
+    stmts.iter().all(|s| stmt_reads_items_only(s, name, len))
+}
+
+fn stmt_reads_items_only(s: &Stmt, name: &str, len: usize) -> bool {
+    let block = |b: &Block| items_only_read_by_literal_index(&b.stmts, name, len);
+    let expr = |e: &Expr| expr_reads_items_only(e, name, len);
+    match &s.kind {
+        StmtKind::Let { name: n, init, .. } => n.name != name && expr(init),
+        StmtKind::LetTuple { pattern, init, .. } => {
+            let mut names = Vec::new();
+            pattern.names(&mut names);
+            names.iter().all(|n| n.name != name) && expr(init)
+        }
+        StmtKind::Seq { stmts, .. } => items_only_read_by_literal_index(stmts, name, len),
+        StmtKind::Return(e) => e.as_ref().is_none_or(expr),
+        StmtKind::While { cond, body } => expr(cond) && block(body),
+        StmtKind::For {
+            var,
+            var2,
+            var_pattern,
+            var2_pattern,
+            iter,
+            step,
+            body,
+        } => {
+            let mut names: Vec<&Ident> = vec![var];
+            names.extend(var2.iter());
+            for p in [var_pattern, var2_pattern].into_iter().flatten() {
+                p.names(&mut names);
+            }
+            names.iter().all(|n| n.name != name)
+                && expr(iter)
+                && step.as_ref().is_none_or(expr)
+                && block(body)
+        }
+        StmtKind::Break | StmtKind::Continue => true,
+        StmtKind::Expr(e) => expr(e),
+    }
+}
+
+fn expr_reads_items_only(e: &Expr, name: &str, len: usize) -> bool {
+    let sub = |x: &Expr| expr_reads_items_only(x, name, len);
+    let block = |b: &Block| items_only_read_by_literal_index(&b.stmts, name, len);
+    match &e.kind {
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::None
+        | ExprKind::SelfVal
+        | ExprKind::Super => true,
+        ExprKind::Ident(n, _) => n != name,
+        ExprKind::Str(parts) => parts.iter().all(|p| match p {
+            StrPart::Lit(_) => true,
+            StrPart::Expr(x) => sub(x),
+        }),
+        ExprKind::Array(items) | ExprKind::Tuple(items) => items.iter().all(sub),
+        ExprKind::Map(pairs) => pairs.iter().all(|(k, v)| sub(k) && sub(v)),
+        ExprKind::StructLit(l) => {
+            l.base.as_deref().is_none_or(sub) && l.fields.iter().all(|f| sub(&f.value))
+        }
+        ExprKind::Unary(_, x)
+        | ExprKind::Cast(x, _)
+        | ExprKind::Try(x)
+        | ExprKind::TupleField(x, _)
+        | ExprKind::Append(x)
+        | ExprKind::Spread(x)
+        | ExprKind::Field(x, _, _) => sub(x),
+        ExprKind::Binary(_, a, b)
+        | ExprKind::Range {
+            start: a, end: b, ..
+        } => sub(a) && sub(b),
+        ExprKind::Assign { target, value, .. } => {
+            // `name[k] = v` changes the array: it is not a read
+            !matches!(&target.kind, ExprKind::Index(b, _) if matches!(&b.kind, ExprKind::Ident(n, _) if n == name))
+                && sub(target)
+                && sub(value)
+        }
+        ExprKind::Call { callee, args } => sub(callee) && args.iter().all(|a| sub(&a.value)),
+        ExprKind::Index(base, idx) => match (&base.kind, &idx.kind) {
+            (ExprKind::Ident(n, _), ExprKind::Int(k)) if n == name => {
+                usize::try_from(*k).is_ok_and(|k| k < len)
+            }
+            _ => sub(base) && sub(idx),
+        },
+        ExprKind::If {
+            branches,
+            else_block,
+        } => {
+            branches.iter().all(|(c, b)| sub(c) && block(b))
+                && else_block.as_ref().is_none_or(block)
+        }
+        // patterns and closures bind names: not looked into
+        ExprKind::Match { .. } | ExprKind::Lambda(_) => false,
+    }
+}
+
 /// What a register can hold: a number, a boolean, a string, or an array of numbers.
 fn vty(t: &Ty) -> bool {
     scalar(t)
@@ -769,6 +869,9 @@ struct Gen<'a> {
     direct_globals: bool,
     /// Tuples that were only taken apart (`(a, b) = (b, a + b)`): the registers of their elements.
     tuples: Vec<(String, Vec<(Reg, Ty)>)>,
+    /// Small arrays of numbers that live in registers, one per element: `let p = [x, y]` when
+    /// `p` is only read as `p[0]`, `p[1]`...
+    scalar_arrays: Vec<(String, Vec<(Reg, Ty)>)>,
     /// Constants used as operands: kept in registers loaded once, at the start. First pass: the
     /// ones met; second pass: `consts_ready`, each with its register.
     consts: Vec<(i64, Reg)>,
@@ -1726,6 +1829,11 @@ impl Gen<'_> {
         if matches!(e.kind, ExprKind::SelfVal) {
             return self.lookup("self");
         }
+        if let ExprKind::Index(base, idx) = &e.kind
+            && let Some(found) = self.scalar_array_item(base, idx)
+        {
+            return Some(found);
+        }
         if matches!(e.kind, ExprKind::Ident(..))
             && let Some(acc) = self.access(e, false)
             && let Some(Access::Reg(r, t)) = self.narrow_access(e, acc)
@@ -2226,6 +2334,10 @@ impl Gen<'_> {
                 Some(out)
             }
             ExprKind::Index(base, idx) => {
+                if let Some((r, t)) = self.scalar_array_item(base, idx) {
+                    self.emit(Op::Mov(dst, r), span);
+                    return Some(t);
+                }
                 let mark = self.top;
                 let (arr, at) = self.value(base)?;
                 let (el, key): (Ty, Ty) = match &at {
@@ -2852,6 +2964,51 @@ impl Gen<'_> {
         ty
     }
 
+    /// The register of `name[k]` when `name` is a small array kept in registers.
+    fn scalar_array_item(&self, base: &Expr, idx: &Expr) -> Option<(Reg, Ty)> {
+        let (ExprKind::Ident(name, _), ExprKind::Int(k)) = (&base.kind, &idx.kind) else {
+            return None;
+        };
+        let (_, items) = self.scalar_arrays.iter().rev().find(|(n, _)| n == name)?;
+        items.get(usize::try_from(*k).ok()?).cloned()
+    }
+
+    /// `let name = [a, b, ...]` where `name` is only ever read as `name[0]`, `name[1]`...
+    /// in the `rest` of the block: the elements go to registers and no array is built.
+    fn scalar_array_let(&mut self, s: &Stmt, rest: &[Stmt]) -> Option<bool> {
+        let StmtKind::Let {
+            name,
+            init:
+                Expr {
+                    kind: ExprKind::Array(items),
+                    id,
+                    ..
+                },
+            ..
+        } = &s.kind
+        else {
+            return Some(false);
+        };
+        let Some(Ty::Array(el)) = self.prog.res.array_lits.get(id).cloned() else {
+            return Some(false);
+        };
+        if items.is_empty()
+            || items.len() > 8
+            || !scalar(&el)
+            || !items_only_read_by_literal_index(rest, &name.name, items.len())
+        {
+            return Some(false);
+        }
+        let mut regs = Vec::new();
+        for it in items {
+            let r = self.alloc()?;
+            self.compile_as(it, r, &el)?;
+            regs.push((r, (*el).clone()));
+        }
+        self.scalar_arrays.push((name.name.clone(), regs));
+        Some(true)
+    }
+
     /// A block in its own scope. With `dst`, the value of its last expression goes there.
     fn block(&mut self, b: &Block, dst: Option<Reg>) -> Option<Ty> {
         self.block_as(b, dst, None)
@@ -2863,8 +3020,12 @@ impl Gen<'_> {
         let mark = self.top;
         let mut ty = Ty::Unit;
         let n = b.stmts.len();
+        let arrays = self.scalar_arrays.len();
         for (i, s) in b.stmts.iter().enumerate() {
             let last = i + 1 == n;
+            if self.scalar_array_let(s, &b.stmts[i + 1..])? {
+                continue;
+            }
             match (&s.kind, dst, last) {
                 (StmtKind::Expr(e), Some(d), true) => match want {
                     Some(w) => {
@@ -2885,6 +3046,7 @@ impl Gen<'_> {
         if n == 0 && dst.is_some() {
             return None;
         }
+        self.scalar_arrays.truncate(arrays);
         self.top = mark;
         self.scopes.pop();
         Some(ty)
@@ -3466,6 +3628,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
         has_call: false,
         direct_globals: false,
         tuples: Vec::new(),
+        scalar_arrays: Vec::new(),
         consts: Vec::new(),
         consts_ready: false,
     };

@@ -2236,7 +2236,7 @@ impl Checker {
 }
 
 /// Whether a register of the typed machine can hold a value of this type: a number, a boolean,
-/// a text, a structure, `T?`, an array or a map of those.
+/// a text, a structure, `T?`, an array, a map, a tuple or a function of those.
 pub(crate) fn register_ty(t: &Ty) -> bool {
     match t {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
@@ -2245,6 +2245,8 @@ pub(crate) fn register_ty(t: &Ty) -> bool {
         Ty::Nullable(e) => register_ty(e),
         Ty::Enum(_, args) => args.iter().all(register_ty),
         Ty::Map(k, v) => matches!(**k, Ty::Int | Ty::Str | Ty::Bool) && register_ty(v),
+        Ty::Tuple(items) => items.iter().all(register_ty),
+        Ty::Fn(ps, r) => ps.iter().all(register_ty) && (register_ty(r) || **r == Ty::Unit),
         _ => false,
     }
 }

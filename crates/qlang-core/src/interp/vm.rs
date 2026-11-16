@@ -3521,6 +3521,19 @@ impl Gen<'_> {
                     // read the variable first, as the tree walker does, then the right side
                     self.emit(Op::LoadG { dst: reg, g }, e.span);
                 }
+                // `x = f(..)`: the arguments are copied before the call and the result is written
+                // when it returns, so it can go straight to the variable
+                if global.is_none()
+                    && op.is_none()
+                    && matches!(value.kind, ExprKind::Call { .. })
+                    && !matches!(ty, Ty::Nullable(_))
+                {
+                    if self.into(value, reg)? != ty {
+                        return None;
+                    }
+                    self.top = mark;
+                    return Some(());
+                }
                 let r = self.value_as(value, &ty)?;
                 match op {
                     None => {

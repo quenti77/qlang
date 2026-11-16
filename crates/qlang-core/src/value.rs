@@ -746,8 +746,12 @@ impl Value {
     #[inline(never)]
     fn drop_container(&mut self) {
         let children: Vec<Value> = match self {
-            Value::Array(a) if Rc::strong_count(a) == 1 => match a.try_borrow_mut() {
-                Ok(mut v) => std::mem::take(&mut *v),
+            Value::Array(a) if Rc::strong_count(a) == 1 => match a.try_raw_mut() {
+                // an array of numbers or booleans holds nothing that needs releasing
+                Ok(mut v) => match &mut *v {
+                    Arr::Vals(items) => std::mem::take(items),
+                    _ => return,
+                },
                 Err(_) => return,
             },
             Value::Map(m) if Rc::strong_count(m) == 1 => match m.try_borrow_mut() {

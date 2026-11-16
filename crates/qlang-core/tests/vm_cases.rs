@@ -257,6 +257,41 @@ fn a_function_calls_a_closure_held_in_a_module_variable() {
 }
 
 #[test]
+fn a_small_array_only_read_by_literal_indexes_needs_no_allocation() {
+    // read with literal indexes only: kept in registers
+    let out = same(
+        "fun d(x: int, y: int) -> int\n  let p = [x, y]\n  p[0] * p[0] + p[1] * p[1]\nend\nprint(d(3, 4))",
+    );
+    assert_eq!(out, "25\n");
+    // floats, and a use in a nested block
+    let out = same(
+        "fun f(x: float) -> float\n  let p = [x, x * 2.0]\n  let t = 0.0\n  for i in 0..3 do\n    t += p[0] + p[1]\n  end\n  t\nend\nprint(f(1.5))",
+    );
+    assert_eq!(out, "13.5\n");
+    // written, passed on, measured or indexed with a variable: a real array
+    let out = same(
+        "fun f(x: int) -> int\n  let p = [x, 1]\n  p[0] = 10\n  p[0] + p[1]\nend\nprint(f(3))",
+    );
+    assert_eq!(out, "11\n");
+    let out = same(
+        "fun f(x: int) -> int\n  let p = [x, 1]\n  let s = 0\n  for i in 0..p.len() do\n    s += p[i]\n  end\n  s\nend\nprint(f(3))",
+    );
+    assert_eq!(out, "4\n");
+    let out = same(
+        "fun sum(a: array<int>) -> int\n  a[0] + a[1]\nend\nfun f(x: int) -> int\n  let p = [x, 1]\n  sum(p)\nend\nprint(f(3))",
+    );
+    assert_eq!(out, "4\n");
+    // an index out of range stays an error
+    let out = same("fun f(x: int) -> int\n  let p = [x, 1]\n  p[2]\nend\nprint(f(3))");
+    assert!(out.contains("R020") || out.contains("COMPILE"), "{out}");
+    // the same name in two blocks
+    let out = same(
+        "fun f(x: int) -> int\n  let t = 0\n  if x > 0 then\n    let p = [x, 2]\n    t += p[0] + p[1]\n  end\n  if x > 1 then\n    let p = [x, 5]\n    t += p[0] * p[1]\n  end\n  t\nend\nprint(f(3))",
+    );
+    assert_eq!(out, "20\n");
+}
+
+#[test]
 fn a_loop_shares_variables_with_the_code_around_it() {
     // module variables, assigned by the loop and read afterwards
     assert_eq!(

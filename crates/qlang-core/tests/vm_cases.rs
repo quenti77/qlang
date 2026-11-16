@@ -246,6 +246,17 @@ fn limits_apply_inside_the_machine() {
 }
 
 #[test]
+fn a_function_calls_a_closure_held_in_a_module_variable() {
+    let out = same(
+        "let k = 3\nlet bump: fun(int) -> int = fun(x: int) -> int\n  x * 2 + k\nend\nfun run(n: int) -> int\n  let v = 1\n  for i in 0..n do\n    v = bump(v) mod 1000003\n  end\n  v\nend\nprint(run(3))\nprint(run(5))",
+    );
+    assert_eq!(out, "29\n125\n");
+    let out =
+        same("let pair = (3, 4)\nfun run() -> int\n  pair.0 * 10 + pair.1\nend\nprint(run())");
+    assert_eq!(out, "34\n");
+}
+
+#[test]
 fn a_loop_shares_variables_with_the_code_around_it() {
     // module variables, assigned by the loop and read afterwards
     assert_eq!(

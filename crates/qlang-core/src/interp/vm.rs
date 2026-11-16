@@ -5058,10 +5058,12 @@ impl Interp<'_> {
                         };
                         let mut ok = true;
                         for fr in &callee.frees {
+                            let mut c = fr.cache.get();
                             let v = match fr.global {
-                                Some(m) => self.envs[m].get(&fr.name),
-                                None => fv.env.get(&fr.name),
+                                Some(m) => self.envs[m].get_cached(&fr.name, &mut c),
+                                None => fv.env.get_cached(&fr.name, &mut c),
                             };
+                            fr.cache.set(c);
                             match v.and_then(|v| slot_of(&v, &fr.ty)) {
                                 Some(Slot::N(x)) => stack[nb + fr.reg as usize] = x,
                                 Some(Slot::O(x)) => ostack[nb + fr.reg as usize] = x,
@@ -5121,10 +5123,12 @@ impl Interp<'_> {
                                 for fr in code.frees.iter().filter(|fr| fr.assigned) {
                                     let v =
                                         reg_value(stack, ostack, base + fr.reg as usize, &fr.ty);
+                                    let mut c = fr.cache.get();
                                     match fr.global {
-                                        Some(m) => self.envs[m].assign(&fr.name, v),
-                                        None => env.assign(&fr.name, v),
+                                        Some(m) => self.envs[m].assign_cached(&fr.name, v, &mut c),
+                                        None => env.assign_cached(&fr.name, v, &mut c),
                                     };
+                                    fr.cache.set(c);
                                 }
                             }
                             // the objects of the frame that ends are released

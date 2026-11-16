@@ -573,6 +573,8 @@ pub(super) struct Code {
 /// A field read or written by name, and its type.
 struct FieldSite {
     name: String,
+    /// The same name, as the structures hold their field names.
+    key: Name,
     ty: Ty,
     /// Where the field was last found in a structure (the same place in the program finds
     /// it in the same place again): a hint, checked against the name each time.
@@ -984,6 +986,7 @@ impl Gen<'_> {
             None => {
                 self.fields.push(FieldSite {
                     name: name.to_string(),
+                    key: Name::new(name),
                     ty: ty.clone(),
                     slot: Cell::new(u32::MAX),
                 });
@@ -4927,7 +4930,7 @@ impl Interp<'_> {
                             fail!("R005", format!("this value has no field `{}`", site.name));
                         };
                         let f = st.fields.borrow();
-                        let mut found = f.get_at(site.slot.get() as usize, &site.name);
+                        let mut found = f.get_at_key(site.slot.get() as usize, &site.key);
                         if found.is_none()
                             && let Some(i) = f.position(&site.name)
                         {
@@ -4962,7 +4965,7 @@ impl Interp<'_> {
                         && let Some(slot) = st
                             .fields
                             .borrow_mut()
-                            .get_mut_at(site.slot.get() as usize, &site.name)
+                            .get_mut_at_key(site.slot.get() as usize, &site.key)
                     {
                         match (slot, &site.ty) {
                             (Value::Int(x), Ty::Int) => {
@@ -4984,7 +4987,7 @@ impl Interp<'_> {
                     match &o!(obj) {
                         Value::Struct(st) => {
                             let mut f = st.fields.borrow_mut();
-                            match f.get_mut_at(site.slot.get() as usize, &site.name) {
+                            match f.get_mut_at_key(site.slot.get() as usize, &site.key) {
                                 Some(slot) => *slot = v,
                                 None => {
                                     f.insert(&site.name, v);
@@ -5474,7 +5477,10 @@ impl Interp<'_> {
                             // the objects of the frame that ends are released
                             if code.uses_objs {
                                 for x in &mut ostack[base..base + code.nregs] {
-                                    *x = Value::Unit;
+                                    // most registers are empty: no call to drop them
+                                    if !matches!(x, Value::Unit) {
+                                        *x = Value::Unit;
+                                    }
                                 }
                             }
                             self.frames.pop();

@@ -36,6 +36,16 @@ impl Name {
         }
     }
 
+    /// Whether both are the same name: a short name is compared as the words it is stored in.
+    #[inline(always)]
+    pub fn same(&self, other: &Name) -> bool {
+        match (&self.0, &other.0) {
+            (Repr::Inline { len: a, buf: x }, Repr::Inline { len: b, buf: y }) => a == b && x == y,
+            (Repr::Heap(a), Repr::Heap(b)) => a == b,
+            _ => false,
+        }
+    }
+
     #[inline]
     pub fn as_str(&self) -> &str {
         match &self.0 {
@@ -113,6 +123,23 @@ impl<V> SmallMap<V> {
     pub fn get_at(&self, index: usize, key: &str) -> Option<&V> {
         match self.entries.get(index) {
             Some((k, v)) if same_name(k.as_str(), key) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// [`SmallMap::get_at`] for a key that is already a [`Name`].
+    #[inline(always)]
+    pub fn get_at_key(&self, index: usize, key: &Name) -> Option<&V> {
+        match self.entries.get(index) {
+            Some((k, v)) if k.same(key) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_mut_at_key(&mut self, index: usize, key: &Name) -> Option<&mut V> {
+        match self.entries.get_mut(index) {
+            Some((k, v)) if k.same(key) => Some(v),
             _ => None,
         }
     }

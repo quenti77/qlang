@@ -637,6 +637,9 @@ pub struct Limits {
     pub max_output: usize,
     /// Maximum size of one array (elements) or string (bytes).
     pub max_alloc: usize,
+    /// Do not free what the program still holds when it ends: for a process that is about to
+    /// exit, taking a big array or map apart value by value is time for nothing.
+    pub leak_at_exit: bool,
 }
 
 impl Default for Limits {
@@ -646,6 +649,7 @@ impl Default for Limits {
             max_depth: 1_000,
             max_output: 10_000_000,
             max_alloc: 10_000_000,
+            leak_at_exit: false,
         }
     }
 }

@@ -3572,10 +3572,13 @@ impl Gen<'_> {
                 else_block,
             } => {
                 let mut ends = Vec::new();
-                for (cond, block) in branches {
+                for (i, (cond, block)) in branches.iter().enumerate() {
                     let skip = self.jump_if_false(cond)?;
                     self.block(block, None)?;
-                    ends.push(self.emit(Op::Jmp(0), e.span));
+                    // the last branch of an `if` without `else` falls through to the end
+                    if i + 1 < branches.len() || else_block.is_some() {
+                        ends.push(self.emit(Op::Jmp(0), e.span));
+                    }
                     let next = self.here();
                     self.patch(skip, next);
                 }

@@ -42,6 +42,9 @@ pub struct Parser<'a> {
     /// Annotations read, waiting for the declaration they belong to, and where the first began.
     pending: Vec<Annotation>,
     pending_start: Option<Span>,
+    /// One entry per function being parsed (and the file itself): whether a variable or a parameter
+    /// named `read` is declared there, so that `read(x)` calls it instead of the prelude's `read_text`.
+    read_bound: Vec<bool>,
     pub diags: Vec<Diagnostic>,
 }
 
@@ -96,6 +99,7 @@ impl<'a> Parser<'a> {
             depth: 0,
             pending: Vec::new(),
             pending_start: None,
+            read_bound: vec![false],
             diags: Vec::new(),
         }
     }
@@ -539,7 +543,24 @@ impl<'a> Parser<'a> {
     }
 
     /// `fun name<T>(params) -> ret` and, if `require_body`, its block and `end`.
+    /// A name is declared here: from now on `read(x)` in this function (and the ones inside it) is a call of
+    /// that name, not the `read_text` of the prelude.
+    fn bind(&mut self, name: &str) {
+        if name == "read"
+            && let Some(last) = self.read_bound.last_mut()
+        {
+            *last = true;
+        }
+    }
+
     fn parse_fun(&mut self, named: bool, body: BodyMode) -> PResult<FunDecl> {
+        self.read_bound.push(false);
+        let r = self.parse_fun_inner(named, body);
+        self.read_bound.pop();
+        r
+    }
+
+    fn parse_fun_inner(&mut self, named: bool, body: BodyMode) -> PResult<FunDecl> {
         let start = self.expect(&Tok::Fun)?;
         let (annotations, annotations_at) = if named {
             self.take_annotations()
@@ -572,6 +593,7 @@ impl<'a> Parser<'a> {
                 } else {
                     let variadic = self.eat(&Tok::Ellipsis);
                     let pname = self.expect_ident()?;
+                    self.bind(&pname.name);
                     if !self.at(&Tok::Colon) {
                         let span = pname.span;
                         return self.error_at(
@@ -1072,6 +1094,7 @@ impl<'a> Parser<'a> {
                 } else {
                     self.expect_ident()?
                 };
+                self.bind(&var.name);
                 let mut var2_pattern = None;
                 let var2 = if self.eat(&Tok::Comma) {
                     if self.at(&Tok::LParen) {
@@ -1083,7 +1106,9 @@ impl<'a> Parser<'a> {
                             span,
                         })
                     } else {
-                        Some(self.expect_ident()?)
+                        let v = self.expect_ident()?;
+                        self.bind(&v.name);
+                        Some(v)
                     }
                 } else {
                     None
@@ -1282,6 +1307,7 @@ impl<'a> Parser<'a> {
             });
         }
         let name = self.expect_ident()?;
+        self.bind(&name.name);
         let ty = if self.eat(&Tok::Colon) {
             Some(self.parse_type()?)
         } else {
@@ -1704,6 +1730,7 @@ impl<'a> Parser<'a> {
                     // `read_typed`; `read()` stays the built-in
                     if let ExprKind::Ident(name, targs) = &mut e.kind
                         && name == "read"
+                        && !self.read_bound.iter().any(|b| *b)
                         && (!args.is_empty() || !targs.is_empty())
                     {
                         *name = if targs.is_empty() {
@@ -2243,6 +2270,7 @@ impl<'a> Parser<'a> {
                 }
                 let id = self.fresh_id();
                 if path.len() == 1 {
+                    self.bind(&path[0].name);
                     Ok(Pattern::Bind {
                         name: path.pop().unwrap(),
                         id,

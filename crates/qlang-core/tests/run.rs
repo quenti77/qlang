@@ -2193,3 +2193,31 @@ fn the_old_spellings_are_deprecated_warnings() {
     );
     assert!(rendered.contains("block comment"), "{rendered}");
 }
+
+#[test]
+fn a_variable_or_a_parameter_named_read_is_called_instead_of_the_prompt() {
+    // a parameter
+    assert_eq!(
+        out(
+            "fun call(read: fun(string) -> string?) -> string?\n  read(\"x\")\nend\nprint(call(fun(p: string) -> string?\n  \"got \" + p\nend))"
+        ),
+        "got x\n"
+    );
+    // a variable of a function
+    assert_eq!(
+        out(
+            "fun f(n: int) -> int\n  let read = fun(p: string) -> int\n    n\n  end\n  read(\"x\")\nend\nprint(f(4))"
+        ),
+        "4\n"
+    );
+    // without such a name, `read(prompt)` still asks, and a name in another function does not hide it
+    let o = run_files(
+        &[(
+            "main.q",
+            "fun other(read: int) -> int\n  read\nend\nlet name = read(\"Name? \")\nprint(\"hi {name} {other(1)}\")",
+        )],
+        Some(&["Zoe"]),
+        Limits::default(),
+    );
+    assert_eq!(o.output, "Name? hi Zoe 1\n");
+}

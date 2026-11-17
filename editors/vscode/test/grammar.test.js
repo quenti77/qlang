@@ -46,7 +46,7 @@ test('grammar', async (t) => {
   const g = await loadGrammar();
 
   await t.test('comments', () => {
-    const tk = tokenize(g, 'let x = 1 -- end of line\n--(\nblock if\n--)\n--"\ndoc\n--"\nlet y = 2');
+    const tk = tokenize(g, 'let x = 1 -- end of line\n--*\nblock if\n--*\n--"\ndoc\n--"\nlet y = 2');
     assert.match(scopesOf(tk, '-- end of line'), /comment\.line\.double-dash/);
     assert.match(scopesOf(tk, 'block if', 2), /comment\.block\.qlang/);
     assert.match(scopesOf(tk, 'doc', 5), /comment\.block\.documentation/);
@@ -104,7 +104,7 @@ test('grammar', async (t) => {
   await t.test('keywords, constants and operators', () => {
     const tk = tokenize(
       g,
-      'if a and not b or c then return none end\nwhile x != 1 do break end\nfor k, v in m step 2 do continue end\nlet r = 7 div 2 + 7 mod 2\nn div= 2\nx = true\nself.v += super.f(1)\nimport a as b from "m.q"\nlet f = 1 ** 2 -> y?'
+      'if a and not b or c then return none end\nwhile x != 1 do break end\nfor k, v in m step 2 do continue end\nlet r = 7 // 2 + 7 mod 2\nn //= 2\nx = true\nself.v += super.f(1)\nimport a as b from "m.q"\nlet f = 1 ** 2 -> y?'
     );
     assert.match(scopesOf(tk, 'if'), /keyword\.control\.flow/);
     assert.match(scopesOf(tk, 'and'), /keyword\.operator\.word/);
@@ -114,9 +114,9 @@ test('grammar', async (t) => {
     assert.match(scopesOf(tk, '!='), /operator\.comparison/);
     assert.match(scopesOf(tk, 'step'), /keyword\.control/);
     assert.match(scopesOf(tk, 'continue'), /keyword\.control/);
-    assert.match(scopesOf(tk, 'div', 3), /keyword\.operator\.word/);
+    assert.match(scopesOf(tk, '//', 3), /operator\.arithmetic/);
     assert.match(scopesOf(tk, 'mod', 3), /keyword\.operator\.word/);
-    assert.match(scopesOf(tk, 'div=', 4), /keyword\.operator\.assignment/);
+    assert.match(scopesOf(tk, '//=', 4), /keyword\.operator\.assignment/);
     assert.match(scopesOf(tk, 'true'), /constant\.language\.boolean/);
     assert.match(scopesOf(tk, 'self'), /variable\.language/);
     assert.match(scopesOf(tk, 'super'), /variable\.language/);

@@ -76,7 +76,7 @@ pub enum Tok {
     StarAssign,
     SlashAssign,
     PercentAssign,
-    /// `div=`
+    /// `//=`
     IntDivAssign,
     /// `mod=`
     ModAssign,
@@ -155,7 +155,7 @@ impl Tok {
             Tok::And => "and",
             Tok::Or => "or",
             Tok::Not => "not",
-            Tok::DivKw => "div",
+            Tok::DivKw => "//",
             Tok::ModKw => "mod",
             Tok::True => "true",
             Tok::False => "false",
@@ -179,7 +179,7 @@ impl Tok {
             Tok::StarAssign => "*=",
             Tok::SlashAssign => "/=",
             Tok::PercentAssign => "%=",
-            Tok::IntDivAssign => "div=",
+            Tok::IntDivAssign => "//=",
             Tok::ModAssign => "mod=",
             Tok::Assign => "=",
             Tok::DotDotEq => "..=",
@@ -344,20 +344,35 @@ pub fn lex_with_docs(
                 }
             }
             b'-' if b.get(i + 1) == Some(&b'-') => match b.get(i + 2) {
-                Some(b'(') => match src[i + 3..].find("--)") {
-                    Some(p) => i = i + 3 + p + 3,
-                    None => {
-                        crate::diag::push_capped(
-                            diags,
-                            Diagnostic::error(
-                                "L003",
-                                "unterminated block comment (missing `--)`)",
-                                span(i, i + 3),
-                            ),
-                        );
-                        i = b.len();
+                Some(open @ (b'*' | b'(')) => {
+                    let close = if *open == b'*' { "--*" } else { "--)" };
+                    match src[i + 3..].find(close) {
+                        Some(p) => {
+                            if *open == b'(' {
+                                crate::diag::push_capped(
+                                    diags,
+                                    Diagnostic::warning(
+                                        "W001",
+                                        "the block comment `--( ... --)` is deprecated: use `--* ... --*`",
+                                        span(i, i + 3 + p + 3),
+                                    ),
+                                );
+                            }
+                            i = i + 3 + p + 3;
+                        }
+                        None => {
+                            crate::diag::push_capped(
+                                diags,
+                                Diagnostic::error(
+                                    "L003",
+                                    format!("unterminated block comment (missing `{close}`)"),
+                                    span(i, i + 3),
+                                ),
+                            );
+                            i = b.len();
+                        }
                     }
-                },
+                }
                 Some(b'"') => match src[i + 3..].find("--\"") {
                     Some(p) => {
                         docs.push(DocComment {
@@ -457,6 +472,20 @@ pub fn lex_with_docs(
                 if compound {
                     i += 1;
                 }
+                if word == "div" {
+                    crate::diag::push_capped(
+                        diags,
+                        Diagnostic::warning(
+                            "W001",
+                            if compound {
+                                "`div=` is deprecated: use `//=`"
+                            } else {
+                                "`div` is deprecated: use `//`"
+                            },
+                            span(start, i),
+                        ),
+                    );
+                }
                 let tok = match (word, compound) {
                     ("div", true) => Tok::IntDivAssign,
                     ("mod", true) => Tok::ModAssign,
@@ -472,6 +501,10 @@ pub fn lex_with_docs(
                     (Some(Tok::DotDotEq), 3)
                 } else if rest.starts_with(b"**") {
                     (Some(Tok::Power), 2)
+                } else if rest.starts_with(b"//=") {
+                    (Some(Tok::IntDivAssign), 3)
+                } else if rest.starts_with(b"//") {
+                    (Some(Tok::DivKw), 2)
                 } else if rest.starts_with(b"==") {
                     (Some(Tok::EqEq), 2)
                 } else if rest.starts_with(b"!=") {

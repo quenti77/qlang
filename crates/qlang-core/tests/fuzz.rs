@@ -19,7 +19,7 @@ impl Rng {
 fn mutate(src: &str, rng: &mut Rng, count: usize) -> String {
     let mut chars: Vec<char> = src.chars().collect();
     let words = [
-        "end", "then", "fun", "(", ")", "[", "]", "{", "}", "\"", "--(", "--\"", "none", "let",
+        "end", "then", "fun", "(", ")", "[", "]", "{", "}", "\"", "--*", "--\"", "none", "let",
         "x", "1", "2.5", "..", "=", "+", "\n", "struct", "impl", "match", "case", "else", "return",
         ".", ",", ":", "->", "?", "<", ">", "{x}", "self", "super", "import", "export",
     ];

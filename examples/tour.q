@@ -9,7 +9,7 @@ let numbers: array<int> = [3, 1, 2]
 
 -- numbers
 print(7 / 2)
-print(7 div 2)
+print(7 // 2)
 print(7 mod 2)
 print(2 ** 10)
 print(1 + 2.5)
@@ -245,7 +245,7 @@ for i, c in "abc" do
 end
 print("")
 let rest = 17
-rest div= 5
+rest //= 5
 rest mod= 2
 print(rest)
 

@@ -49,12 +49,12 @@ print(BigInt.pow(3, 300))
 
 #[test]
 fn division_cuts_toward_zero_like_int() {
-    let src = "print(BigInt.pow(2, 200) div BigInt.pow(2, 100))
+    let src = "print(BigInt.pow(2, 200) // BigInt.pow(2, 100))
 print((BigInt.pow(2, 200) + 5) % BigInt.pow(2, 100))
-print(BigInt.of(-7) div 2)
+print(BigInt.of(-7) // 2)
 print(BigInt.of(-7) % 2)
-print(BigInt.of(7) div -2)
-print(BigInt.pow(10, 40) div 7)
+print(BigInt.of(7) // -2)
+print(BigInt.pow(10, 40) // 7)
 print(BigInt.pow(10, 40) % 7)
 let pair = BigInt.of(-7).divmod(BigInt.of(2))
 print(pair.0)
@@ -105,7 +105,7 @@ print(BigInt.of(0).is_zero())
 
 #[test]
 fn dividing_a_big_int_by_zero_stops_the_program() {
-    let src = "print(BigInt.of(1) div BigInt.of(0))\n";
+    let src = "print(BigInt.of(1) // BigInt.of(0))\n";
     assert!(run(src).starts_with("RUNTIME"));
 }
 

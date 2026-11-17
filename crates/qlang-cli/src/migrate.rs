@@ -4,6 +4,7 @@
 //! checked before it is written: it must have exactly the tokens the file had, with only the replaced names
 //! different.
 
+use qlang_core::diag::{Diagnostic, Severity};
 use qlang_core::lexer::{Tok, Token, lex};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -31,8 +32,17 @@ struct Edit {
     start: usize,
     end: usize,
     text: &'static str,
-    rule: &'static Rule,
+    /// What the change is, for the report: `Log.warn -> Log.warning (since 0.69)`.
+    what: String,
+    /// Whether the token changes (a renamed name); `div` -> `//` is the same token.
+    renames: bool,
 }
+
+/// Syntax rewritten by `qlang migrate` (announced in the version in the first column).
+const SYNTAX_RULES: &[(&str, &str)] = &[
+    ("1.6", "div -> //  and  div= -> //="),
+    ("1.6", "--( ... --) -> --* ... --*  (block comments)"),
+];
 
 fn find_edits(tokens: &[Token]) -> Vec<Edit> {
     let mut edits = Vec::new();
@@ -46,8 +56,51 @@ fn find_edits(tokens: &[Token]) -> Vec<Edit> {
                 start: w[2].span.start as usize,
                 end: w[2].span.end as usize,
                 text: rule.new,
-                rule,
+                what: format!(
+                    "{}.{} -> {}.{} (since {})",
+                    rule.owner, rule.old, rule.owner, rule.new, rule.since
+                ),
+                renames: true,
             });
+        }
+    }
+    for t in tokens {
+        let text = match t.tok {
+            Tok::DivKw => "//",
+            Tok::IntDivAssign => "//=",
+            _ => continue,
+        };
+        let (start, end) = (t.span.start as usize, t.span.end as usize);
+        // `//` and `//=` are already the new spelling: only `div` and `div=` are rewritten
+        if end - start == text.len() {
+            continue;
+        }
+        edits.push(Edit {
+            start,
+            end,
+            text,
+            what: format!("div -> {text} (since 1.6)"),
+            renames: false,
+        });
+    }
+    edits
+}
+
+/// The `--( ... --)` block comments (the lexer warns about each one), as edits of both delimiters.
+fn find_comment_edits(diags: &[Diagnostic]) -> Vec<Edit> {
+    let mut edits = Vec::new();
+    for d in diags {
+        if d.code == "W001" && d.message.starts_with("the block comment") {
+            let (start, end) = (d.span.start as usize, d.span.end as usize);
+            for (a, b) in [(start, start + 3), (end - 3, end)] {
+                edits.push(Edit {
+                    start: a,
+                    end: b,
+                    text: "--*",
+                    what: "--( ... --) -> --* ... --* (since 1.6)".into(),
+                    renames: false,
+                });
+            }
         }
     }
     edits
@@ -84,6 +137,9 @@ fn rewrite(source: &str, edits: &[Edit]) -> Result<String, String> {
     let mut out = String::with_capacity(source.len());
     let mut at = 0;
     for e in edits {
+        if e.start < at {
+            return Err("two changes overlap".into());
+        }
         out.push_str(&source[at..e.start]);
         out.push_str(e.text);
         at = e.end;
@@ -93,7 +149,8 @@ fn rewrite(source: &str, edits: &[Edit]) -> Result<String, String> {
     let (mut d1, mut d2) = (Vec::new(), Vec::new());
     let before = lex(source, 0, 0, &mut d1);
     let after = lex(&out, 0, 0, &mut d2);
-    if before.len() != after.len() || d1.len() != d2.len() {
+    let errors = |d: &[Diagnostic]| d.iter().filter(|x| x.severity == Severity::Error).count();
+    if before.len() != after.len() || errors(&d1) != errors(&d2) || errors(&d2) != 0 {
         return Err("the result does not have the tokens of the original".into());
     }
     let renamed = |t: &Tok| -> String { format!("{t:?}") };
@@ -102,7 +159,7 @@ fn rewrite(source: &str, edits: &[Edit]) -> Result<String, String> {
         .zip(&after)
         .filter(|(a, b)| renamed(&a.tok) != renamed(&b.tok))
         .count();
-    if different != edits.len() {
+    if different != edits.iter().filter(|e| e.renames).count() {
         return Err("more than the renamed names changed".into());
     }
     Ok(out)
@@ -120,6 +177,9 @@ pub fn run(args: &[&str]) -> ExitCode {
                         "{}: {}.{} -> {}.{}  ({})",
                         r.since, r.owner, r.old, r.owner, r.new, r.why
                     );
+                }
+                for (since, what) in SYNTAX_RULES {
+                    println!("{since}: {what}");
                 }
                 return ExitCode::SUCCESS;
             }
@@ -151,12 +211,14 @@ pub fn run(args: &[&str]) -> ExitCode {
         };
         let mut diags = Vec::new();
         let tokens = lex(&source, 0, 0, &mut diags);
-        if !diags.is_empty() {
+        if diags.iter().any(|d| d.severity == Severity::Error) {
             eprintln!("{}: it does not lex, left as it is", f.display());
             failed = true;
             continue;
         }
-        let edits = find_edits(&tokens);
+        let mut edits = find_edits(&tokens);
+        edits.extend(find_comment_edits(&diags));
+        edits.sort_by_key(|e| e.start);
         if edits.is_empty() {
             continue;
         }
@@ -168,15 +230,8 @@ pub fn run(args: &[&str]) -> ExitCode {
             Ok(out) => {
                 changed += 1;
                 let rules: Vec<String> = {
-                    let mut v: Vec<String> = edits
-                        .iter()
-                        .map(|e| {
-                            format!(
-                                "{}.{} -> {}.{} (since {})",
-                                e.rule.owner, e.rule.old, e.rule.owner, e.rule.new, e.rule.since
-                            )
-                        })
-                        .collect();
+                    let mut v: Vec<String> = edits.iter().map(|e| e.what.clone()).collect();
+                    v.sort();
                     v.dedup();
                     v
                 };

@@ -11,7 +11,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | --- | --- |
 | `L001` | `unexpected character {c}` (pour `!`, `&`, `|`, `;` et `'`, avec l'indication : `not`, `and`, `or`, fin de ligne, guillemets doubles) |
 | `L002` | ``unterminated string (missing closing `"`)`` |
-| `L003` | ``unterminated block comment (missing `--)`)`` <br> ``unterminated documentation comment (missing `--"`)`` <br> `this tuple position is too large` |
+| `L003` | ``unterminated block comment (missing `--*`)`` <br> ``unterminated documentation comment (missing `--"`)`` <br> `this tuple position is too large` |
 | `L004` | `expected hexadecimal digits after 0x` <br> `expected binary digits (0 or 1) after 0b` |
 | `L005` | `integer literal is too large` <br> `float literal is out of range` |
 

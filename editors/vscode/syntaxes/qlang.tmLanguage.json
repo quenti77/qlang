@@ -41,6 +41,13 @@
         },
         {
           "name": "comment.block.qlang",
+          "begin": "--\\*",
+          "end": "--\\*",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } }
+        },
+        {
+          "name": "comment.block.deprecated.qlang",
           "begin": "--\\(",
           "end": "--\\)",
           "beginCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } },
@@ -48,7 +55,7 @@
         },
         {
           "name": "comment.line.double-dash.qlang",
-          "match": "--(?![(\"]).*$"
+          "match": "--(?![*(\"]).*$"
         }
       ]
     },
@@ -219,13 +226,13 @@
       "patterns": [
         {
           "name": "keyword.operator.assignment.qlang",
-          "match": "\\+=|-=|\\*=|/=|%=|=(?!=)"
+          "match": "\\+=|-=|\\*=|//=|/=|%=|=(?!=)"
         },
         { "name": "keyword.operator.comparison.qlang", "match": "==|!=|<=|>=|<|>" },
         { "name": "keyword.operator.spread.qlang", "match": "\\.\\.\\." },
         { "name": "keyword.operator.range.qlang", "match": "\\.\\.=|\\.\\." },
         { "name": "keyword.operator.arrow.qlang", "match": "->" },
-        { "name": "keyword.operator.arithmetic.qlang", "match": "\\*\\*|[+\\-*/%]" },
+        { "name": "keyword.operator.arithmetic.qlang", "match": "\\*\\*|//|[+\\-*/%]" },
         { "name": "keyword.operator.nullable.qlang", "match": "\\?\\??" }
       ]
     },

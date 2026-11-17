@@ -18,7 +18,7 @@ end
 let p = Point { x: 1, y: 2 } + Point { x: 10, y: 20 }
 print("{p.x}, {p.y}")      -- 11, 22
 print(7 / 2)               -- 3.5
-print(7 div 2)             -- 3
+print(7 // 2)             -- 3
 ```
 
 - **Le langage** : [`docs/language.md`](docs/language.md) (référence complète).

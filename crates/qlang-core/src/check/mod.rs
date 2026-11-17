@@ -556,7 +556,7 @@ impl Duration
         if t.is_err() then
             return Result<int, Error>.Err(t.unwrap_err())
         end
-        Result<int, Error>.Ok(t.unwrap() div 1000)
+        Result<int, Error>.Ok(t.unwrap() // 1000)
     end
 
     --" The length in whole minutes (cut toward 0), or `err` if it has years or months. --"
@@ -565,7 +565,7 @@ impl Duration
         if t.is_err() then
             return Result<int, Error>.Err(t.unwrap_err())
         end
-        Result<int, Error>.Ok(t.unwrap() div 60000)
+        Result<int, Error>.Ok(t.unwrap() // 60000)
     end
 
     --" The length in whole hours (cut toward 0), or `err` if it has years or months. --"
@@ -574,7 +574,7 @@ impl Duration
         if t.is_err() then
             return Result<int, Error>.Err(t.unwrap_err())
         end
-        Result<int, Error>.Ok(t.unwrap() div 3600000)
+        Result<int, Error>.Ok(t.unwrap() // 3600000)
     end
 
     --" The length in whole days (cut toward 0), or `err` if it has years or months. --"
@@ -583,7 +583,7 @@ impl Duration
         if t.is_err() then
             return Result<int, Error>.Err(t.unwrap_err())
         end
-        Result<int, Error>.Ok(t.unwrap() div 86400000)
+        Result<int, Error>.Ok(t.unwrap() // 86400000)
     end
 
     --" The same length with the parts carried: 12 months are a year, 1000 ms a second, 60 seconds a minute,
@@ -596,12 +596,12 @@ impl Duration
         let sm = if months < 0 then -1 else 1 end
         let se = if exact < 0 then -1 else 1 end
         Duration {
-            years: sm * (m div 12),
+            years: sm * (m // 12),
             months: sm * (m % 12),
-            days: se * (e div 86400000),
-            hours: se * (e div 3600000 % 24),
-            minutes: se * (e div 60000 % 60),
-            seconds: se * (e div 1000 % 60),
+            days: se * (e // 86400000),
+            hours: se * (e // 3600000 % 24),
+            minutes: se * (e // 60000 % 60),
+            seconds: se * (e // 1000 % 60),
             ms: se * (e % 1000)
         }
     end
@@ -727,7 +727,7 @@ impl datetime
 
     --" The quarter of the year, 1 to 4. --"
     public fun quarter(self) -> int
-        (self.month() - 1) div 3 + 1
+        (self.month() - 1) // 3 + 1
     end
 
     --" Whole months from this instant to `other` (negative if `other` is earlier): 31 January to 28 February is 1. --"
@@ -743,27 +743,27 @@ impl datetime
 
     --" Whole years from this instant to `other`. --"
     public fun diff_in_years(self, other: datetime) -> int
-        self.diff_in_months(other) div 12
+        self.diff_in_months(other) // 12
     end
 
     --" Whole days (blocks of 24 hours) from this instant to `other`, cut toward 0. --"
     public fun diff_in_days(self, other: datetime) -> int
-        (other.ms() - self.ms()) div 86400000
+        (other.ms() - self.ms()) // 86400000
     end
 
     --" Whole hours from this instant to `other`, cut toward 0. --"
     public fun diff_in_hours(self, other: datetime) -> int
-        (other.ms() - self.ms()) div 3600000
+        (other.ms() - self.ms()) // 3600000
     end
 
     --" Whole minutes from this instant to `other`, cut toward 0. --"
     public fun diff_in_minutes(self, other: datetime) -> int
-        (other.ms() - self.ms()) div 60000
+        (other.ms() - self.ms()) // 60000
     end
 
     --" Whole seconds from this instant to `other`, cut toward 0. --"
     public fun diff_in_seconds(self, other: datetime) -> int
-        (other.ms() - self.ms()) div 1000
+        (other.ms() - self.ms()) // 1000
     end
 
     --" The time from this instant to `other` as a `Duration`: whole years and months first, then days, hours,
@@ -876,7 +876,7 @@ impl datetime
     --" Seconds since 1970 (cut toward the past). --"
     public fun unix(self) -> int
         let ms = self.ms()
-        (ms - ((ms % 1000) + 1000) % 1000) div 1000
+        (ms - ((ms % 1000) + 1000) % 1000) // 1000
     end
 
     --" `Tue, 03 Nov 2026 14:30:00 GMT`: the form of the HTTP `Date` and `Last-Modified` headers. --"
@@ -899,26 +899,26 @@ impl datetime
         let w = humanize_words(locale)
         let diff = self.ms() - now.ms()
         let past = diff < 0
-        let secs = diff.abs() div 1000
+        let secs = diff.abs() // 1000
         if secs < 45 then
             return if past then w[2] else w[3] end
         end
         let n = 0
         let unit = 0
         if secs < 3600 then
-            n = (secs + 30) div 60
+            n = (secs + 30) // 60
             unit = 4
         elseif secs < 86400 then
-            n = (secs + 1800) div 3600
+            n = (secs + 1800) // 3600
             unit = 6
         elseif secs < 86400 * 30 then
-            n = (secs + 43200) div 86400
+            n = (secs + 43200) // 86400
             unit = 8
         elseif secs < 86400 * 365 then
-            n = (secs + 1296000) div 2592000
+            n = (secs + 1296000) // 2592000
             unit = 10
         else
-            n = (secs + 15768000) div 31536000
+            n = (secs + 15768000) // 31536000
             unit = 12
         end
         if n == 0 then n = 1 end

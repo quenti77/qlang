@@ -43,7 +43,7 @@ fn an_error_is_shown_and_the_session_goes_on() {
 
 #[test]
 fn a_failed_definition_is_not_kept() {
-    let (out, err) = repl("let bad = 1 div 0\nlet ok = 5\nok\n");
+    let (out, err) = repl("let bad = 1 // 0\nlet ok = 5\nok\n");
     assert!(!err.is_empty(), "{err}");
     assert!(out.lines().any(|l| l == "5"), "{out}");
 }

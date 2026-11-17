@@ -1,5 +1,5 @@
 fun divmod(a: int, b: int) -> (int, int)
-    (a div b, a mod b)
+    (a // b, a mod b)
 end
 
 fun digit_sum(n: int) -> int

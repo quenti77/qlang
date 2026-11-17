@@ -22,7 +22,7 @@ program: Newline* (topLevelItem (Newline+ topLevelItem)* Newline*)? EOF;
 //   not                    (préfixe)
 //   == != < <= > >=        (non associatif : a < b < c est interdit)
 //   + -
-//   * / div mod %          (% est un synonyme de mod)
+//   * / // mod %          (% est un synonyme de mod)
 //   as                     (conversion : x as T appelle As<T>.convert)
 //   -x                     (préfixe)
 //   **                     (droite : -2 ** 2 vaut -(2 ** 2))
@@ -483,7 +483,7 @@ As: 'as';
 And: 'and';
 Or: 'or';
 Not: 'not';
-DivKw: 'div';
+DivKw: '//' | 'div';  // `div` is deprecated since 1.6
 ModKw: 'mod';
 
 True: 'true';
@@ -516,7 +516,7 @@ MinusAssign: '-=';
 StarAssign: '*=';
 SlashAssign: '/=';
 PercentAssign: '%=';
-IntDivAssign: 'div=';
+IntDivAssign: '//=' | 'div=';  // `div=` is deprecated since 1.6
 ModAssign: 'mod=';
 Assign: '=';
 
@@ -575,8 +575,9 @@ Identifier: [a-zA-Z_] [a-zA-Z_0-9]*;
 // '--' suivi de '(' ou '"' n'est jamais un commentaire de ligne.
 // Pas d'imbrication. Les commentaires de doc vont sur le canal HIDDEN.
 
-LineComment: '--' (~[("\r\n] ~[\r\n]*)? -> skip;
-BlockComment: '--(' .*? '--)' -> skip;
+LineComment: '--' (~[*("\r\n] ~[\r\n]*)? -> skip;
+// `--( ... --)` is deprecated since 1.6
+BlockComment: ('--*' .*? '--*' | '--(' .*? '--)') -> skip;
 DocComment: '--"' .*? '--"' -> channel(HIDDEN);
 
 // Le retour à la ligne est significatif (fin d'instruction).

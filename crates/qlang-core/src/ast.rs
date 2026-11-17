@@ -335,7 +335,7 @@ impl BinOp {
             BinOp::Sub => "-",
             BinOp::Mul => "*",
             BinOp::Div => "/",
-            BinOp::IntDiv => "div",
+            BinOp::IntDiv => "//",
             BinOp::Mod => "mod",
             BinOp::Pow => "**",
             BinOp::Eq => "==",

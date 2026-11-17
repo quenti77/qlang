@@ -40,7 +40,7 @@ fn exec(src: &str) -> String {
         .unwrap()
 }
 
-const DIVIDE: &str = "fun divide(a: int, b: int) -> Result<int, Error>\n  if b == 0 then\n    return Err(Error { message: \"division by zero\" })\n  end\n  Ok(a div b)\nend\n";
+const DIVIDE: &str = "fun divide(a: int, b: int) -> Result<int, Error>\n  if b == 0 then\n    return Err(Error { message: \"division by zero\" })\n  end\n  Ok(a // b)\nend\n";
 
 #[test]
 fn ok_gives_the_value_and_err_leaves_the_function() {

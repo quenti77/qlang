@@ -170,7 +170,7 @@ fn duplicate_variants_and_fields_are_reported() {
 #[test]
 fn result_is_an_enum_that_match_takes_apart() {
     let out = exec(
-        "fun divide(a: int, b: int) -> Result<int, Error>\n  if b == 0 then\n    return Err(Error { message: \"division by zero\" })\n  end\n  Ok(a div b)\nend\n\nfun show(r: Result<int, Error>) -> string\n  match r\n    case Ok(v) then \"ok {v}\"\n    case Err(e) then \"err {e.message}\"\n  end\nend\nprint(show(divide(10, 2)))\nprint(show(divide(1, 0)))\nprint(divide(10, 2))\nprint(divide(1, 0).is_err())\nprint(Result<int, Error>.Ok(3).is_ok())",
+        "fun divide(a: int, b: int) -> Result<int, Error>\n  if b == 0 then\n    return Err(Error { message: \"division by zero\" })\n  end\n  Ok(a // b)\nend\n\nfun show(r: Result<int, Error>) -> string\n  match r\n    case Ok(v) then \"ok {v}\"\n    case Err(e) then \"err {e.message}\"\n  end\nend\nprint(show(divide(10, 2)))\nprint(show(divide(1, 0)))\nprint(divide(10, 2))\nprint(divide(1, 0).is_err())\nprint(Result<int, Error>.Ok(3).is_ok())",
     );
     assert!(
         out.starts_with("ok 5\nerr division by zero\nResult.Ok(5)\ntrue\n"),

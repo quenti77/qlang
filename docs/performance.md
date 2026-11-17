@@ -76,7 +76,7 @@ Mesuré contre la version 0.34.0, sur les mêmes programmes de `benches/` (meill
   de 64 bits, intervalle exclusif et inclusif en deux variantes, énumération avec ses numéros en
   32 bits et ses données derrière un pointeur simple). Elles sont copiées à chaque retour de
   `eval`.
-- **Entiers** : `+ - * div mod < <= > >= == !=` entre deux `int` (sans dépassement ni division par
+- **Entiers** : `+ - * // mod < <= > >= == !=` entre deux `int` (sans dépassement ni division par
   zéro) sont calculés sur place, sans passer par `binary` ; c'est le plus gros gain de la boucle.
   Les erreurs (`R010`, `R011`) sont toujours construites par le chemin général.
 - Un appel réserve d'emblée la place des paramètres de sa portée.
@@ -174,7 +174,7 @@ des registres au début de la fonction ou de la boucle ; une comparaison suivie 
 (`while i < n`, `if a == b`, `for`) est une seule instruction (`JnLtI`, `ForCheck`...) ; les pas
 d'évaluation ne sont plus comptés à chaque instruction mais à chaque tour de boucle et à chaque
 appel, ce qui borne tout aussi bien une boucle infinie ou une récursion sans fin. Ce qui reste
-est surtout le coût de la division (`mod`, `div`) et de l'aiguillage des instructions.
+est surtout le coût de la division (`mod`, `//`) et de l'aiguillage des instructions.
 
 **Ce qui est garanti.** Les deux moteurs donnent le même résultat : mêmes sorties, mêmes erreurs
 (`R010` dépassement, `R011` division par zéro, `R013`, `R014`, `R031`...), mêmes lignes et mêmes

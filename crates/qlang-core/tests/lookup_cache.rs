@@ -78,9 +78,9 @@ fn match_cases_bind_in_their_own_scope() {
 fn integer_fast_paths_keep_the_errors() {
     assert!(exec("print(9223372036854775807 + 1)").contains("R010"));
     assert!(exec("let a = 1\nprint(a mod 0)").contains("R011"));
-    assert!(exec("let a = 1\nprint(a div 0)").contains("R011"));
+    assert!(exec("let a = 1\nprint(a // 0)").contains("R011"));
     assert_eq!(
-        exec("print(7 div 2)\nprint(-7 mod 3)\nprint(2 < 3)\nprint(2 == 2)"),
+        exec("print(7 // 2)\nprint(-7 mod 3)\nprint(2 < 3)\nprint(2 == 2)"),
         "3\n-1\ntrue\ntrue\n"
     );
 }

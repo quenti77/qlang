@@ -121,6 +121,7 @@ fn probe(src: &str) -> Result<Probe, String> {
             if b[i] == b'-' && b.get(i + 1) == Some(&b'-') {
                 let begin = from + i;
                 let end = match b.get(i + 2) {
+                    Some(b'*') => gap[i + 3..].find("--*").map(|p| i + 3 + p + 3),
                     Some(b'(') => gap[i + 3..].find("--)").map(|p| i + 3 + p + 3),
                     Some(b'"') => gap[i + 3..].find("--\"").map(|p| i + 3 + p + 3),
                     _ => gap[i..].find('\n').map(|p| i + p),

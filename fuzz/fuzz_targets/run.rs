@@ -20,6 +20,7 @@ fuzz_target!(|data: &[u8]| {
         max_depth: 64,
         max_output: 1 << 16,
         max_alloc: 1 << 16,
+        leak_at_exit: false,
     };
     let result = program.run(&mut host, limits);
     if let Some(d) = result.error {

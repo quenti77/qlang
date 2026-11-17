@@ -198,7 +198,7 @@ impl Time
 
     --" Whole minutes from this time to `other` on the same day (negative if `other` is earlier). --"
     public fun minutes_until(self, other: Time) -> int
-        (other.to_ms() - self.to_ms()) div 60000
+        (other.to_ms() - self.to_ms()) // 60000
     end
 
     --" The instant at which this time is on `date` (UTC). --"
@@ -283,8 +283,8 @@ impl Zoned
     public fun to_iso(self) -> string
         let off = self.offset_seconds()
         let sign = if off < 0 then "-" else "+" end
-        let a = off.abs() div 60
-        self.wall().format("YYYY-MM-DD[T]HH:mm:ss") + sign + "{a div 60}".pad_left(2, "0") + ":" + "{a % 60}".pad_left(2, "0")
+        let a = off.abs() // 60
+        self.wall().format("YYYY-MM-DD[T]HH:mm:ss") + sign + "{a // 60}".pad_left(2, "0") + ":" + "{a % 60}".pad_left(2, "0")
     end
 
     --" After adding a duration: years, months and days move the wall clock (so a day is a day across a daylight saving

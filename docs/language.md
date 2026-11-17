@@ -126,10 +126,10 @@ AZERTY comme QWERTY.
 -- commentaire sur une ligne
 let x = 1 -- ou en fin de ligne
 
---(
+--*
   commentaire sur
   plusieurs lignes
---)
+--*
 
 --"
   commentaire de documentation
@@ -137,8 +137,13 @@ let x = 1 -- ou en fin de ligne
 ```
 
 - Les commentaires ne s'imbriquent pas.
-- `--` suivi de `(` ou de `"` ouvre toujours un commentaire de bloc ou de
-  documentation, jamais un commentaire de ligne.
+- Déprécié en 1.6 (retiré en 1.8) : l'ancien bloc `--(` … `--)` reste lu, avec
+  l'avertissement `W001`. `qlang migrate` le réécrit en `--*` … `--*`.
+- `--` suivi de `*` ou de `"` ouvre toujours un commentaire de bloc ou de
+  documentation, jamais un commentaire de ligne : `--*****` ouvre donc un bloc.
+  Pour une ligne de séparation, écrire `-- *****` ou `-----`.
+- Un éditeur peut préfixer chaque ligne d'un bloc par `*` ; seul le dernier
+  `--*` le ferme.
 - Attention : `a --b` est un commentaire. Pour soustraire un nombre négatif,
   écrire `a - -b`.
 
@@ -469,7 +474,7 @@ affectation. Une `string` ne se modifie pas sur place : une opération qui la
 
 ### Affectation
 
-`=` et les opérateurs composés `+=` `-=` `*=` `/=` `div=` `mod=` `%=` modifient une variable,
+`=` et les opérateurs composés `+=` `-=` `*=` `/=` `//=` `mod=` `%=` modifient une variable,
 un champ (`a.b = 1`) ou un élément (`a[i] = 1`). L'affectation est une
 expression : `a = b = 0` est valide. `x op= y` signifie `x = x op y`, et le type
 du résultat doit convenir à `x`.
@@ -480,8 +485,8 @@ a[0] = 42
 ```
 
 Attention : `/` donne toujours un `float`. Écrire `n /= 2` pour un `int` est donc
-une erreur ; on écrit `n div= 2` (ou `n = n div 2`). `div=` s'écrit collé, sans
-espace entre `div` et `=` (de même pour `mod=`).
+une erreur ; on écrit `n //= 2` (ou `n = n // 2`). `//=` s'écrit collé, sans
+espace entre `//` et `=` (de même pour `mod=`).
 
 ---
 
@@ -493,7 +498,7 @@ De la plus faible à la plus forte :
 
 | Opérateurs                                | Remarque                                                     |
 | ----------------------------------------- | ------------------------------------------------------------ |
-| `=` `+=` `-=` `*=` `/=` `div=` `mod=` `%=` | affectation, associative à droite                           |
+| `=` `+=` `-=` `*=` `/=` `//=` `mod=` `%=` | affectation, associative à droite                           |
 | `??`                                      | valeur par défaut d'un nullable, associative à droite        |
 | `..` `..=`                                | intervalle, non associatif                                   |
 | `or`                                      |                                                              |
@@ -501,7 +506,7 @@ De la plus faible à la plus forte :
 | `not`                                     | préfixe                                                      |
 | `==` `!=` `<` `<=` `>` `>=`               | non associatif : `a < b < c` est interdit                    |
 | `+` `-`                                   |                                                              |
-| `*` `/` `div` `mod` `%`                   | `%` est un synonyme de `mod`                                 |
+| `*` `/` `//` `mod` `%`                   | `%` est un synonyme de `mod`                                 |
 | `as`                                      | conversion de type                                           |
 | `-x`                                      | négation (préfixe)                                           |
 | `**`                                      | puissance, associative à droite : `-2 ** 2` vaut `-(2 ** 2)` |
@@ -512,14 +517,16 @@ De la plus faible à la plus forte :
 | Expression | Résultat | Remarque                                   |
 | ---------- | -------- | ------------------------------------------ |
 | `7 / 2`    | `3.5`    | `/` donne toujours un `float`              |
-| `7 div 2`  | `3`      | division entière (vers zéro) : `-7 div 2` vaut `-3` |
+| `7 // 2`  | `3`      | division entière (vers zéro) : `-7 // 2` vaut `-3` |
 | `7 mod 2`  | `1`      | reste : du signe du premier nombre         |
 | `2 ** 10`  | `1024`   | deux `int` donnent un `int`                |
 | `2.0 ** 0.5` | `1.414…` | sinon, un `float`                        |
 
-- `div` ne s'applique qu'à deux `int`. `mod` s'applique aussi aux `float`
+- `//` ne s'applique qu'à deux `int`, et coupe vers zéro (`-7 // 2` vaut `-3`), pas vers le bas comme le `//` de
+  Python. `div` est l'ancien nom : déprécié en 1.6 (`W001`), retiré en 1.8 ; `qlang migrate` écrit `//` à sa place.
+  `mod` s'applique aussi aux `float`
   (`5.5 mod 2` vaut `1.5`).
-- Diviser par zéro (`/`, `div`, `mod`) est une erreur d'exécution.
+- Diviser par zéro (`/`, `//`, `mod`) est une erreur d'exécution.
 - Un exposant négatif avec deux `int` est une erreur (`2 ** -1`) : écrire
   `2.0 ** -1.0`.
 - **`int` et `float` se mélangent** pour le calcul et la comparaison : `1 + 2.5`
@@ -541,10 +548,10 @@ quelques milliers ou un total en euros, lents pour des nombres de dizaines de mi
 | `BigInt.of(12)`, `BigInt.parse("123456789012345678901234567890")` | un `BigInt` ; `parse` rend un `Result` (`err` si ce ne sont pas des chiffres, avec un `+` ou `-` facultatif) |
 | `BigInt.pow(2, 200)` | `2 ** 200`, calculé exactement |
 | `a + b`, `a - b`, `a * b`, `a ** n`, `-a` | exacts ; `n` est un `int` |
-| `a div b`, `a % b` | quotient (vers zéro) et reste (du signe de `a`), comme pour les `int` ; diviser par zéro arrête le programme |
-| `a / b` | **n'existe pas** (`T…`) : écrire `div`, ou passer par `BigDecimal` |
+| `a // b`, `a % b` | quotient (vers zéro) et reste (du signe de `a`), comme pour les `int` ; diviser par zéro arrête le programme |
+| `a / b` | **n'existe pas** (`T…`) : écrire `//`, ou passer par `BigDecimal` |
 | `a == b`, `a < b`… | entre deux `BigInt` |
-| `a + 2`, `2 + a`, `a * 3`, `a div 2` | un `int` se mélange avec un `BigInt` (il est converti) ; pour comparer, écrire `a == BigInt.of(2)` |
+| `a + 2`, `2 + a`, `a * 3`, `a // 2` | un `int` se mélange avec un `BigInt` (il est converti) ; pour comparer, écrire `a == BigInt.of(2)` |
 | `a.to_int()` | un `Result<int, Error>` : `err` si le nombre ne tient pas dans un `int` |
 | `"{a}"`, `a as string`, `a.to_string()` | les chiffres |
 | `a.sign()`, `a.abs()`, `a.is_zero()`, `a.divmod(b)` | −1, 0 ou 1 ; valeur absolue ; test ; le couple (quotient, reste) |
@@ -619,13 +626,13 @@ Les opérateurs sont définis par des **traits**. `a + b` est du sucre pour
 | ------------------------ | ---------- | ------------ |
 | `+` `-` `*`              | `Add` `Sub` `Mul` | `add` `sub` `mul` |
 | `/`                      | `Div`      | `divide`     |
-| `div`                    | `IntDiv`   | `int_div`    |
+| `//`                    | `IntDiv`   | `int_div`    |
 | `mod` `%`                | `Mod`      | `modulo`     |
 | `**`                     | `Pow`      | `pow`        |
 | `-x`                     | `Neg`      | `neg`        |
 | `==` `!=`                | `Eq`       | `eq`         |
 | `<` `<=` `>` `>=`        | `Ord`      | `cmp` (renvoie un `int` : négatif, nul ou positif) |
-| `+=` `-=` `*=` `/=` `div=` `mod=` `%=` | les mêmes traits | `a += b` signifie `a = a + b` |
+| `+=` `-=` `*=` `/=` `//=` `mod=` `%=` | les mêmes traits | `a += b` signifie `a = a + b` |
 | `a[i]`                   | `Index<I>` | `index`      |
 | `a[i] = v`               | `IndexSet<I, V>` | `set_index` |
 | `a[] = v`                | `Push<T>`  | `push`       |
@@ -2489,7 +2496,7 @@ print(rendu.weekday())                -- 7 (dimanche)
 
 let fin = datetime.of(2026, 12, 25)
 print(rendu.days_until(fin))          -- 75
-print((fin - rendu) div 3_600_000)    -- les heures qui restent
+print((fin - rendu) // 3_600_000)    -- les heures qui restent
 
 let d = datetime.parse("2026-10-11 14:30")
 if d != none then
@@ -2843,7 +2850,7 @@ fun divide(a: int, b: int) -> Result<int, Error>
   if b == 0 then
     return Err(Error { message: "division by zero" })
   end
-  Ok(a div b)
+  Ok(a // b)
 end
 
 match divide(10, 0)

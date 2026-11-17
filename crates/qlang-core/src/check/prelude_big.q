@@ -3,8 +3,8 @@
 
 --" An integer without limit (an `int` stops at about 9.2e18: past that, the program stops with an overflow).
 Write `BigInt.of(12)`, `BigInt.parse("123456789012345678901234567890")` or `BigInt.pow(2, 200)`; the operators
-`+ - * ** div %` work on two `BigInt`s and between a `BigInt` and an `int` (`BigInt.of(3) + 2`); the
-comparisons `== < >` need two `BigInt`s (`n == BigInt.of(5)`). `/` is not defined on a `BigInt`: use `div` for the whole quotient (cut toward 0, like
+`+ - * ** // %` work on two `BigInt`s and between a `BigInt` and an `int` (`BigInt.of(3) + 2`); the
+comparisons `== < >` need two `BigInt`s (`n == BigInt.of(5)`). `/` is not defined on a `BigInt`: use `//` for the whole quotient (cut toward 0, like
 `int`), or `BigDecimal`. `x as string` and `"{x}"` give the digits. Nothing here is native: it is written in
 qlang, fine for a factorial of a few thousand, slow for much more. --"
 struct BigInt
@@ -97,7 +97,7 @@ fun big_mul_small(a: array<int>, m: int) -> array<int>
     for x in a do
         let cur = x * m + carry
         out.push(cur % 1000000000)
-        carry = cur div 1000000000
+        carry = cur // 1000000000
     end
     if carry > 0 then
         out.push(carry)
@@ -118,13 +118,13 @@ fun big_mul_mag(a: array<int>, b: array<int>) -> array<int>
         for j in 0..b.len() do
             let cur = out[i + j] + a[i] * b[j] + carry
             out[i + j] = cur % 1000000000
-            carry = cur div 1000000000
+            carry = cur // 1000000000
         end
         let k = i + b.len()
         while carry > 0 do
             let cur = out[k] + carry
             out[k] = cur % 1000000000
-            carry = cur div 1000000000
+            carry = cur // 1000000000
             k += 1
         end
     end
@@ -141,7 +141,7 @@ fun big_divmod_small(a: array<int>, d: int) -> (array<int>, int)
     let i = a.len() - 1
     while i >= 0 do
         let cur = rem * 1000000000 + a[i]
-        q[i] = cur div d
+        q[i] = cur // d
         rem = cur % d
         i -= 1
     end
@@ -175,7 +175,7 @@ fun big_divmod_mag(a: array<int>, b: array<int>) -> (array<int>, array<int>)
         let lo = 0
         let hi = 999999999
         while lo < hi do
-            let mid = (lo + hi + 1) div 2
+            let mid = (lo + hi + 1) // 2
             if big_cmp_mag(big_mul_small(b, mid), rem) <= 0 then
                 lo = mid
             else
@@ -207,7 +207,7 @@ impl BigInt
         end
         while v != 0 do
             limbs.push(-(v % 1000000000))
-            v = v div 1000000000
+            v = v // 1000000000
         end
         BigInt { negative: n < 0, limbs: limbs }
     end
@@ -305,7 +305,7 @@ impl BigInt
     end
 
     --" The quotient and the remainder as a pair, the quotient cut toward 0 and the remainder with the sign of
-    `self` (like `div` and `%` of an `int`). Stops the program if `other` is zero. --"
+    `self` (like `//` and `%` of an `int`). Stops the program if `other` is zero. --"
     public fun divmod(self, other: BigInt) -> (BigInt, BigInt)
         if other.limbs.is_empty() then
             panic("division by zero")
@@ -336,7 +336,7 @@ impl BigInt
             if e % 2 == 1 then
                 result = result.times(base)
             end
-            e = e div 2
+            e = e // 2
             if e > 0 then
                 base = base.times(base)
             end
@@ -420,7 +420,7 @@ impl Mul for BigInt
 end
 
 impl IntDiv for BigInt
-    --" The quotient cut toward 0 (`div`). --"
+    --" The quotient cut toward 0 (`//`). --"
     public fun int_div(self, other: BigInt) -> BigInt
         self.quotient(other)
     end
@@ -469,7 +469,7 @@ impl Mul<int> for BigInt
 end
 
 impl IntDiv<int> for BigInt
-    --" The quotient cut toward 0 (`div`). --"
+    --" The quotient cut toward 0 (`//`). --"
     public fun int_div(self, other: int) -> BigInt
         self.quotient(BigInt.of(other))
     end

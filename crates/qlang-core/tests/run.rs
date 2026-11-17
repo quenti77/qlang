@@ -67,7 +67,7 @@ fn err(src: &str) -> String {
 #[test]
 fn arithmetic() {
     assert_eq!(
-        out("print(7 / 2)\nprint(7 div 2)\nprint(7 mod 2)\nprint(-7 div 2)\nprint(-7 mod 2)"),
+        out("print(7 / 2)\nprint(7 // 2)\nprint(7 mod 2)\nprint(-7 // 2)\nprint(-7 mod 2)"),
         "3.5\n3\n1\n-3\n-1\n"
     );
     assert_eq!(
@@ -95,7 +95,7 @@ fn arithmetic() {
 #[test]
 fn arithmetic_errors() {
     assert!(err("print(1 / 0)").starts_with("R011"));
-    assert!(err("print(1 div 0)").starts_with("R011"));
+    assert!(err("print(1 // 0)").starts_with("R011"));
     assert!(err("print(1 mod 0)").starts_with("R011"));
     assert!(err("print(9223372036854775807 + 1)").starts_with("R010"));
     assert!(err("print(2 ** 64)").starts_with("R010"));
@@ -703,7 +703,7 @@ fn prelude_result_and_error_need_no_import() {
          if b == 0 then\n\
          return Result<int, Error>.Err(Error { message: \"division by zero\" })\n\
          end\n\
-         Result<int, Error>.Ok(a div b)\n\
+         Result<int, Error>.Ok(a // b)\n\
          end\n\
          let r = divide(10, 2)\n\
          print(r.is_ok())\n\
@@ -915,7 +915,7 @@ fun divide(a: int, b: int) -> Result<int, Error>
     if b == 0 then
         return Err(Error { message: "division by zero" })
     end
-    Ok(a div b)
+    Ok(a // b)
 end
 
 print(divide(10, 2).unwrap())
@@ -1163,7 +1163,7 @@ fn deep_recursion_within_limits() {
 fn comments() {
     assert_eq!(
         out(
-            "-- one\nprint(1) -- two\n--( block\n comment --)\nprint(2)\n--\" doc --\"\nprint(3)\nlet a = 5 --1\nprint(a)"
+            "-- one\nprint(1) -- two\n--* block\n comment --*\nprint(2)\n--\" doc --\"\nprint(3)\nlet a = 5 --1\nprint(a)"
         ),
         "1\n2\n3\n5\n"
     );
@@ -1766,24 +1766,24 @@ fn for_with_two_variables_errors() {
 #[test]
 fn div_and_mod_assignment() {
     assert_eq!(
-        out("let n = 17\nn div= 5\nprint(n)\nn mod= 2\nprint(n)\nn = 100\nn %= 7\nprint(n)"),
+        out("let n = 17\nn //= 5\nprint(n)\nn mod= 2\nprint(n)\nn = 100\nn %= 7\nprint(n)"),
         "3\n1\n2\n"
     );
     assert_eq!(
         out(
-            "let a = [20]\na[0] div= 3\nprint(a[0])\nlet m = { \"k\": 9 }\nm[\"k\"] mod= 4\nprint(m[\"k\"])"
+            "let a = [20]\na[0] //= 3\nprint(a[0])\nlet m = { \"k\": 9 }\nm[\"k\"] mod= 4\nprint(m[\"k\"])"
         ),
         "6\n1\n"
     );
     assert_eq!(out("let x = 7.5\nx mod= 2\nprint(x)"), "1.5\n");
     // `div ==` and `mod ==` are not compound assignments; spaces keep them apart
     assert_eq!(
-        out("let n = 7\nprint(n div 2 == 3)\nprint(n mod 2 == 1)"),
+        out("let n = 7\nprint(n // 2 == 3)\nprint(n mod 2 == 1)"),
         "true\ntrue\n"
     );
     // the old way still works, and `/=` on an int is still an error
     assert!(err("let n = 8\nn /= 2").starts_with("COMPILE"));
-    assert!(err("let x = 7.5\nx div= 2").starts_with("COMPILE"));
+    assert!(err("let x = 7.5\nx //= 2").starts_with("COMPILE"));
 }
 
 #[test]
@@ -2163,4 +2163,33 @@ fn cyclic_imports_are_matched_through_different_spellings() {
     );
     assert_eq!(o.error, None);
     assert_eq!(o.output, "2\n");
+}
+
+#[test]
+fn the_new_integer_division_and_block_comment_work_like_the_old_ones() {
+    let new = "--*\nnote\n--*\nlet n = 17\nn //= 2\nprint(n)\nprint(-7 // 2)\nprint(7 // 2 * 2 + 7 mod 2)\n";
+    let old = "--(\nnote\n--)\nlet n = 17\nn div= 2\nprint(n)\nprint(-7 div 2)\nprint(7 div 2 * 2 + 7 mod 2)\n";
+    assert_eq!(out(new), "8\n-3\n7\n");
+    assert_eq!(out(old), out(new));
+    assert!(run("--*\nnever closed").error.is_some());
+}
+
+#[test]
+fn the_old_spellings_are_deprecated_warnings() {
+    let mut host = MemoryHost::new();
+    let r = compile("main.q", "--(\nx\n--)\nprint(7 div 2)\n", &mut host);
+    let rendered = match r {
+        Ok(p) => p
+            .warnings
+            .iter()
+            .map(|d| format!("{} {}", d.code, d.message))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(e) => e.render(),
+    };
+    assert!(
+        rendered.contains("W001") && rendered.contains("`div` is deprecated"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("block comment"), "{rendered}");
 }

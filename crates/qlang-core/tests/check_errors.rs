@@ -71,9 +71,9 @@ fn functions() {
 
 #[test]
 fn mixed_numbers_work() {
-    ok("let a = 1 + 2.5\nlet b: float = 7 / 2\nlet c: int = 7 div 2\nlet d: int = 7 mod 2");
+    ok("let a = 1 + 2.5\nlet b: float = 7 / 2\nlet c: int = 7 // 2\nlet d: int = 7 mod 2");
     expect("let c: int = 7 / 2", "expected `int`, found `float`");
-    expect("let c = 7.5 div 2", "cannot apply `div`");
+    expect("let c = 7.5 // 2", "cannot apply `//`");
 }
 
 #[test]

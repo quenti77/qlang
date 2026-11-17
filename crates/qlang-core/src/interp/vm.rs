@@ -165,7 +165,7 @@ enum Op {
     SubI(Reg, Reg, Reg),
     /// `a + imm`, `a - imm` with a small constant.
     AddImm(Reg, Reg, i32),
-    /// `a div k` / `a mod k` for a constant `k > 0` (`Code::divs[idx]`: the constant and the
+    /// `a // k` / `a mod k` for a constant `k > 0` (`Code::divs[idx]`: the constant and the
     /// multiplier that replaces the division).
     DivK(Reg, Reg, u32),
     ModK(Reg, Reg, u32),

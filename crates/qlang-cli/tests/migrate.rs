@@ -70,3 +70,20 @@ fn rules_are_listed() {
     assert_eq!(code, 0);
     assert!(out.contains("0.69: Log.warn -> Log.warning"), "{out}");
 }
+
+#[test]
+fn it_rewrites_div_and_the_old_block_comment() {
+    let old = "--( old\nblock --)\nlet a = 7 div 2\nvar b = 9\nb div= 2\nprint(\"div --( x\")\n-- div in a comment\nprint(a + b)\n";
+    let dir = project("syntax", &[("a.q", old)]);
+    let (out, code) = migrate(&dir, &["--check"]);
+    assert_eq!(code, 1, "{out}");
+    let (out, code) = migrate(&dir, &[]);
+    assert_eq!(code, 0, "{out}");
+    let new = std::fs::read_to_string(dir.join("a.q")).unwrap();
+    assert_eq!(
+        new,
+        "--* old\nblock --*\nlet a = 7 // 2\nvar b = 9\nb //= 2\nprint(\"div --( x\")\n-- div in a comment\nprint(a + b)\n"
+    );
+    let (_, code) = migrate(&dir, &["--check"]);
+    assert_eq!(code, 0);
+}

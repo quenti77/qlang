@@ -41,7 +41,7 @@ const KEYWORDS = {
   and: 'Logical and (both sides must be `bool`).',
   or: 'Logical or (both sides must be `bool`).',
   not: 'Logical not.',
-  div: 'Integer division: `7 div 2` is 3.',
+  div: 'Integer division, deprecated: write `//` (`7 // 2` is 3).',
   mod: 'Remainder: `7 mod 2` is 1.',
   self: 'The value a method is called on.',
   super: 'The parent structure: `super.method()`.',

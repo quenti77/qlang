@@ -2,7 +2,7 @@ fun half(n: int) -> Result<int, Error>
     if n mod 2 == 1 then
         return Err(Error { message: "odd" })
     end
-    Ok(n div 2)
+    Ok(n // 2)
 end
 
 fun twice(n: int) -> Result<int, Error>

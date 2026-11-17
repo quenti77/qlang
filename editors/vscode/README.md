@@ -3,7 +3,7 @@
 Support for the [qlang](https://github.com/quenti77/qlang#readme) language in VS Code (files ending in `.q`).
 
 - **Syntax highlighting**: keywords, types, numbers (`0xFF_FF`, `0b0101`, `1_000`), strings with
-  `{interpolation}`, the three comment forms (`--`, `--( … --)`, `--" … --"`).
+  `{interpolation}`, the three comment forms (`--`, `--* … --*`, `--" … --"`).
 - **Language server** (`qlang lsp`, started by the extension): the real qlang compiler answers.
   - **Errors as you type**, underlined in the editor and listed in the Problems panel; errors
     inside imported modules are shown in those files.

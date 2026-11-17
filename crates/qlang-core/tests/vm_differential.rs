@@ -38,7 +38,7 @@ fn int_expr(rng: &mut Rng, vars: &[&str], depth: usize) -> String {
         0 => format!("({a} + {b})"),
         1 => format!("({a} - {b})"),
         2 => format!("({a} * {b})"),
-        3 => format!("({a} div {b})"),
+        3 => format!("({a} // {b})"),
         4 => format!("({a} mod {b})"),
         5 => format!("(-{a})"),
         6 => format!(
@@ -950,7 +950,7 @@ fn enum_program(rng: &mut Rng) -> String {
     src += "fun mk(k: int) -> Shape\n  match k mod 4\n    case 0 then Shape.Circle(k)\n    case 1 then Shape.Rect(k mod 5, 2)\n    case 2 then Shape.Named(\"m{k}\", 1)\n    else Shape.Empty\n  end\nend\n";
     src += "fun area(s: Shape) -> int\n  match s\n    case Circle(r) then r * 3\n    case Rect(w, h) then w * h\n    case Empty then 0\n    case Named(name, k) then name.len() + k\n  end\nend\n";
     src += "fun color(k: int) -> Color\n  match k mod 3\n    case 0 then Color.Red\n    case 1 then Color.Green\n    else Color.Blue\n  end\nend\n";
-    src += "fun halve(n: int) -> Result<int, Error>\n  if n mod 2 == 1 then\n    return Err(Error { message: \"odd {n}\" })\n  end\n  Ok(n div 2)\nend\n";
+    src += "fun halve(n: int) -> Result<int, Error>\n  if n mod 2 == 1 then\n    return Err(Error { message: \"odd {n}\" })\n  end\n  Ok(n // 2)\nend\n";
     src += "fun chain(n: int) -> Result<int, Error>\n  let a = halve(n)?\n  let b = halve(a)?\n  Ok(a + b)\nend\n";
     src += "fun opt(n: int) -> int?\n  if n mod 3 == 0 then none else n end\nend\n";
     src += "fun optchain(n: int) -> int?\n  let a = opt(n)?\n  let b = opt(a + 1)?\n  a + b\nend\n";
@@ -1045,7 +1045,7 @@ fn tuple_stmts(rng: &mut Rng, depth: usize) -> String {
 
 fn tuple_program(rng: &mut Rng) -> String {
     let mut src = String::new();
-    src += "fun divmod(a: int, b: int) -> (int, int)\n  (a div b, a mod b)\nend\n";
+    src += "fun divmod(a: int, b: int) -> (int, int)\n  (a // b, a mod b)\nend\n";
     src += &format!(
         "fun work(n: int) -> int\n  let acc = 0\n  let n = n\n  let t = (1, 2)\n  let u = (\"a\", 1, 1.0)\n  let w = (t, true)\n{}  acc + n + t.0 + t.1\nend\n",
         tuple_stmts(rng, 2)

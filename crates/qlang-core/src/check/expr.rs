@@ -1326,7 +1326,7 @@ impl Checker {
                 let hint = if matches!(lt, Ty::Nullable(_)) || matches!(rt, Ty::Nullable(_)) {
                     " (a value may be `none`: check `!= none` first)"
                 } else if matches!(op, BinOp::IntDiv) {
-                    " (`div` is for integers; use `/` for decimals)"
+                    " (`//` is for integers; use `/` for decimals)"
                 } else {
                     ""
                 };

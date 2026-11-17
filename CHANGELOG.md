@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.6.1
+
+Un correctif. Aucun changement du langage ni cassant.
+
+- **Correction : un paramètre ou une variable nommé `read` masque l'invite `read(question)`** (#302). Depuis la 1.4, le parseur réécrivait tout `read(x)` en appel de l'invite, même dans une fonction dont `read` était un paramètre (`fun load(read: fun(string) -> string?)`) : le programme lisait l'entrée standard au lieu d'appeler le paramètre (`R050: no more input to read`). Le nom déclaré dans la fonction, ou dans une de celles qui l'entourent, gagne ; sans lui, `read("Nom ? ")` reste l'invite. La portée est celle de la fonction, pas du bloc.
+
 ## 1.6.0
 
 Deux changements de syntaxe, annoncés ici et retirés en 1.8 (#299) : `//` remplace `div`, `--*` remplace `--(` … `--)`. Les anciennes formes marchent encore et donnent l'avertissement `W001`.

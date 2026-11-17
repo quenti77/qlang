@@ -3118,8 +3118,14 @@ impl Gen<'_> {
                 _ => {
                     self.stmt(s)?;
                     if last && dst.is_some() {
-                        // a block that must give a value ended with something that gives none
-                        return None;
+                        // a block that must give a value ended with something that gives none,
+                        // unless it leaves the function: its value is never read
+                        match (&s.kind, want) {
+                            (StmtKind::Return(Some(_)), Some(w)) if !self.loop_mode => {
+                                ty = w.clone();
+                            }
+                            _ => return None,
+                        }
                     }
                 }
             }

@@ -648,3 +648,19 @@ fn a_loop_that_ends_with_its_own_test_still_hits_the_step_limit() {
     assert!(used.0 >= 1, "{vm}");
     assert!(vm.contains("R900"), "{vm}");
 }
+
+#[test]
+fn a_function_ending_with_return_is_compiled() {
+    assert_eq!(
+        same(
+            "fun fib(n: int) -> int\n  if n < 2 then return n end\n  return fib(n - 1) + fib(n - 2)\nend\nprint(fib(20))"
+        ),
+        "6765\n"
+    );
+    assert_eq!(
+        same(
+            "fun f(x: float) -> float\n  if x < 0.0 then return 0.0 end\n  return x * 2.0\nend\nprint(f(-1.0))\nprint(f(1.5))"
+        ),
+        "0.0\n3.0\n"
+    );
+}

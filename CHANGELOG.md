@@ -2,6 +2,25 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.6.0
+
+Deux changements de syntaxe, annoncés ici et retirés en 1.8 (#299) : `//` remplace `div`, `--*` remplace `--(` … `--)`. Les anciennes formes marchent encore et donnent l'avertissement `W001`.
+
+### Cassant
+
+- **Une ligne qui commence par `--*` ouvre maintenant un bloc de commentaire.** Avant, `--*****` ou `--* titre` était un commentaire de ligne ; le bloc court maintenant jusqu'au prochain `--*`. S'adapter : écrire `-- *****` ou `-----` pour une ligne de séparation (voir [docs/migration.md](docs/migration.md)).
+
+### Déprécié
+
+- **`div` et `div=`** (retirés en 1.8) : écrire `//` et `//=`. Le résultat est le même : la division entière coupe vers zéro (`-7 // 2` vaut `-3`), elle n'arrondit pas vers le bas comme le `//` de Python. Une fois `div` retiré, ce n'est plus un mot réservé : un nom de variable, de fonction, de méthode ou de champ.
+- **Le commentaire de bloc `--(` … `--)`** (retiré en 1.8) : écrire `--*` … `--*`, le même marqueur ouvre et ferme, comme `--"` pour la documentation. Un éditeur peut préfixer chaque ligne du bloc par `*`.
+
+### Autres changements
+
+- **`qlang migrate` réécrit les deux** (non cassant) : `div` en `//`, `div=` en `//=` et les anciens blocs en `--*` … `--*`. Il vérifie que le résultat a les mêmes jetons ; `qlang migrate --check` liste ce qui changerait (code 1, pour la CI).
+- **La grammaire VS Code, `qlang.g4` et le formateur** connaissent les deux écritures. La suite de conformité (`conformance.ref` : `v1.6.0`), `qlang-std`, `qlang-kit` et `qlang-test` utilisent déjà les nouvelles.
+- **Correction** : la cible de fuzz `run` ne compilait plus depuis le champ `Limits::leak_at_exit` de la 1.5.
+
 ## 1.5.0
 
 Une version de performances : la machine à registres compile et exécute plus de programmes, et plusieurs chemins chauds (variables, maps, tableaux, champs de struct, appels de fermetures) sont plus rapides. Aucun changement du langage ni de son comportement, aucun changement cassant pour les programmes qlang.

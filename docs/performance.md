@@ -184,8 +184,16 @@ complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` s
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées. Avec `QLANG_VM_DUMP=1`, le programme affiche sur la sortie d'erreur les instructions de chaque fonction et boucle compilée.
 
 **Ce qui reste.** Les fermetures, les structures génériques et les valeurs de types plus rares
-(identifiants, dates, tuples) ne sont pas compilés. Une étape suivante, hors du navigateur, serait de produire du code machine à partir de ces mêmes
-instructions (un JIT natif).
+(identifiants, dates, tuples) ne sont pas compilés.
+
+**Code natif (JIT, fonctionnalité `jit` de `qlang-core`, activée dans `qlang`, pas dans le navigateur).**
+Une fonction qui ne fait que de l'arithmétique, des comparaisons, des sauts et des appels de
+fonctions du même genre est traduite en code machine (Cranelift) après 300 appels. Elle n'a aucun
+effet sur l'extérieur : au moindre dépassement, division par zéro ou limite (`R900`, `R901`), le
+code natif s'arrête et la machine rejoue l'appel depuis le début, donc les erreurs, les lignes et
+les piles d'appels sont ceux de la machine. `QLANG_NO_JIT=1` désactive le JIT, `QLANG_JIT_HOT=n`
+change le seuil de 300 appels (les tests le mettent à 1). `tests/jit_cases.rs` vérifie les cas
+d'erreur.
 
 ## Ce qui reste (avant la machine à registres)
 

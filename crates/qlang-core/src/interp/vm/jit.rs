@@ -52,10 +52,41 @@ extern "C" fn poll(ctx: *mut Ctx) -> i64 {
     i64::from(crate::host::memory_exceeded() || crate::host::cancelled() || late)
 }
 
+/// `a ** b` for integers: `0` and the flag of the context raised when it overflows or `b < 0`.
+extern "C" fn pow_i(ctx: *mut Ctx, a: i64, b: i64) -> i64 {
+    match u32::try_from(b).ok().and_then(|e| a.checked_pow(e)) {
+        Some(v) => v,
+        None => {
+            // SAFETY: the pointer is the `Ctx` that the machine made for this run.
+            unsafe { (*ctx).bail = 1 };
+            0
+        }
+    }
+}
+
+extern "C" fn pow_f(a: f64, b: f64) -> f64 {
+    a.powf(b)
+}
+
+extern "C" fn rem_f(a: f64, b: f64) -> f64 {
+    a % b
+}
+
+// Rust's `min` and `max` ignore a NaN, Cranelift's do not: the same functions as the machine's.
+extern "C" fn min_f(a: f64, b: f64) -> f64 {
+    a.min(b)
+}
+
+extern "C" fn max_f(a: f64, b: f64) -> f64 {
+    a.max(b)
+}
+
 pub(in crate::interp) struct Jit {
     module: JITModule,
     fb: FunctionBuilderContext,
     poll: FuncId,
+    /// `pow_i`, `pow_f`, `rem_f`, `min_f`, `max_f`
+    helpers: [FuncId; 5],
     ids: HashMap<u32, FuncId>,
 }
 
@@ -84,6 +115,11 @@ impl Jit {
             .ok()?;
         let mut jb = JITBuilder::with_isa(isa, default_libcall_names());
         jb.symbol("qlang_jit_poll", poll as *const u8);
+        jb.symbol("qlang_jit_pow_i", pow_i as *const u8);
+        jb.symbol("qlang_jit_pow_f", pow_f as *const u8);
+        jb.symbol("qlang_jit_rem_f", rem_f as *const u8);
+        jb.symbol("qlang_jit_min_f", min_f as *const u8);
+        jb.symbol("qlang_jit_max_f", max_f as *const u8);
         let mut module = JITModule::new(jb);
         let mut sig = module.make_signature();
         sig.params.push(AbiParam::new(types::I64));
@@ -91,10 +127,31 @@ impl Jit {
         let poll = module
             .declare_function("qlang_jit_poll", Linkage::Import, &sig)
             .ok()?;
+        let mut ff = module.make_signature();
+        for _ in 0..2 {
+            ff.params.push(AbiParam::new(types::F64));
+        }
+        ff.returns.push(AbiParam::new(types::F64));
+        let mut ii = module.make_signature();
+        for _ in 0..3 {
+            ii.params.push(AbiParam::new(types::I64));
+        }
+        ii.returns.push(AbiParam::new(types::I64));
+        let mut decl = |name: &str, sig: &ir::Signature| {
+            module.declare_function(name, Linkage::Import, sig).ok()
+        };
+        let helpers = [
+            decl("qlang_jit_pow_i", &ii)?,
+            decl("qlang_jit_pow_f", &ff)?,
+            decl("qlang_jit_rem_f", &ff)?,
+            decl("qlang_jit_min_f", &ff)?,
+            decl("qlang_jit_max_f", &ff)?,
+        ];
         Some(Jit {
             module,
             fb: FunctionBuilderContext::new(),
             poll,
+            helpers,
             ids: HashMap::new(),
         })
     }
@@ -194,6 +251,9 @@ impl Jit {
         {
             let mut b = FunctionBuilder::new(&mut cx.func, &mut self.fb);
             let poll = self.module.declare_func_in_func(self.poll, b.func);
+            let helpers = self
+                .helpers
+                .map(|h| self.module.declare_func_in_func(h, b.func));
             let entry = b.create_block();
             b.append_block_params_for_function_params(entry);
             b.switch_to_block(entry);
@@ -214,6 +274,7 @@ impl Jit {
                 ctx: ps[0],
                 bail,
                 poll,
+                helpers,
                 vars,
                 module: &mut self.module,
                 ids: &self.ids,
@@ -268,6 +329,13 @@ fn scan(code: &Code) -> Option<Vec<u32>> {
             | Op::AbsF(..)
             | Op::MinI(..)
             | Op::MaxI(..)
+            | Op::MinF(..)
+            | Op::MaxF(..)
+            | Op::PowI(..)
+            | Op::PowF(..)
+            | Op::ModF(..)
+            | Op::SqrtI(..)
+            | Op::SqrtF(..)
             | Op::ForLoop { .. }
             | Op::ForCheck { .. }
             | Op::StepCheck(_)
@@ -321,6 +389,7 @@ struct Em<'a, 'b> {
     ctx: ir::Value,
     bail: Block,
     poll: ir::FuncRef,
+    helpers: [ir::FuncRef; 5],
     vars: Vec<Variable>,
     module: &'a mut JITModule,
     ids: &'a HashMap<u32, FuncId>,
@@ -587,6 +656,53 @@ impl Em<'_, '_> {
                     self.bail_if(bad);
                     let v = self.b.ins().fcvt_to_sint_sat(types::I64, f);
                     self.set(d, v);
+                }
+                Op::PowI(d, a, b) => {
+                    let (x, y) = (self.get(a), self.get(b));
+                    let call = self.b.ins().call(self.helpers[0], &[self.ctx, x, y]);
+                    let v = self.b.inst_results(call)[0];
+                    let flag =
+                        self.b
+                            .ins()
+                            .load(types::I64, MemFlagsData::trusted(), self.ctx, BAIL);
+                    self.bail_if(flag);
+                    self.set(d, v);
+                }
+                Op::PowF(d, a, b) | Op::MinF(d, a, b) | Op::MaxF(d, a, b) => {
+                    let h = match op {
+                        Op::PowF(..) => 1,
+                        Op::MinF(..) => 3,
+                        _ => 4,
+                    };
+                    let (x, y) = (self.fget(a), self.fget(b));
+                    let call = self.b.ins().call(self.helpers[h], &[x, y]);
+                    let v = self.b.inst_results(call)[0];
+                    self.fset(d, v);
+                }
+                Op::ModF(d, a, b) => {
+                    let (x, y) = (self.fget(a), self.fget(b));
+                    let z = self.b.ins().f64const(0.0);
+                    let zero = self.b.ins().fcmp(FloatCC::Equal, y, z);
+                    self.bail_if(zero);
+                    let call = self.b.ins().call(self.helpers[2], &[x, y]);
+                    let v = self.b.inst_results(call)[0];
+                    self.fset(d, v);
+                }
+                Op::SqrtI(d, a) => {
+                    let x = self.get(a);
+                    let neg = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, x, 0);
+                    self.bail_if(neg);
+                    let f = self.b.ins().fcvt_from_sint(types::F64, x);
+                    let v = self.b.ins().sqrt(f);
+                    self.fset(d, v);
+                }
+                Op::SqrtF(d, a) => {
+                    let x = self.fget(a);
+                    let z = self.b.ins().f64const(0.0);
+                    let neg = self.b.ins().fcmp(FloatCC::LessThan, x, z);
+                    self.bail_if(neg);
+                    let v = self.b.ins().sqrt(x);
+                    self.fset(d, v);
                 }
                 Op::AbsF(d, a) => {
                     let f = self.fget(a);

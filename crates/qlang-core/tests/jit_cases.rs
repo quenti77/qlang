@@ -113,3 +113,27 @@ fn a_float_division_by_zero_in_native_code_is_reported() {
     );
     assert!(out.contains("R011"), "{out}");
 }
+
+#[test]
+fn powers_roots_min_max_and_float_modulo_agree() {
+    let out = same(
+        "fun a(x: int, y: int) -> int\n  (x ** y).min(1000000) + x.max(y)\nend\nfun b(x: float, y: float) -> float\n  x.sqrt() + (x ** y) + x.min(y) + x.max(y) + x mod y\nend\nlet t = 0\nlet u = 0.0\nfor i in 0..1000 do\n  t += a(i mod 7, i mod 5)\n  u += b(i * 1.0, 1.5 + i mod 3)\nend\nprint(t)\nprint(u)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_power_overflow_a_negative_exponent_and_a_root_of_a_negative_are_reported() {
+    let o = same(
+        "fun p(a: int, b: int) -> int\n  a ** b\nend\nlet t = 0\nfor i in 0..1000 do\n  t += p(3, i mod 41)\nend\nprint(t)",
+    );
+    assert!(o.contains("R010"), "{o}");
+    let o = same(
+        "fun p(a: int, b: int) -> int\n  a ** b\nend\nlet t = 0\nfor i in 0..1000 do\n  t += p(2, 5 - i)\nend\nprint(t)",
+    );
+    assert!(o.contains("R012"), "{o}");
+    let o = same(
+        "fun r(x: float) -> float\n  x.sqrt()\nend\nlet t = 0.0\nfor i in 0..1000 do\n  t += r(500.0 - i)\nend\nprint(t)",
+    );
+    assert!(o.contains("R014"), "{o}");
+}

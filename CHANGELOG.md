@@ -2,6 +2,19 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.7.0
+
+Une version de performances : les fonctions et les boucles qui ne calculent qu'avec des nombres sont compilées en code natif (Cranelift). Aucun changement du langage, aucun changement cassant : les résultats, les erreurs (code, ligne, pile) et les limites (`R900`, `R901`, `R903`) sont les mêmes qu'avec la machine à registres, ce que vérifient les tests de comparaison entre le parcours d'arbre, la machine et le code natif.
+
+- **Les fonctions numériques chaudes sont compilées en code natif** (non cassant). Une fonction qui ne manipule que des `int`, des `float` et des `bool` (et celles qu'elle appelle) est compilée après 300 appels : `fib(35)` passe de 0,47 s à 0,08 s (×5,8). Une erreur dans le code natif (dépassement, division par zéro, profondeur) rejoue l'appel dans la machine, qui produit l'erreur habituelle.
+- **Les boucles chaudes sont compilées en cours d'exécution** (non cassant), à la racine du programme comme dans une fonction : Collatz sur un million de nombres 1,82 s → 0,39 s (×4,7), Mandelbrot 0,296 s → 0,055 s (×5). En cas d'erreur, la machine reprend à l'instruction fautive.
+- **Les puissances, `sqrt`, `min`, `max` et le modulo flottant** sont compilés.
+- **Les tableaux de nombres sont lus et écrits sur place** (non cassant) dans les boucles sans `push` (×1,7) ; `push` passe par une fonction d'aide qui respecte la limite mémoire (`R903`).
+- **Les registres qui ne contiennent que des flottants restent en `f64`** (non cassant), sans conversion à chaque instruction.
+- **Réglages** : `QLANG_NO_JIT=1` désactive le code natif, `QLANG_JIT_HOT=n` change le seuil (300 par défaut). Voir [docs/performance.md](docs/performance.md). Le code natif est une fonctionnalité Cargo (`jit`), activée dans `qlang-cli` et absente de `qlang-wasm` ; le binaire grossit d'environ 6 Mo.
+- **Pas encore natif** : les structures, les textes, les maps, les fermetures et les tuples tournent toujours sur la machine à registres (même vitesse qu'en 1.6).
+- **CI** : le workflow `jit.yml` compile `qlang` pour les cinq cibles de publication avec le code natif, et la suite du noyau tourne aussi avec le seuil à 1 (`QLANG_JIT_HOT=1`).
+
 ## 1.6.1
 
 Un correctif. Aucun changement du langage ni cassant.

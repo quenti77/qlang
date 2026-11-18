@@ -663,6 +663,10 @@ struct Interp<'a> {
     /// those that were compiled, and the registers of the call in progress.
     vm_state: Vec<vm::VmState>,
     vm_codes: Vec<Rc<vm::Code>>,
+    #[cfg(feature = "jit")]
+    vm_jit: Option<Box<vm::jit::Jit>>,
+    #[cfg(feature = "jit")]
+    vm_jit_tried: bool,
     vm_stack: Vec<i64>,
     vm_enabled: bool,
     /// Record the statements that run (`qlang test --coverage`); the register machine is then off.
@@ -740,6 +744,10 @@ impl<'a> Interp<'a> {
             cmp_depth: 0,
             vm_state: Vec::new(),
             vm_codes: Vec::new(),
+            #[cfg(feature = "jit")]
+            vm_jit: None,
+            #[cfg(feature = "jit")]
+            vm_jit_tried: false,
             vm_stack: Vec::new(),
             vm_enabled: !crate::coverage::enabled() && !dbg_on,
             coverage: crate::coverage::enabled(),

@@ -406,17 +406,24 @@ impl Jit {
             b.append_block_params_for_function_params(entry);
             b.switch_to_block(entry);
             let ps = b.block_params(entry).to_vec();
-            let vars: Vec<Variable> = (0..code.nregs).map(|_| b.declare_var(types::I64)).collect();
+            let is_f = float_registers(code, codes);
+            let ty_of = |r: usize| if is_f[r] { types::F64 } else { types::I64 };
+            let vars: Vec<Variable> = (0..code.nregs).map(|r| b.declare_var(ty_of(r))).collect();
             let em_vars = vars.clone();
-            let zero = b.ins().iconst(types::I64, 0);
             for (r, v) in vars.iter().enumerate() {
                 let init = if osr {
                     b.ins()
-                        .load(types::I64, MemFlagsData::trusted(), ps[1], (r * 8) as i32)
+                        .load(ty_of(r), MemFlagsData::trusted(), ps[1], (r * 8) as i32)
                 } else if r < code.param_tys.len() {
-                    ps[r + 1]
+                    if is_f[r] {
+                        b.ins().bitcast(types::F64, MemFlagsData::new(), ps[r + 1])
+                    } else {
+                        ps[r + 1]
+                    }
+                } else if is_f[r] {
+                    b.ins().f64const(0.0)
                 } else {
-                    zero
+                    b.ins().iconst(types::I64, 0)
                 };
                 b.def_var(*v, init);
             }
@@ -443,6 +450,7 @@ impl Jit {
                 poll,
                 helpers,
                 vars,
+                is_f,
                 module: &mut self.module,
                 ids: &self.ids,
                 codes,
@@ -475,6 +483,177 @@ impl Jit {
         self.module.clear_context(&mut cx);
         Some(())
     }
+}
+
+/// Which registers hold only floats: they are kept as `f64` in native code, without a move
+/// between the two kinds of registers at each instruction. A register used both ways (or one
+/// nothing tells about) stays an integer; the access functions convert where the two meet, so
+/// a wrong guess costs a move, never a wrong result.
+fn float_registers(code: &Code, codes: &[Rc<Code>]) -> Vec<bool> {
+    let n = code.nregs;
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        let mut c = x;
+        while p[c] != r {
+            let next = p[c];
+            p[c] = r;
+            c = next;
+        }
+        r
+    }
+    let (mut fl, mut it) = (vec![false; n], vec![false; n]);
+    for (k, t) in code.param_tys.iter().enumerate().take(n) {
+        if *t == Ty::Float {
+            fl[k] = true;
+        } else {
+            it[k] = true;
+        }
+    }
+    let mut moves = Vec::new();
+    {
+        let mut f = |rs: &[Reg]| rs.iter().for_each(|r| fl[usize::from(*r)] = true);
+        let mut i = |rs: &[Reg]| rs.iter().for_each(|r| it[usize::from(*r)] = true);
+        for op in &code.ops {
+            match *op {
+                Op::ConstI(..) => {}
+                Op::Mov(d, a) => moves.push((usize::from(d), usize::from(a))),
+                Op::AddF(d, a, b)
+                | Op::SubF(d, a, b)
+                | Op::MulF(d, a, b)
+                | Op::DivF(d, a, b)
+                | Op::ModF(d, a, b)
+                | Op::PowF(d, a, b)
+                | Op::MinF(d, a, b)
+                | Op::MaxF(d, a, b) => f(&[d, a, b]),
+                Op::NegF(d, a) | Op::AbsF(d, a) | Op::SqrtF(d, a) => f(&[d, a]),
+                Op::SqrtI(d, a) | Op::ItoF(d, a) => {
+                    f(&[d]);
+                    i(&[a]);
+                }
+                Op::FtoI(d, a) => {
+                    i(&[d]);
+                    f(&[a]);
+                }
+                Op::DivII(d, a, b) => {
+                    f(&[d]);
+                    i(&[a, b]);
+                }
+                Op::LtF(d, a, b)
+                | Op::LeF(d, a, b)
+                | Op::GtF(d, a, b)
+                | Op::GeF(d, a, b)
+                | Op::EqF(d, a, b)
+                | Op::NeF(d, a, b) => {
+                    i(&[d]);
+                    f(&[a, b]);
+                }
+                Op::JnF { a, b, .. } => f(&[a, b]),
+                Op::ALoad { dst, idx, ety, .. } => {
+                    i(&[idx]);
+                    if ety == Ety::F { f(&[dst]) } else { i(&[dst]) }
+                }
+                Op::ForArr { dst, idx, ety, .. } => {
+                    i(&[idx]);
+                    if ety == Ety::F { f(&[dst]) } else { i(&[dst]) }
+                }
+                Op::AStore { idx, src, ety, .. } => {
+                    i(&[idx]);
+                    if ety == Ety::F { f(&[src]) } else { i(&[src]) }
+                }
+                Op::APush { src, ety, .. } => {
+                    if ety == Ety::F {
+                        f(&[src])
+                    } else {
+                        i(&[src])
+                    }
+                }
+                Op::ACheck { idx, .. } => i(&[idx]),
+                Op::ALen(d, _) => i(&[d]),
+                Op::Call { code: t, base, dst } => {
+                    let callee = &codes[t as usize];
+                    for (k, ty) in callee.param_tys.iter().enumerate() {
+                        let r = base + k as Reg;
+                        if *ty == Ty::Float { f(&[r]) } else { i(&[r]) }
+                    }
+                    if callee.ret == Ty::Float {
+                        f(&[dst])
+                    } else {
+                        i(&[dst])
+                    }
+                }
+                Op::Ret(a) => {
+                    if code.ret == Ty::Float {
+                        f(&[a])
+                    } else {
+                        i(&[a])
+                    }
+                }
+                Op::AddI(d, a, b)
+                | Op::SubI(d, a, b)
+                | Op::MulI(d, a, b)
+                | Op::IntDivI(d, a, b)
+                | Op::ModI(d, a, b)
+                | Op::PowI(d, a, b)
+                | Op::MinI(d, a, b)
+                | Op::MaxI(d, a, b)
+                | Op::LtI(d, a, b)
+                | Op::LeI(d, a, b)
+                | Op::GtI(d, a, b)
+                | Op::GeI(d, a, b)
+                | Op::EqI(d, a, b)
+                | Op::NeI(d, a, b) => i(&[d, a, b]),
+                Op::NegI(d, a)
+                | Op::AbsI(d, a)
+                | Op::Not(d, a)
+                | Op::AddImm(d, a, _)
+                | Op::SubImm(d, a, _)
+                | Op::DivK(d, a, _)
+                | Op::ModK(d, a, _) => i(&[d, a]),
+                Op::JnLtI(a, b, _)
+                | Op::JnLeI(a, b, _)
+                | Op::JnGtI(a, b, _)
+                | Op::JnGeI(a, b, _)
+                | Op::JnEqI(a, b, _)
+                | Op::JnNeI(a, b, _) => i(&[a, b]),
+                Op::JnLtImm(a, ..)
+                | Op::JnLeImm(a, ..)
+                | Op::JnGtImm(a, ..)
+                | Op::JnGeImm(a, ..)
+                | Op::JnEqImm(a, ..)
+                | Op::JnNeImm(a, ..)
+                | Op::JBackImm { a, .. }
+                | Op::StepCheck(a)
+                | Op::JmpF(a, _)
+                | Op::JmpT(a, _)
+                | Op::IncI(a) => i(&[a]),
+                Op::JBack { a, b, .. } => i(&[a, b]),
+                Op::ForLoop { cnt, lim, step, .. } | Op::ForCheck { cnt, lim, step, .. } => {
+                    i(&[cnt, lim, step]);
+                }
+                _ => {}
+            }
+        }
+    }
+    for (d, a) in moves {
+        let (x, y) = (find(&mut parent, d), find(&mut parent, a));
+        parent[x] = y;
+    }
+    let (mut cf, mut ci) = (vec![false; n], vec![false; n]);
+    for r in 0..n {
+        let root = find(&mut parent, r);
+        cf[root] |= fl[r];
+        ci[root] |= it[r];
+    }
+    (0..n)
+        .map(|r| {
+            let root = find(&mut parent, r);
+            cf[root] && !ci[root]
+        })
+        .collect()
 }
 
 /// The most arrays a loop reads in place.
@@ -613,6 +792,8 @@ struct Em<'a, 'b> {
     poll: ir::FuncRef,
     helpers: [ir::FuncRef; HELPERS],
     vars: Vec<Variable>,
+    /// The registers kept as `f64`.
+    is_f: Vec<bool>,
     module: &'a mut JITModule,
     ids: &'a HashMap<u32, FuncId>,
     codes: &'a [Rc<Code>],
@@ -625,22 +806,41 @@ struct Em<'a, 'b> {
 }
 
 impl Em<'_, '_> {
+    /// The register as an integer (the bits of a float).
     fn get(&mut self, r: Reg) -> ir::Value {
-        self.b.use_var(self.vars[r as usize])
+        let v = self.b.use_var(self.vars[r as usize]);
+        if self.is_f[usize::from(r)] {
+            self.b.ins().bitcast(types::I64, MemFlagsData::new(), v)
+        } else {
+            v
+        }
     }
 
     fn set(&mut self, r: Reg, v: ir::Value) {
+        let v = if self.is_f[usize::from(r)] {
+            self.b.ins().bitcast(types::F64, MemFlagsData::new(), v)
+        } else {
+            v
+        };
         self.b.def_var(self.vars[r as usize], v);
     }
 
     fn fget(&mut self, r: Reg) -> ir::Value {
-        let v = self.get(r);
-        self.b.ins().bitcast(types::F64, MemFlagsData::new(), v)
+        let v = self.b.use_var(self.vars[r as usize]);
+        if self.is_f[usize::from(r)] {
+            v
+        } else {
+            self.b.ins().bitcast(types::F64, MemFlagsData::new(), v)
+        }
     }
 
     fn fset(&mut self, r: Reg, v: ir::Value) {
-        let v = self.b.ins().bitcast(types::I64, MemFlagsData::new(), v);
-        self.set(r, v);
+        let v = if self.is_f[usize::from(r)] {
+            v
+        } else {
+            self.b.ins().bitcast(types::I64, MemFlagsData::new(), v)
+        };
+        self.b.def_var(self.vars[r as usize], v);
     }
 
     fn bset(&mut self, r: Reg, c: ir::Value) {
@@ -902,9 +1102,17 @@ impl Em<'_, '_> {
             let next = blocks[i + 1];
             let tgt = |t: u32| blocks[t as usize].unwrap();
             match *op {
+                Op::ConstI(d, v) if self.is_f[usize::from(d)] => {
+                    let x = self.b.ins().f64const(f64::from_bits(v as u64));
+                    self.b.def_var(self.vars[usize::from(d)], x);
+                }
                 Op::ConstI(d, v) => {
                     let v = self.imm(v);
                     self.set(d, v);
+                }
+                Op::Mov(d, a) if self.is_f[usize::from(d)] && self.is_f[usize::from(a)] => {
+                    let v = self.b.use_var(self.vars[usize::from(a)]);
+                    self.b.def_var(self.vars[usize::from(d)], v);
                 }
                 Op::Mov(d, a) => {
                     let v = self.get(a);

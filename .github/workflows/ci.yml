@@ -45,6 +45,12 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo build --release --workspace
       - run: cargo test --release --workspace
+      # every program of the suite goes through the native code (a function or a loop is hot at
+      # its first call): the three engines must still agree
+      - name: Core tests with the JIT hot from the start
+        run: cargo test --release -p qlang-core --features jit
+        env:
+          QLANG_JIT_HOT: '1'
       - name: install.sh against a fake release
         if: runner.os != 'Windows'
         run: scripts/test-install.sh

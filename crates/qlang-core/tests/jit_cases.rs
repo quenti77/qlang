@@ -219,3 +219,11 @@ fn the_sieve_of_a_function_with_an_array_parameter_agrees() {
     );
     assert_eq!(o, "2262\n");
 }
+
+#[test]
+fn float_registers_agree_with_the_tree_walker() {
+    let out = same(
+        "fun mandel(cr: float, ci: float) -> int\n  let zr = 0.0\n  let zi = 0.0\n  let n = 0\n  while n < 100 and zr * zr + zi * zi < 4.0 do\n    let t = zr * zr - zi * zi + cr\n    zi = 2.0 * zr * zi + ci\n    zr = t\n    n += 1\n  end\n  n\nend\nfun mix(x: float, k: int) -> float\n  let y = x\n  if k mod 2 == 0 then y = y * 1.5 else y = y - k end\n  y + k\nend\nlet s = 0\nlet f = 0.0\nfor i in 0..300 do\n  s += mandel(i * 0.01 - 1.5, 0.3)\n  f += mix(i * 0.5, i)\nend\nprint(s)\nprint(f)\nlet xs: array<float> = []\nfor i in 0..500 do\n  xs.push(i * 0.25)\nend\nlet acc = 0.0\nfor i in 0..xs.len() do\n  xs[i] = xs[i] * 2.0 + 1.0\n  acc += xs[i]\nend\nprint(acc)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}

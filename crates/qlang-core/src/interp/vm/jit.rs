@@ -36,7 +36,11 @@ pub(in crate::interp) struct Ctx {
     pub max_depth: i64,
     pub bail: i64,
     pub deadline: Option<std::time::Instant>,
+    pub max_alloc: usize,
 }
+
+/// How many helpers (see `Jit::helpers`).
+const HELPERS: usize = 10;
 
 const STEPS: i32 = 0;
 const MAX_STEPS: i32 = 8;
@@ -81,12 +85,104 @@ extern "C" fn max_f(a: f64, b: f64) -> f64 {
     a.max(b)
 }
 
+fn ety_from(n: i64) -> Ety {
+    match n {
+        0 => Ety::I,
+        1 => Ety::F,
+        _ => Ety::B,
+    }
+}
+
+fn ety_num(e: Ety) -> i64 {
+    match e {
+        Ety::I => 0,
+        Ety::F => 1,
+        _ => 2,
+    }
+}
+
+/// The array in the object register at `v`.
+///
+/// # Safety
+/// `v` points to an object register of the run that is going on.
+unsafe fn array_at<'a>(v: *const Value) -> Option<&'a ArrObj> {
+    match unsafe { &*v } {
+        Value::Array(rc) => Some(&**rc),
+        _ => None,
+    }
+}
+
+/// What is wrong is told through the flag of the context: the machine runs the instruction
+/// again and says what it is.
+fn fail(ctx: *mut Ctx) -> i64 {
+    // SAFETY: the pointer is the `Ctx` that the machine made for this run.
+    unsafe { (*ctx).bail = 1 };
+    0
+}
+
+extern "C" fn h_alen(v: *const Value) -> i64 {
+    // SAFETY: see `array_at`.
+    match unsafe { array_at(v) } {
+        Some(a) => a.raw().len() as i64,
+        None => -1,
+    }
+}
+
+extern "C" fn h_aload(ctx: *mut Ctx, v: *const Value, i: i64, ety: i64) -> i64 {
+    // SAFETY: see `array_at`.
+    let Some(a) = (unsafe { array_at(v) }) else {
+        return fail(ctx);
+    };
+    match arr_get(&a.raw(), i, ety_from(ety)) {
+        Elem::Ok(b) => b,
+        _ => fail(ctx),
+    }
+}
+
+extern "C" fn h_astore(ctx: *mut Ctx, v: *const Value, i: i64, bits: i64, ety: i64) -> i64 {
+    // SAFETY: see `array_at`.
+    let Some(a) = (unsafe { array_at(v) }) else {
+        return fail(ctx);
+    };
+    match arr_set(&mut a.raw_mut(), i, bits, ety_from(ety)) {
+        Elem::Ok(_) => 0,
+        _ => fail(ctx),
+    }
+}
+
+extern "C" fn h_acheck(ctx: *mut Ctx, v: *const Value, i: i64) -> i64 {
+    // SAFETY: see `array_at`.
+    let Some(a) = (unsafe { array_at(v) }) else {
+        return fail(ctx);
+    };
+    if usize::try_from(i)
+        .ok()
+        .filter(|u| *u < a.raw().len())
+        .is_none()
+    {
+        return fail(ctx);
+    }
+    0
+}
+
+extern "C" fn h_apush(ctx: *mut Ctx, v: *const Value, bits: i64, ety: i64) -> i64 {
+    // SAFETY: see `array_at`; the context is the one of this run.
+    let (Some(a), max) = (unsafe { array_at(v) }, unsafe { (*ctx).max_alloc }) else {
+        return fail(ctx);
+    };
+    let mut arr = a.raw_mut();
+    if arr.len() + 1 > max || !arr_push(&mut arr, bits, ety_from(ety)) {
+        return fail(ctx);
+    }
+    0
+}
+
 pub(in crate::interp) struct Jit {
     module: JITModule,
     fb: FunctionBuilderContext,
     poll: FuncId,
-    /// `pow_i`, `pow_f`, `rem_f`, `min_f`, `max_f`
-    helpers: [FuncId; 5],
+    /// `pow_i`, `pow_f`, `rem_f`, `min_f`, `max_f`, then the five of the arrays
+    helpers: [FuncId; HELPERS],
     ids: HashMap<u32, FuncId>,
 }
 
@@ -120,6 +216,11 @@ impl Jit {
         jb.symbol("qlang_jit_rem_f", rem_f as *const u8);
         jb.symbol("qlang_jit_min_f", min_f as *const u8);
         jb.symbol("qlang_jit_max_f", max_f as *const u8);
+        jb.symbol("qlang_jit_alen", h_alen as *const u8);
+        jb.symbol("qlang_jit_aload", h_aload as *const u8);
+        jb.symbol("qlang_jit_astore", h_astore as *const u8);
+        jb.symbol("qlang_jit_acheck", h_acheck as *const u8);
+        jb.symbol("qlang_jit_apush", h_apush as *const u8);
         let mut module = JITModule::new(jb);
         let mut sig = module.make_signature();
         sig.params.push(AbiParam::new(types::I64));
@@ -132,20 +233,34 @@ impl Jit {
             ff.params.push(AbiParam::new(types::F64));
         }
         ff.returns.push(AbiParam::new(types::F64));
-        let mut ii = module.make_signature();
-        for _ in 0..3 {
-            ii.params.push(AbiParam::new(types::I64));
-        }
-        ii.returns.push(AbiParam::new(types::I64));
+        let ints = |module: &JITModule, n: usize| {
+            let mut sig = module.make_signature();
+            for _ in 0..n {
+                sig.params.push(AbiParam::new(types::I64));
+            }
+            sig.returns.push(AbiParam::new(types::I64));
+            sig
+        };
+        let (i1, i3, i4, i5) = (
+            ints(&module, 1),
+            ints(&module, 3),
+            ints(&module, 4),
+            ints(&module, 5),
+        );
         let mut decl = |name: &str, sig: &ir::Signature| {
             module.declare_function(name, Linkage::Import, sig).ok()
         };
         let helpers = [
-            decl("qlang_jit_pow_i", &ii)?,
+            decl("qlang_jit_pow_i", &i3)?,
             decl("qlang_jit_pow_f", &ff)?,
             decl("qlang_jit_rem_f", &ff)?,
             decl("qlang_jit_min_f", &ff)?,
             decl("qlang_jit_max_f", &ff)?,
+            decl("qlang_jit_alen", &i1)?,
+            decl("qlang_jit_aload", &i4)?,
+            decl("qlang_jit_astore", &i5)?,
+            decl("qlang_jit_acheck", &i3)?,
+            decl("qlang_jit_apush", &i4)?,
         ];
         Some(Jit {
             module,
@@ -165,7 +280,7 @@ impl Jit {
             if self.ids.contains_key(&i) || set.contains(&i) {
                 continue;
             }
-            let Some(callees) = scan(&codes[i as usize]) else {
+            let Some(callees) = scan(&codes[i as usize], false) else {
                 return false;
             };
             set.push(i);
@@ -184,7 +299,7 @@ impl Jit {
             declared.push((i, id));
         }
         for &(i, id) in &declared {
-            if self.define(id, &codes[i as usize], codes).is_none() {
+            if self.define(id, &codes[i as usize], codes, false).is_none() {
                 for (j, _) in &declared {
                     self.ids.remove(j);
                 }
@@ -205,6 +320,36 @@ impl Jit {
             let p = self.module.get_finalized_function(s);
             codes[i as usize].jit.entry.set(p as usize);
         }
+        true
+    }
+
+    /// Compiles `root` for an entry in the middle of its run (a loop that became hot), and the
+    /// functions it calls. `false` when it cannot.
+    pub(in crate::interp) fn compile_osr(&mut self, root: u32, codes: &[Rc<Code>]) -> bool {
+        let Some(callees) = scan(&codes[root as usize], true) else {
+            return false;
+        };
+        for c in callees {
+            if !self.ids.contains_key(&c) && !self.compile(c, codes) {
+                return false;
+            }
+        }
+        let sig = arity_sig(&self.module, 3);
+        let Ok(id) = self
+            .module
+            .declare_function(&format!("o{root}"), Linkage::Local, &sig)
+        else {
+            return false;
+        };
+        if self
+            .define(id, &codes[root as usize], codes, true)
+            .is_none()
+            || self.module.finalize_definitions().is_err()
+        {
+            return false;
+        }
+        let p = self.module.get_finalized_function(id);
+        codes[root as usize].jit.osr.set(p as usize);
         true
     }
 
@@ -245,9 +390,11 @@ impl Jit {
         Some(id)
     }
 
-    fn define(&mut self, id: FuncId, code: &Code, codes: &[Rc<Code>]) -> Option<()> {
+    fn define(&mut self, id: FuncId, code: &Code, codes: &[Rc<Code>], osr: bool) -> Option<()> {
         let mut cx = self.module.make_context();
-        cx.func.signature = arity_sig(&self.module, code.param_tys.len());
+        // a function takes its arguments; the entry in the middle of a run takes the registers
+        // and the instruction to go on at
+        cx.func.signature = arity_sig(&self.module, if osr { 3 } else { code.param_tys.len() });
         {
             let mut b = FunctionBuilder::new(&mut cx.func, &mut self.fb);
             let poll = self.module.declare_func_in_func(self.poll, b.func);
@@ -259,9 +406,13 @@ impl Jit {
             b.switch_to_block(entry);
             let ps = b.block_params(entry).to_vec();
             let vars: Vec<Variable> = (0..code.nregs).map(|_| b.declare_var(types::I64)).collect();
+            let em_vars = vars.clone();
             let zero = b.ins().iconst(types::I64, 0);
             for (r, v) in vars.iter().enumerate() {
-                let init = if r < code.param_tys.len() {
+                let init = if osr {
+                    b.ins()
+                        .load(types::I64, MemFlagsData::trusted(), ps[1], (r * 8) as i32)
+                } else if r < code.param_tys.len() {
                     ps[r + 1]
                 } else {
                     zero
@@ -269,6 +420,7 @@ impl Jit {
                 b.def_var(*v, init);
             }
             let bail = b.create_block();
+            let at = b.append_block_param(bail, types::I64);
             let mut em = Em {
                 b: &mut b,
                 ctx: ps[0],
@@ -279,14 +431,27 @@ impl Jit {
                 module: &mut self.module,
                 ids: &self.ids,
                 codes,
+                osr: osr.then(|| (ps[1], ps[2], ps[3])),
+                at: 0,
             };
             em.body(code)?;
             let bail = em.bail;
             b.switch_to_block(bail);
-            let one = b.ins().iconst(types::I64, 1);
-            b.ins().store(MemFlagsData::trusted(), one, ps[0], BAIL);
-            let z = b.ins().iconst(types::I64, 0);
-            b.ins().return_(&[z]);
+            if osr {
+                // the registers go back to memory, and the machine runs the instruction that
+                // the native code could not (it gives the same error, at the same place)
+                for (r, v) in em_vars.iter().enumerate() {
+                    let x = b.use_var(*v);
+                    b.ins()
+                        .store(MemFlagsData::trusted(), x, ps[1], (r * 8) as i32);
+                }
+                b.ins().return_(&[at]);
+            } else {
+                let one = b.ins().iconst(types::I64, 1);
+                b.ins().store(MemFlagsData::trusted(), one, ps[0], BAIL);
+                let z = b.ins().iconst(types::I64, 0);
+                b.ins().return_(&[z]);
+            }
             b.seal_all_blocks();
             b.finalize(self.module.target_config());
         }
@@ -297,13 +462,18 @@ impl Jit {
 }
 
 /// The functions `code` calls when it can be compiled to native code; `None` otherwise.
-fn scan(code: &Code) -> Option<Vec<u32>> {
+fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
     let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
-    if code.is_loop
-        || code.uses_objs
-        || !code.frees.is_empty()
-        || !code.param_tys.iter().all(scalar)
-        || !scalar(&code.ret)
+    if code.uses_objs && !osr {
+        return None;
+    }
+    // a function called from native code: numbers in, a number out. The entry in the middle of
+    // a run (a loop, or a function that is running) only needs the registers to be numbers.
+    if !osr
+        && (code.is_loop
+            || !code.frees.is_empty()
+            || !code.param_tys.iter().all(scalar)
+            || !scalar(&code.ret))
     {
         return None;
     }
@@ -377,6 +547,15 @@ fn scan(code: &Code) -> Option<Vec<u32>> {
             | Op::JmpT(..)
             | Op::IncI(_)
             | Op::Ret(_) => {}
+            Op::RetUnit | Op::RetO(_) if osr => {}
+            // arrays of numbers: through the machine's own functions (the entry in the middle
+            // of a run only: the objects stay in their registers)
+            Op::ALen(..) | Op::ACheck { .. } if osr => {}
+            Op::ALoad { ety, .. }
+            | Op::AStore { ety, .. }
+            | Op::APush { ety, .. }
+            | Op::ForArr { ety, .. }
+                if osr && ety != Ety::O => {}
             Op::Call { code: t, .. } => callees.push(t),
             _ => return None,
         }
@@ -389,11 +568,15 @@ struct Em<'a, 'b> {
     ctx: ir::Value,
     bail: Block,
     poll: ir::FuncRef,
-    helpers: [ir::FuncRef; 5],
+    helpers: [ir::FuncRef; HELPERS],
     vars: Vec<Variable>,
     module: &'a mut JITModule,
     ids: &'a HashMap<u32, FuncId>,
     codes: &'a [Rc<Code>],
+    /// For the entry in the middle of a run: the registers in memory and the instruction.
+    osr: Option<(ir::Value, ir::Value, ir::Value)>,
+    /// The instruction being translated: where the machine goes on when the native code leaves.
+    at: usize,
 }
 
 impl Em<'_, '_> {
@@ -427,20 +610,19 @@ impl Em<'_, '_> {
     /// Leave the native code (to be run again by the machine) when `c` holds.
     fn bail_if(&mut self, c: ir::Value) {
         let go = self.b.create_block();
-        self.b.ins().brif(c, self.bail, &[], go, &[]);
+        let at = self.imm(self.at as i64);
+        self.b.ins().brif(c, self.bail, &[at.into()], go, &[]);
         self.b.switch_to_block(go);
     }
 
-    /// Counts a step; leaves when the limit is reached.
-    fn count_step(&mut self) -> ir::Value {
+    /// The steps after one more is counted; leaves when the limit is reached (the count is
+    /// stored by `store_steps`, once nothing can stop the instruction any more).
+    fn next_step(&mut self) -> ir::Value {
         let s = self
             .b
             .ins()
             .load(types::I64, MemFlagsData::trusted(), self.ctx, STEPS);
         let s = self.b.ins().iadd_imm_s(s, 4);
-        self.b
-            .ins()
-            .store(MemFlagsData::trusted(), s, self.ctx, STEPS);
         let max = self
             .b
             .ins()
@@ -450,9 +632,15 @@ impl Em<'_, '_> {
         s
     }
 
+    fn store_steps(&mut self, s: ir::Value) {
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), s, self.ctx, STEPS);
+    }
+
     /// A jump back: a step, and now and then a look at the outside.
     fn back_edge(&mut self) {
-        let s = self.count_step();
+        let s = self.next_step();
         let low = self.b.ins().band_imm_s(s, 0x3FFF);
         let look = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, low, 64);
         let poll = self.b.create_block();
@@ -461,8 +649,10 @@ impl Em<'_, '_> {
         self.b.switch_to_block(poll);
         let call = self.b.ins().call(self.poll, &[self.ctx]);
         let stop = self.b.inst_results(call)[0];
-        self.b.ins().brif(stop, self.bail, &[], go, &[]);
+        let at = self.imm(self.at as i64);
+        self.b.ins().brif(stop, self.bail, &[at.into()], go, &[]);
         self.b.switch_to_block(go);
+        self.store_steps(s);
     }
 
     fn cmp_i(&mut self, cc: IntCC, a: Reg, b: Reg) -> ir::Value {
@@ -483,6 +673,48 @@ impl Em<'_, '_> {
     /// Jump to `t` when `c` holds, else go on with the next instruction (`next`).
     fn branch(&mut self, c: ir::Value, t: Block, next: Block) {
         self.b.ins().brif(c, t, &[], next, &[]);
+    }
+
+    /// The address of the object register `r`.
+    fn obj_addr(&mut self, r: Reg) -> Option<ir::Value> {
+        let (_, _, objs) = self.osr?;
+        Some(
+            self.b
+                .ins()
+                .iadd_imm_s(objs, (usize::from(r) * std::mem::size_of::<Value>()) as i64),
+        )
+    }
+
+    /// Calls a helper that tells it went wrong through the flag of the context, then leaves
+    /// when it did.
+    fn helper_checked(&mut self, h: usize, args: &[ir::Value]) -> ir::Value {
+        let call = self.b.ins().call(self.helpers[h], args);
+        let v = self.b.inst_results(call)[0];
+        let flag = self
+            .b
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), self.ctx, BAIL);
+        self.bail_if(flag);
+        v
+    }
+
+    /// An access to the array in the object register `arr`: `(ctx, array, indexes..., values...,
+    /// kind of the elements)`.
+    fn array_op(
+        &mut self,
+        h: usize,
+        arr: Reg,
+        idx: &[Reg],
+        vals: &[Reg],
+        ety: Ety,
+    ) -> Option<ir::Value> {
+        let p = self.obj_addr(arr)?;
+        let mut args = vec![self.ctx, p];
+        for r in idx.iter().chain(vals) {
+            args.push(self.get(*r));
+        }
+        args.push(self.imm(ety_num(ety)));
+        Some(self.helper_checked(h, &args))
     }
 
     /// `i` is inside the range of a `for` (the same test as the machine's).
@@ -525,9 +757,9 @@ impl Em<'_, '_> {
                 | Op::JmpT(_, t)
                 | Op::JBack { t, .. }
                 | Op::JBackImm { t, .. } => Some(t),
-                Op::ForCheck { exit, .. } => Some(exit),
+                Op::ForCheck { exit, .. } | Op::ForArr { exit, .. } => Some(exit),
                 Op::ForLoop { body, .. } => Some(body),
-                Op::Ret(_) => None,
+                Op::Ret(_) | Op::RetUnit | Op::RetO(_) => None,
                 _ => continue,
             };
             if let Some(t) = target {
@@ -540,7 +772,35 @@ impl Em<'_, '_> {
             .map(|&s| s.then(|| self.b.create_block()))
             .collect();
         let mut dead = false;
+        if let Some((_, pc, _)) = self.osr {
+            // go on where the machine was: at the start of a loop body
+            let mut entries = std::collections::BTreeSet::new();
+            for (i, op) in code.ops.iter().enumerate() {
+                match *op {
+                    Op::Jmp(t) if (t as usize) <= i => {
+                        entries.insert(t);
+                    }
+                    Op::JBack { t, .. } | Op::JBackImm { t, .. } => {
+                        entries.insert(t);
+                    }
+                    Op::ForLoop { body, .. } => {
+                        entries.insert(body);
+                    }
+                    _ => {}
+                }
+            }
+            let mut sw = cranelift_frontend::Switch::new();
+            for t in entries {
+                sw.set_entry(u128::from(t), blocks[t as usize]?);
+            }
+            let stray = self.b.create_block();
+            sw.emit(self.b, pc, stray);
+            self.b.switch_to_block(stray);
+            self.b.ins().jump(self.bail, &[pc.into()]);
+            dead = true;
+        }
         for (i, op) in code.ops.iter().enumerate() {
+            self.at = i;
             if let Some(blk) = blocks[i] {
                 if !dead {
                     self.b.ins().jump(blk, &[]);
@@ -703,6 +963,55 @@ impl Em<'_, '_> {
                     self.bail_if(neg);
                     let v = self.b.ins().sqrt(x);
                     self.fset(d, v);
+                }
+                Op::ALen(d, a) => {
+                    let p = self.obj_addr(a)?;
+                    let call = self.b.ins().call(self.helpers[5], &[p]);
+                    let n = self.b.inst_results(call)[0];
+                    let bad = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, n, 0);
+                    self.bail_if(bad);
+                    self.set(d, n);
+                }
+                Op::ALoad { dst, arr, idx, ety } => {
+                    let v = self.array_op(6, arr, &[idx], &[], ety)?;
+                    self.set(dst, v);
+                }
+                Op::ACheck { arr, idx } => {
+                    let p = self.obj_addr(arr)?;
+                    let i = self.get(idx);
+                    self.helper_checked(8, &[self.ctx, p, i]);
+                }
+                Op::AStore { arr, idx, src, ety } => {
+                    let v = self.array_op(7, arr, &[idx], &[src], ety)?;
+                    let _ = v;
+                }
+                Op::APush { arr, src, ety } => {
+                    let p = self.obj_addr(arr)?;
+                    let x = self.get(src);
+                    let e = self.imm(ety_num(ety));
+                    self.helper_checked(9, &[self.ctx, p, x, e]);
+                }
+                Op::ForArr {
+                    dst,
+                    arr,
+                    idx,
+                    exit,
+                    ety,
+                } => {
+                    let p = self.obj_addr(arr)?;
+                    let call = self.b.ins().call(self.helpers[5], &[p]);
+                    let n = self.b.inst_results(call)[0];
+                    let bad = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, n, 0);
+                    self.bail_if(bad);
+                    let i = self.get(idx);
+                    let inside = self.b.ins().icmp(IntCC::UnsignedLessThan, i, n);
+                    let load = self.b.create_block();
+                    self.b.ins().brif(inside, load, &[], tgt(exit), &[]);
+                    self.b.switch_to_block(load);
+                    let v = self.array_op(6, arr, &[idx], &[], ety)?;
+                    self.set(dst, v);
+                    self.b.ins().jump(next?, &[]);
+                    dead = true;
                 }
                 Op::AbsF(d, a) => {
                     let f = self.fget(a);
@@ -932,8 +1241,8 @@ impl Em<'_, '_> {
                     // an overflow ends the loop, without a step
                     self.b.ins().brif(o, next?, &[], go, &[]);
                     self.b.switch_to_block(go);
-                    self.set(cnt, v);
                     self.back_edge();
+                    self.set(cnt, v);
                     let end = self.get(lim);
                     let inside = self.inside(v, end, st, incl);
                     self.b.ins().brif(inside, tgt(body), &[], next?, &[]);
@@ -954,7 +1263,7 @@ impl Em<'_, '_> {
                     base,
                     dst,
                 } => {
-                    self.count_step();
+                    let steps = self.next_step();
                     let d = self
                         .b
                         .ins()
@@ -969,6 +1278,7 @@ impl Em<'_, '_> {
                     self.b
                         .ins()
                         .store(MemFlagsData::trusted(), d1, self.ctx, DEPTH);
+                    self.store_steps(steps);
                     let callee = self.ids.get(&target).copied()?;
                     let f = self.module.declare_func_in_func(callee, &mut *self.b.func);
                     let arity = self.arity(target);
@@ -985,8 +1295,31 @@ impl Em<'_, '_> {
                         self.b
                             .ins()
                             .load(types::I64, MemFlagsData::trusted(), self.ctx, BAIL);
-                    self.bail_if(flag);
+                    // a callee that left: the machine makes this call itself, from the steps as
+                    // they were before it
+                    let undo = self.b.create_block();
+                    let go = self.b.create_block();
+                    self.b.ins().brif(flag, undo, &[], go, &[]);
+                    self.b.switch_to_block(undo);
+                    let before = self.b.ins().iadd_imm_s(steps, -4);
+                    self.store_steps(before);
+                    let at = self.imm(self.at as i64);
+                    self.b.ins().jump(self.bail, &[at.into()]);
+                    self.b.switch_to_block(go);
                     self.set(dst, r);
+                }
+                Op::Ret(_) | Op::RetUnit | Op::RetO(_) if self.osr.is_some() => {
+                    // the registers go back to memory, and the machine runs this return
+                    let (regs, _, _) = self.osr?;
+                    for r in 0..self.vars.len() {
+                        let v = self.b.use_var(self.vars[r]);
+                        self.b
+                            .ins()
+                            .store(MemFlagsData::trusted(), v, regs, (r * 8) as i32);
+                    }
+                    let at = self.imm(i as i64);
+                    self.b.ins().return_(&[at]);
+                    dead = true;
                 }
                 Op::Ret(a) => {
                     let v = self.get(a);
@@ -1002,7 +1335,8 @@ impl Em<'_, '_> {
                 self.b.ins().jump(blk, &[]);
             }
             self.b.switch_to_block(blk);
-            self.b.ins().jump(self.bail, &[]);
+            let at = self.imm(n as i64);
+            self.b.ins().jump(self.bail, &[at.into()]);
         }
         Some(())
     }
@@ -1092,6 +1426,7 @@ impl Interp<'_> {
             max_depth: self.limits.max_depth as i64,
             bail: 0,
             deadline: self.deadline,
+            max_alloc: self.limits.max_alloc,
         };
         // SAFETY: `entry` is the shim made by `Jit::shim` for this function, which reads as many
         // arguments from the pointer as the function has parameters (all inside `stack`).
@@ -1102,5 +1437,76 @@ impl Interp<'_> {
         }
         self.steps = ctx.steps as u64;
         Some(v)
+    }
+
+    /// Counts a jump back in `cur`; when it is hot, compiles it for an entry in the middle of its
+    /// run. The native entry point when there is one.
+    #[inline]
+    pub(super) fn jit_osr_entry(&mut self, cur: u32) -> usize {
+        let c = self.code_at(cur);
+        if c.jit.osr_refused.get() {
+            return 0;
+        }
+        let e = c.jit.osr.get();
+        if e != 0 {
+            return e;
+        }
+        let n = c.jit.calls.get() + 1;
+        c.jit.calls.set(n);
+        if n < hot() {
+            return 0;
+        }
+        c.jit.osr_refused.set(true);
+        if self.vm_jit.is_none() && !self.vm_jit_tried {
+            self.vm_jit_tried = true;
+            self.vm_jit = Jit::new().map(Box::new);
+        }
+        let Some(mut jit) = self.vm_jit.take() else {
+            return 0;
+        };
+        let ok = jit.compile_osr(cur, &self.vm_codes);
+        self.vm_jit = Some(jit);
+        if ok {
+            c.jit.osr_refused.set(false);
+            c.jit.osr.get()
+        } else {
+            0
+        }
+    }
+
+    /// Runs the rest of the code at `pc` natively, on the registers `stack[base..]`. The
+    /// instruction to go on at: a return, or the one the native code could not run (an error,
+    /// a limit: the machine runs it and says what is wrong).
+    #[inline]
+    pub(super) fn jit_osr(
+        &mut self,
+        entry: usize,
+        stack: &mut [i64],
+        ostack: &mut [Value],
+        base: usize,
+        pc: usize,
+    ) -> usize {
+        let mut ctx = Ctx {
+            steps: self.steps as i64,
+            max_steps: self.limits.max_steps as i64,
+            depth: self.depth as i64,
+            max_depth: self.limits.max_depth as i64,
+            bail: 0,
+            deadline: self.deadline,
+            max_alloc: self.limits.max_alloc,
+        };
+        // SAFETY: `entry` is the function made by `Jit::compile_osr` for this code, which reads
+        // and writes the `nregs` registers of the code from the pointer (all inside `stack`).
+        let f: extern "C" fn(*mut Ctx, *mut i64, i64, *mut Value) -> i64 =
+            unsafe { std::mem::transmute(entry) };
+        let at = f(
+            &mut ctx,
+            stack[base..].as_mut_ptr(),
+            pc as i64,
+            ostack.as_mut_ptr().wrapping_add(base),
+        );
+        // the registers are back in memory, with the steps as they were at that instruction
+        self.steps = ctx.steps as u64;
+        at as usize
     }
 }

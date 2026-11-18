@@ -591,6 +591,11 @@ pub(super) struct JitSlot {
     entry: Cell<usize>,
     #[allow(dead_code)]
     refused: Cell<bool>,
+    /// The entry in the middle of a run (a loop that became hot), and whether it is given up.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr: Cell<usize>,
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr_refused: Cell<bool>,
 }
 
 /// A field read or written by name, and its type.
@@ -4665,6 +4670,20 @@ impl Interp<'_> {
                 }
             };
         }
+        // a loop that became hot goes on in native code (feature `jit`): the registers are in
+        // memory, and the native code ends at a return that this machine then runs
+        macro_rules! osr {
+            () => {
+                #[cfg(feature = "jit")]
+                {
+                    let e = self.jit_osr_entry(cur);
+                    if e != 0 {
+                        pc = self.jit_osr(e, stack, ostack, base, pc);
+                        continue;
+                    }
+                }
+            };
+        }
         loop {
             debug_assert!(pc < code.ops.len());
             // SAFETY: every compiled code ends with a return and its jumps stay inside it
@@ -5276,6 +5295,7 @@ impl Interp<'_> {
                     };
                     if inside {
                         pc = body as usize;
+                        osr!();
                     }
                 }
                 Op::StepCheck(st) => {
@@ -5330,6 +5350,8 @@ impl Interp<'_> {
                         if self.steps & 0x3FFF < 64 {
                             self.check_memory(code.spans[pc - 1])?;
                         }
+                        pc = t as usize;
+                        osr!();
                     }
                     pc = t as usize;
                 }
@@ -5337,12 +5359,14 @@ impl Interp<'_> {
                     if holds(cmp, r!(a), r!(b)) {
                         back_edge!();
                         pc = t as usize;
+                        osr!();
                     }
                 }
                 Op::JBackImm { cmp, a, k, t } => {
                     if holds(cmp, r!(a), i64::from(k)) {
                         back_edge!();
                         pc = t as usize;
+                        osr!();
                     }
                 }
                 Op::JnLtImm(a, k, t) => {

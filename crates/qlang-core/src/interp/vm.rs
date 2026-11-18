@@ -12,6 +12,9 @@
 use super::*;
 use std::cell::Cell;
 
+#[cfg(feature = "jit")]
+pub(super) mod jit;
+
 type Reg = u16;
 
 /// A comparison.
@@ -574,6 +577,20 @@ pub(super) struct Code {
     is_loop: bool,
     /// Whether it uses object registers (their frame must be emptied when it returns).
     uses_objs: bool,
+    /// What became of its native code (feature `jit`).
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    jit: JitSlot,
+}
+
+/// The calls of a function, and its native entry once it is hot and compiled (0 until then).
+#[derive(Default)]
+pub(super) struct JitSlot {
+    #[allow(dead_code)]
+    calls: Cell<u32>,
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    entry: Cell<usize>,
+    #[allow(dead_code)]
+    refused: Cell<bool>,
 }
 
 /// A field read or written by name, and its type.
@@ -3825,6 +3842,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     frees: Vec::new(),
                     is_loop: false,
                     uses_objs,
+                    jit: JitSlot::default(),
                 },
                 g.callees,
             ))
@@ -3920,6 +3938,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     frees: g.frees,
                     is_loop: false,
                     uses_objs,
+                    jit: JitSlot::default(),
                 },
                 g.callees,
             ))
@@ -3988,6 +4007,7 @@ fn gen_unit(prog: &Program, unit: Unit, deny: &[FnId]) -> Option<(Code, Vec<FnId
                     frees: g.frees,
                     is_loop: true,
                     uses_objs,
+                    jit: JitSlot::default(),
                 },
                 g.callees,
             ))
@@ -5433,6 +5453,16 @@ impl Interp<'_> {
                     base: b,
                     dst,
                 } => {
+                    #[cfg(feature = "jit")]
+                    {
+                        let e = self.jit_entry(target);
+                        if e != 0
+                            && let Some(v) = self.jit_call(e, stack, base + b as usize)
+                        {
+                            r!(dst) = v;
+                            continue;
+                        }
+                    }
                     self.steps += 4;
                     if self.steps > self.limits.max_steps {
                         fail!(

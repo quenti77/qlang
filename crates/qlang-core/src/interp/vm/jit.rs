@@ -334,7 +334,8 @@ impl Jit {
                 return false;
             }
         }
-        let sig = arity_sig(&self.module, 3);
+        *codes[root as usize].jit.osr_arrays.borrow_mut() = inline_arrays(&codes[root as usize]);
+        let sig = arity_sig(&self.module, 4);
         let Ok(id) = self
             .module
             .declare_function(&format!("o{root}"), Linkage::Local, &sig)
@@ -394,7 +395,7 @@ impl Jit {
         let mut cx = self.module.make_context();
         // a function takes its arguments; the entry in the middle of a run takes the registers
         // and the instruction to go on at
-        cx.func.signature = arity_sig(&self.module, if osr { 3 } else { code.param_tys.len() });
+        cx.func.signature = arity_sig(&self.module, if osr { 4 } else { code.param_tys.len() });
         {
             let mut b = FunctionBuilder::new(&mut cx.func, &mut self.fb);
             let poll = self.module.declare_func_in_func(self.poll, b.func);
@@ -419,6 +420,20 @@ impl Jit {
                 };
                 b.def_var(*v, init);
             }
+            let mut parts = HashMap::new();
+            if osr {
+                for (k, (reg, ety)) in code.jit.osr_arrays.borrow().iter().enumerate() {
+                    let (p, n) = (b.declare_var(types::I64), b.declare_var(types::I64));
+                    let at = (k * 16) as i32;
+                    let x = b.ins().load(types::I64, MemFlagsData::trusted(), ps[4], at);
+                    b.def_var(p, x);
+                    let y = b
+                        .ins()
+                        .load(types::I64, MemFlagsData::trusted(), ps[4], at + 8);
+                    b.def_var(n, y);
+                    parts.insert(*reg, (p, n, *ety));
+                }
+            }
             let bail = b.create_block();
             let at = b.append_block_param(bail, types::I64);
             let mut em = Em {
@@ -433,6 +448,7 @@ impl Jit {
                 codes,
                 osr: osr.then(|| (ps[1], ps[2], ps[3])),
                 at: 0,
+                parts,
             };
             em.body(code)?;
             let bail = em.bail;
@@ -459,6 +475,33 @@ impl Jit {
         self.module.clear_context(&mut cx);
         Some(())
     }
+}
+
+/// The most arrays a loop reads in place.
+const MAX_INLINE: usize = 16;
+
+/// The arrays (object register, kind of the elements) that the native code of `code` reads and
+/// writes in place, from a pointer and a length given when it starts. That is only right when
+/// nothing in the code can make an array grow or move: no `push`.
+fn inline_arrays(code: &Code) -> Vec<(Reg, Ety)> {
+    let mut found: Vec<(Reg, Ety)> = Vec::new();
+    for op in &code.ops {
+        match *op {
+            Op::APush { .. } => return Vec::new(),
+            Op::ALoad { arr, ety, .. }
+            | Op::AStore { arr, ety, .. }
+            | Op::ForArr { arr, ety, .. } => match found.iter().find(|(r, _)| *r == arr) {
+                Some((_, e)) if *e != ety => return Vec::new(),
+                Some(_) => {}
+                None => found.push((arr, ety)),
+            },
+            _ => {}
+        }
+    }
+    if found.len() > MAX_INLINE {
+        return Vec::new();
+    }
+    found
 }
 
 /// The functions `code` calls when it can be compiled to native code; `None` otherwise.
@@ -577,6 +620,8 @@ struct Em<'a, 'b> {
     osr: Option<(ir::Value, ir::Value, ir::Value)>,
     /// The instruction being translated: where the machine goes on when the native code leaves.
     at: usize,
+    /// The arrays read in place: pointer and length, in variables, and the kind of the elements.
+    parts: HashMap<Reg, (Variable, Variable, Ety)>,
 }
 
 impl Em<'_, '_> {
@@ -673,6 +718,49 @@ impl Em<'_, '_> {
     /// Jump to `t` when `c` holds, else go on with the next instruction (`next`).
     fn branch(&mut self, c: ir::Value, t: Block, next: Block) {
         self.b.ins().brif(c, t, &[], next, &[]);
+    }
+
+    /// The address of the element `i` (`ptr + i * size`).
+    fn elem_addr(&mut self, ptr: ir::Value, i: ir::Value, ety: Ety) -> ir::Value {
+        let off = if ety == Ety::B {
+            i
+        } else {
+            self.b.ins().ishl_imm_s(i, 3)
+        };
+        self.b.ins().iadd(ptr, off)
+    }
+
+    /// The address of the element `idx` of the array in `arr`; leaves when it does not exist.
+    fn element(&mut self, arr: Reg, idx: Reg, ety: Ety) -> Option<(ir::Value, Ety)> {
+        let (p, n, e) = self.parts.get(&arr).copied()?;
+        let _ = ety;
+        let (ptr, len) = (self.b.use_var(p), self.b.use_var(n));
+        let i = self.get(idx);
+        let outside = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, len);
+        self.bail_if(outside);
+        Some((self.elem_addr(ptr, i, e), e))
+    }
+
+    fn load_elem(&mut self, addr: ir::Value, ety: Ety) -> ir::Value {
+        if ety == Ety::B {
+            self.b
+                .ins()
+                .uload8(types::I64, MemFlagsData::trusted(), addr, 0)
+        } else {
+            self.b
+                .ins()
+                .load(types::I64, MemFlagsData::trusted(), addr, 0)
+        }
+    }
+
+    fn store_elem(&mut self, addr: ir::Value, v: ir::Value, ety: Ety) {
+        if ety == Ety::B {
+            let nz = self.b.ins().icmp_imm_s(IntCC::NotEqual, v, 0);
+            let one = self.b.ins().uextend(types::I64, nz);
+            self.b.ins().istore8(MemFlagsData::trusted(), one, addr, 0);
+        } else {
+            self.b.ins().store(MemFlagsData::trusted(), v, addr, 0);
+        }
     }
 
     /// The address of the object register `r`.
@@ -963,6 +1051,43 @@ impl Em<'_, '_> {
                     self.bail_if(neg);
                     let v = self.b.ins().sqrt(x);
                     self.fset(d, v);
+                }
+                Op::ALen(d, a) if self.parts.contains_key(&a) => {
+                    let n = self.b.use_var(self.parts[&a].1);
+                    self.set(d, n);
+                }
+                Op::ALoad { dst, arr, idx, ety } if self.parts.contains_key(&arr) => {
+                    let (addr, ety) = self.element(arr, idx, ety)?;
+                    let v = self.load_elem(addr, ety);
+                    self.set(dst, v);
+                }
+                Op::ACheck { arr, idx } if self.parts.contains_key(&arr) => {
+                    self.element(arr, idx, Ety::I)?;
+                }
+                Op::AStore { arr, idx, src, ety } if self.parts.contains_key(&arr) => {
+                    let (addr, ety) = self.element(arr, idx, ety)?;
+                    let v = self.get(src);
+                    self.store_elem(addr, v, ety);
+                }
+                Op::ForArr {
+                    dst,
+                    arr,
+                    idx,
+                    exit,
+                    ety,
+                } if self.parts.contains_key(&arr) => {
+                    let (p, n, _) = self.parts[&arr];
+                    let (ptr, len) = (self.b.use_var(p), self.b.use_var(n));
+                    let i = self.get(idx);
+                    let inside = self.b.ins().icmp(IntCC::UnsignedLessThan, i, len);
+                    let load = self.b.create_block();
+                    self.b.ins().brif(inside, load, &[], tgt(exit), &[]);
+                    self.b.switch_to_block(load);
+                    let addr = self.elem_addr(ptr, i, ety);
+                    let v = self.load_elem(addr, ety);
+                    self.set(dst, v);
+                    self.b.ins().jump(next?, &[]);
+                    dead = true;
                 }
                 Op::ALen(d, a) => {
                     let p = self.obj_addr(a)?;
@@ -1480,12 +1605,33 @@ impl Interp<'_> {
     #[inline]
     pub(super) fn jit_osr(
         &mut self,
+        cur: u32,
         entry: usize,
         stack: &mut [i64],
         ostack: &mut [Value],
         base: usize,
         pc: usize,
     ) -> usize {
+        // where the arrays that the code reads in place are, and how long: nothing in it can
+        // move them
+        let mut parts = [0i64; MAX_INLINE * 2];
+        for (k, (reg, ety)) in self.code_at(cur).jit.osr_arrays.borrow().iter().enumerate() {
+            let Some(Value::Array(rc)) = ostack.get(base + usize::from(*reg)) else {
+                return self.jit_osr_refuse(cur, pc);
+            };
+            let a = rc.raw();
+            let (p, n) = match (&*a, ety) {
+                (Arr::Ints(v), Ety::I) => (v.as_ptr() as i64, v.len()),
+                (Arr::Floats(v), Ety::F) => (v.as_ptr() as i64, v.len()),
+                (Arr::Bools(v), Ety::B) => (v.as_ptr() as i64, v.len()),
+                _ => {
+                    drop(a);
+                    return self.jit_osr_refuse(cur, pc);
+                }
+            };
+            parts[k * 2] = p;
+            parts[k * 2 + 1] = n as i64;
+        }
         let mut ctx = Ctx {
             steps: self.steps as i64,
             max_steps: self.limits.max_steps as i64,
@@ -1497,16 +1643,24 @@ impl Interp<'_> {
         };
         // SAFETY: `entry` is the function made by `Jit::compile_osr` for this code, which reads
         // and writes the `nregs` registers of the code from the pointer (all inside `stack`).
-        let f: extern "C" fn(*mut Ctx, *mut i64, i64, *mut Value) -> i64 =
+        let f: extern "C" fn(*mut Ctx, *mut i64, i64, *mut Value, *const i64) -> i64 =
             unsafe { std::mem::transmute(entry) };
         let at = f(
             &mut ctx,
             stack[base..].as_mut_ptr(),
             pc as i64,
             ostack.as_mut_ptr().wrapping_add(base),
+            parts.as_ptr(),
         );
         // the registers are back in memory, with the steps as they were at that instruction
         self.steps = ctx.steps as u64;
         at as usize
+    }
+
+    /// The arrays are not stored the way the native code reads them: the machine goes on, and
+    /// the native code is given up for this code.
+    fn jit_osr_refuse(&self, cur: u32, pc: usize) -> usize {
+        self.code_at(cur).jit.osr_refused.set(true);
+        pc
     }
 }

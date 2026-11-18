@@ -195,6 +195,13 @@ les piles d'appels sont ceux de la machine. `QLANG_NO_JIT=1` désactive le JIT, 
 change le seuil de 300 appels (les tests le mettent à 1). `tests/jit_cases.rs` vérifie les cas
 d'erreur.
 
+Une boucle (au niveau racine ou dans une fonction) qui devient chaude passe en natif en plein
+milieu de son exécution : les registres restent en mémoire, le code natif les réécrit en sortant,
+et la machine reprend à l'instruction qu'il n'a pas pu exécuter (dépassement, index hors limites,
+limite de pas...) ou au `return`. L'erreur est donc dite par la machine, au même endroit. Les
+tableaux de nombres (lecture, écriture, `push`, `len`, `for x in`) passent par des fonctions d'aide
+de la machine ; les autres objets (textes, structures, tableaux d'objets) restent sur la machine.
+
 ## Ce qui reste (avant la machine à registres)
 
 Le temps est maintenant réparti dans `eval`, `binary` et la recherche des variables par nom :

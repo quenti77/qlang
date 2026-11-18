@@ -137,3 +137,85 @@ fn a_power_overflow_a_negative_exponent_and_a_root_of_a_negative_are_reported() 
     );
     assert!(o.contains("R014"), "{o}");
 }
+
+#[test]
+fn a_hot_loop_at_the_root_gives_the_same_variables() {
+    let out = same(
+        "let total = 0\nlet i = 0\nlet f = 0.5\nwhile i < 5000 do\n  total += i mod 7\n  f = f * 1.0001\n  i += 1\nend\nprint(total)\nprint(f)\nprint(i)\nlet s = 0\nfor a in 0..200 do\n  for b in a..400 step 3 do\n    s += a * b\n  end\nend\nprint(s)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_error_in_a_hot_loop_is_reported_as_the_machine_does() {
+    let o = same("let x = 1\nlet i = 0\nwhile i < 100 do\n  x = x * 3\n  i += 1\nend\nprint(x)");
+    assert!(o.contains("R010"), "{o}");
+    let o = same(
+        "let i = 0\nlet t = 0\nwhile i < 2000 do\n  t += 100 // (1000 - i)\n  i += 1\nend\nprint(t)",
+    );
+    assert!(o.contains("R011"), "{o}");
+}
+
+#[test]
+fn a_hot_loop_calls_a_hot_function_and_leaves_through_a_return() {
+    let o = same(
+        "fun sq(n: int) -> int\n  n * n\nend\nfun find(limit: int) -> int\n  let i = 0\n  while i < 100000 do\n    if sq(i) > limit then\n      return i\n    end\n    i += 1\n  end\n  0\nend\nprint(find(1000000))\nprint(find(50))",
+    );
+    assert_eq!(o, "1001\n8\n");
+}
+
+#[test]
+fn the_step_limit_in_a_hot_loop_is_the_machines() {
+    let limits = Limits {
+        max_steps: 100_000,
+        ..Limits::default()
+    };
+    // (the tree walker puts the position elsewhere in the loop: only the machine is checked)
+    let o = run(
+        "let i = 0\nwhile i < 100000000 do\n  i += 1\nend\nprint(i)",
+        limits,
+        false,
+    );
+    assert!(o.contains("R900"), "{o}");
+}
+
+#[test]
+fn hot_loops_over_arrays_of_numbers_agree() {
+    let out = same(
+        "let xs: array<int> = []\nfor i in 0..3000 do\n  xs.push(i * 2 - 7)\nend\nlet fs: array<float> = []\nlet bs: array<bool> = []\nfor i in 0..xs.len() do\n  fs.push(xs[i] / 3)\n  bs.push(xs[i] mod 3 == 0)\nend\nlet acc = 0\nlet facc = 0.0\nlet n = 0\nfor i in 0..xs.len() do\n  acc += xs[i]\n  xs[i] = acc\n  facc += fs[i]\n  if bs[i] then\n    n += 1\n  end\nend\nfor x in xs do\n  acc += x mod 11\nend\nprint(acc)\nprint(facc)\nprint(n)\nprint(xs[2999])",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_index_out_of_bounds_in_a_hot_loop_is_reported_as_the_machine_does() {
+    let o = same(
+        "let xs: array<int> = [1, 2, 3]\nlet t = 0\nfor i in 0..1000 do\n  t += xs[i mod 4]\nend\nprint(t)",
+    );
+    assert!(o.contains("R020"), "{o}");
+    let o = same(
+        "let xs: array<int> = [0, 0, 0]\nlet i = 0\nwhile i < 1000 do\n  xs[i] = i\n  i += 1\nend\nprint(xs[0])",
+    );
+    assert!(o.contains("R020"), "{o}");
+}
+
+#[test]
+fn a_hot_loop_that_pushes_stops_at_the_memory_limit_of_the_machine() {
+    let limits = Limits {
+        max_alloc: 2000,
+        ..Limits::default()
+    };
+    let o = same_with(
+        "let xs: array<int> = []\nlet i = 0\nwhile i < 100000 do\n  xs.push(i)\n  i += 1\nend\nprint(xs.len())",
+        limits,
+    );
+    assert!(o.contains("R903"), "{o}");
+}
+
+#[test]
+fn the_sieve_of_a_function_with_an_array_parameter_agrees() {
+    let o = same(
+        "fun sieve(flags: array<bool>, n: int) -> int\n  let count = 0\n  for i in 2..n do\n    if flags[i] then\n      count += 1\n      let j = i * i\n      while j < n do\n        flags[j] = false\n        j += i\n      end\n    end\n  end\n  count\nend\nlet n = 20000\nlet flags: array<bool> = []\nfor i in 0..n do\n  flags.push(true)\nend\nprint(sieve(flags, n))",
+    );
+    assert_eq!(o, "2262\n");
+}

@@ -596,6 +596,10 @@ pub(super) struct JitSlot {
     osr: Cell<usize>,
     #[cfg_attr(not(feature = "jit"), allow(dead_code))]
     osr_refused: Cell<bool>,
+    /// The arrays whose elements the native code of the loop reads in place: their object
+    /// register and the kind of their elements.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr_arrays: std::cell::RefCell<Vec<(Reg, Ety)>>,
 }
 
 /// A field read or written by name, and its type.
@@ -4678,7 +4682,7 @@ impl Interp<'_> {
                 {
                     let e = self.jit_osr_entry(cur);
                     if e != 0 {
-                        pc = self.jit_osr(e, stack, ostack, base, pc);
+                        pc = self.jit_osr(cur, e, stack, ostack, base, pc);
                         continue;
                     }
                 }

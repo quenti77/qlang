@@ -558,6 +558,13 @@ pub fn lex_with_docs(
                 };
                 match tok {
                     Some(t) => {
+                        // a line that starts with `.` continues the previous expression
+                        // (method chains laid out one call per line)
+                        if t == Tok::Dot
+                            && matches!(toks.last().map(|k| &k.tok), Some(Tok::Newline))
+                        {
+                            toks.pop();
+                        }
                         push!(t, i, i + len);
                         i += len;
                     }

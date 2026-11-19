@@ -710,6 +710,31 @@ impl Checker {
                 );
                 continue;
             }
+            if matches!(
+                d.name.name.as_str(),
+                "int"
+                    | "float"
+                    | "bool"
+                    | "string"
+                    | "uuid"
+                    | "ulid"
+                    | "datetime"
+                    | "bytes"
+                    | "range"
+                    | "array"
+                    | "map"
+                    | "Self"
+                    | "Any"
+            ) {
+                self.err(
+                    "T123",
+                    format!(
+                        "`{0}` is a built-in type, not a name for a type parameter (`impl<T> array<T>` for every element type, `impl array<{0}>` for this one)",
+                        d.name.name
+                    ),
+                    d.name.span,
+                );
+            }
             let id = self.defs.new_param(&d.name.name);
             out.push((d.name.name.clone(), id));
             self.tparam_scope.push((d.name.name.clone(), id));

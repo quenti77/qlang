@@ -201,3 +201,23 @@ fn a_function_ending_with_a_match_that_misses_cases_says_so() {
         d.notes
     );
 }
+
+#[test]
+fn a_built_in_type_name_is_not_a_type_parameter() {
+    expect(
+        "impl<int> array<int>\n  public fun f(self) -> int\n    1\n  end\nend",
+        "`int` is a built-in type, not a name for a type parameter",
+    );
+    ok("impl array<int>\n  public fun f(self) -> int\n    1\n  end\nend");
+    expect(
+        "let x = [1.0]\nimpl array<int>\n  public fun f(self) -> int\n    1\n  end\nend\nx.f()",
+        "no method `f`",
+    );
+}
+
+#[test]
+fn a_method_chain_can_continue_on_the_next_line() {
+    ok(
+        "struct S\n  public n: int\nend\nimpl S\n  public fun add(self, k: int) -> Self\n    S { n: self.n + k }\n  end\nend\nlet s = S { n: 0 }\n    .add(1)\n    .add(2)\nprint(s.n)",
+    );
+}

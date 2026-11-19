@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.7.3
+
+Un correctif de l'éditeur. Aucun changement du langage ni cassant.
+
+- **Complétion : les méthodes d'un `impl array<int>` ne sont plus proposées sur un `array<float>`** (et de même pour `map<K, V>`). Le vérificateur les refusait déjà (`has no method`), mais la liste de l'éditeur les offrait pour tout tableau.
+
 ## 1.7.2
 
 Mise à jour des dépendances. Aucun changement du langage ni cassant.

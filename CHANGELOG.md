@@ -2,6 +2,12 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.7.4
+
+Un correctif du formateur. Aucun changement du langage ni cassant.
+
+- **`qlang fmt` : une méthode d'un trait qui a un corps par défaut gardait mal ses retraits** quand elle suivait une signature sans corps (`fun permissions(self) -> array<Permission>` puis `fun give(self, p: Permission) -> Self` avec son corps) : le corps et le `end` étaient décalés d'un niveau et le `end` du trait se retrouvait mal placé. Le formateur suit maintenant la règle du parseur : une méthode de trait a un corps sauf si le jeton qui suit sa ligne est `fun` ou `end`.
+
 ## 1.7.3
 
 Un correctif de l'éditeur. Aucun changement du langage ni cassant.

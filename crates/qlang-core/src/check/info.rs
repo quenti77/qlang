@@ -638,11 +638,15 @@ impl Checker {
                         })
                         .collect(),
                     // `impl<T> array<T>`, `impl int`...: an impl on a built-in type
-                    (Ty::Array(a), Ty::Array(b)) => bind_param(a, b).into_iter().collect(),
-                    (Ty::Map(k1, v1), Ty::Map(k2, v2)) => bind_param(k1, k2)
-                        .into_iter()
-                        .chain(bind_param(v1, v2))
-                        .collect(),
+                    (Ty::Array(a), Ty::Array(b)) if fits(a, b) => {
+                        bind_param(a, b).into_iter().collect()
+                    }
+                    (Ty::Map(k1, v1), Ty::Map(k2, v2)) if fits(k1, k2) && fits(v1, v2) => {
+                        bind_param(k1, k2)
+                            .into_iter()
+                            .chain(bind_param(v1, v2))
+                            .collect()
+                    }
                     (a, b)
                         if is_plain_builtin(a)
                             && std::mem::discriminant(a) == std::mem::discriminant(b) =>
@@ -1111,6 +1115,12 @@ fn bind_param(target: &Ty, value: &Ty) -> Option<(ParamId, Ty)> {
     }
 }
 
+/// Whether an impl target's element type can apply to the receiver's: a type parameter
+/// takes anything, a concrete type (`impl array<int>`) only itself.
+fn fits(target: &Ty, value: &Ty) -> bool {
+    matches!(target, Ty::Param(_)) || matches!(value, Ty::Param(_)) || target == value
+}
+
 fn is_plain_builtin(t: &Ty) -> bool {
     matches!(
         t,
@@ -1142,6 +1152,23 @@ mod tests {
         assert!(has("array<int>", "duplicate") && has("array<int>", "chunk"));
         assert!(has("string", "shout") && has("string", "upper"));
         assert!(!has("string", "duplicate"));
+    }
+
+    /// `impl array<int>` is offered after an `array<int>` only, `impl<T> array<T>` after any array.
+    #[test]
+    fn impl_methods_follow_the_element_type() {
+        let info = info_of(
+            "impl<T> array<T>\n  public fun any(self) -> string\n    \"a\"\n  end\nend\nimpl array<int>\n  public fun ints(self) -> string\n    \"i\"\n  end\nend\nimpl array<float>\n  public fun floats(self) -> string\n    \"f\"\n  end\nend\nlet a = [1, 2]\nlet b = [1.0]\nprint(a.ints())\nprint(b.floats())\n",
+        );
+        let has = |ty: &str, name: &str| info.members[ty].iter().any(|m| m.name == name);
+        assert!(
+            has("array<int>", "any") && has("array<int>", "ints") && !has("array<int>", "floats")
+        );
+        assert!(
+            has("array<float>", "any")
+                && has("array<float>", "floats")
+                && !has("array<float>", "ints")
+        );
     }
 
     /// Every method documented in the catalog must exist in the checker, and the other

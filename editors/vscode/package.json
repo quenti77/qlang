@@ -152,7 +152,7 @@
     "vscode-languageclient": "11.0.0"
   },
   "devDependencies": {
-    "@vscode/vsce": "^4.1.0",
+    "@vscode/vsce": "^4.1.1",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.0.0"
   }

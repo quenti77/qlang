@@ -223,8 +223,15 @@ fn probe(src: &str) -> Result<Probe, String> {
                     let in_trait = stack.last().is_some_and(|f| f.kind == Kind::Trait);
                     let after_extern = matches!(prev, Some(Tok::Extern));
                     let in_type = k < type_until;
+                    // a trait method has a default body unless the next token after its line is `fun`
+                    // or `end` (the parser's rule)
+                    let has_default = in_trait
+                        && !matches!(
+                            idxs.last().and_then(|&l| real.get(l + 1)).map(|t| &t.tok),
+                            None | Some(Tok::Fun | Tok::End)
+                        );
                     let opens = if named {
-                        !in_trait && !after_extern
+                        (!in_trait || has_default) && !after_extern
                     } else {
                         !in_type
                     };
@@ -717,6 +724,12 @@ mod tests {
             "struct Task\n    public run: fun() -> string?\n    public other: array<(string, fun(int) -> int)>\nend\n\ntype Handler = fun(Request) -> Response\n\nfun apply(f: fun(int) -> int, x: int) -> int\n    f(x)\nend\n",
         );
         same("let found = Reflect.find<fun(Request) -> Response>(name)\nlet again = 1\n");
+    }
+
+    #[test]
+    fn a_trait_default_method_keeps_its_body_indented() {
+        let src = "trait T\n    fun a(self) -> int\n\n    fun b(self) -> int\n        if true then\n            1\n        end\n        2\n    end\n\n    fun c(self) -> int\nend\n";
+        same(src);
     }
 
     #[test]

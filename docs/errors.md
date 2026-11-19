@@ -71,7 +71,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `T120` | `a type without value cannot be nullable` <br> `a type without value cannot be in a tuple` |
 | `T121` | ```{}` expects {n} type argument(s)`` <br> ```{}` expects {} type argument(s), found {}`` <br> ``type parameter `{name}` takes no type arguments`` |
 | `T122` | ``the type alias `{name}` refers to itself`` <br> `expected a trait here` <br> ```{}` is not a trait`` |
-| `T123` | ``type parameter `{}` is declared twice`` |
+| `T123` | ``type parameter `{}` is declared twice`` <br> ``` `{0}` is a built-in type, not a name for a type parameter (`impl<T> array<T>` for every element type, `impl array<{0}>` for this one)``` |
 | `T124` | ``method `{}` is declared twice in trait `{}``` |
 | `T125` | ``a struct can only extend another struct, not `{shown}``` |
 | `T126` | ``field `{}` is declared twice in `{}``` <br> ``field `{n}` already exists in parent struct `{pn}``` |

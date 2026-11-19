@@ -2,6 +2,13 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.7.1
+
+Deux correctifs. Aucun changement cassant pour un programme correct.
+
+- **Une ligne qui commence par `.` continue l'expression précédente** : une chaîne d'appels peut s'écrire un appel par ligne (`Role.new("a")` puis `.give_permission("x")` sur la ligne suivante). Avant, `P001: expected an expression, found `.``. `..` et `..=` ne sont pas concernés.
+- **`impl<int> array<int>` est refusé** (`T123`). Entre les chevrons d'un `impl`, d'une fonction ou d'un type, on déclare des paramètres de type : `impl<int>` déclarait un paramètre *nommé* `int` (comme `impl<T>`), donc la méthode était offerte à tous les tableaux, y compris un `array<float>`. Un nom de type intégré (`int`, `float`, `bool`, `string`, `array`, `map`…) n'est plus accepté comme nom de paramètre. S'adapter : `impl array<int>` pour un seul type d'éléments, `impl<T> array<T>` pour tous.
+
 ## 1.7.0
 
 Une version de performances : les fonctions et les boucles qui ne calculent qu'avec des nombres sont compilées en code natif (Cranelift). Aucun changement du langage, aucun changement cassant : les résultats, les erreurs (code, ligne, pile) et les limites (`R900`, `R901`, `R903`) sont les mêmes qu'avec la machine à registres, ce que vérifient les tests de comparaison entre le parcours d'arbre, la machine et le code natif.

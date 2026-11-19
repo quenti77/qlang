@@ -23,7 +23,7 @@ similar = { version = "3", default-features = false, features = ["text"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
 crossterm = "0.29"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 postgres = "0.19"
 tokio-postgres-rustls = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }

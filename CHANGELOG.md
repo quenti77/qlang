@@ -2,6 +2,13 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.7.2
+
+Mise à jour des dépendances. Aucun changement du langage ni cassant.
+
+- **`ureq` 3.5.2** (les limites de taille d'une réponse s'appliquent après le décodage et acceptent une réponse exactement à la limite ; l'adresse suivante est essayée quand le réseau est coupé), **`rusqlite` 0.43** (correction de trois accès à une mémoire libérée ; un SQL vide ou fait de commentaires est rejeté), **`webpki-roots` 1.0.12**, **`zip` 9.6.0**.
+- **Outils de publication** : `@vscode/vsce` 4.1.1 et `taiki-e/install-action` 2.90.5.
+
 ## 1.7.1
 
 Deux correctifs. Aucun changement cassant pour un programme correct.

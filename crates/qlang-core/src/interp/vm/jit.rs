@@ -40,7 +40,7 @@ pub(in crate::interp) struct Ctx {
 }
 
 /// How many helpers (see `Jit::helpers`).
-const HELPERS: usize = 10;
+const HELPERS: usize = 12;
 
 const STEPS: i32 = 0;
 const MAX_STEPS: i32 = 8;
@@ -177,6 +177,60 @@ extern "C" fn h_apush(ctx: *mut Ctx, v: *const Value, bits: i64, ety: i64) -> i6
     0
 }
 
+/// The structure in the object register at `v`, and the field of `site` in it, as the bits of a
+/// number: `Some` only for the type the checker gave the field (an `int`, a `float`, a `bool`).
+///
+/// # Safety
+/// `v` points to an object register of the run that is going on, and `site` to a field site of
+/// the code being run (both stay alive while the native code runs).
+unsafe fn field_bits(v: *const Value, site: *const FieldSite) -> Option<i64> {
+    let (Value::Struct(st), site) = (unsafe { &*v }, unsafe { &*site }) else {
+        return None;
+    };
+    let f = st.fields.borrow();
+    let mut found = f.get_at_key(site.slot.get() as usize, &site.key);
+    if found.is_none()
+        && let Some(i) = f.position(&site.name)
+    {
+        site.slot.set(i as u32);
+        found = f.get_at(i, &site.name);
+    }
+    match (found, &site.ty) {
+        (Some(Value::Int(i)), Ty::Int) => Some(*i),
+        (Some(Value::Float(x)), Ty::Float) => Some(x.to_bits() as i64),
+        (Some(Value::Bool(x)), Ty::Bool) => Some(i64::from(*x)),
+        _ => None,
+    }
+}
+
+extern "C" fn h_field(ctx: *mut Ctx, v: *const Value, site: *const FieldSite) -> i64 {
+    // SAFETY: see `field_bits`.
+    match unsafe { field_bits(v, site) } {
+        Some(bits) => bits,
+        None => fail(ctx),
+    }
+}
+
+/// Replaces a number of a structure by another: anything else (a field that is not there yet,
+/// another kind of value) is left to the machine.
+extern "C" fn h_setfield(ctx: *mut Ctx, v: *const Value, site: *const FieldSite, bits: i64) -> i64 {
+    // SAFETY: see `field_bits`.
+    let (Value::Struct(st), site) = (unsafe { &*v }, unsafe { &*site }) else {
+        return fail(ctx);
+    };
+    let mut f = st.fields.borrow_mut();
+    match (
+        f.get_mut_at_key(site.slot.get() as usize, &site.key),
+        &site.ty,
+    ) {
+        (Some(Value::Int(x)), Ty::Int) => *x = bits,
+        (Some(Value::Float(x)), Ty::Float) => *x = f64::from_bits(bits as u64),
+        (Some(Value::Bool(x)), Ty::Bool) => *x = bits != 0,
+        _ => return fail(ctx),
+    }
+    0
+}
+
 pub(in crate::interp) struct Jit {
     module: JITModule,
     fb: FunctionBuilderContext,
@@ -221,6 +275,8 @@ impl Jit {
         jb.symbol("qlang_jit_astore", h_astore as *const u8);
         jb.symbol("qlang_jit_acheck", h_acheck as *const u8);
         jb.symbol("qlang_jit_apush", h_apush as *const u8);
+        jb.symbol("qlang_jit_field", h_field as *const u8);
+        jb.symbol("qlang_jit_setfield", h_setfield as *const u8);
         let mut module = JITModule::new(jb);
         let mut sig = module.make_signature();
         sig.params.push(AbiParam::new(types::I64));
@@ -261,6 +317,8 @@ impl Jit {
             decl("qlang_jit_astore", &i5)?,
             decl("qlang_jit_acheck", &i3)?,
             decl("qlang_jit_apush", &i4)?,
+            decl("qlang_jit_field", &i3)?,
+            decl("qlang_jit_setfield", &i4)?,
         ];
         Some(Jit {
             module,
@@ -572,6 +630,20 @@ fn float_registers(code: &Code, codes: &[Rc<Code>]) -> Vec<bool> {
                     }
                 }
                 Op::ACheck { idx, .. } => i(&[idx]),
+                Op::Field { dst, fld, .. } => {
+                    if code.fields[fld as usize].ty == Ty::Float {
+                        f(&[dst])
+                    } else {
+                        i(&[dst])
+                    }
+                }
+                Op::SetField { src, fld, .. } => {
+                    if code.fields[fld as usize].ty == Ty::Float {
+                        f(&[src])
+                    } else {
+                        i(&[src])
+                    }
+                }
                 Op::ALen(d, _) => i(&[d]),
                 Op::Call { code: t, base, dst } => {
                     let callee = &codes[t as usize];
@@ -684,6 +756,40 @@ fn inline_arrays(code: &Code) -> Vec<(Reg, Ety)> {
 }
 
 /// The functions `code` calls when it can be compiled to native code; `None` otherwise.
+/// The place an instruction jumps to, for the ones that can jump back.
+fn jump_target(op: &Op) -> Option<u32> {
+    match *op {
+        Op::Jmp(t)
+        | Op::JnLtI(_, _, t)
+        | Op::JnLeI(_, _, t)
+        | Op::JnGtI(_, _, t)
+        | Op::JnGeI(_, _, t)
+        | Op::JnEqI(_, _, t)
+        | Op::JnNeI(_, _, t)
+        | Op::JnLtImm(_, _, t)
+        | Op::JnLeImm(_, _, t)
+        | Op::JnGtImm(_, _, t)
+        | Op::JnGeImm(_, _, t)
+        | Op::JnEqImm(_, _, t)
+        | Op::JnNeImm(_, _, t)
+        | Op::JnF { t, .. }
+        | Op::JmpF(_, t)
+        | Op::JmpT(_, t)
+        | Op::JBack { t, .. }
+        | Op::JBackImm { t, .. } => Some(t),
+        Op::ForLoop { body, .. } => Some(body),
+        _ => None,
+    }
+}
+
+/// Whether the instruction `at` is inside a loop: between a jump back and the place it goes to.
+/// Any other jump that is not native keeps the code out as well (`false` only when sure).
+fn in_loop(code: &Code, at: usize) -> bool {
+    code.ops.iter().enumerate().any(|(j, op)| {
+        jump_target(op).is_some_and(|t| (t as usize) <= j && (t as usize) <= at && at <= j)
+    }) || matches!(code.ops[at], Op::JnEnum { .. })
+}
+
 fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
     let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
     if code.uses_objs && !osr {
@@ -700,7 +806,7 @@ fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
         return None;
     }
     let mut callees = Vec::new();
-    for op in &code.ops {
+    for (at, op) in code.ops.iter().enumerate() {
         match *op {
             Op::ConstI(..)
             | Op::Mov(..)
@@ -778,7 +884,13 @@ fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
             | Op::APush { ety, .. }
             | Op::ForArr { ety, .. }
                 if osr && ety != Ety::O => {}
+            // a number in a structure, read or written in place (the entry in the middle of a run only)
+            Op::Field { fld, .. } | Op::SetField { fld, .. }
+                if osr && scalar(&code.fields[fld as usize].ty) => {}
             Op::Call { code: t, .. } => callees.push(t),
+            // the entry in the middle of a run leaves to the machine at an instruction it cannot
+            // translate, as long as none is in a loop (it would leave at each turn)
+            _ if osr && !in_loop(code, at) => {}
             _ => return None,
         }
     }
@@ -961,6 +1073,21 @@ impl Em<'_, '_> {
         } else {
             self.b.ins().store(MemFlagsData::trusted(), v, addr, 0);
         }
+    }
+
+    /// The registers go back to memory and the native code returns the instruction `i`, where the
+    /// machine goes on (the entry in the middle of a run only).
+    fn leave_to_machine(&mut self, i: usize) -> Option<()> {
+        let (regs, _, _) = self.osr?;
+        for r in 0..self.vars.len() {
+            let v = self.b.use_var(self.vars[r]);
+            self.b
+                .ins()
+                .store(MemFlagsData::trusted(), v, regs, (r * 8) as i32);
+        }
+        let at = self.imm(i as i64);
+        self.b.ins().return_(&[at]);
+        Some(())
     }
 
     /// The address of the object register `r`.
@@ -1309,6 +1436,18 @@ impl Em<'_, '_> {
                     let v = self.array_op(6, arr, &[idx], &[], ety)?;
                     self.set(dst, v);
                 }
+                Op::Field { dst, obj, fld } => {
+                    let p = self.obj_addr(obj)?;
+                    let site = self.imm(&code.fields[fld as usize] as *const FieldSite as i64);
+                    let v = self.helper_checked(10, &[self.ctx, p, site]);
+                    self.set(dst, v);
+                }
+                Op::SetField { obj, src, fld } => {
+                    let p = self.obj_addr(obj)?;
+                    let site = self.imm(&code.fields[fld as usize] as *const FieldSite as i64);
+                    let x = self.get(src);
+                    self.helper_checked(11, &[self.ctx, p, site, x]);
+                }
                 Op::ACheck { arr, idx } => {
                     let p = self.obj_addr(arr)?;
                     let i = self.get(idx);
@@ -1643,20 +1782,18 @@ impl Em<'_, '_> {
                 }
                 Op::Ret(_) | Op::RetUnit | Op::RetO(_) if self.osr.is_some() => {
                     // the registers go back to memory, and the machine runs this return
-                    let (regs, _, _) = self.osr?;
-                    for r in 0..self.vars.len() {
-                        let v = self.b.use_var(self.vars[r]);
-                        self.b
-                            .ins()
-                            .store(MemFlagsData::trusted(), v, regs, (r * 8) as i32);
-                    }
-                    let at = self.imm(i as i64);
-                    self.b.ins().return_(&[at]);
+                    self.leave_to_machine(i)?;
                     dead = true;
                 }
                 Op::Ret(a) => {
                     let v = self.get(a);
                     self.b.ins().return_(&[v]);
+                    dead = true;
+                }
+                // an instruction that is not native, outside every loop (`scan` checked): the
+                // machine goes on from here
+                _ if self.osr.is_some() => {
+                    self.leave_to_machine(i)?;
                     dead = true;
                 }
                 _ => return None,

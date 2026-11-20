@@ -3364,7 +3364,12 @@ impl<'a> Interp<'a> {
                     );
                 }
                 match self.host.sleep_ms(ms as u64) {
-                    Ok(()) => Value::Unit,
+                    Ok(()) => {
+                        if ms > 0 {
+                            self.steps = 0;
+                        }
+                        Value::Unit
+                    }
                     Err(HostError::Unsupported(_)) => {
                         return self.fail(
                             "R060",

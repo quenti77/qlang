@@ -3825,6 +3825,12 @@ chaîne (`+`, `replace`, `split`…) coûte environ une étape pour 4 éléments
 octets). Une boucle qui fouille un très grand tableau à chaque tour atteint donc
 la limite d'étapes, comme n'importe quelle boucle trop longue.
 
+Le compteur d'étapes repart de zéro chaque fois que le programme rend la main pour attendre
+l'extérieur : `time.sleep`, `Term.event`, la réception d'un message de `Worker` ou d'une tâche, avec un
+délai supérieur à zéro. La limite protège donc d'une boucle **entre deux attentes**, pas de la durée
+de vie d'un écran en terminal, d'un démon ou d'un consommateur de file. Une boucle qui ne fait que
+sonder (`Term.event(0)`) ne rend pas la main et reste bornée.
+
 Comparer deux valeurs (`==`, `<`) descend au plus de 1 000 niveaux dans les énumérations, tableaux et
 tuples imbriqués : au-delà, `R092` (un programme peut construire des listes chaînées de millions de
 maillons ; leur libération, elle, n'a pas de limite).

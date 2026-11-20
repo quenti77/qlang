@@ -200,7 +200,12 @@ milieu de son exécution : les registres restent en mémoire, le code natif les 
 et la machine reprend à l'instruction qu'il n'a pas pu exécuter (dépassement, index hors limites,
 limite de pas...) ou au `return`. L'erreur est donc dite par la machine, au même endroit. Les
 tableaux de nombres (lecture, écriture, `push`, `len`, `for x in`) passent par des fonctions d'aide
-de la machine ; les autres objets (textes, structures, tableaux d'objets) restent sur la machine.
+de la machine, comme les champs numériques d'une structure (`p.x`, `p.x = ...` pour un champ `int`,
+`float` ou `bool`) ; les autres objets (textes, tableaux d'objets, structures dans une structure) restent
+sur la machine. La fonction qui contient la boucle peut faire des choses que le code natif ne sait pas
+faire (créer la structure, afficher) tant que ce n'est **pas dans une boucle** : le code natif rend la main
+à la machine à la première de ces instructions. Une boucle qui crée une structure ou lit un texte reste donc
+entièrement sur la machine.
 
 ## Ce qui reste (avant la machine à registres)
 

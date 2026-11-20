@@ -227,3 +227,39 @@ fn float_registers_agree_with_the_tree_walker() {
     );
     assert!(!out.contains("error"), "{out}");
 }
+
+const POINT: &str = "struct P\n  public x: int\n  public y: float\n  public on: bool\nend\n";
+
+#[test]
+fn a_hot_loop_reads_and_writes_the_numbers_of_a_structure() {
+    // the structure is made in the function: the machine makes it, the loop is native
+    let o = same(&format!(
+        "{POINT}fun run(n: int) -> int\n  let p = P {{ x: 0, y: 0.5, on: true }}\n  let i = 0\n  while i < n do\n    p.x = p.x + i mod 7\n    p.y = p.y * 1.5 - 0.25\n    if p.on then\n      p.x += 1\n    end\n    p.on = i mod 3 != 0\n    i += 1\n  end\n  print(p.y)\n  p.x\nend\nprint(run(100000))\nprint(run(10))"
+    ));
+    assert!(!o.contains("error"), "{o}");
+    // a structure that is given
+    let o = same(&format!(
+        "{POINT}fun bump(p: P, n: int)\n  let i = 0\n  while i < n do\n    p.x += 2\n    i += 1\n  end\nend\nlet p = P {{ x: 1, y: 0.0, on: false }}\nbump(p, 50000)\nbump(p, 10)\nprint(p.x)"
+    ));
+    assert_eq!(o, "100021\n");
+}
+
+#[test]
+fn an_error_on_a_field_in_a_hot_loop_is_reported_as_the_machine_does() {
+    let o = same(&format!(
+        "{POINT}let p = P {{ x: 1, y: 0.0, on: false }}\nlet i = 0\nwhile i < 100 do\n  p.x = p.x * 3\n  i += 1\nend\nprint(p.x)"
+    ));
+    assert!(o.contains("R010"), "{o}");
+    let o = same(&format!(
+        "{POINT}let p = P {{ x: 100, y: 0.0, on: false }}\nlet i = 0\nwhile i < 2000 do\n  p.x = p.x - 1\n  p.y = p.y + 100 // p.x\n  i += 1\nend\nprint(p.y)"
+    ));
+    assert!(o.contains("R011") || o.contains("error"), "{o}");
+}
+
+#[test]
+fn a_loop_that_makes_a_structure_stays_on_the_machine() {
+    let o = same(&format!(
+        "{POINT}let t = 0\nlet i = 0\nwhile i < 5000 do\n  let p = P {{ x: i, y: 0.0, on: true }}\n  t += p.x\n  i += 1\nend\nprint(t)"
+    ));
+    assert_eq!(o, "12497500\n");
+}

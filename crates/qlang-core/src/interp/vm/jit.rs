@@ -48,6 +48,12 @@ const MAX_GLOBALS: usize = 8;
 /// Where in the buffer given to a loop the table of objects and the numbers of the variables are.
 const GTABLE: usize = MAX_INLINE * 2;
 
+/// The most calls of function values in a loop, and the most variables each takes from the code
+/// around it: where their addresses are in the buffer given to a loop.
+const MAX_CSITES: usize = 8;
+const MAX_FREES: usize = 8;
+const CBASE: usize = GTABLE + 1 + MAX_GLOBALS;
+
 /// The most parameters of a function that takes objects (their addresses are put in a buffer).
 const MAX_ARGS: usize = 16;
 
@@ -401,7 +407,7 @@ impl Jit {
             if self.ids.contains_key(&i) || set.contains(&i) {
                 continue;
             }
-            let Some(callees) = scan(&codes[i as usize], false) else {
+            let Some(callees) = scan(&codes[i as usize], false, &[]) else {
                 return false;
             };
             // a function that writes fields keeps them until it returns, so that the machine
@@ -422,7 +428,7 @@ impl Jit {
                 }
                 c.jit.objs.set(true);
             }
-            let sig = arity_sig(&self.module, codes[i as usize].param_tys.len());
+            let sig = arity_sig(&self.module, nargs(&codes[i as usize]));
             let Ok(id) = self
                 .module
                 .declare_function(&format!("f{i}"), Linkage::Local, &sig)
@@ -442,7 +448,7 @@ impl Jit {
         }
         let mut shims = Vec::new();
         for &(i, id) in &declared {
-            let Some(s) = self.shim(i, id, codes[i as usize].param_tys.len()) else {
+            let Some(s) = self.shim(i, id, nargs(&codes[i as usize])) else {
                 return false;
             };
             shims.push((i, s));
@@ -459,8 +465,13 @@ impl Jit {
 
     /// Compiles `root` for an entry in the middle of its run (a loop that became hot), and the
     /// functions it calls. `false` when it cannot.
-    pub(in crate::interp) fn compile_osr(&mut self, root: u32, codes: &[Rc<Code>]) -> bool {
-        let Some(callees) = scan(&codes[root as usize], true) else {
+    pub(in crate::interp) fn compile_osr(
+        &mut self,
+        root: u32,
+        codes: &[Rc<Code>],
+        closures: &[(usize, u32)],
+    ) -> bool {
+        let Some(callees) = scan(&codes[root as usize], true, closures) else {
             return false;
         };
         for c in callees {
@@ -472,7 +483,21 @@ impl Jit {
         let Some(globals) = osr_globals(&codes[root as usize]) else {
             return false;
         };
+        // a variable that the loop keeps in memory must not also be one a function it calls
+        // reads or writes through its address
+        for (_, t) in closures {
+            for fr in &codes[*t as usize].frees {
+                let clash = globals.iter().any(|(g, ..)| {
+                    let gr = &codes[root as usize].globals[*g as usize];
+                    Some(gr.module) == fr.global && gr.name == fr.name
+                });
+                if clash {
+                    return false;
+                }
+            }
+        }
         *codes[root as usize].jit.osr_globals.borrow_mut() = globals;
+        *codes[root as usize].jit.osr_closures.borrow_mut() = closures.to_vec();
         let sig = arity_sig(&self.module, 4);
         let Ok(id) = self
             .module
@@ -533,7 +558,7 @@ impl Jit {
         let mut cx = self.module.make_context();
         // a function takes its arguments; the entry in the middle of a run takes the registers
         // and the instruction to go on at
-        cx.func.signature = arity_sig(&self.module, if osr { 4 } else { code.param_tys.len() });
+        cx.func.signature = arity_sig(&self.module, if osr { 4 } else { nargs(code) });
         {
             let mut b = FunctionBuilder::new(&mut cx.func, &mut self.fb);
             let poll = self.module.declare_func_in_func(self.poll, b.func);
@@ -574,6 +599,29 @@ impl Jit {
                     b.ins().iconst(types::I64, 0)
                 };
                 b.def_var(*v, init);
+            }
+            // the variables taken from the code around: read from their addresses when the
+            // function starts, written back when it returns
+            let mut free_ptrs = Vec::new();
+            if !osr {
+                for (j, fr) in code.frees.iter().enumerate() {
+                    let p = ps[code.param_tys.len() + 1 + j];
+                    let x = if fr.ty == Ty::Bool {
+                        b.ins().uload8(types::I64, MemFlagsData::trusted(), p, 0)
+                    } else {
+                        b.ins().load(types::I64, MemFlagsData::trusted(), p, 0)
+                    };
+                    let r = usize::from(fr.reg);
+                    let x = if is_f[r] {
+                        b.ins().bitcast(types::F64, MemFlagsData::new(), x)
+                    } else {
+                        x
+                    };
+                    b.def_var(em_vars[r], x);
+                    if fr.assigned {
+                        free_ptrs.push((fr.reg, fr.ty.clone(), p));
+                    }
+                }
             }
             let mut parts = HashMap::new();
             if osr {
@@ -640,6 +688,8 @@ impl Jit {
                 gl: gl.clone(),
                 gtable,
                 gbuf: osr.then(|| ps[4]),
+                closures: code.jit.osr_closures.borrow().clone(),
+                free_ptrs,
                 fptr: HashMap::new(),
                 fval: HashMap::new(),
                 cached: false,
@@ -930,14 +980,15 @@ fn in_loop(code: &Code, at: usize) -> bool {
     }) || matches!(code.ops[at], Op::JnEnum { .. })
 }
 
-fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
+fn scan(code: &Code, osr: bool, closures: &[(usize, u32)]) -> Option<Vec<u32>> {
     let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
     // a function called from native code: numbers or structures in, a number out. The entry in
     // the middle of a run (a loop, or a function that is running) only needs the registers to
     // be numbers.
     if !osr
         && (code.is_loop
-            || !code.frees.is_empty()
+            || code.frees.iter().any(|f| !scalar(&f.ty))
+            || code.frees.len() > MAX_FREES
             || code.param_tys.len() > MAX_ARGS
             || !code
                 .param_tys
@@ -1041,6 +1092,14 @@ fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
                         || is_obj(&code.globals[g as usize].ty)) => {}
             Op::StoreG { g, .. } if osr && scalar(&code.globals[g as usize].ty) => {}
             Op::MovO(..) if osr => {}
+            Op::CallValue { f, .. }
+                if osr
+                    && closures.len() <= MAX_CSITES
+                    && !writes_obj_reg(code, f)
+                    && closures.iter().any(|c| c.0 == at) =>
+            {
+                callees.extend(closures.iter().filter(|c| c.0 == at).map(|c| c.1));
+            }
             Op::Call { code: t, .. } => callees.push(t),
             // the entry in the middle of a run leaves to the machine at an instruction it cannot
             // translate, as long as none is in a loop (it would leave at each turn)
@@ -1076,9 +1135,24 @@ fn osr_globals(code: &Code) -> Option<Vec<(u32, bool, bool)>> {
     (found.len() <= MAX_GLOBALS).then_some(found)
 }
 
-/// Whether `code` has an instruction that writes a field of a structure.
+/// The values a native function is given: its parameters, then the addresses of the variables
+/// it takes from the code around it.
+fn nargs(code: &Code) -> usize {
+    code.param_tys.len() + code.frees.len()
+}
+
+/// Whether `code` writes something that is not its own: a field of a structure, or a variable
+/// of the code around it.
 fn writes_fields(code: &Code) -> bool {
-    code.ops.iter().any(|op| matches!(op, Op::SetField { .. }))
+    code.frees.iter().any(|f| f.assigned)
+        || code.ops.iter().any(|op| matches!(op, Op::SetField { .. }))
+}
+
+/// Whether an instruction of `code` gives a new value to the object register `r`.
+fn writes_obj_reg(code: &Code, r: Reg) -> bool {
+    code.ops
+        .iter()
+        .any(|op| matches!(*op, Op::MovO(d, _) | Op::LoadG { dst: d, .. } if d == r))
 }
 
 struct Em<'a, 'b> {
@@ -1107,6 +1181,10 @@ struct Em<'a, 'b> {
     gl: Vec<(u32, bool, bool)>,
     gtable: Option<ir::Value>,
     gbuf: Option<ir::Value>,
+    /// The calls of function values the loop was compiled for, and the variables a function
+    /// writes back to the code around it (register, type, address).
+    closures: Vec<(usize, u32)>,
+    free_ptrs: Vec<(Reg, Ty, ir::Value)>,
     /// Where the number of each field used (structure register, name of the field) is, and
     /// its value held in a variable when the function writes fields: the writes go to memory
     /// only when it returns.
@@ -1421,6 +1499,14 @@ impl Em<'_, '_> {
 
     /// The numbers held for the fields written go to their places (a function returns).
     fn commit(&mut self) {
+        for (r, ty, p) in self.free_ptrs.clone() {
+            let x = self.get(r);
+            if ty == Ty::Bool {
+                self.b.ins().istore8(MemFlagsData::trusted(), x, p, 0);
+            } else {
+                self.b.ins().store(MemFlagsData::trusted(), x, p, 0);
+            }
+        }
         for (key, ty) in self.written.clone() {
             let p = self.b.use_var(self.fptr[&key]);
             let x = self.b.use_var(self.fval[&key]);
@@ -2061,62 +2147,25 @@ impl Em<'_, '_> {
                     code: target,
                     base,
                     dst,
-                } => {
-                    let steps = self.next_step();
-                    let d = self
-                        .b
-                        .ins()
-                        .load(types::I64, MemFlagsData::trusted(), self.ctx, DEPTH);
-                    let max =
-                        self.b
-                            .ins()
-                            .load(types::I64, MemFlagsData::trusted(), self.ctx, MAX_DEPTH);
-                    let deep = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, d, max);
-                    self.bail_if(deep);
-                    let d1 = self.b.ins().iadd_imm_s(d, 1);
-                    self.b
-                        .ins()
-                        .store(MemFlagsData::trusted(), d1, self.ctx, DEPTH);
-                    self.store_steps(steps);
-                    let callee = self.ids.get(&target).copied()?;
-                    let f = self.module.declare_func_in_func(callee, &mut *self.b.func);
-                    let arity = self.arity(target);
-                    let mut args = vec![self.ctx];
-                    let codes = self.codes;
-                    for k in 0..arity {
-                        let r = base + k as Reg;
-                        if is_obj(&codes[target as usize].param_tys[k]) {
-                            let p = if self.osr.is_some() {
-                                self.obj_addr(r)?
-                            } else {
-                                self.b.use_var(self.ovars[usize::from(r)])
-                            };
-                            args.push(p);
-                        } else {
-                            args.push(self.get(r));
-                        }
+                } => self.call_native(target, base, dst, Vec::new())?,
+                // a function value that the loop was compiled for (see `JitSlot::osr_closures`):
+                // the variables it takes from the code around it are given as addresses
+                Op::CallValue { dst, base, .. } => {
+                    let j = self.closures.iter().position(|c| c.0 == i)?;
+                    let target = self.closures[j].1;
+                    let buf = self.gbuf?;
+                    let n = self.codes[target as usize].frees.len();
+                    let mut free_args = Vec::new();
+                    for m in 0..n {
+                        let at = ((CBASE + j * MAX_FREES + m) * 8) as i32;
+                        free_args.push(self.b.ins().load(
+                            types::I64,
+                            MemFlagsData::trusted(),
+                            buf,
+                            at,
+                        ));
                     }
-                    let call = self.b.ins().call(f, &args);
-                    let r = self.b.inst_results(call)[0];
-                    self.b
-                        .ins()
-                        .store(MemFlagsData::trusted(), d, self.ctx, DEPTH);
-                    let flag =
-                        self.b
-                            .ins()
-                            .load(types::I64, MemFlagsData::trusted(), self.ctx, BAIL);
-                    // a callee that left: the machine makes this call itself, from the steps as
-                    // they were before it
-                    let undo = self.b.create_block();
-                    let go = self.b.create_block();
-                    self.b.ins().brif(flag, undo, &[], go, &[]);
-                    self.b.switch_to_block(undo);
-                    let before = self.b.ins().iadd_imm_s(steps, -4);
-                    self.store_steps(before);
-                    let at = self.imm(self.at as i64);
-                    self.b.ins().jump(self.bail, &[at.into()]);
-                    self.b.switch_to_block(go);
-                    self.set(dst, r);
+                    self.call_native(target, base, dst, free_args)?;
                 }
                 Op::Ret(_) | Op::RetUnit | Op::RetO(_) if self.osr.is_some() => {
                     // the registers go back to memory, and the machine runs this return
@@ -2179,6 +2228,73 @@ impl Em<'_, '_> {
         self.b.switch_to_block(again);
         self.back_edge();
         self.b.ins().jump(t, &[]);
+    }
+
+    fn call_native(
+        &mut self,
+        target: u32,
+        base: Reg,
+        dst: Reg,
+        free_args: Vec<ir::Value>,
+    ) -> Option<()> {
+        let steps = self.next_step();
+        let d = self
+            .b
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), self.ctx, DEPTH);
+        let max = self
+            .b
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), self.ctx, MAX_DEPTH);
+        let deep = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, d, max);
+        self.bail_if(deep);
+        let d1 = self.b.ins().iadd_imm_s(d, 1);
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), d1, self.ctx, DEPTH);
+        self.store_steps(steps);
+        let callee = self.ids.get(&target).copied()?;
+        let f = self.module.declare_func_in_func(callee, &mut *self.b.func);
+        let arity = self.arity(target);
+        let mut args = vec![self.ctx];
+        let codes = self.codes;
+        for k in 0..arity {
+            let r = base + k as Reg;
+            if is_obj(&codes[target as usize].param_tys[k]) {
+                let p = if self.osr.is_some() {
+                    self.obj_addr(r)?
+                } else {
+                    self.b.use_var(self.ovars[usize::from(r)])
+                };
+                args.push(p);
+            } else {
+                args.push(self.get(r));
+            }
+        }
+        args.extend(free_args);
+        let call = self.b.ins().call(f, &args);
+        let r = self.b.inst_results(call)[0];
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), d, self.ctx, DEPTH);
+        let flag = self
+            .b
+            .ins()
+            .load(types::I64, MemFlagsData::trusted(), self.ctx, BAIL);
+        // a callee that left: the machine makes this call itself, from the steps as
+        // they were before it
+        let undo = self.b.create_block();
+        let go = self.b.create_block();
+        self.b.ins().brif(flag, undo, &[], go, &[]);
+        self.b.switch_to_block(undo);
+        let before = self.b.ins().iadd_imm_s(steps, -4);
+        self.store_steps(before);
+        let at = self.imm(self.at as i64);
+        self.b.ins().jump(self.bail, &[at.into()]);
+        self.b.switch_to_block(go);
+        self.set(dst, r);
+
+        Some(())
     }
 
     fn arity(&self, target: u32) -> usize {
@@ -2268,7 +2384,7 @@ impl Interp<'_> {
     /// Counts a jump back in `cur`; when it is hot, compiles it for an entry in the middle of its
     /// run. The native entry point when there is one.
     #[inline]
-    pub(super) fn jit_osr_entry(&mut self, cur: u32) -> usize {
+    pub(super) fn jit_osr_entry(&mut self, cur: u32, ostack: &[Value], base: usize) -> usize {
         let c = self.code_at(cur);
         if c.jit.osr_refused.get() {
             return 0;
@@ -2290,7 +2406,19 @@ impl Interp<'_> {
         let Some(mut jit) = self.vm_jit.take() else {
             return 0;
         };
-        let ok = jit.compile_osr(cur, &self.vm_codes);
+        // the function values the loop calls: the code each one runs now
+        let code = self.code_at(cur);
+        let mut closures = Vec::new();
+        for (at, op) in code.ops.iter().enumerate() {
+            if let Op::CallValue { f, site, .. } = *op
+                && let Some(Value::Func(fv)) = ostack.get(base + usize::from(f))
+                && fv.tenv.is_none()
+                && let Some(t) = self.vm_func_target(fv, &code.sites[site as usize])
+            {
+                closures.push((at, t));
+            }
+        }
+        let ok = jit.compile_osr(cur, &self.vm_codes, &closures);
         self.vm_jit = Some(jit);
         if ok {
             c.jit.osr_refused.set(false);
@@ -2315,7 +2443,7 @@ impl Interp<'_> {
     ) -> usize {
         // where the arrays that the code reads in place are, and how long: nothing in it can
         // move them
-        let mut parts = [0i64; GTABLE + 1 + MAX_GLOBALS];
+        let mut parts = [0i64; CBASE + MAX_CSITES * MAX_FREES];
         for (k, (reg, ety)) in self.code_at(cur).jit.osr_arrays.borrow().iter().enumerate() {
             let Some(Value::Array(rc)) = ostack.get(base + usize::from(*reg)) else {
                 return self.jit_osr_refuse(cur, pc);
@@ -2349,6 +2477,39 @@ impl Interp<'_> {
             }
         }
         parts[GTABLE] = table.as_ptr() as i64;
+        // the function values the loop calls: still the same code, and where their variables are
+        let sites = code.jit.osr_closures.borrow().clone();
+        for (j, (at, target)) in sites.iter().enumerate() {
+            let Op::CallValue { f, site, .. } = code.ops[*at] else {
+                return self.jit_osr_refuse(cur, pc);
+            };
+            let Some(Value::Func(fv)) = ostack.get(base + usize::from(f)) else {
+                return self.jit_osr_refuse(cur, pc);
+            };
+            if fv.tenv.is_some()
+                || self.vm_func_target(fv, &code.sites[site as usize]) != Some(*target)
+            {
+                return self.jit_osr_refuse(cur, pc);
+            }
+            for (m, fr) in self.code_at(*target).frees.iter().enumerate() {
+                let mut c = fr.cache.get();
+                let look = |slot: &mut Value| match (slot, &fr.ty) {
+                    (Value::Int(x), Ty::Int) => Some(std::ptr::from_mut(x) as i64),
+                    (Value::Float(x), Ty::Float) => Some(std::ptr::from_mut(x) as i64),
+                    (Value::Bool(x), Ty::Bool) => Some(std::ptr::from_mut(x) as i64),
+                    _ => None,
+                };
+                let p = match fr.global {
+                    Some(g) => self.envs[g].update_cached(&fr.name, &mut c, look),
+                    None => fv.env.update_cached(&fr.name, &mut c, look),
+                };
+                fr.cache.set(c);
+                let Some(Some(p)) = p else {
+                    return self.jit_osr_refuse(cur, pc);
+                };
+                parts[CBASE + j * MAX_FREES + m] = p;
+            }
+        }
         let mut ctx = Ctx {
             steps: self.steps as i64,
             max_steps: self.limits.max_steps as i64,

@@ -183,8 +183,8 @@ programmes numériques aléatoires (`Program::run_tree_walker` sert de référen
 complet de 10 000 programmes se lance avec `--ignored`) et `tests/vm_cases.rs` sur des cas écrits
 à la main. `RunResult::vm_functions` dit combien de fonctions et de boucles ont été compilées. Avec `QLANG_VM_DUMP=1`, le programme affiche sur la sortie d'erreur les instructions de chaque fonction et boucle compilée.
 
-**Ce qui reste.** Les fermetures, les structures génériques et les valeurs de types plus rares
-(identifiants, dates, tuples) ne sont pas compilés.
+**Ce qui reste.** Les structures génériques et les valeurs de types plus rares (identifiants,
+dates, tuples) ne sont pas compilés.
 
 **Code natif (JIT, fonctionnalité `jit` de `qlang-core`, activée dans `qlang`, pas dans le navigateur).**
 Une fonction qui ne fait que de l'arithmétique, des comparaisons, des sauts et des appels de
@@ -206,6 +206,18 @@ sur la machine. La fonction qui contient la boucle peut faire des choses que le 
 faire (créer la structure, afficher) tant que ce n'est **pas dans une boucle** : le code natif rend la main
 à la machine à la première de ces instructions. Une boucle qui crée une structure ou lit un texte reste donc
 entièrement sur la machine.
+
+**Structures, variables du module et fonctions-valeurs.** Une fonction ou une méthode dont les paramètres
+sont des structures (`self` compris) lit et écrit leurs champs `int`, `float` et `bool` en code natif :
+les champs sont cherchés une fois au début de l'appel, les écritures restent dans des registres et ne vont en
+mémoire qu'au `return`, de sorte qu'un appel que la machine rejoue depuis le début n'écrit jamais deux fois.
+Pour la même raison une fonction qui écrit (un champ, ou une variable capturée) ne peut pas appeler d'autre
+fonction, et une fonction qui en appelle une qui écrit n'est pas compilée. Une boucle chaude garde en mémoire
+les variables du module qu'elle lit ou écrit (la machine les lui donne au départ et reprend les valeurs
+écrites à la sortie) et peut passer une structure tenue par une variable à ces fonctions. Un appel de
+fonction-valeur (`f(v)`, une fermeture) dans une boucle est compilé pour la fonction que `f` désignait
+quand la boucle est devenue chaude : la machine vérifie à chaque entrée que `f` en est toujours une qui
+exécute ce code, puis donne les adresses des variables que la fermeture prend autour d'elle.
 
 ## Ce qui reste (avant la machine à registres)
 

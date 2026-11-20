@@ -609,6 +609,11 @@ pub(super) struct JitSlot {
     /// their values when it starts the native code and takes the written ones back when it ends.
     #[cfg_attr(not(feature = "jit"), allow(dead_code))]
     osr_globals: std::cell::RefCell<Vec<(u32, bool, bool)>>,
+    /// The calls of function values in a loop (instruction, the function it called when the
+    /// loop became hot): the native code calls that function directly, and the machine checks
+    /// at each entry that the value is still one that runs that code.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr_closures: std::cell::RefCell<Vec<(usize, u32)>>,
 }
 
 /// A field read or written by name, and its type.
@@ -4689,7 +4694,7 @@ impl Interp<'_> {
             () => {
                 #[cfg(feature = "jit")]
                 {
-                    let e = self.jit_osr_entry(cur);
+                    let e = self.jit_osr_entry(cur, ostack, base);
                     if e != 0 {
                         pc = self.jit_osr(cur, e, stack, ostack, base, pc);
                         continue;

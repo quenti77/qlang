@@ -352,3 +352,37 @@ fn an_error_in_a_method_called_from_a_hot_loop_leaves_the_structure_as_the_machi
     ));
     assert!(out.contains("R010"), "{out}");
 }
+
+const APPLY: &str = "fun apply_n(f: fun(int) -> int, n: int, x: int) -> int\n  let v = x\n  for i in 0..n do\n    v = f(v) mod 1000003\n  end\n  v\nend\n";
+
+#[test]
+fn a_hot_loop_calls_a_function_value_that_reads_a_captured_variable() {
+    let out = same(&format!(
+        "{APPLY}let k = 3\nlet add = fun(x: int) -> int\n  x * 2 + k\nend\nprint(apply_n(add, 5000, 1))\nprint(apply_n(add, 3000, 2))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_function_value_that_changes_a_captured_variable_agrees() {
+    let out = same(&format!(
+        "{APPLY}let calls = 0\nlet bump = fun(x: int) -> int\n  calls += 1\n  x + calls\nend\nprint(apply_n(bump, 5000, 1))\nprint(calls)\nfun make() -> fun(int) -> int\n  let seen = 0\n  fun(x: int) -> int\n    seen += x\n    seen mod 1000\n  end\nend\nlet g = make()\nprint(apply_n(g, 4000, 1))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_error_in_a_function_value_called_by_a_hot_loop_leaves_the_variable_as_the_machine_does() {
+    let out = same(&format!(
+        "{APPLY}let calls = 0\nlet big = 1\nlet grow = fun(x: int) -> int\n  calls += 1\n  big = big * 3\n  print(\"{{calls}} {{big}}\")\n  x + calls\nend\nprint(apply_n(grow, 1000, 1))"
+    ));
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
+fn another_function_value_in_a_loop_that_became_hot_is_still_right() {
+    let out = same(&format!(
+        "{APPLY}let k = 3\nlet a = fun(x: int) -> int\n  x + k\nend\nlet b = fun(x: int) -> int\n  x * 2\nend\nprint(apply_n(a, 4000, 1))\nprint(apply_n(b, 4000, 1))\nprint(apply_n(a, 10, 1))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}

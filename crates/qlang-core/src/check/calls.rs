@@ -1667,7 +1667,7 @@ impl Checker {
                         Some(("tz_offset", ARCHIVE_ONLY))
                     }
                     ("Zone", "local") => Some(("tz_resolve", ARCHIVE_ONLY)),
-                    ("Process", "run" | "run_with_input") => Some((
+                    ("Process", "run" | "run_with_input" | "run_with") => Some((
                         "process_run",
                         "starting programs is not allowed here; the terminal needs `--allow-process`",
                     )),

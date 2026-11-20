@@ -4018,7 +4018,7 @@ extern fun crypto_sign(alg: string, key: string, message: bytes) -> Result<bytes
 extern fun process_stopping() -> bool
 
 -- Starting programs: only where the host allows it.
-extern fun process_run(command: string, args: array<string>, input: string?) -> Result<ProcessOutput, Error>
+extern fun process_run(command: string, args: array<string>, input: string?, cwd: string?, env: map<string, string>, timeout_ms: int) -> Result<ProcessOutput, Error>
 
 --" What a program wrote on its two output streams, and the code it ended with (-1 when a
 signal ended it). --"
@@ -4031,9 +4031,21 @@ struct ProcessOutput
     public stderr: string
 end
 
+--" The choices of `Process.run_with`. --"
+struct ProcessOptions
+    --" What is written on the standard input of the program. --"
+    public input: string? = none
+    --" The directory it runs in (the one of the caller by default). --"
+    public cwd: string? = none
+    --" Variables added to its environment (it keeps the others). --"
+    public env: map<string, string> = {}
+    --" How long it may run, in milliseconds (from 1 to 3600000, a minute by default). --"
+    public timeout_ms: int = 60000
+end
+
 --" Starting programs: `Process.run("git", ["status"])`. No shell is involved, so the
 arguments are passed as they are. Needs permission (`--allow-process` in the terminal); a
-program is not confined by `--root`, and one that runs for more than a minute is stopped. --"
+program is not confined by `--root`, and one that runs for more than a minute (by default) is stopped. --"
 struct Process
 end
 
@@ -4050,12 +4062,20 @@ impl Process
     --" Runs `command` with `args` and waits for it. `err` if it cannot be started; a program
     that ends with a non-zero `status` is still an `ok` result. --"
     public fun run(command: string, args: array<string>) -> Result<ProcessOutput, Error>
-        process_run(command, args, none)
+        process_run(command, args, none, none, {}, 60000)
     end
 
     --" Like `run`, with `input` written to the program's standard input. --"
     public fun run_with_input(command: string, args: array<string>, input: string) -> Result<ProcessOutput, Error>
-        process_run(command, args, input)
+        process_run(command, args, input, none, {}, 60000)
+    end
+
+    --" Like `run`, with the choices of `options`: the directory it runs in, variables added to its
+    environment, a standard input and a delay. A program that goes past the delay is stopped, with
+    everything it started, and the result is an `err` that says so. The task of a `Worker` that is
+    cancelled stops its program in the same way. --"
+    public fun run_with(command: string, args: array<string>, options: ProcessOptions) -> Result<ProcessOutput, Error>
+        process_run(command, args, options.input, options.cwd, options.env, options.timeout_ms)
     end
 end
 
@@ -4135,7 +4155,7 @@ A task can also talk while it works. In the task: `Worker.emit(value)` sends to 
 waits for what the program sent (`none` after `ms`), `Worker.cancelled()` says whether it was asked to stop
 (by `cancel()`, or because the server is stopping). In the program: `w.recv(ms)`, `w.send(value)`,
 `w.cancel()`, `w.is_done()`. `cancel()` also **stops the task at its next few thousand steps** (error
-`R906`), even in a loop that never looks at `cancelled()`; a task waiting in a host call stops when it returns.
+`R906`), even in a loop that never looks at `cancelled()`; a task waiting in a host call stops when it returns, except in `Process.run`, which stops its program as soon as the task is cancelled.
 
 The file is looked for from the folder you run `qlang` in (inside `--root` if there is one). The task has the
 permissions of the program (`--allow-process`...), its own memory and its own database connections, and it

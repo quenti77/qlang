@@ -5,7 +5,7 @@
 //! different.
 
 use qlang_core::diag::{Diagnostic, Severity};
-use qlang_core::lexer::{Tok, Token, lex};
+use qlang_core::lexer::{Tok, Token, lex, lex_legacy};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -147,7 +147,7 @@ fn rewrite(source: &str, edits: &[Edit]) -> Result<String, String> {
     out.push_str(&source[at..]);
     // the same tokens, but the ones that were renamed
     let (mut d1, mut d2) = (Vec::new(), Vec::new());
-    let before = lex(source, 0, 0, &mut d1);
+    let before = lex_legacy(source, 0, 0, &mut d1);
     let after = lex(&out, 0, 0, &mut d2);
     let errors = |d: &[Diagnostic]| d.iter().filter(|x| x.severity == Severity::Error).count();
     if before.len() != after.len() || errors(&d1) != errors(&d2) || errors(&d2) != 0 {
@@ -210,7 +210,7 @@ pub fn run(args: &[&str]) -> ExitCode {
             continue;
         };
         let mut diags = Vec::new();
-        let tokens = lex(&source, 0, 0, &mut diags);
+        let tokens = lex_legacy(&source, 0, 0, &mut diags);
         if diags.iter().any(|d| d.severity == Severity::Error) {
             eprintln!("{}: it does not lex, left as it is", f.display());
             failed = true;

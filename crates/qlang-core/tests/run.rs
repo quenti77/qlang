@@ -1782,7 +1782,7 @@ fn div_and_mod_assignment() {
         out("let n = 7\nprint(n // 2 == 3)\nprint(n mod 2 == 1)"),
         "true\ntrue\n"
     );
-    // the old way still works, and `/=` on an int is still an error
+    // `/=` on an int is an error
     assert!(err("let n = 8\nn /= 2").starts_with("COMPILE"));
     assert!(err("let x = 7.5\nx //= 2").starts_with("COMPILE"));
 }
@@ -2167,32 +2167,25 @@ fn cyclic_imports_are_matched_through_different_spellings() {
 }
 
 #[test]
-fn the_new_integer_division_and_block_comment_work_like_the_old_ones() {
+fn the_integer_division_and_the_block_comment() {
     let new = "--*\nnote\n--*\nlet n = 17\nn //= 2\nprint(n)\nprint(-7 // 2)\nprint(7 // 2 * 2 + 7 mod 2)\n";
-    let old = "--(\nnote\n--)\nlet n = 17\nn div= 2\nprint(n)\nprint(-7 div 2)\nprint(7 div 2 * 2 + 7 mod 2)\n";
     assert_eq!(out(new), "8\n-3\n7\n");
-    assert_eq!(out(old), out(new));
     assert!(run("--*\nnever closed").error.is_some());
 }
 
 #[test]
-fn the_old_spellings_are_deprecated_warnings() {
-    let mut host = MemoryHost::new();
-    let r = compile("main.q", "--(\nx\n--)\nprint(7 div 2)\n", &mut host);
-    let rendered = match r {
-        Ok(p) => p
-            .warnings
-            .iter()
-            .map(|d| format!("{} {}", d.code, d.message))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Err(e) => e.render(),
-    };
-    assert!(
-        rendered.contains("W001") && rendered.contains("`div` is deprecated"),
-        "{rendered}"
+fn div_is_a_name_like_any_other_and_the_old_block_comment_is_an_error() {
+    // 1.9 removed `div`, `div=` and `--( ... --)`
+    assert_eq!(
+        out("let div = 5\nfun twice(div: int) -> int\n  div * 2\nend\nprint(twice(div))"),
+        "10\n"
     );
-    assert!(rendered.contains("block comment"), "{rendered}");
+    let e = err("print(7 div 2)");
+    assert!(e.contains("removed in 1.9"), "{e}");
+    let e = err("--(\nx\n--)\nprint(1)");
+    assert!(e.contains("L006") && e.contains("--*"), "{e}");
+    // a `--(` that is never closed is a line comment
+    assert_eq!(out("--(a note\nprint(1)"), "1\n");
 }
 
 #[test]

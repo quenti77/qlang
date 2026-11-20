@@ -249,7 +249,6 @@ fn keyword(s: &str) -> Option<Tok> {
         "and" => Tok::And,
         "or" => Tok::Or,
         "not" => Tok::Not,
-        "div" => Tok::DivKw,
         "mod" => Tok::ModKw,
         "true" => Tok::True,
         "false" => Tok::False,
@@ -312,6 +311,23 @@ pub fn lex_with_docs(
     diags: &mut Vec<Diagnostic>,
     docs: &mut Vec<DocComment>,
 ) -> Vec<Token> {
+    lex_impl(src, file, base, diags, docs, false)
+}
+
+/// Like [`lex`], and still reads what 1.9 removed: `div`, `div=` and the `--( ... --)` comments
+/// (each with a `W001` warning). Only `qlang migrate` needs it, to rewrite them.
+pub fn lex_legacy(src: &str, file: u32, base: usize, diags: &mut Vec<Diagnostic>) -> Vec<Token> {
+    lex_impl(src, file, base, diags, &mut Vec::new(), true)
+}
+
+fn lex_impl(
+    src: &str,
+    file: u32,
+    base: usize,
+    diags: &mut Vec<Diagnostic>,
+    docs: &mut Vec<DocComment>,
+    legacy: bool,
+) -> Vec<Token> {
     let b = src.as_bytes();
     let mut toks: Vec<Token> = Vec::new();
     let mut i = 0usize;
@@ -343,8 +359,22 @@ pub fn lex_with_docs(
                     push!(Tok::Newline, s, i);
                 }
             }
+            // `--( ... --)` was removed in 1.9: a block that is closed is an error that says what to write
+            // (anything else starting with `--(` is a line comment, as before the block existed)
+            b'-' if !legacy && b[i..].starts_with(b"--(") && src[i + 3..].contains("--)") => {
+                let end = i + 3 + src[i + 3..].find("--)").unwrap_or(0) + 3;
+                crate::diag::push_capped(
+                    diags,
+                    Diagnostic::error(
+                        "L006",
+                        "the block comment `--( ... --)` was removed in 1.9: write `--* ... --*` (`qlang migrate` rewrites it)",
+                        span(i, end),
+                    ),
+                );
+                i = end;
+            }
             b'-' if b.get(i + 1) == Some(&b'-') => match b.get(i + 2) {
-                Some(open @ (b'*' | b'(')) => {
+                Some(open @ (b'*' | b'(')) if *open == b'*' || legacy => {
                     let close = if *open == b'*' { "--*" } else { "--)" };
                     match src[i + 3..].find(close) {
                         Some(p) => {
@@ -466,13 +496,13 @@ pub fn lex_with_docs(
                 }
                 let word = &src[start..i];
                 // `div=` and `mod=` are compound assignments (but `div ==` is not)
-                let compound = matches!(word, "div" | "mod")
+                let compound = (word == "mod" || (legacy && word == "div"))
                     && b.get(i) == Some(&b'=')
                     && b.get(i + 1) != Some(&b'=');
                 if compound {
                     i += 1;
                 }
-                if word == "div" {
+                if legacy && word == "div" {
                     crate::diag::push_capped(
                         diags,
                         Diagnostic::warning(
@@ -487,7 +517,8 @@ pub fn lex_with_docs(
                     );
                 }
                 let tok = match (word, compound) {
-                    ("div", true) => Tok::IntDivAssign,
+                    ("div", true) if legacy => Tok::IntDivAssign,
+                    ("div", false) if legacy => Tok::DivKw,
                     ("mod", true) => Tok::ModAssign,
                     _ => keyword(word).unwrap_or_else(|| Tok::Ident(word.to_string())),
                 };

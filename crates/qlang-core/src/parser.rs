@@ -9,6 +9,10 @@
 use crate::ast::*;
 use crate::diag::Diagnostic;
 use crate::lexer::{Tok, Token, lex, lex_with_docs};
+
+/// Said after a parse error at a `div`: 1.9 removed it.
+const DIV_REMOVED: &str =
+    "`div` was removed in 1.9: write `//` (and `//=` for `div=`); `qlang migrate` rewrites it";
 use crate::span::Span;
 use std::rc::Rc;
 
@@ -262,7 +266,11 @@ impl<'a> Parser<'a> {
     }
 
     fn error_at<T>(&mut self, code: &str, msg: impl Into<String>, span: Span) -> PResult<T> {
-        crate::diag::push_capped(&mut self.diags, Diagnostic::error(code, msg, span));
+        let mut d = Diagnostic::error(code, msg, span);
+        if self.peek() == Tok::Ident("div".to_string()) {
+            d = d.with_note(DIV_REMOVED, None);
+        }
+        crate::diag::push_capped(&mut self.diags, d);
         Err(())
     }
 
@@ -330,14 +338,15 @@ impl<'a> Parser<'a> {
             return true;
         }
         let span = self.peek_span();
-        crate::diag::push_capped(
-            &mut self.diags,
-            Diagnostic::error(
-                "P002",
-                format!("unexpected {}; expected the end of the line", t.describe()),
-                span,
-            ),
+        let mut d = Diagnostic::error(
+            "P002",
+            format!("unexpected {}; expected the end of the line", t.describe()),
+            span,
         );
+        if t == Tok::Ident("div".to_string()) {
+            d = d.with_note(DIV_REMOVED, None);
+        }
+        crate::diag::push_capped(&mut self.diags, d);
         false
     }
 

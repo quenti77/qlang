@@ -2,6 +2,20 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.9.0
+
+Retire ce que la 1.6 avait déprécié : `div`, `div=` et le commentaire `--(` … `--)`. Deux versions mineures d'avertissement (1.7 et 1.8) ont précédé ce retrait, comme le demande `docs/stability.md`.
+
+### Cassant
+
+- **`div` et `div=` n'existent plus.** Avant : `a div b` et `n div= 2` marchaient (avertissement `W001` depuis la 1.6). Après : `div` est un nom comme un autre (variable, fonction, méthode, champ), et `a div b` est une erreur de syntaxe dont le message dit d'écrire `//`. S'adapter : `qlang migrate` réécrit `div` en `//` et `div=` en `//=` (la 1.9 sait encore les lire pour cela). Rien ne change pour le résultat : `//` coupe vers zéro.
+- **Le commentaire `--(` … `--)` n'existe plus.** Avant : bloc de commentaire (avertissement `W001`). Après : un bloc fermé est l'erreur `L006` qui dit d'écrire `--*` … `--*` ; un `--(` jamais fermé est un commentaire de ligne. S'adapter : `qlang migrate`.
+- `qlang-std` 1.0.1 et `qlang-kit` 1.1.0 n'emploient plus `div` ; avec `std` 1.0.0 (tag publié avec `div`), prendre la 1.0.1.
+
+### Autre
+
+- `div` n'est plus dans les mots proposés par l'éditeur ni colorié comme opérateur, et la grammaire (`qlang.g4`, VS Code) ne connaît plus ni `div` ni `--(`.
+
 ## 1.8.0
 
 Ce qu'il faut pour des écrans en terminal et des outils qui lancent des programmes : une limite d'étapes qui ne tue plus un programme qui attend, des options pour `Process`, des droits de fichier, et un peu de JIT en plus. Rien de cassant ; **le retrait de `div` et du bloc `--(` … `--)` passe de la 1.8 à la 1.9** : la 1.8 apporte des fonctions, et `qlang-std` doit d'abord publier une version sans `div` (qlang-std#34).

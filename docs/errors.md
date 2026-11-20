@@ -14,6 +14,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `L003` | ``unterminated block comment (missing `--*`)`` <br> ``unterminated documentation comment (missing `--"`)`` <br> `this tuple position is too large` |
 | `L004` | `expected hexadecimal digits after 0x` <br> `expected binary digits (0 or 1) after 0b` |
 | `L005` | `integer literal is too large` <br> `float literal is out of range` |
+| `L006` | ``the block comment `--( ... --)` was removed in 1.9: write `--* ... --*` `` |
 
 ## Pxxx : Syntaxe
 

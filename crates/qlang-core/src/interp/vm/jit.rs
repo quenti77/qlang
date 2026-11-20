@@ -2258,9 +2258,14 @@ impl Em<'_, '_> {
         let arity = self.arity(target);
         let mut args = vec![self.ctx];
         let codes = self.codes;
-        for k in 0..arity {
+        for (k, ty) in codes[target as usize]
+            .param_tys
+            .iter()
+            .enumerate()
+            .take(arity)
+        {
             let r = base + k as Reg;
-            if is_obj(&codes[target as usize].param_tys[k]) {
+            if is_obj(ty) {
                 let p = if self.osr.is_some() {
                     self.obj_addr(r)?
                 } else {

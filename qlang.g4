@@ -483,7 +483,7 @@ As: 'as';
 And: 'and';
 Or: 'or';
 Not: 'not';
-DivKw: '//' | 'div';  // `div` is deprecated since 1.6
+DivKw: '//';
 ModKw: 'mod';
 
 True: 'true';
@@ -516,7 +516,7 @@ MinusAssign: '-=';
 StarAssign: '*=';
 SlashAssign: '/=';
 PercentAssign: '%=';
-IntDivAssign: '//=' | 'div=';  // `div=` is deprecated since 1.6
+IntDivAssign: '//=';
 ModAssign: 'mod=';
 Assign: '=';
 
@@ -575,9 +575,8 @@ Identifier: [a-zA-Z_] [a-zA-Z_0-9]*;
 // '--' suivi de '(' ou '"' n'est jamais un commentaire de ligne.
 // Pas d'imbrication. Les commentaires de doc vont sur le canal HIDDEN.
 
-LineComment: '--' (~[*("\r\n] ~[\r\n]*)? -> skip;
-// `--( ... --)` is deprecated since 1.6
-BlockComment: ('--*' .*? '--*' | '--(' .*? '--)') -> skip;
+LineComment: '--' (~[*"\r\n] ~[\r\n]*)? -> skip;
+BlockComment: '--*' .*? '--*' -> skip;
 DocComment: '--"' .*? '--"' -> channel(HIDDEN);
 
 // Le retour à la ligne est significatif (fin d'instruction).

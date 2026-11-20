@@ -137,8 +137,8 @@ let x = 1 -- ou en fin de ligne
 ```
 
 - Les commentaires ne s'imbriquent pas.
-- Déprécié en 1.6 (retiré en 1.9) : l'ancien bloc `--(` … `--)` reste lu, avec
-  l'avertissement `W001`. `qlang migrate` le réécrit en `--*` … `--*`.
+- Retiré en 1.9 (déprécié en 1.6) : l'ancien bloc `--(` … `--)` est l'erreur `L006`.
+  `qlang migrate` le réécrit en `--*` … `--*`. Un `--(` jamais fermé est un commentaire de ligne.
 - `--` suivi de `*` ou de `"` ouvre toujours un commentaire de bloc ou de
   documentation, jamais un commentaire de ligne : `--*****` ouvre donc un bloc.
   Pour une ligne de séparation, écrire `-- *****` ou `-----`.
@@ -523,7 +523,7 @@ De la plus faible à la plus forte :
 | `2.0 ** 0.5` | `1.414…` | sinon, un `float`                        |
 
 - `//` ne s'applique qu'à deux `int`, et coupe vers zéro (`-7 // 2` vaut `-3`), pas vers le bas comme le `//` de
-  Python. `div` est l'ancien nom : déprécié en 1.6 (`W001`), retiré en 1.9 ; `qlang migrate` écrit `//` à sa place.
+  Python. `div` était l'ancien nom : déprécié en 1.6 (`W001`), retiré en 1.9 (c'est maintenant un nom libre) ; `qlang migrate` écrit `//` à sa place.
   `mod` s'applique aussi aux `float`
   (`5.5 mod 2` vaut `1.5`).
 - Diviser par zéro (`/`, `//`, `mod`) est une erreur d'exécution.
@@ -3783,7 +3783,7 @@ match case
 struct impl trait enum extends override
 public private protected static
 import export extern from as
-and or not div mod
+and or not mod
 true false none self super
 ```
 

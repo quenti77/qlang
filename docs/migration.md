@@ -17,19 +17,28 @@ qlang migrate             # réécrit
 ```
 
 Les règles : `Log.warn` → `Log.warning` (déprécié en 0.69, retiré en 0.83), `div` → `//` et `div=` → `//=`, et le bloc de
-commentaire `--(` … `--)` → `--*` … `--*` (dépréciés en 1.6). Ce qui n'est pas un renommage (un comportement qui change)
+commentaire `--(` … `--)` → `--*` … `--*` (dépréciés en 1.6, retirés en 1.9 : `qlang migrate` les lit encore pour les réécrire). Ce qui n'est pas un renommage (un comportement qui change)
 reste décrit ici, à la main.
 
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
-## 1.6 : `//` remplace `div`, `--*` remplace `--(` (déprécié, retiré en 1.9)
+## 1.9 : `div`, `div=` et `--(` … `--)` sont retirés
+
+- **Avant** : `a div b`, `n div= 2` et le bloc `--(` … `--)` marchaient, avec l'avertissement `W001` (depuis la 1.6).
+- **Après** : `div` n'est plus un mot réservé, c'est un nom comme un autre (variable, fonction, méthode, champ) ; `a div b` est une
+  erreur de syntaxe qui dit d'écrire `//`. Un bloc `--(` … `--)` fermé est l'erreur `L006` qui dit d'écrire `--*` … `--*` ; un `--(`
+  jamais fermé est un commentaire de ligne.
+- **S'adapter** : `qlang migrate` (avec la 1.9) réécrit les deux ; il lit encore les anciennes formes pour cela. `qlang check --deny-warnings`
+  en 1.8 liste ce qu'il y a à changer. `qlang-std` 1.0.1 et `qlang-kit` 1.1 n'emploient plus `div`.
+
+## 1.6 : `//` remplace `div`, `--*` remplace `--(` (déprécié en 1.6, retiré en 1.9)
 
 - **Avant** : la division entière s'écrivait `a div b` (`n div= 2`), et un commentaire sur plusieurs lignes `--(` … `--)`.
 - **Après** : `a // b` (`n //= 2`) et `--*` … `--*` (le même marqueur ouvre et ferme, comme `--"` pour la documentation). Le résultat est le
   même : `//` coupe **vers zéro** (`-7 // 2` vaut `-3`), il n'arrondit pas vers le bas comme le `//` de Python.
-- **Les anciennes formes marchent encore en 1.6 et 1.7**, avec l'avertissement `W001` à chaque emploi. Elles sont retirées en 1.9 ;
-  `div` devient alors un nom comme un autre (variable, fonction, méthode, champ).
+- **Les anciennes formes marchaient encore de la 1.6 à la 1.8**, avec l'avertissement `W001` à chaque emploi. Elles sont retirées en 1.9
+  (voir plus haut) ; `div` est alors un nom comme un autre (variable, fonction, méthode, champ).
 - **S'adapter** : `qlang migrate` réécrit les deux (`qlang migrate --check` pour la liste, code 1 s'il y a quelque chose à changer).
 - **Cassant dès la 1.6** : une ligne qui commence par `--*` ouvrait un commentaire de ligne (`--*****`, `--* titre`) ; elle ouvre
   maintenant un bloc, qui court jusqu'au prochain `--*`. Écrire `-- *****` ou `-----` pour une ligne de séparation.

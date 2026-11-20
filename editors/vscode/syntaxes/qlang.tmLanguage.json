@@ -47,15 +47,8 @@
           "endCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } }
         },
         {
-          "name": "comment.block.deprecated.qlang",
-          "begin": "--\\(",
-          "end": "--\\)",
-          "beginCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } },
-          "endCaptures": { "0": { "name": "punctuation.definition.comment.qlang" } }
-        },
-        {
           "name": "comment.line.double-dash.qlang",
-          "match": "--(?![*(\"]).*$"
+          "match": "--(?![*\"]).*$"
         }
       ]
     },
@@ -175,11 +168,11 @@
         },
         {
           "name": "keyword.operator.assignment.word.qlang",
-          "match": "\\b(div|mod)="
+          "match": "\\bmod="
         },
         {
           "name": "keyword.operator.word.qlang",
-          "match": "\\b(and|or|not|div|mod)\\b"
+          "match": "\\b(and|or|not|mod)\\b"
         },
         {
           "name": "variable.language.qlang",

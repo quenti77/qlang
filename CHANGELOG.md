@@ -2,6 +2,28 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.10.0
+
+Un trait qui en étend un autre s'implémente en un seul bloc, et le code natif (JIT) couvre les structures, les fermetures, les textes et les maps. Rien de cassant : tout ce qui marchait marche pareil.
+
+### Langage
+
+- **Les méthodes d'un trait étendu peuvent s'écrire dans l'`impl` du trait qui l'étend.** Avec `trait Response extends ToJson`, `impl Response for T` peut contenir `to_json` : elle compte comme l'implémentation de `ToJson` pour `T`, sans `impl ToJson for T` à part (aussi à travers une chaîne `C extends B extends A`). Avant, ce `to_json` donnait deux erreurs (`T135` et `T136`). Les deux écritures marchent ; les mélanger pour un même trait est la nouvelle erreur `T137`.
+- **L'ordre des `impl` n'a plus d'importance.** `impl B for T` écrit avant `impl A for T` (avec `B extends A`) était refusé (`T136`) ; les `impl` sont maintenant vérifiés une fois qu'ils sont tous connus.
+- **Des messages qui disent quoi écrire** : `T136` indique `impl A for T` ou les méthodes à mettre dans l'`impl` ; une méthode de trait sans `self` appelée sur une valeur du trait dit qu'elle est statique (au lieu de « has no method »).
+
+### Performances
+
+Le code natif (Cranelift, voir `docs/performance.md`) compile maintenant, avec les mêmes résultats, erreurs, lignes et limites que la machine (`jit_cases`) :
+
+- **les méthodes et fonctions qui prennent des structures** (`self` compris) lisent et écrivent leurs champs `int`, `float` et `bool` ; les écritures ne vont en mémoire qu'au `return`, de sorte qu'un appel rejoué par la machine n'écrit jamais deux fois ;
+- **les variables du module** qu'une boucle chaude lit ou écrit restent en mémoire pendant la boucle ;
+- **les appels de fonctions-valeurs (fermetures)** dans une boucle chaude, avec les variables qu'elles capturent (lues, ou réécrites au `return`) ;
+- **les textes** (`len`, `substring`, comparaison avec un texte du programme) et **les maps de nombres** (clés `int` ou `string`) dans une boucle chaude ;
+- **les tableaux de nombres reçus en paramètre** par une fonction appelée en natif (en lecture).
+
+Une boucle que le code natif quitte 32 fois de suite sans finir un tour est rendue à la machine. Mesures (meilleur de 3, 1.9.0 → 1.10.0) : fermetures 0,35 s → 0,066 s, structures 0,46 s → 0,15 s, appels de fonctions 0,24 s → 0,074 s, maps 0,085 s → 0,055 s, petits tableaux 0,131 s → 0,044 s, textes 0,79 s → 0,63 s. Pour #320, restent les tuples (une fonction qui en rend un), `push` sans fonction d'aide et les textes construits (`+`, interpolation).
+
 ## 1.9.0
 
 Retire ce que la 1.6 avait déprécié : `div`, `div=` et le commentaire `--(` … `--)`. Deux versions mineures d'avertissement (1.7 et 1.8) ont précédé ce retrait, comme le demande `docs/stability.md`.

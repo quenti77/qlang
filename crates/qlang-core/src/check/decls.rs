@@ -1154,56 +1154,159 @@ impl Checker {
                 methods: Vec::new(),
             });
 
-            let mut methods: Vec<(String, FnId)> = Vec::new();
-            for md in &imp.methods {
-                let f = &md.fun;
-                let name = f.name.clone().unwrap();
-                if methods.iter().any(|(n, _)| *n == name.name) {
-                    self.err(
-                        "T131",
-                        format!("method `{}` is declared twice in this impl", name.name),
-                        name.span,
-                    );
-                    continue;
+            // the methods of a trait that this one extends can be given here: they implement
+            // that trait (an impl of its own is made for them)
+            let mut extra_traits: Vec<(TraitId, Vec<Ty>)> = Vec::new();
+            let mut home: Vec<Option<usize>> = Vec::new();
+            if let Some((tid, targs)) = &trait_ {
+                let own = self.defs.traits[*tid].sigs.clone();
+                let closure = self.trait_closure_of(*tid, targs, Some(&target));
+                for md in &imp.methods {
+                    let name = md.fun.name.as_ref().map_or("", |n| n.name.as_str());
+                    if own.iter().any(|s| s.name == name) {
+                        home.push(None);
+                        continue;
+                    }
+                    let found = closure
+                        .iter()
+                        .skip(1)
+                        .find(|(st, _)| self.defs.traits[*st].sigs.iter().any(|s| s.name == name));
+                    match found {
+                        Some((st, sa)) => {
+                            let k = match extra_traits.iter().position(|(x, _)| x == st) {
+                                Some(k) => k,
+                                None => {
+                                    extra_traits.push((*st, sa.clone()));
+                                    extra_traits.len() - 1
+                                }
+                            };
+                            home.push(Some(k));
+                        }
+                        None => home.push(None),
+                    }
                 }
-                let mark = self.tparam_scope.len();
-                let own = self.make_tparams(&f.tparams);
-                let params: Vec<Ty> = self.param_types(&f.params);
-                let ret = f
-                    .ret
-                    .as_ref()
-                    .map(|r| self.resolve_type(r))
-                    .unwrap_or(Ty::Unit);
-                self.tparam_scope.truncate(mark);
-                let mut scope_params = tps.clone();
-                scope_params.extend(own.iter().cloned());
-                let fid = self.defs.fns.len();
-                self.defs.fns.push(FnDef {
-                    name: name.name.clone(),
-                    module: m,
-                    span: name.span,
-                    scope_params,
-                    own_tparams: own.len(),
-                    impl_id: Some(impl_id),
-                    has_self: f.has_self,
-                    params,
-                    ret,
-                    vis: md.vis.unwrap_or(Visibility::Private),
-                    is_override: md.is_override,
-                    decl: Some(f.clone()),
-                    trait_default_self: None,
-                });
-                methods.push((name.name.clone(), fid));
+            } else {
+                home = vec![None; imp.methods.len()];
             }
-            self.defs.impls[impl_id].methods = methods;
-            self.verify_impl(impl_id, imp);
+            let mut ids = vec![impl_id];
+            for (st, sa) in &extra_traits {
+                let id = self.defs.impls.len();
+                self.defs.impls.push(ImplDef {
+                    module: m,
+                    span: imp.span,
+                    tparams: tps.clone(),
+                    trait_: Some((*st, sa.clone())),
+                    target: target.clone(),
+                    methods: Vec::new(),
+                });
+                self.synthetic_impls.push(id);
+                ids.push(id);
+            }
+            if ids.len() > 1 {
+                self.mscopes[m]
+                    .extra_impls
+                    .insert(item_idx, ids[1..].to_vec());
+            }
+            for (k, id) in ids.iter().enumerate() {
+                let mut methods: Vec<(String, FnId)> = Vec::new();
+                let mine: Vec<&ast::MethodDecl> = imp
+                    .methods
+                    .iter()
+                    .zip(&home)
+                    .filter(|(_, h)| match h {
+                        None => k == 0,
+                        Some(x) => *x + 1 == k,
+                    })
+                    .map(|(md, _)| md)
+                    .collect();
+                let impl_id = *id;
+                for md in mine {
+                    let f = &md.fun;
+                    let name = f.name.clone().unwrap();
+                    if methods.iter().any(|(n, _)| *n == name.name) {
+                        self.err(
+                            "T131",
+                            format!("method `{}` is declared twice in this impl", name.name),
+                            name.span,
+                        );
+                        continue;
+                    }
+                    let mark = self.tparam_scope.len();
+                    let own = self.make_tparams(&f.tparams);
+                    let params: Vec<Ty> = self.param_types(&f.params);
+                    let ret = f
+                        .ret
+                        .as_ref()
+                        .map(|r| self.resolve_type(r))
+                        .unwrap_or(Ty::Unit);
+                    self.tparam_scope.truncate(mark);
+                    let mut scope_params = tps.clone();
+                    scope_params.extend(own.iter().cloned());
+                    let fid = self.defs.fns.len();
+                    self.defs.fns.push(FnDef {
+                        name: name.name.clone(),
+                        module: m,
+                        span: name.span,
+                        scope_params,
+                        own_tparams: own.len(),
+                        impl_id: Some(impl_id),
+                        has_self: f.has_self,
+                        params,
+                        ret,
+                        vis: md.vis.unwrap_or(Visibility::Private),
+                        is_override: md.is_override,
+                        decl: Some(f.clone()),
+                        trait_default_self: None,
+                    });
+                    methods.push((name.name.clone(), fid));
+                }
+                self.defs.impls[impl_id].methods = methods;
+                self.pending_impls.push((impl_id, imp.target.span));
+            }
             self.tparam_scope.clear();
         }
         self.self_ty = None;
     }
 
+    /// Checks the impls once all of them are known, so that the order of the impls in the files
+    /// does not matter (`impl B for T` can come before the `impl A for T` that `B` extends).
+    pub(crate) fn verify_impls(&mut self) {
+        let pending = std::mem::take(&mut self.pending_impls);
+        for (impl_id, span) in pending {
+            // the methods of a trait given in the impl of a trait that extends it, and an impl of
+            // that trait of its own too: they would be split between the two
+            if self.synthetic_impls.contains(&impl_id) {
+                let def = self.defs.impls[impl_id].clone();
+                let twin = self.defs.impls.iter().enumerate().any(|(oi, o)| {
+                    oi != impl_id
+                        && !self.synthetic_impls.contains(&oi)
+                        && o.trait_.as_ref().map(|t| t.0) == def.trait_.as_ref().map(|t| t.0)
+                        && o.target == def.target
+                });
+                if twin {
+                    let (tr, target) = (
+                        def.trait_
+                            .as_ref()
+                            .map(|(t, a)| self.show(&Ty::Trait(*t, a.clone())))
+                            .unwrap_or_default(),
+                        self.show(&def.target),
+                    );
+                    self.err(
+                        "T137",
+                        format!(
+                            "the methods of `{tr}` are given here, and `{target}` has an `impl {tr}` of its own: put them all in one of the two"
+                        ),
+                        span,
+                    );
+                    continue;
+                }
+            }
+            self.verify_impl(impl_id, span);
+        }
+    }
+
     /// Check an impl against its trait, or for duplicate inherent methods.
-    fn verify_impl(&mut self, impl_id: ImplId, imp: &ast::ImplDecl) {
+    fn verify_impl(&mut self, impl_id: ImplId, target_span: Span) {
         let def = self.defs.impls[impl_id].clone();
         let Some((tid, targs)) = def.trait_.clone() else {
             // inherent: names must not clash with other inherent impls of the same type
@@ -1214,7 +1317,7 @@ impl Checker {
                     .iter()
                     .enumerate()
                     .filter(|(oi, other)| {
-                        *oi != impl_id
+                        *oi < impl_id
                             && other.trait_.is_none()
                             && other.target == def.target
                             && other.methods.iter().any(|(n, _)| n == name)
@@ -1249,12 +1352,26 @@ impl Checker {
                     self.show(&def.target),
                     self.show(&Ty::Trait(*st, sa.clone())),
                 );
+                let required: Vec<String> = self.defs.traits[*st]
+                    .sigs
+                    .iter()
+                    .filter(|s| s.default.is_none())
+                    .map(|s| format!("`{}`", s.name))
+                    .collect();
+                let hint = if required.is_empty() {
+                    format!("write `impl {needed} for {target}`")
+                } else {
+                    format!(
+                        "write `impl {needed} for {target}`, or give its methods ({}) in this `impl`",
+                        required.join(", ")
+                    )
+                };
                 self.err(
                     "T136",
                     format!(
-                        "trait `{trait_shown}` extends `{needed}`: `{target}` must implement it too"
+                        "trait `{trait_shown}` extends `{needed}`: `{target}` must implement it too ({hint})"
                     ),
-                    imp.target.span,
+                    target_span,
                 );
             }
         }
@@ -1271,7 +1388,7 @@ impl Checker {
                             "missing method `{}` required by trait `{trait_shown}`",
                             sig.name
                         ),
-                        imp.target.span,
+                        target_span,
                     );
                 }
                 continue;

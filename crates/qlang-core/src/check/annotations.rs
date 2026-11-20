@@ -45,11 +45,23 @@ impl Checker {
                     }
                 }
                 Item::Impl(i) => {
-                    let impl_id = self.mscopes[m].decl_ids.get(&idx).copied();
+                    let mut impl_ids: Vec<usize> = self.mscopes[m]
+                        .decl_ids
+                        .get(&idx)
+                        .copied()
+                        .into_iter()
+                        .collect();
+                    impl_ids.extend(
+                        self.mscopes[m]
+                            .extra_impls
+                            .get(&idx)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
                     for md in &i.methods {
-                        let fid = impl_id.and_then(|iid| {
+                        let fid = impl_ids.iter().find_map(|iid| {
                             let name = md.fun.name.as_ref()?;
-                            let methods = &self.defs.impls[iid].methods;
+                            let methods = &self.defs.impls[*iid].methods;
                             methods
                                 .iter()
                                 .find(|(n, _)| *n == name.name)

@@ -85,6 +85,7 @@ Ce fichier est vérifié par un test (`crates/qlang-core/tests/error_codes.rs`) 
 | `T134` | ``method `{}` should {} `self``` <br> ``method `{}` should have {} generic parameter(s)`` <br> ``method `{}` should take {} parameter(s), found {}`` |
 | `T135` | ```{name}` is not a method of trait `{trait_shown}``` |
 | `T136` | `a trait cannot extend itself` <br> ``a trait can only extend another trait, not `{shown}``` <br> ``trait `{trait_shown}` extends `{needed}`: `{target}` must implement it too`` |
+| `T137` | ``the methods of `{tr}` are given here, and `{target}` has an `impl {tr}` of its own: put them all in one of the two`` |
 | `T140` | ``struct `{name}` cannot extend itself, directly or not`` |
 | `T150` | ```{}` is already declared in this scope`` |
 | `T151` | ```self` is only available inside a method that takes `self``` |

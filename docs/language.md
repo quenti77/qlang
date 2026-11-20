@@ -1521,6 +1521,23 @@ fun hello(g: Greeter) -> string
 end
 ```
 
+Les méthodes de `Named` peuvent s'écrire dans l'`impl` de `Greeter` : elles comptent comme l'implémentation de
+`Named`, sans `impl Named for Cat` à part (l'ordre des `impl` dans les fichiers n'a pas d'importance).
+
+```
+impl Greeter for Cat
+  fun greet(self) -> string
+    "miaou " + self.name()
+  end
+  fun name(self) -> string     -- vient de Named
+    self.label
+  end
+end
+```
+
+Les deux écritures marchent, mais pas ensemble pour un même trait : si `Cat` a un `impl Named` à part, les
+méthodes de `Named` n'ont rien à faire dans `impl Greeter` (`T137`).
+
 ### Une méthode sans `self` : `Self` et `T.zero()`
 
 Un trait peut déclarer une méthode **sans `self`**, et `Self` y désigne le type qui implémente le trait :

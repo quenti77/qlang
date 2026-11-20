@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// A program that runs longer than this is stopped.
-const TIMEOUT: Duration = Duration::from_secs(60);
+/// The longest a program may be given: an hour.
+const MAX_TIMEOUT_MS: i64 = 3_600_000;
 /// What a program wrote is kept up to this many bytes on each stream.
 const MAX_OUTPUT: u64 = 16 << 20;
 
@@ -19,7 +19,30 @@ fn text(v: Option<&HostValue>) -> Option<String> {
     }
 }
 
-/// `process_run(command, args, input)` -> a map `{status, stdout, stderr}`.
+/// Stops the program and what it started: its whole process group on unix (`uv run python` starts
+/// a second program), its tree on Windows.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", child.id())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// `process_run(command, args, input, cwd, env, timeout_ms)` -> a map `{status, stdout, stderr}`.
 pub fn run(args: &[HostValue]) -> Result<HostValue, HostError> {
     let command = text(args.first()).ok_or_else(|| HostError::Other("no command".into()))?;
     let argv: Vec<String> = match args.get(1) {
@@ -27,8 +50,35 @@ pub fn run(args: &[HostValue]) -> Result<HostValue, HostError> {
         _ => Vec::new(),
     };
     let input = text(args.get(2));
-    let mut child = Command::new(&command)
-        .args(&argv)
+    let cwd = text(args.get(3));
+    let env: Vec<(String, String)> = match args.get(4) {
+        Some(HostValue::Map(pairs)) => pairs
+            .iter()
+            .filter_map(|(k, v)| Some((text(Some(k))?, text(Some(v))?)))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let timeout_ms = match args.get(5) {
+        Some(HostValue::Int(n)) => *n,
+        _ => 60_000,
+    };
+    if !(1..=MAX_TIMEOUT_MS).contains(&timeout_ms) {
+        return Err(HostError::Other(format!(
+            "the delay of a program is from 1 to {MAX_TIMEOUT_MS} milliseconds (found {timeout_ms})"
+        )));
+    }
+    let timeout = Duration::from_millis(timeout_ms as u64);
+    let mut cmd = Command::new(&command);
+    cmd.args(&argv).envs(env);
+    if let Some(dir) = &cwd {
+        cmd.current_dir(dir);
+    }
+    #[cfg(unix)]
+    {
+        // its own group, so that it can be stopped with what it started
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    }
+    let mut child = cmd
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -59,16 +109,20 @@ pub fn run(args: &[HostValue]) -> Result<HostValue, HostError> {
     let out = read(Box::new(child.stdout.take().expect("piped")));
     let err = read(Box::new(child.stderr.take().expect("piped")));
 
-    let deadline = Instant::now() + TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
+            Ok(None) if qlang_core::host::cancelled() => {
+                kill_tree(&mut child);
                 return Err(HostError::Other(format!(
-                    "`{command}` was stopped after {} seconds",
-                    TIMEOUT.as_secs()
+                    "`{command}` was stopped: the task was cancelled"
+                )));
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                kill_tree(&mut child);
+                return Err(HostError::Other(format!(
+                    "`{command}` was stopped after {timeout_ms} milliseconds"
                 )));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(5)),

@@ -2089,7 +2089,7 @@ fait est de **multiplier les interpréteurs** plutôt que de les rendre non bloq
   ajoutés partent après 30 s d'inactivité. Chacun a sa copie du programme, ses connexions et son état de modules, comme
   les workers de départ ; `--db-pool N` borne les connexions réelles à la base, `--max-queue N` refuse les requêtes
   quand la file est pleine, `--request-timeout S` arrête une requête trop longue (quand elle reprend la main).
-- **Ce qui reste bloquant, et que c'est voulu** : `Process.run` (une minute au plus) occupe son interpréteur ; un
+- **Ce qui reste bloquant, et que c'est voulu** : `Process.run` (une minute par défaut, `timeout_ms` de `run_with` pour changer) occupe son interpréteur ; un
   `Redis.subscribe` aussi, tant qu'il écoute ; un WebSocket est servi par l'interpréteur qui l'a accepté, entre deux
   requêtes. Pour ces cas, un `Worker` dédié ou un processus à part (`qlang run` d'une boucle) est la bonne forme.
 
@@ -3687,6 +3687,15 @@ Un bloc (corps de fonction, de `if`, de boucle…) reprend ses propres règles, 
 `Result<ProcessOutput, Error>` ; `ProcessOutput` a trois champs publics : `status` (le code de
 sortie, −1 si un signal l'a arrêté), `stdout` et `stderr` (ce qu'il a écrit, en texte).
 `Process.run_with_input(commande, arguments, texte)` écrit en plus `texte` sur son entrée standard.
+`Process.run_with(commande, arguments, options)` prend en plus des choix dans un `ProcessOptions` (tous facultatifs) :
+`input` (l'entrée standard), `cwd` (le dossier où il tourne), `env` (des variables ajoutées à son environnement, il garde les autres)
+et `timeout_ms` (de 1 à 3 600 000 millisecondes, une minute par défaut). Au délai, le programme est arrêté **avec tout ce qu'il a lancé**
+(son groupe de processus), et le résultat est un `Err` qui le dit. Un `Worker` annulé (`w.cancel()`) arrête de la même façon le programme
+qu'il attendait.
+
+```
+let r = Process.run_with("uv", ["run", "python", "probe.py"], ProcessOptions { cwd: "projet", env: { "DEBUG": "1" }, timeout_ms: 45000 })
+```
 
 `Process.stopping()` dit si le programme a reçu l'ordre de s'arrêter (Ctrl-C, `kill`, un gestionnaire de services). **Le premier appel fait prendre la main au programme** : à partir de là le signal ne le termine plus tout de suite, il fait seulement rendre `true`, pour qu'un worker finisse ce qu'il fait et parte proprement ; un deuxième signal termine le programme (code 130). Un programme qui ne l'appelle jamais s'arrête comme avant. Dans un programme servi par `qlang serve`, c'est `true` pendant l'arrêt du serveur.
 
@@ -3712,7 +3721,7 @@ end
   protocole JSON, le navigateur et un `qlang.toml` ne peuvent pas l'accorder. `qlang check` n'en a
   pas besoin.
 - Un programme lancé n'est **pas limité** par `--root` ni par les limites de qlang (pas, mémoire) ;
-  il est arrêté s'il tourne plus d'une minute, et on garde au plus 16 Mo de chaque flux.
+  il est arrêté s'il tourne plus longtemps que son délai (une minute par défaut), et on garde au plus 16 Mo de chaque flux.
 
 ### Prélude : le terminal
 

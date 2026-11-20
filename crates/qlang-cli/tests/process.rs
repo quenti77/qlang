@@ -93,3 +93,44 @@ fn tests_may_start_programs_with_the_flag() {
     let (out, _, code) = d.qlang(&["test", "--allow-process"], "");
     assert_eq!(code, Some(0), "{out}");
 }
+
+#[test]
+fn a_program_can_have_its_directory_its_variables_and_a_delay() {
+    let d = Dir::new("options");
+    d.write(
+        "a.q",
+        "let r = assert_ok(Process.run_with(\"sh\", [\"-c\", \"pwd; echo $GREETING; cat\"], ProcessOptions { cwd: \"/\", env: { \"GREETING\": \"salut\" }, input: \"stdin\" }))\nprint(r.stdout)\nlet t0 = time.now()\nlet slow = Process.run_with(\"sh\", [\"-c\", \"sleep 30 & sleep 30\"], ProcessOptions { timeout_ms: 300 })\nprint(slow.is_err())\nprint(slow.unwrap_err().message)\nprint(time.now() - t0 < 5000)\nprint(Process.run_with(\"echo\", [], ProcessOptions { timeout_ms: 0 }).is_err())\n",
+    );
+    let (out, err, code) = d.qlang(&["run", "--allow-process", "a.q"], "");
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(
+        out,
+        "/\nsalut\nstdin\ntrue\n`sh` was stopped after 300 milliseconds\ntrue\ntrue\n"
+    );
+}
+
+#[test]
+fn cancelling_a_worker_stops_the_program_it_started() {
+    let d = Dir::new("cancel");
+    // a delay no other test uses, to find the program again
+    let delay = format!("31{}", std::process::id() % 1000);
+    d.write(
+        "task.q",
+        &format!(
+            "fun run()\n    let r = Process.run(\"sh\", [\"-c\", \"sleep {delay}\"])\n    Worker.finish(Json.of(r.is_ok()))\nend\n"
+        ),
+    );
+    d.write(
+        "a.q",
+        "let w = Worker.spawn(\"task.q\", Json.null()).unwrap()\ntime.sleep(300)\nlet t0 = time.now()\nw.cancel()\nw.wait(5000)\nprint(time.now() - t0 < 3000)\n",
+    );
+    let (out, err, code) = d.qlang(&["run", "--allow-process", "a.q"], "");
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(out, "true\n");
+    let left = Command::new("pgrep")
+        .args(["-f", &format!("sleep {delay}")])
+        .output();
+    if let Ok(left) = left {
+        assert!(left.stdout.is_empty(), "the program is still running");
+    }
+}

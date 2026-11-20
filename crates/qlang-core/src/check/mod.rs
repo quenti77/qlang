@@ -5626,6 +5626,8 @@ pub(crate) struct ModScope {
     pub vars: HashMap<String, Local>,
     /// Item index in the file to the id of its definition.
     pub decl_ids: HashMap<usize, usize>,
+    /// The impls an `impl` item gave to the traits its trait extends (see `resolve_impls`).
+    pub extra_impls: HashMap<usize, Vec<usize>>,
     /// Variables some function or lambda of this file assigns (never narrowed).
     pub assigned_in_closures: HashSet<String>,
 }
@@ -5647,6 +5649,10 @@ pub(crate) struct Checker {
     pub tparam_scope: Vec<(String, ParamId)>,
     /// What `Self` means here: the type an `impl` is for, or the (still unknown) implementer in a trait.
     pub self_ty: Option<Ty>,
+    /// The impls to check once all of them are known, and those that an `impl` of a trait made
+    /// for the traits it extends.
+    pub pending_impls: Vec<(ImplId, Span)>,
+    pub synthetic_impls: Vec<ImplId>,
     /// Return type of the enclosing function or lambda.
     pub ret_stack: Vec<Ty>,
     pub loop_depth: usize,
@@ -5681,6 +5687,8 @@ impl Checker {
             scopes: Vec::new(),
             tparam_scope: Vec::new(),
             self_ty: None,
+            pending_impls: Vec::new(),
+            synthetic_impls: Vec::new(),
             ret_stack: Vec::new(),
             loop_depth: 0,
             cur_impl_struct: None,
@@ -5756,6 +5764,7 @@ impl Checker {
             self.cur_mod = m;
             self.resolve_impls(m);
         }
+        self.verify_impls();
         // an alias nobody uses is still checked
         for id in 0..self.defs.aliases.len() {
             let a = &self.defs.aliases[id];

@@ -841,7 +841,15 @@ impl Checker {
                         exported(&t.name.name),
                     ),
                     Item::Impl(_) => {
-                        if let Some(iid) = id {
+                        let mut all: Vec<usize> = id.into_iter().collect();
+                        all.extend(
+                            self.mscopes[m]
+                                .extra_impls
+                                .get(&idx)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                        for iid in all {
                             for (_, fid) in &self.defs.impls[iid].methods {
                                 let f = &self.defs.fns[*fid];
                                 if let Some(n) = f.decl.as_ref().and_then(|d| d.name.as_ref()) {

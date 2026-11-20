@@ -68,9 +68,17 @@ impl Checker {
                     if let Some(&iid) = self.mscopes[m].decl_ids.get(&idx) {
                         // trait defaults used to fill a gap are checked once, below,
                         // not once per impl that happens to fall back to them.
-                        let fids: Vec<FnId> = self.defs.impls[iid]
-                            .methods
+                        let mut ids = vec![iid];
+                        ids.extend(
+                            self.mscopes[m]
+                                .extra_impls
+                                .get(&idx)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                        let fids: Vec<FnId> = ids
                             .iter()
+                            .flat_map(|i| self.defs.impls[*i].methods.iter())
                             .map(|(_, f)| *f)
                             .filter(|f| self.defs.fns[*f].trait_default_self.is_none())
                             .collect();

@@ -193,3 +193,118 @@ print(empty.sum())
 ";
     assert_eq!(run(src), "RUNTIME R015");
 }
+
+#[test]
+fn the_methods_of_the_extended_trait_can_be_given_in_the_impl_of_the_trait_that_extends_it() {
+    let src = "trait Named
+  fun name(self) -> string
+end
+trait Greeter extends Named
+  fun greet(self) -> string
+end
+struct Cat
+  public label: string
+end
+impl Greeter for Cat
+  fun greet(self) -> string
+    \"mew \" + self.name()
+  end
+  fun name(self) -> string
+    self.label
+  end
+end
+fun hello(g: Greeter) -> string
+  g.greet() + \" / \" + g.name()
+end
+fun named(n: Named) -> string
+  n.name()
+end
+let c = Cat { label: \"tom\" }
+print(hello(c))
+print(named(c))
+";
+    assert_eq!(run(src), "mew tom / tom\ntom\n");
+}
+
+#[test]
+fn a_chain_of_traits_can_be_implemented_in_one_impl() {
+    let src = "trait A
+  fun a(self) -> int
+end
+trait B extends A
+  fun b(self) -> int
+end
+trait C extends B
+  fun c(self) -> int
+end
+struct S
+end
+impl C for S
+  fun a(self) -> int
+    1
+  end
+  fun b(self) -> int
+    20
+  end
+  fun c(self) -> int
+    300
+  end
+end
+fun total<T: C>(x: T) -> int
+  x.a() + x.b() + x.c()
+end
+print(total(S {}))
+";
+    assert_eq!(run(src), "321\n");
+}
+
+#[test]
+fn the_order_of_the_impls_does_not_matter() {
+    let src = "trait Named
+  fun name(self) -> string
+end
+trait Greeter extends Named
+end
+struct Cat
+end
+impl Greeter for Cat
+end
+impl Named for Cat
+  fun name(self) -> string
+    \"cat\"
+  end
+end
+fun hello(g: Greeter) -> string
+  g.name()
+end
+print(hello(Cat {}))
+";
+    assert_eq!(run(src), "cat\n");
+}
+
+#[test]
+fn a_method_of_the_extended_trait_is_missing_or_given_twice() {
+    let base = "trait Named
+  fun name(self) -> string
+  fun other(self) -> string
+end
+trait Greeter extends Named
+end
+struct Cat
+end
+";
+    // one of the two methods of `Named` is missing
+    let src =
+        format!("{base}impl Greeter for Cat\n  fun name(self) -> string\n    \"x\"\n  end\nend\n");
+    assert_eq!(run(&src), "T133");
+    // methods of `Named` here, and an `impl Named` of its own
+    let src = format!(
+        "{base}impl Named for Cat\n  fun name(self) -> string\n    \"x\"\n  end\n  fun other(self) -> string\n    \"y\"\n  end\nend\nimpl Greeter for Cat\n  fun name(self) -> string\n    \"z\"\n  end\nend\n"
+    );
+    assert_eq!(run(&src), "T137");
+    // a method of no trait at all
+    let src = format!(
+        "{base}impl Greeter for Cat\n  fun name(self) -> string\n    \"x\"\n  end\n  fun other(self) -> string\n    \"y\"\n  end\n  fun nothing(self) -> string\n    \"z\"\n  end\nend\n"
+    );
+    assert_eq!(run(&src), "T135");
+}

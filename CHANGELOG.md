@@ -6,6 +6,7 @@
 
 - **`Process.run_with(commande, arguments, ProcessOptions { ... })`** : un dossier (`cwd`), des variables d'environnement ajoutées (`env`), une entrée standard (`input`) et un délai (`timeout_ms`, de 1 à 3 600 000, une minute par défaut). Au délai le programme est arrêté **avec ce qu'il a lancé** (son groupe de processus : `uv run python` lance un second programme) et le résultat est un `Err`. `Process.run` et `run_with_input` ne changent pas.
 - **`Worker.cancel()` arrête le programme que la tâche attendait** dans `Process.run` : avant, il continuait jusqu'à sa fin ou à la minute.
+- **Les droits d'un fichier** : `fs.write(chemin, contenu, mode: 0o600)` (et `fs.write_bytes`) crée le fichier avec ces droits, jamais lisible par d'autres, même un instant ; `fs.chmod(chemin, mode)` et `fs.mode(chemin)` les changent et les lisent. Sans effet sous Windows. Les nombres en base 8 s'écrivent `0o600`. (`fs.copy` gardait déjà le mode de la source.)
 - **La limite d'étapes (`R900`) compte entre deux attentes**, plus sur toute la vie du programme. Le compteur repart de zéro après `time.sleep`, `Term.event` et la réception d'un message de `Worker` ou d'une tâche (avec un délai supérieur à zéro). Un écran en terminal, un démon ou un consommateur de file ne s'arrêtent plus au bout de quelques centaines de redessins ou de quelques jours ; une boucle infinie entre deux attentes l'est toujours. `qlang serve` remettait déjà le compteur à zéro à chaque requête.
 
 ## 1.7.4

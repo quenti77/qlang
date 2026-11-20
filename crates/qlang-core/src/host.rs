@@ -93,9 +93,8 @@ pub fn std_has(caps: Capabilities, name: &str) -> bool {
     match name {
         "fs_read" | "fs_write" | "fs_read_bytes" | "fs_write_bytes" | "fs_create_dir"
         | "fs_exists" | "fs_list" | "fs_is_dir" | "fs_open_lines" | "fs_read_line"
-        | "fs_close_lines" | "fs_stat" | "fs_append" | "fs_remove" | "fs_rename" | "fs_copy" => {
-            caps.fs
-        }
+        | "fs_close_lines" | "fs_stat" | "fs_append" | "fs_remove" | "fs_rename" | "fs_copy"
+        | "fs_write_mode" | "fs_chmod" | "fs_mode" => caps.fs,
         "env_get" | "env_args" => caps.env,
         "read_prompt" => caps.read,
         "secure_random_bytes" => caps.random,
@@ -103,6 +102,17 @@ pub fn std_has(caps: Capabilities, name: &str) -> bool {
         "constant_time_eq" | "log_write" => true,
         "http_send" | "http_send_all" => caps.http,
         _ => false,
+    }
+}
+
+/// The permission bits of a file: from 0 to `0o7777`.
+fn file_mode_bits(mode: i64) -> Result<u32, HostError> {
+    if (0..=0o7777).contains(&mode) {
+        Ok(mode as u32)
+    } else {
+        Err(HostError::Other(format!(
+            "the mode of a file is from 0 to 0o7777 (found {mode})"
+        )))
     }
 }
 
@@ -125,6 +135,26 @@ pub fn std_call<H: Host + ?Sized>(
         ("fs_write_bytes", [HostValue::Str(path), HostValue::Bytes(content)]) => host
             .write_file_bytes(path, content)
             .map(|()| HostValue::Bool(true)),
+        (
+            "fs_write_mode",
+            [
+                HostValue::Str(path),
+                HostValue::Bytes(content),
+                HostValue::Int(mode),
+            ],
+        ) => match file_mode_bits(*mode) {
+            Ok(bits) => host
+                .write_file_mode(path, content, bits)
+                .map(|()| HostValue::Bool(true)),
+            Err(e) => Err(e),
+        },
+        ("fs_chmod", [HostValue::Str(path), HostValue::Int(mode)]) => match file_mode_bits(*mode) {
+            Ok(bits) => host.set_mode(path, bits).map(|()| HostValue::Bool(true)),
+            Err(e) => Err(e),
+        },
+        ("fs_mode", [HostValue::Str(path)]) => host
+            .file_mode(path)
+            .map(|m| m.map_or(HostValue::Null, |m| HostValue::Int(i64::from(m)))),
         ("fs_create_dir", [HostValue::Str(path)]) => {
             host.create_dir(path).map(|()| HostValue::Bool(true))
         }
@@ -505,6 +535,23 @@ pub trait Host {
 
     /// Write `content` to a file, replacing it entirely (creating it if needed).
     fn write_file(&mut self, _path: &str, _content: &str) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// Write bytes to a file, replacing it entirely; the file is created with the permission bits
+    /// `mode` (never readable by more than that, even for an instant). By default the mode is
+    /// ignored: only a host with permissions (unix) uses it.
+    fn write_file_mode(&mut self, path: &str, content: &[u8], _mode: u32) -> Result<(), HostError> {
+        self.write_file_bytes(path, content)
+    }
+
+    /// Change the permission bits of a file or a folder (nothing to do where there are none).
+    fn set_mode(&mut self, _path: &str, _mode: u32) -> Result<(), HostError> {
+        Err(HostError::Unsupported("fs"))
+    }
+
+    /// The permission bits of a file or a folder, or `None` where there are none (Windows).
+    fn file_mode(&mut self, _path: &str) -> Result<Option<u32>, HostError> {
         Err(HostError::Unsupported("fs"))
     }
 

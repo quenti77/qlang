@@ -614,6 +614,10 @@ pub(super) struct JitSlot {
     /// at each entry that the value is still one that runs that code.
     #[cfg_attr(not(feature = "jit"), allow(dead_code))]
     osr_closures: std::cell::RefCell<Vec<(usize, u32)>>,
+    /// How many times in a row the native code of the loop left before it finished a turn (a
+    /// text that is too long for it, say): at some point the machine keeps the loop.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr_fails: Cell<u32>,
 }
 
 /// A field read or written by name, and its type.

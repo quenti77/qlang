@@ -40,7 +40,7 @@ pub(in crate::interp) struct Ctx {
 }
 
 /// How many helpers (see `Jit::helpers`).
-const HELPERS: usize = 15;
+const HELPERS: usize = 25;
 
 /// The most variables of the module that the native code of a loop keeps.
 const MAX_GLOBALS: usize = 8;
@@ -286,6 +286,185 @@ extern "C" fn h_loadobj(dst: *mut Value, table: *const Value, k: i64) -> i64 {
     0
 }
 
+/// The text in the object register at `v`, when it is short: a long one is left to the machine,
+/// which remembers its length and where it was read last (a walk along it is not quadratic).
+unsafe fn short_text<'a>(v: *const Value) -> Option<&'a Rc<str>> {
+    match unsafe { &*v } {
+        Value::Str(t) if t.len() < 64 => Some(t),
+        _ => None,
+    }
+}
+
+/// The number of letters of a short text.
+fn letters(t: &str) -> usize {
+    if t.is_ascii() {
+        t.len()
+    } else {
+        t.chars().count()
+    }
+}
+
+extern "C" fn h_slen(ctx: *mut Ctx, v: *const Value) -> i64 {
+    // SAFETY: an object register of this run.
+    match unsafe { short_text(v) } {
+        Some(t) => letters(t) as i64,
+        None => fail(ctx),
+    }
+}
+
+/// The part `from..to` of a short text as the machine makes it; `None` when the range is wrong.
+fn part_of(t: &Rc<str>, from: i64, to: i64) -> Option<(usize, usize)> {
+    let n = letters(t);
+    if from < 0 || to < from || to as usize > n {
+        return None;
+    }
+    let (from, to) = (from as usize, to as usize);
+    if n == t.len() {
+        return Some((from, to));
+    }
+    let mut it = t
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(t.len()));
+    let a = it.clone().nth(from)?;
+    let b = it.nth(to)?;
+    Some((a, b))
+}
+
+extern "C" fn h_ssub(ctx: *mut Ctx, dst: *mut Value, v: *const Value, from: i64, to: i64) -> i64 {
+    // SAFETY: object registers of this run.
+    let Some(t) = (unsafe { short_text(v) }) else {
+        return fail(ctx);
+    };
+    let Some((a, b)) = part_of(t, from, to) else {
+        return fail(ctx);
+    };
+    let part: Rc<str> = if letters(t) == t.len() && b - a == 1 {
+        ONE_LETTER.with(|l| l[usize::from(t.as_bytes()[a])].clone())
+    } else {
+        Rc::from(&t[a..b])
+    };
+    // SAFETY: see above.
+    unsafe { *dst = Value::Str(part) };
+    0
+}
+
+extern "C" fn h_cmpsk(ctx: *mut Ctx, v: *const Value, lit: *const Value) -> i64 {
+    // SAFETY: an object register of this run and a text of the code.
+    match unsafe { (&*v, &*lit) } {
+        (Value::Str(x), Value::Str(y)) => i64::from(**x == **y),
+        _ => fail(ctx),
+    }
+}
+
+extern "C" fn h_ssubeq(
+    ctx: *mut Ctx,
+    v: *const Value,
+    lit: *const Value,
+    from: i64,
+    to: i64,
+) -> i64 {
+    // SAFETY: an object register of this run and a text of the code.
+    let (Some(t), Value::Str(lit)) = (unsafe { short_text(v) }, unsafe { &*lit }) else {
+        return fail(ctx);
+    };
+    match part_of(t, from, to) {
+        Some((a, b)) => i64::from(t[a..b] == **lit),
+        None => fail(ctx),
+    }
+}
+
+/// Puts what the map `map` holds for `key` (a number) in the register `dst`, as the machine does.
+extern "C" fn h_mapget(
+    ctx: *mut Ctx,
+    dst: *mut Value,
+    map: *const Value,
+    key: i64,
+    ety: i64,
+) -> i64 {
+    // SAFETY: object registers of this run.
+    let Value::Map(m) = (unsafe { &*map }) else {
+        return fail(ctx);
+    };
+    let got = map_got(m.borrow().get(&Value::Int(key)), ety_from(ety));
+    // SAFETY: see above.
+    put_got(unsafe { &mut *dst }, got);
+    0
+}
+
+extern "C" fn h_mapgets(
+    ctx: *mut Ctx,
+    dst: *mut Value,
+    map: *const Value,
+    key: *const Value,
+    ety: i64,
+) -> i64 {
+    // SAFETY: object registers of this run.
+    let (Value::Map(m), k @ Value::Str(_)) = (unsafe { &*map }, unsafe { &*key }) else {
+        return fail(ctx);
+    };
+    let got = map_got(m.borrow().get(k), ety_from(ety));
+    // SAFETY: see above.
+    put_got(unsafe { &mut *dst }, got);
+    0
+}
+
+/// `map[key] = value` for a key that is a number or a text and a value that is a number.
+fn map_put(ctx: *mut Ctx, map: *const Value, key: Value, v: Value) -> i64 {
+    // SAFETY: an object register of this run and the context of this run.
+    let (Value::Map(m), max) = (unsafe { &*map }, unsafe { (*ctx).max_alloc }) else {
+        return fail(ctx);
+    };
+    let len = m.borrow().len();
+    if len + 1 > max || (len + 1 >= 1 << 16 && crate::host::memory_exceeded()) {
+        return fail(ctx);
+    }
+    m.borrow_mut().insert(key, v);
+    0
+}
+
+fn number_value(bits: i64, ety: i64) -> Value {
+    match ety_from(ety) {
+        Ety::I => Value::Int(bits),
+        Ety::F => Value::Float(f64::from_bits(bits as u64)),
+        _ => Value::Bool(bits != 0),
+    }
+}
+
+extern "C" fn h_mapset(ctx: *mut Ctx, map: *const Value, key: i64, bits: i64, ety: i64) -> i64 {
+    map_put(ctx, map, Value::Int(key), number_value(bits, ety))
+}
+
+extern "C" fn h_mapsets(
+    ctx: *mut Ctx,
+    map: *const Value,
+    key: *const Value,
+    bits: i64,
+    ety: i64,
+) -> i64 {
+    // SAFETY: an object register of this run.
+    let Value::Str(k) = (unsafe { &*key }) else {
+        return fail(ctx);
+    };
+    map_put(ctx, map, Value::Str(k.clone()), number_value(bits, ety))
+}
+
+extern "C" fn h_isnone(v: *const Value) -> i64 {
+    // SAFETY: an object register of this run.
+    i64::from(matches!(unsafe { &*v }, Value::None))
+}
+
+/// The number a nullable register holds.
+extern "C" fn h_unbox(ctx: *mut Ctx, v: *const Value, ety: i64) -> i64 {
+    // SAFETY: an object register of this run.
+    match (unsafe { &*v }, ety_from(ety)) {
+        (Value::Int(i), Ety::I) => *i,
+        (Value::Float(f), Ety::F) => f.to_bits() as i64,
+        (Value::Bool(b), Ety::B) => i64::from(*b),
+        _ => fail(ctx),
+    }
+}
+
 /// `dst = src` for two object registers.
 extern "C" fn h_movo(dst: *mut Value, src: *const Value) -> i64 {
     // SAFETY: two object registers of this run.
@@ -342,6 +521,16 @@ impl Jit {
         jb.symbol("qlang_jit_fieldptr", h_fieldptr as *const u8);
         jb.symbol("qlang_jit_loadobj", h_loadobj as *const u8);
         jb.symbol("qlang_jit_movo", h_movo as *const u8);
+        jb.symbol("qlang_jit_slen", h_slen as *const u8);
+        jb.symbol("qlang_jit_ssub", h_ssub as *const u8);
+        jb.symbol("qlang_jit_cmpsk", h_cmpsk as *const u8);
+        jb.symbol("qlang_jit_ssubeq", h_ssubeq as *const u8);
+        jb.symbol("qlang_jit_mapget", h_mapget as *const u8);
+        jb.symbol("qlang_jit_mapset", h_mapset as *const u8);
+        jb.symbol("qlang_jit_isnone", h_isnone as *const u8);
+        jb.symbol("qlang_jit_unbox", h_unbox as *const u8);
+        jb.symbol("qlang_jit_mapgets", h_mapgets as *const u8);
+        jb.symbol("qlang_jit_mapsets", h_mapsets as *const u8);
         let mut module = JITModule::new(jb);
         let mut sig = module.make_signature();
         sig.params.push(AbiParam::new(types::I64));
@@ -388,6 +577,16 @@ impl Jit {
             decl("qlang_jit_fieldptr", &i3)?,
             decl("qlang_jit_loadobj", &i3)?,
             decl("qlang_jit_movo", &i2)?,
+            decl("qlang_jit_slen", &i2)?,
+            decl("qlang_jit_ssub", &i5)?,
+            decl("qlang_jit_cmpsk", &i3)?,
+            decl("qlang_jit_ssubeq", &i5)?,
+            decl("qlang_jit_mapget", &i5)?,
+            decl("qlang_jit_mapset", &i5)?,
+            decl("qlang_jit_isnone", &i1)?,
+            decl("qlang_jit_unbox", &i3)?,
+            decl("qlang_jit_mapgets", &i5)?,
+            decl("qlang_jit_mapsets", &i5)?,
         ];
         Some(Jit {
             module,
@@ -965,6 +1164,8 @@ fn jump_target(op: &Op) -> Option<u32> {
         | Op::JnF { t, .. }
         | Op::JmpF(_, t)
         | Op::JmpT(_, t)
+        | Op::JNone(_, t)
+        | Op::JSome(_, t)
         | Op::JBack { t, .. }
         | Op::JBackImm { t, .. } => Some(t),
         Op::ForLoop { body, .. } => Some(body),
@@ -993,13 +1194,16 @@ fn scan(code: &Code, osr: bool, closures: &[(usize, u32)]) -> Option<Vec<u32>> {
             || !code
                 .param_tys
                 .iter()
-                .all(|t| scalar(t) || matches!(t, Ty::Struct(..)))
+                .all(|t| scalar(t) || matches!(t, Ty::Struct(..)) || number_array(t))
             || !scalar(&code.ret))
     {
         return None;
     }
     // a structure that is a parameter, and was not given another value
     let object = |r: Reg| matches!(code.param_tys.get(usize::from(r)), Some(Ty::Struct(..)));
+    // an array of numbers that is a parameter: read, never written (a call that the machine
+    // runs again from the start must find it as it was)
+    let array = |r: Reg| code.param_tys.get(usize::from(r)).is_some_and(number_array);
     let mut callees = Vec::new();
     for (at, op) in code.ops.iter().enumerate() {
         match *op {
@@ -1074,6 +1278,9 @@ fn scan(code: &Code, osr: bool, closures: &[(usize, u32)]) -> Option<Vec<u32>> {
             // arrays of numbers: through the machine's own functions (the entry in the middle
             // of a run only: the objects stay in their registers)
             Op::ALen(..) | Op::ACheck { .. } if osr => {}
+            Op::ALen(_, a) if array(a) => {}
+            Op::ALoad { arr, ety, .. } | Op::ForArr { arr, ety, .. }
+                if !osr && array(arr) && ety != Ety::O => {}
             Op::ALoad { ety, .. }
             | Op::AStore { ety, .. }
             | Op::APush { ety, .. }
@@ -1092,6 +1299,16 @@ fn scan(code: &Code, osr: bool, closures: &[(usize, u32)]) -> Option<Vec<u32>> {
                         || is_obj(&code.globals[g as usize].ty)) => {}
             Op::StoreG { g, .. } if osr && scalar(&code.globals[g as usize].ty) => {}
             Op::MovO(..) if osr => {}
+            // texts and maps of numbers, through the machine's own rules (the entry in the
+            // middle of a run only: the objects stay in their registers)
+            Op::SLen(..) | Op::SSub(..) | Op::CmpSK { .. } | Op::SSubEq { .. } if osr => {}
+            Op::IsNone(..) | Op::JNone(..) | Op::JSome(..) if osr => {}
+            Op::Unbox { ety, .. }
+            | Op::MapGetI { ety, .. }
+            | Op::MapSetI { ety, .. }
+            | Op::MapGetS { ety, .. }
+            | Op::MapSetS { ety, .. }
+                if osr && ety != Ety::O => {}
             Op::CallValue { f, .. }
                 if osr
                     && closures.len() <= MAX_CSITES
@@ -1133,6 +1350,11 @@ fn osr_globals(code: &Code) -> Option<Vec<(u32, bool, bool)>> {
         }
     }
     (found.len() <= MAX_GLOBALS).then_some(found)
+}
+
+/// An array whose elements are numbers.
+fn number_array(t: &Ty) -> bool {
+    matches!(t, Ty::Array(e) if matches!(**e, Ty::Int | Ty::Float | Ty::Bool))
 }
 
 /// The values a native function is given: its parameters, then the addresses of the variables
@@ -1381,7 +1603,10 @@ impl Em<'_, '_> {
 
     /// The address of the object register `r`.
     fn obj_addr(&mut self, r: Reg) -> Option<ir::Value> {
-        let (_, _, objs) = self.osr?;
+        let Some((_, _, objs)) = self.osr else {
+            // a function: the structures and arrays it was given
+            return Some(self.b.use_var(self.ovars[usize::from(r)]));
+        };
         Some(
             self.b
                 .ins()
@@ -1543,6 +1768,8 @@ impl Em<'_, '_> {
                 | Op::JnF { t, .. }
                 | Op::JmpF(_, t)
                 | Op::JmpT(_, t)
+                | Op::JNone(_, t)
+                | Op::JSome(_, t)
                 | Op::JBack { t, .. }
                 | Op::JBackImm { t, .. } => Some(t),
                 Op::ForCheck { exit, .. } | Op::ForArr { exit, .. } => Some(exit),
@@ -2075,6 +2302,80 @@ impl Em<'_, '_> {
                     self.branch(c, tgt(t), next?);
                     dead = true;
                 }
+                Op::JNone(a, t) | Op::JSome(a, t) => {
+                    let p = self.obj_addr(a)?;
+                    let call = self.b.ins().call(self.helpers[21], &[p]);
+                    let n = self.b.inst_results(call)[0];
+                    let cc = if matches!(op, Op::JNone(..)) {
+                        IntCC::NotEqual
+                    } else {
+                        IntCC::Equal
+                    };
+                    let c = self.b.ins().icmp_imm_s(cc, n, 0);
+                    self.branch(c, tgt(t), next?);
+                    dead = true;
+                }
+                Op::IsNone(d, a) => {
+                    let p = self.obj_addr(a)?;
+                    let call = self.b.ins().call(self.helpers[21], &[p]);
+                    let n = self.b.inst_results(call)[0];
+                    self.set(d, n);
+                }
+                Op::Unbox { dst, src, ety } => {
+                    let p = self.obj_addr(src)?;
+                    let e = self.imm(ety_num(ety));
+                    let v = self.helper_checked(22, &[self.ctx, p, e]);
+                    self.set(dst, v);
+                }
+                Op::SLen(d, a) => {
+                    let p = self.obj_addr(a)?;
+                    let v = self.helper_checked(15, &[self.ctx, p]);
+                    self.set(d, v);
+                }
+                Op::SSub(d, a) => {
+                    let (dp, ap) = (self.obj_addr(d)?, self.obj_addr(a)?);
+                    let (from, to) = (self.get(a + 1), self.get(a + 2));
+                    self.helper_checked(16, &[self.ctx, dp, ap, from, to]);
+                }
+                Op::CmpSK { dst, a, k, ne } => {
+                    let p = self.obj_addr(a)?;
+                    let lit = self.imm(&code.strs[k as usize] as *const Value as i64);
+                    let v = self.helper_checked(17, &[self.ctx, p, lit]);
+                    let v = if ne { self.b.ins().bxor_imm_s(v, 1) } else { v };
+                    self.set(dst, v);
+                }
+                Op::SSubEq { dst, recv, k, ne } => {
+                    let p = self.obj_addr(recv)?;
+                    let lit = self.imm(&code.strs[k as usize] as *const Value as i64);
+                    let (from, to) = (self.get(recv + 1), self.get(recv + 2));
+                    let v = self.helper_checked(18, &[self.ctx, p, lit, from, to]);
+                    let v = if ne { self.b.ins().bxor_imm_s(v, 1) } else { v };
+                    self.set(dst, v);
+                }
+                Op::MapGetI { dst, map, key, ety } => {
+                    let (dp, mp) = (self.obj_addr(dst)?, self.obj_addr(map)?);
+                    let (k, e) = (self.get(key), self.imm(ety_num(ety)));
+                    self.helper_checked(19, &[self.ctx, dp, mp, k, e]);
+                }
+                Op::MapGetS { dst, map, key, ety } => {
+                    let (dp, mp, kp) = (
+                        self.obj_addr(dst)?,
+                        self.obj_addr(map)?,
+                        self.obj_addr(key)?,
+                    );
+                    let e = self.imm(ety_num(ety));
+                    self.helper_checked(23, &[self.ctx, dp, mp, kp, e]);
+                }
+                Op::MapSetI { map, key, val, ety } => {
+                    let mp = self.obj_addr(map)?;
+                    let (k, v, e) = (self.get(key), self.get(val), self.imm(ety_num(ety)));
+                    self.helper_checked(20, &[self.ctx, mp, k, v, e]);
+                }
+                Op::MapSetS { map, key, val, ety } => {
+                    let (mp, kp) = (self.obj_addr(map)?, self.obj_addr(key)?);
+                    let (v, e) = (self.get(val), self.imm(ety_num(ety)));
+                    self.helper_checked(24, &[self.ctx, mp, kp, v, e]);
+                }
                 Op::JmpF(r, t) => {
                     let x = self.get(r);
                     let c = self.b.ins().icmp_imm_s(IntCC::Equal, x, 0);
@@ -2536,7 +2837,18 @@ impl Interp<'_> {
             parts.as_mut_ptr(),
         );
         // the registers are back in memory, with the steps as they were at that instruction
+        let progressed = ctx.steps != self.steps as i64;
         self.steps = ctx.steps as u64;
+        // a loop that the native code leaves again and again at once is better left to the machine
+        if progressed {
+            code.jit.osr_fails.set(0);
+        } else {
+            let n = code.jit.osr_fails.get() + 1;
+            code.jit.osr_fails.set(n);
+            if n >= 32 {
+                code.jit.osr_refused.set(true);
+            }
+        }
         // and the variables of the module the loop wrote
         for (k, (g, obj, stored)) in globals.iter().enumerate() {
             if *stored && !*obj {

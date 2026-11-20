@@ -219,6 +219,15 @@ fonction-valeur (`f(v)`, une fermeture) dans une boucle est compilé pour la fon
 quand la boucle est devenue chaude : la machine vérifie à chaque entrée que `f` en est toujours une qui
 exécute ce code, puis donne les adresses des variables que la fermeture prend autour d'elle.
 
+**Textes, maps et tableaux en paramètre.** Une boucle chaude lit les textes (`len`, `substring`, comparaison avec
+un texte écrit dans le programme) et lit et écrit les maps dont les valeurs sont des nombres (clés `int` ou
+`string`), par les mêmes règles que la machine : un texte de 64 octets ou plus, dont la machine retient la longueur
+et la dernière position lue, lui reste confié. Une boucle que le code natif quitte 32 fois de suite sans avoir fini
+un tour est rendue à la machine. Une fonction appelée en natif peut lire un `array<int>`, `array<float>` ou
+`array<bool>` reçu en paramètre ; elle ne l'écrit pas (un appel que la machine rejoue ne doit pas trouver le
+tableau changé). Reste sur la machine : les tuples (une fonction qui en rend un), `push` sans passer par une
+fonction d'aide, et les textes construits (`+`, interpolation).
+
 ## Ce qui reste (avant la machine à registres)
 
 Le temps est maintenant réparti dans `eval`, `binary` et la recherche des variables par nom :

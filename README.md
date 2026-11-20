@@ -66,10 +66,10 @@ dépendance) sont des fichiers de la release : `sudo dpkg -i qlang_X.Y.Z_amd64.d
 (il n'y a pas encore de dépôt apt ou yum).
 
 **Mettre à jour** : `qlang self-update` (ou relancer la même commande d'installation). Il télécharge la
-dernière version, vérifie la somme de contrôle et remplace le programme ; `qlang self-update --version 0.63.0`
+dernière version, vérifie la somme de contrôle et remplace le programme ; `qlang self-update --version 1.8.0`
 installe une version précise (même plus ancienne), `qlang self-update --check` dit seulement s'il y en a une nouvelle.
 
-**Version par projet** : `qlang = "0.64"` dans le `[package]` de `qlang.toml` demande au moins cette
+**Version par projet** : `qlang = "1.9"` dans le `[package]` de `qlang.toml` demande au moins cette
 version ; avec un qlang plus ancien, le projet refuse de démarrer et dit de lancer `qlang self-update`.
 `qlang init` l'écrit pour toi.
 
@@ -233,7 +233,7 @@ exécutée une fois et sa valeur est affichée. Chaque entrée est compilée ave
 ```sh
 qlang search [texte]     # les paquets de l'index (nom, description, licence, dépôt git)
 qlang info std           # licence, versions disponibles, comment l'ajouter
-qlang add std            # ajoute un paquet de l'index, dans l'intervalle de sa dernière version (^0.19)
+qlang add std            # ajoute un paquet de l'index, dans l'intervalle de sa dernière version (^1.0)
 qlang add x --git URL --version "^1.2"   # ou un dépôt à toi, avec une contrainte (--tag, --rev, --branch aussi)
 qlang verify             # les paquets installés sont-ils ceux de qlang.lock ?
 qlang publish            # ce paquet peut-il être listé dans l'index ?
@@ -414,6 +414,9 @@ pub trait Host {
   et une graine fixes pour les tests.
 - Les erreurs sont des **données** (`Diagnostic` : code, message, position,
   notes), jamais du texte déjà affiché. Elles se sérialisent en JSON.
+- Les fonctions et boucles qui ne calculent qu'avec des nombres sont compilées en code natif (Cranelift, fonctionnalité `jit`
+  de `qlang-core`, absente du navigateur) ; les résultats et les erreurs sont ceux de la machine à registres
+  ([docs/performance.md](docs/performance.md)).
 - L'exécution est bornée par des `Limits` (étapes, profondeur d'appels, taille
   de la sortie, taille des tableaux et chaînes).
 

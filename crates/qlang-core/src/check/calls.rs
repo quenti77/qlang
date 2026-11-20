@@ -1493,11 +1493,40 @@ impl Checker {
             return self.check_args(e, &sig, &[], HashMap::new(), args, want);
         }
         let shown = self.show(&rt);
-        self.err(
-            "T161",
-            format!("`{shown}` has no method `{}`", name.name),
-            name.span,
-        );
+        // a method of a trait that was written without `self` cannot be called on a value
+        let traits: Vec<(TraitId, Vec<Ty>)> = match &rt {
+            Ty::Trait(t, a) => self.trait_closure_of(*t, a, Some(&rt)),
+            Ty::Param(p) => self.defs.params[*p]
+                .bounds
+                .clone()
+                .into_iter()
+                .flat_map(|(t, a)| self.trait_closure_of(t, &a, Some(&rt)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let without_self = traits.iter().find(|(t, _)| {
+            self.defs.traits[*t]
+                .sigs
+                .iter()
+                .any(|sg| sg.name == name.name && !sg.has_self)
+        });
+        if let Some((t, a)) = without_self {
+            let tr = self.show(&Ty::Trait(*t, a.clone()));
+            self.err(
+                "T161",
+                format!(
+                    "`{0}` has no `self` in trait `{tr}`, so it is a static method and cannot be called on a value (write `fun {0}(self, ...)` in the trait)",
+                    name.name
+                ),
+                name.span,
+            );
+        } else {
+            self.err(
+                "T161",
+                format!("`{shown}` has no method `{}`", name.name),
+                name.span,
+            );
+        }
         self.check_args_loose(args);
         Ty::Error
     }

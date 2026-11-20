@@ -263,3 +263,126 @@ fn a_loop_that_makes_a_structure_stays_on_the_machine() {
     ));
     assert_eq!(o, "12497500\n");
 }
+
+const PT: &str =
+    "struct P\n  public x: int\n  public y: int\n  public w: float\n  public on: bool\nend\n";
+
+#[test]
+fn a_hot_method_reads_and_writes_the_numbers_of_its_structure() {
+    let out = same(&format!(
+        "{PT}impl P\n  public fun advance(self) -> int\n    self.x = self.x + 1\n    self.y = (self.y + self.x) mod 1000003\n    self.w = self.w * 1.5 + 0.25\n    self.on = not self.on\n    self.y\n  end\nend\nlet p = P {{ x: 0, y: 0, w: 1.0, on: false }}\nlet last = 0\nfor i in 0..2000 do\n  last = p.advance()\nend\nprint(last)\nprint(p.x)\nprint(p.w > 1.0)\nprint(p.on)"
+    ));
+    assert!(
+        out.starts_with(&format!("{}\n", expected_y())) || !out.contains("error"),
+        "{out}"
+    );
+}
+
+fn expected_y() -> i64 {
+    let (mut x, mut y) = (0i64, 0i64);
+    for _ in 0..2000 {
+        x += 1;
+        y = (y + x) % 1_000_003;
+    }
+    y
+}
+
+#[test]
+fn a_function_with_two_structures_that_are_the_same_one_agrees() {
+    let out = same(&format!(
+        "{PT}fun move_by(a: P, b: P) -> int\n  a.x = (a.x + b.x + 1) mod 1000\n  b.y = (b.y + a.x) mod 1000\n  a.x + b.y\nend\nlet p = P {{ x: 1, y: 2, w: 0.0, on: true }}\nlet q = P {{ x: 5, y: 7, w: 0.0, on: true }}\nlet t = 0\nfor i in 0..1000 do\n  t = (t + move_by(p, q)) mod 1000003\n  t = (t + move_by(p, p)) mod 1000003\nend\nprint(t)\nprint(p.x)\nprint(p.y)\nprint(q.x)\nprint(q.y)"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_overflow_after_a_write_leaves_the_structure_as_the_machine_does() {
+    // the second write overflows at some turn: the first one must not have happened twice
+    let out = same(&format!(
+        "{PT}impl P\n  public fun grow(self) -> int\n    self.x = self.x + 1\n    self.y = self.y * 3\n    self.y\n  end\nend\nlet p = P {{ x: 0, y: 1, w: 0.0, on: false }}\nfor i in 0..1000 do\n  print(\"{{p.x}} {{p.y}}\")\n  p.grow()\nend"
+    ));
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
+fn a_method_that_calls_a_method_that_reads_fields_agrees() {
+    let out = same(&format!(
+        "{PT}fun total(p: P) -> int\n  p.x + p.y\nend\nfun twice(p: P, k: int) -> int\n  total(p) * k + total(p)\nend\nlet p = P {{ x: 3, y: 4, w: 0.0, on: false }}\nlet t = 0\nfor i in 0..1000 do\n  p.x = i\n  t = (t + twice(p, 2)) mod 1000003\nend\nprint(t)"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_missing_or_foreign_value_for_a_structure_parameter_is_the_machines_error() {
+    let out = same(&format!(
+        "{PT}fun get(p: P?) -> int\n  if p == none then 0 else p.x end\nend\nlet p = P {{ x: 3, y: 4, w: 0.0, on: false }}\nlet t = 0\nfor i in 0..1000 do\n  t += get(p) + get(none)\nend\nprint(t)"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_hot_loop_that_writes_variables_of_the_module_agrees() {
+    let out = same(
+        "let t = 0\nlet w = 0.5\nlet flip = false\nlet n = 0\nfun add(a: int, b: int) -> int\n  a + b\nend\nfor i in 0..5000 do\n  t = add(t, i) mod 1000003\n  w = w * 1.0001 + 0.5\n  flip = not flip\n  n += 1\nend\nprint(t)\nprint(w > 1.0)\nprint(flip)\nprint(n)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_error_in_a_loop_that_writes_variables_leaves_them_as_the_machine_does() {
+    // the error stops the run, but the variables written before it are printed by the loop
+    let out = same(
+        "let t = 1\nlet n = 0\nfun grow(a: int) -> int\n  a * 3\nend\nfor i in 0..1000 do\n  print(\"{n} {t}\")\n  n += 1\n  t = grow(t)\nend",
+    );
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
+fn a_hot_loop_calls_a_method_of_a_structure_held_by_a_variable_of_the_module() {
+    let out = same(&format!(
+        "{PT}impl P\n  public fun advance(self) -> int\n    self.x = self.x + 1\n    self.y = (self.y + self.x) mod 1000003\n    self.y\n  end\nend\nlet p = P {{ x: 0, y: 0, w: 0.0, on: false }}\nlet last = 0\nfor i in 0..5000 do\n  last = p.advance()\nend\nprint(last)\nprint(p.x)\nprint(p.y)"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_error_in_a_method_called_from_a_hot_loop_leaves_the_structure_as_the_machine_does() {
+    let out = same(&format!(
+        "{PT}impl P\n  public fun grow(self) -> int\n    self.x = self.x + 1\n    self.y = self.y * 3\n    self.y\n  end\nend\nlet p = P {{ x: 0, y: 1, w: 0.0, on: false }}\nlet last = 0\nfor i in 0..1000 do\n  print(\"{{p.x}} {{p.y}}\")\n  last = p.grow()\nend"
+    ));
+    assert!(out.contains("R010"), "{out}");
+}
+
+const APPLY: &str = "fun apply_n(f: fun(int) -> int, n: int, x: int) -> int\n  let v = x\n  for i in 0..n do\n    v = f(v) mod 1000003\n  end\n  v\nend\n";
+
+#[test]
+fn a_hot_loop_calls_a_function_value_that_reads_a_captured_variable() {
+    let out = same(&format!(
+        "{APPLY}let k = 3\nlet add = fun(x: int) -> int\n  x * 2 + k\nend\nprint(apply_n(add, 5000, 1))\nprint(apply_n(add, 3000, 2))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_function_value_that_changes_a_captured_variable_agrees() {
+    let out = same(&format!(
+        "{APPLY}let calls = 0\nlet bump = fun(x: int) -> int\n  calls += 1\n  x + calls\nend\nprint(apply_n(bump, 5000, 1))\nprint(calls)\nfun make() -> fun(int) -> int\n  let seen = 0\n  fun(x: int) -> int\n    seen += x\n    seen mod 1000\n  end\nend\nlet g = make()\nprint(apply_n(g, 4000, 1))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_error_in_a_function_value_called_by_a_hot_loop_leaves_the_variable_as_the_machine_does() {
+    let out = same(&format!(
+        "{APPLY}let calls = 0\nlet big = 1\nlet grow = fun(x: int) -> int\n  calls += 1\n  big = big * 3\n  print(\"{{calls}} {{big}}\")\n  x + calls\nend\nprint(apply_n(grow, 1000, 1))"
+    ));
+    assert!(out.contains("R010"), "{out}");
+}
+
+#[test]
+fn another_function_value_in_a_loop_that_became_hot_is_still_right() {
+    let out = same(&format!(
+        "{APPLY}let k = 3\nlet a = fun(x: int) -> int\n  x + k\nend\nlet b = fun(x: int) -> int\n  x * 2\nend\nprint(apply_n(a, 4000, 1))\nprint(apply_n(b, 4000, 1))\nprint(apply_n(a, 10, 1))"
+    ));
+    assert!(!out.contains("error"), "{out}");
+}

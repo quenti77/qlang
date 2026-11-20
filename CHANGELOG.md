@@ -2,6 +2,10 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## Non publié
+
+- **La limite d'étapes (`R900`) compte entre deux attentes**, plus sur toute la vie du programme. Le compteur repart de zéro après `time.sleep`, `Term.event` et la réception d'un message de `Worker` ou d'une tâche (avec un délai supérieur à zéro). Un écran en terminal, un démon ou un consommateur de file ne s'arrêtent plus au bout de quelques centaines de redessins ou de quelques jours ; une boucle infinie entre deux attentes l'est toujours. `qlang serve` remettait déjà le compteur à zéro à chaque requête.
+
 ## 1.7.4
 
 Un correctif du formateur. Aucun changement du langage ni cassant.

@@ -28,6 +28,7 @@ impl Interp<'_> {
         let name = def.name.clone();
 
         let mut work = 0;
+        let waits = waiting_call(&name, &args);
         let mut host_args = Vec::with_capacity(args.len());
         for (a, ty) in args.iter().zip(&def.params) {
             host_args.push(self.value_to_host(a, ty, 0, &mut work, span)?);
@@ -37,6 +38,11 @@ impl Interp<'_> {
         // `Result<T, Error>`: a host failure is the caller's to handle
         let payload = prog_result_payload(prog, &def.ret);
         let answer = self.host.call(&name, host_args);
+        if waits {
+            // the program gave the hand back to wait for the outside: the step limit protects
+            // against a loop between two waits, not against the life of a long-running program
+            self.steps = 0;
+        }
         match (answer, payload) {
             (Ok(h), Some(t)) => {
                 let v = self.host_to_value(&h, t, 0, &mut work, span)?;
@@ -497,4 +503,10 @@ fn prog_result_payload<'a>(prog: &crate::check::Program, ret: &'a Ty) -> Option<
     let s = &prog.defs.enums[*eid];
     (s.module == crate::check::PRELUDE_MOD && s.name == "Result" && args.len() == 2)
         .then(|| &args[0])
+}
+
+/// A host call that waits for an event, a message or a worker (not a mere poll with a zero timeout).
+fn waiting_call(name: &str, args: &[Value]) -> bool {
+    matches!(name, "term_event" | "task_recv" | "task_wait" | "task_next")
+        && matches!(args.last(), Some(Value::Int(ms)) if *ms > 0)
 }

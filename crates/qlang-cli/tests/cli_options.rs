@@ -55,6 +55,23 @@ fn run_stops_a_program_that_goes_past_max_steps() {
 }
 
 #[test]
+fn max_steps_counts_between_two_waits_not_over_the_whole_run() {
+    let d = Dir::new("steps-waits");
+    // 200 rounds of ~600 steps each, far past the limit of 20000 in all, but never in one stretch
+    d.write(
+        "daemon.q",
+        "let n = 0\nwhile n < 200 do\n  let i = 0\n  while i < 100 do\n    i += 1\n  end\n  time.sleep(1)\n  n += 1\nend\nprint(n)\n",
+    );
+    let (out, err, code) = d.qlang(&["run", "daemon.q", "--max-steps", "20000"]);
+    assert_eq!((out.as_str(), code), ("200\n", Some(0)), "{err}");
+    // without a wait the same work goes past the limit
+    d.write("busy.q", "let n = 0\nwhile n < 200 do\n  let i = 0\n  while i < 100 do\n    i += 1\n  end\n  n += 1\nend\n");
+    let (_, err, code) = d.qlang(&["run", "busy.q", "--max-steps", "20000"]);
+    assert!(err.contains("R900"), "{err}");
+    assert_eq!(code, Some(2));
+}
+
+#[test]
 fn test_applies_max_steps_to_each_test() {
     let d = Dir::new("test-steps");
     d.write("qlang.toml", "[package]\nname = \"t\"\n");

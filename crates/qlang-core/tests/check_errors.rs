@@ -221,3 +221,11 @@ fn a_method_chain_can_continue_on_the_next_line() {
         "struct S\n  public n: int\nend\nimpl S\n  public fun add(self, k: int) -> Self\n    S { n: self.n + k }\n  end\nend\nlet s = S { n: 0 }\n    .add(1)\n    .add(2)\nprint(s.n)",
     );
 }
+
+#[test]
+fn a_trait_method_without_self_cannot_be_called_on_a_value_of_the_trait() {
+    expect(
+        "trait Handler<C>\n  fun handle(c: C) -> int\nend\nfun go<C>(h: Handler<C>, c: C) -> int\n  h.handle(c)\nend\n",
+        "has no `self` in trait `Handler<C>`",
+    );
+}

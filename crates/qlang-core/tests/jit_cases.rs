@@ -386,3 +386,51 @@ fn another_function_value_in_a_loop_that_became_hot_is_still_right() {
     ));
     assert!(!out.contains("error"), "{out}");
 }
+
+#[test]
+fn hot_loops_over_texts_agree() {
+    let out = same(
+        "fun vowels(s: string) -> int\n  let n = 0\n  let i = 0\n  while i < s.len() do\n    let c = s.substring(i, i + 1)\n    if c == \"a\" or c == \"é\" or c == \"ü\" then n += 1 end\n    if s.substring(i, i + 1) != \"b\" then n += 2 end\n    i += 1\n  end\n  n\nend\nlet t = 0\nfor k in 0..3000 do\n  t += vowels(\"abécüaé{k}\")\nend\nprint(t)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_substring_out_of_range_in_a_hot_loop_is_the_machines_error() {
+    let out = same(
+        "fun cut(s: string, n: int) -> int\n  let c = s.substring(0, n)\n  c.len()\nend\nlet t = 0\nfor k in 0..2000 do\n  t += cut(\"hello\", k mod 7)\nend\nprint(t)",
+    );
+    assert!(out.contains("R020"), "{out}");
+}
+
+#[test]
+fn a_hot_loop_over_a_long_text_agrees() {
+    let out = same(
+        "let long = \"\"\nfor j in 0..20 do\n  long = long + \"abcdefghij\"\nend\nlet n = 0\nlet i = 0\nwhile i < long.len() do\n  if long.substring(i, i + 1) == \"e\" then n += 1 end\n  i += 1\nend\nlet total = 0\nfor k in 0..2000 do\n  total += k mod 3\nend\nprint(n)\nprint(total)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn hot_loops_over_maps_of_numbers_agree() {
+    let out = same(
+        "let m: map<int, int> = {}\nlet f: map<string, float> = {}\nfor i in 0..5000 do\n  m[i] = i * i mod 1000\n  f[\"k{i mod 50}\"] = i * 0.5\nend\nlet total = 0\nlet missing = 0\nfor i in 0..6000 do\n  let v = m[i]\n  if v != none then total += v else missing += 1 end\nend\nlet s = 0.0\nfor k in 0..50 do\n  let x = f[\"k{k}\"]\n  if x != none then s += x end\nend\nprint(total)\nprint(missing)\nprint(s)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn a_hot_function_that_reads_an_array_parameter_agrees() {
+    let out = same(
+        "fun total(xs: array<int>, k: int) -> int\n  let t = 0\n  for x in xs do\n    t += x * k\n  end\n  t + xs.len() + xs[0]\nend\nfun first(xs: array<float>) -> float\n  xs[1] * 2.0\nend\nfun twice(xs: array<int>) -> int\n  total(xs, 2) + total(xs, 3)\nend\nlet a = [3, 1, 4, 1, 5]\nlet f = [0.5, 1.25]\nlet s = 0\nlet g = 0.0\nfor i in 0..2000 do\n  s = (s + twice(a)) mod 1000003\n  g += first(f)\nend\nprint(s)\nprint(g)",
+    );
+    assert!(!out.contains("error"), "{out}");
+}
+
+#[test]
+fn an_index_out_of_bounds_in_a_hot_function_with_an_array_parameter_is_reported() {
+    let out = same(
+        "fun at(xs: array<int>, i: int) -> int\n  xs[i]\nend\nlet a = [1, 2, 3]\nlet s = 0\nfor i in 0..1000 do\n  s += at(a, i mod 4)\nend\nprint(s)",
+    );
+    assert!(out.contains("R020"), "{out}");
+}

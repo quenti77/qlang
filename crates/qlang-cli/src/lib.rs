@@ -634,6 +634,69 @@ impl Host for TerminalHost {
         std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
     }
 
+    fn write_file_mode(&mut self, path: &str, content: &[u8], mode: u32) -> Result<(), HostError> {
+        let target = self.write_target(path)?;
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let err = |e: std::io::Error| HostError::Other(e.to_string());
+            // created with the mode (never wider, even for an instant); a file that was there keeps
+            // its mode when it is opened, so it is set again before anything is written
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(mode)
+                .open(target)
+                .map_err(err)?;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))
+                .map_err(err)?;
+            file.write_all(content).map_err(err)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+            std::fs::write(target, content).map_err(|e| HostError::Other(e.to_string()))
+        }
+    }
+
+    fn set_mode(&mut self, path: &str, mode: u32) -> Result<(), HostError> {
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&full, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| HostError::Other(e.to_string()))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+            Ok(())
+        }
+    }
+
+    fn file_mode(&mut self, path: &str) -> Result<Option<u32>, HostError> {
+        let full = Path::new(path)
+            .canonicalize()
+            .map_err(|_| HostError::Other(format!("\"{path}\" not found")))?;
+        self.check_fs_root(&full)?;
+        let meta = std::fs::metadata(&full).map_err(|e| HostError::Other(e.to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            Ok(Some(meta.permissions().mode() & 0o7777))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = meta;
+            Ok(None)
+        }
+    }
+
     fn append_file(&mut self, path: &str, content: &str) -> Result<(), HostError> {
         use std::io::Write as _;
         let target = self.write_target(path)?;

@@ -86,6 +86,7 @@ fn arithmetic() {
         out("print(5.5 mod 2)\nprint(1_000 + 0xFF + 0b11)"),
         "1.5\n1258\n"
     );
+    assert_eq!(out("print(0o644)\nprint(0O7_7)"), "420\n63\n");
     assert_eq!(
         out("let x = 5\nx += 2\nx *= 3\nx -= 1\nprint(x)\nlet y = 5.0\ny /= 4\nprint(y)"),
         "20\n1.25\n"

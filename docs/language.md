@@ -210,7 +210,7 @@ d'être écrit.
 
 | Type       | Exemples                                | Remarque         |
 | ---------- | --------------------------------------- | ---------------- |
-| `int`      | `42`, `1_000`, `0xFF_FF`, `0b0101_0101` | entier 64 bits   |
+| `int`      | `42`, `1_000`, `0xFF_FF`, `0b0101_0101`, `0o644` | entier 64 bits   |
 | `float`    | `3.14`, `2.5e3`, `1_000.5`              | nombre à virgule |
 | `bool`     | `true`, `false`                         |                  |
 | `string`   | `"texte"`                               | non modifiable   |
@@ -226,7 +226,7 @@ la [section 14](#dictionnaires). Les types que tu définis
 
 - `int` et `float` sont deux types distincts : `1` est un `int`, `1.0` est un
   `float`.
-- Les nombres en base 2 (`0b…`) et en base 16 (`0x…`) sont acceptés.
+- Les nombres en base 2 (`0b…`), en base 8 (`0o…`, pour les droits d'un fichier : `0o644`) et en base 16 (`0x…`) sont acceptés.
 - Le caractère `_` peut séparer des chiffres pour la lisibilité : `1_000`,
   `0xFF_FF`, `0b0101_0101`. Il doit se trouver **entre deux chiffres**.
 - Un `float` a toujours un chiffre après le point : `0..10` est l'intervalle de
@@ -3470,6 +3470,7 @@ contenu)` le remplace entièrement (le crée si besoin). Les deux renvoient un
 `Result` : un fichier absent ou une erreur de permission donnent un
 `Result::err`, jamais un arrêt du programme. `fs.read_bytes(chemin)` et `fs.write_bytes(chemin,
 octets)` font de même avec des [`bytes`](#octets--bytes) (une image, une archive).
+`fs.write(chemin, contenu, mode: 0o600)` (et `fs.write_bytes`) **crée** le fichier avec ces droits : personne d'autre ne peut le lire, pas même un instant, et un fichier déjà là les reçoit aussi. `fs.chmod(chemin, 0o644)` change les droits d'un fichier ou d'un dossier, `fs.mode(chemin)` les donne (`Result<int?, Error>`). Les droits n'ont pas d'effet sous Windows (`fs.mode` y donne `none`).
 `fs.create_dir(dossier)` crée un dossier et ceux qui manquent au-dessus (rien ne se passe s'il existe) ;
 `fs.exists(chemin)` dit si un fichier ou un dossier est là (`Result<bool, Error>`). Avec `--root`, ils
 restent dans le dossier : un `..` après un dossier qui n'existe pas encore est refusé.

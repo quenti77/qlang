@@ -627,11 +627,14 @@ fn lex_number(
         text
     };
 
-    if b[i] == b'0' && matches!(b.get(i + 1), Some(b'x' | b'X' | b'b' | b'B')) {
+    if b[i] == b'0' && matches!(b.get(i + 1), Some(b'x' | b'X' | b'b' | b'B' | b'o' | b'O')) {
         let hex = matches!(b[i + 1], b'x' | b'X');
+        let octal = matches!(b[i + 1], b'o' | b'O');
         i += 2;
         let digits = if hex {
             eat_digits(&mut i, |c| c.is_ascii_hexdigit())
+        } else if octal {
+            eat_digits(&mut i, |c| (b'0'..=b'7').contains(&c))
         } else {
             eat_digits(&mut i, |c| c == b'0' || c == b'1')
         };
@@ -642,6 +645,8 @@ fn lex_number(
                     "L004",
                     if hex {
                         "expected hexadecimal digits after `0x`"
+                    } else if octal {
+                        "expected octal digits (0 to 7) after `0o`"
                     } else {
                         "expected binary digits (0 or 1) after `0b`"
                     },
@@ -654,7 +659,16 @@ fn lex_number(
             });
             return i;
         }
-        match i64::from_str_radix(&digits, if hex { 16 } else { 2 }) {
+        match i64::from_str_radix(
+            &digits,
+            if hex {
+                16
+            } else if octal {
+                8
+            } else {
+                2
+            },
+        ) {
             Ok(v) => toks.push(Token {
                 tok: Tok::Int(v),
                 span: span(start, i),

@@ -2464,6 +2464,9 @@ extern fun fs_read(path: string) -> Result<string, Error>
 extern fun fs_write(path: string, content: string) -> Result<bool, Error>
 extern fun fs_read_bytes(path: string) -> Result<bytes, Error>
 extern fun fs_write_bytes(path: string, content: bytes) -> Result<bool, Error>
+extern fun fs_write_mode(path: string, content: bytes, mode: int) -> Result<bool, Error>
+extern fun fs_chmod(path: string, mode: int) -> Result<bool, Error>
+extern fun fs_mode(path: string) -> Result<int?, Error>
 extern fun fs_create_dir(path: string) -> Result<bool, Error>
 extern fun fs_exists(path: string) -> Result<bool, Error>
 extern fun fs_is_dir(path: string) -> Result<bool, Error>
@@ -2492,9 +2495,26 @@ impl fs
         fs_read(path)
     end
 
-    --" Writes `content` to a file, replacing it entirely (creating it if needed). Needs disk access. --"
-    public fun write(path: string, content: string) -> Result<bool, Error>
-        fs_write(path, content)
+    --" Writes `content` to a file, replacing it entirely (creating it if needed). With a `mode`
+    (`0o600`: readable and writable by the owner only), the file is **created** with that mode, so
+    nobody else can read it, not even for an instant; one that was there gets it too. The mode has
+    no effect on Windows. Needs disk access. --"
+    public fun write(path: string, content: string, mode: int = -1) -> Result<bool, Error>
+        if mode < 0 then
+            return fs_write(path, content)
+        end
+        fs_write_mode(path, content.to_bytes(), mode)
+    end
+
+    --" Changes the permission bits of a file or a folder (`0o644`, `0o600`...); from 0 to `0o7777`. No effect on
+    Windows. Needs disk access. --"
+    public fun chmod(path: string, mode: int) -> Result<bool, Error>
+        fs_chmod(path, mode)
+    end
+
+    --" The permission bits of a file or a folder (`0o644`), or `none` on Windows. Needs disk access. --"
+    public fun mode(path: string) -> Result<int?, Error>
+        fs_mode(path)
     end
 
     --" Reads a file's whole content as bytes (an image, an archive). Needs disk access. --"
@@ -2502,9 +2522,13 @@ impl fs
         fs_read_bytes(path)
     end
 
-    --" Writes bytes to a file, replacing it entirely (creating it if needed). Needs disk access. --"
-    public fun write_bytes(path: string, content: bytes) -> Result<bool, Error>
-        fs_write_bytes(path, content)
+    --" Writes bytes to a file, replacing it entirely (creating it if needed); `mode` is the one of `fs.write`.
+    Needs disk access. --"
+    public fun write_bytes(path: string, content: bytes, mode: int = -1) -> Result<bool, Error>
+        if mode < 0 then
+            return fs_write_bytes(path, content)
+        end
+        fs_write_mode(path, content, mode)
     end
 
     --" Creates a folder, and the folders above it that are missing; nothing happens if it is already

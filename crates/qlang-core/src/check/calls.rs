@@ -1587,6 +1587,8 @@ impl Checker {
                     ("fs", "remove" | "remove_dir") => {
                         Some(("fs_remove", "there is no disk access"))
                     }
+                    ("fs", "chmod") => Some(("fs_chmod", "there is no disk access")),
+                    ("fs", "mode") => Some(("fs_mode", "there is no disk access")),
                     ("fs", "rename") => Some(("fs_rename", "there is no disk access")),
                     ("fs", "copy") => Some(("fs_copy", "there is no disk access")),
                     ("File" | "Dir", _) => Some(("fs_stat", "there is no disk access")),

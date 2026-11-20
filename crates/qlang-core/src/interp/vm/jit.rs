@@ -40,7 +40,16 @@ pub(in crate::interp) struct Ctx {
 }
 
 /// How many helpers (see `Jit::helpers`).
-const HELPERS: usize = 12;
+const HELPERS: usize = 15;
+
+/// The most variables of the module that the native code of a loop keeps.
+const MAX_GLOBALS: usize = 8;
+
+/// Where in the buffer given to a loop the table of objects and the numbers of the variables are.
+const GTABLE: usize = MAX_INLINE * 2;
+
+/// The most parameters of a function that takes objects (their addresses are put in a buffer).
+const MAX_ARGS: usize = 16;
 
 const STEPS: i32 = 0;
 const MAX_STEPS: i32 = 8;
@@ -231,6 +240,53 @@ extern "C" fn h_setfield(ctx: *mut Ctx, v: *const Value, site: *const FieldSite,
     0
 }
 
+/// The address of the number of the field `site` in the structure at `v`, kept by the native
+/// code for the whole call (nothing it runs can move the field). `0` and the flag when the
+/// value is not a structure with that number.
+extern "C" fn h_fieldptr(ctx: *mut Ctx, v: *const Value, site: *const FieldSite) -> i64 {
+    // SAFETY: see `field_bits`.
+    let (Value::Struct(st), site) = (unsafe { &*v }, unsafe { &*site }) else {
+        return fail(ctx);
+    };
+    let Ok(mut f) = st.fields.try_borrow_mut() else {
+        return fail(ctx);
+    };
+    let mut found = f
+        .get_mut_at_key(site.slot.get() as usize, &site.key)
+        .is_some();
+    if !found && let Some(i) = f.position(&site.name) {
+        site.slot.set(i as u32);
+        found = f.get_mut_at(i, &site.name).is_some();
+    }
+    if !found {
+        return fail(ctx);
+    }
+    match (
+        f.get_mut_at_key(site.slot.get() as usize, &site.key),
+        &site.ty,
+    ) {
+        (Some(Value::Int(x)), Ty::Int) => std::ptr::from_mut(x) as i64,
+        (Some(Value::Float(x)), Ty::Float) => std::ptr::from_mut(x) as i64,
+        (Some(Value::Bool(x)), Ty::Bool) => std::ptr::from_mut(x) as i64,
+        _ => fail(ctx),
+    }
+}
+
+/// `dst = table[k]` for an object register (a variable of the module that is an object).
+extern "C" fn h_loadobj(dst: *mut Value, table: *const Value, k: i64) -> i64 {
+    // SAFETY: `dst` is an object register of this run and `table` the values the machine
+    // gave for this loop, with `k` inside.
+    unsafe { *dst = (*table.offset(k as isize)).clone() };
+    0
+}
+
+/// `dst = src` for two object registers.
+extern "C" fn h_movo(dst: *mut Value, src: *const Value) -> i64 {
+    // SAFETY: two object registers of this run.
+    unsafe { *dst = (*src).clone() };
+    0
+}
+
 pub(in crate::interp) struct Jit {
     module: JITModule,
     fb: FunctionBuilderContext,
@@ -277,6 +333,9 @@ impl Jit {
         jb.symbol("qlang_jit_apush", h_apush as *const u8);
         jb.symbol("qlang_jit_field", h_field as *const u8);
         jb.symbol("qlang_jit_setfield", h_setfield as *const u8);
+        jb.symbol("qlang_jit_fieldptr", h_fieldptr as *const u8);
+        jb.symbol("qlang_jit_loadobj", h_loadobj as *const u8);
+        jb.symbol("qlang_jit_movo", h_movo as *const u8);
         let mut module = JITModule::new(jb);
         let mut sig = module.make_signature();
         sig.params.push(AbiParam::new(types::I64));
@@ -297,8 +356,9 @@ impl Jit {
             sig.returns.push(AbiParam::new(types::I64));
             sig
         };
-        let (i1, i3, i4, i5) = (
+        let (i1, i2, i3, i4, i5) = (
             ints(&module, 1),
+            ints(&module, 2),
             ints(&module, 3),
             ints(&module, 4),
             ints(&module, 5),
@@ -319,6 +379,9 @@ impl Jit {
             decl("qlang_jit_apush", &i4)?,
             decl("qlang_jit_field", &i3)?,
             decl("qlang_jit_setfield", &i4)?,
+            decl("qlang_jit_fieldptr", &i3)?,
+            decl("qlang_jit_loadobj", &i3)?,
+            decl("qlang_jit_movo", &i2)?,
         ];
         Some(Jit {
             module,
@@ -341,11 +404,24 @@ impl Jit {
             let Some(callees) = scan(&codes[i as usize], false) else {
                 return false;
             };
+            // a function that writes fields keeps them until it returns, so that the machine
+            // can run the call again from the start when the native code leaves: a caller
+            // that could leave after it would run the writes twice
+            if callees.iter().any(|c| writes_fields(&codes[*c as usize])) {
+                return false;
+            }
             set.push(i);
             todo.extend(callees);
         }
         let mut declared = Vec::new();
         for &i in &set {
+            let c = &codes[i as usize];
+            if c.param_tys.iter().any(is_obj) {
+                if c.param_tys.len() > MAX_ARGS {
+                    return false;
+                }
+                c.jit.objs.set(true);
+            }
             let sig = arity_sig(&self.module, codes[i as usize].param_tys.len());
             let Ok(id) = self
                 .module
@@ -393,6 +469,10 @@ impl Jit {
             }
         }
         *codes[root as usize].jit.osr_arrays.borrow_mut() = inline_arrays(&codes[root as usize]);
+        let Some(globals) = osr_globals(&codes[root as usize]) else {
+            return false;
+        };
+        *codes[root as usize].jit.osr_globals.borrow_mut() = globals;
         let sig = arity_sig(&self.module, 4);
         let Ok(id) = self
             .module
@@ -468,6 +548,16 @@ impl Jit {
             let ty_of = |r: usize| if is_f[r] { types::F64 } else { types::I64 };
             let vars: Vec<Variable> = (0..code.nregs).map(|r| b.declare_var(ty_of(r))).collect();
             let em_vars = vars.clone();
+            // the structures that are parameters: their addresses
+            let ovars: Vec<Variable> = (0..code.nregs).map(|_| b.declare_var(types::I64)).collect();
+            for (r, v) in ovars.iter().enumerate() {
+                let init = if !osr && r < code.param_tys.len() && is_obj(&code.param_tys[r]) {
+                    ps[r + 1]
+                } else {
+                    b.ins().iconst(types::I64, 0)
+                };
+                b.def_var(*v, init);
+            }
             for (r, v) in vars.iter().enumerate() {
                 let init = if osr {
                     b.ins()
@@ -499,6 +589,36 @@ impl Jit {
                     parts.insert(*reg, (p, n, *ety));
                 }
             }
+            // the variables of the module that a loop keeps in memory: their numbers (written
+            // back where the machine reads them when the native code leaves) and the table
+            // of the objects
+            let gl = code.jit.osr_globals.borrow().clone();
+            let mut gvars = Vec::new();
+            let mut gtable = None;
+            if osr {
+                for (k, (_, obj, _)) in gl.iter().enumerate() {
+                    let v = b.declare_var(types::I64);
+                    let x = if *obj {
+                        b.ins().iconst(types::I64, 0)
+                    } else {
+                        b.ins().load(
+                            types::I64,
+                            MemFlagsData::trusted(),
+                            ps[4],
+                            ((GTABLE + 1 + k) * 8) as i32,
+                        )
+                    };
+                    b.def_var(v, x);
+                    gvars.push(v);
+                }
+                gtable = Some(b.ins().load(
+                    types::I64,
+                    MemFlagsData::trusted(),
+                    ps[4],
+                    (GTABLE * 8) as i32,
+                ));
+            }
+            let spill_to = gvars.clone();
             let bail = b.create_block();
             let at = b.append_block_param(bail, types::I64);
             let mut em = Em {
@@ -515,6 +635,15 @@ impl Jit {
                 osr: osr.then(|| (ps[1], ps[2], ps[3])),
                 at: 0,
                 parts,
+                ovars,
+                gvars,
+                gl: gl.clone(),
+                gtable,
+                gbuf: osr.then(|| ps[4]),
+                fptr: HashMap::new(),
+                fval: HashMap::new(),
+                cached: false,
+                written: Vec::new(),
             };
             em.body(code)?;
             let bail = em.bail;
@@ -526,6 +655,17 @@ impl Jit {
                     let x = b.use_var(*v);
                     b.ins()
                         .store(MemFlagsData::trusted(), x, ps[1], (r * 8) as i32);
+                }
+                for (k, (_, obj, stored)) in gl.iter().enumerate() {
+                    if *stored && !*obj {
+                        let x = b.use_var(spill_to[k]);
+                        b.ins().store(
+                            MemFlagsData::trusted(),
+                            x,
+                            ps[4],
+                            ((GTABLE + 1 + k) * 8) as i32,
+                        );
+                    }
                 }
                 b.ins().return_(&[at]);
             } else {
@@ -792,19 +932,23 @@ fn in_loop(code: &Code, at: usize) -> bool {
 
 fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
     let scalar = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Bool);
-    if code.uses_objs && !osr {
-        return None;
-    }
-    // a function called from native code: numbers in, a number out. The entry in the middle of
-    // a run (a loop, or a function that is running) only needs the registers to be numbers.
+    // a function called from native code: numbers or structures in, a number out. The entry in
+    // the middle of a run (a loop, or a function that is running) only needs the registers to
+    // be numbers.
     if !osr
         && (code.is_loop
             || !code.frees.is_empty()
-            || !code.param_tys.iter().all(scalar)
+            || code.param_tys.len() > MAX_ARGS
+            || !code
+                .param_tys
+                .iter()
+                .all(|t| scalar(t) || matches!(t, Ty::Struct(..)))
             || !scalar(&code.ret))
     {
         return None;
     }
+    // a structure that is a parameter, and was not given another value
+    let object = |r: Reg| matches!(code.param_tys.get(usize::from(r)), Some(Ty::Struct(..)));
     let mut callees = Vec::new();
     for (at, op) in code.ops.iter().enumerate() {
         match *op {
@@ -885,8 +1029,18 @@ fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
             | Op::ForArr { ety, .. }
                 if osr && ety != Ety::O => {}
             // a number in a structure, read or written in place (the entry in the middle of a run only)
-            Op::Field { fld, .. } | Op::SetField { fld, .. }
-                if osr && scalar(&code.fields[fld as usize].ty) => {}
+            Op::Field { obj, fld, .. } | Op::SetField { obj, fld, .. }
+                if scalar(&code.fields[fld as usize].ty) && (osr || object(obj)) => {}
+            // a structure handed on to a function called from here
+            Op::MovO(_, a) if !osr && object(a) => {}
+            // the entry in the middle of a run: a variable of the module is kept in memory
+            // (its number) or given by the machine (its object), and objects are copied
+            Op::LoadG { g, .. }
+                if osr
+                    && (scalar(&code.globals[g as usize].ty)
+                        || is_obj(&code.globals[g as usize].ty)) => {}
+            Op::StoreG { g, .. } if osr && scalar(&code.globals[g as usize].ty) => {}
+            Op::MovO(..) if osr => {}
             Op::Call { code: t, .. } => callees.push(t),
             // the entry in the middle of a run leaves to the machine at an instruction it cannot
             // translate, as long as none is in a loop (it would leave at each turn)
@@ -894,7 +1048,37 @@ fn scan(code: &Code, osr: bool) -> Option<Vec<u32>> {
             _ => return None,
         }
     }
+    if !osr && !callees.is_empty() && writes_fields(code) {
+        return None;
+    }
     Some(callees)
+}
+
+/// The variables of the module that the code of a loop reads or writes, as `Code::jit` keeps
+/// them; `None` when there are too many, or when one is written that holds an object.
+fn osr_globals(code: &Code) -> Option<Vec<(u32, bool, bool)>> {
+    let mut found: Vec<(u32, bool, bool)> = Vec::new();
+    for op in &code.ops {
+        let (g, store) = match *op {
+            Op::LoadG { g, .. } => (g, false),
+            Op::StoreG { g, .. } => (g, true),
+            _ => continue,
+        };
+        let obj = is_obj(&code.globals[g as usize].ty);
+        if obj && store {
+            return None;
+        }
+        match found.iter_mut().find(|(h, ..)| *h == g) {
+            Some(e) => e.2 |= store,
+            None => found.push((g, obj, store)),
+        }
+    }
+    (found.len() <= MAX_GLOBALS).then_some(found)
+}
+
+/// Whether `code` has an instruction that writes a field of a structure.
+fn writes_fields(code: &Code) -> bool {
+    code.ops.iter().any(|op| matches!(op, Op::SetField { .. }))
 }
 
 struct Em<'a, 'b> {
@@ -915,6 +1099,21 @@ struct Em<'a, 'b> {
     at: usize,
     /// The arrays read in place: pointer and length, in variables, and the kind of the elements.
     parts: HashMap<Reg, (Variable, Variable, Ety)>,
+    /// The structures held by the registers (their addresses), for a function.
+    ovars: Vec<Variable>,
+    /// For a loop: the variables of the module it uses (see `JitSlot::osr_globals`), the numbers
+    /// of those in variables, the table of the objects, and the buffer the machine reads.
+    gvars: Vec<Variable>,
+    gl: Vec<(u32, bool, bool)>,
+    gtable: Option<ir::Value>,
+    gbuf: Option<ir::Value>,
+    /// Where the number of each field used (structure register, name of the field) is, and
+    /// its value held in a variable when the function writes fields: the writes go to memory
+    /// only when it returns.
+    fptr: HashMap<(Reg, String), Variable>,
+    fval: HashMap<(Reg, String), Variable>,
+    cached: bool,
+    written: Vec<((Reg, String), Ty)>,
 }
 
 impl Em<'_, '_> {
@@ -1085,6 +1284,18 @@ impl Em<'_, '_> {
                 .ins()
                 .store(MemFlagsData::trusted(), v, regs, (r * 8) as i32);
         }
+        let buf = self.gbuf?;
+        for (k, (_, obj, stored)) in self.gl.clone().iter().enumerate() {
+            if *stored && !*obj {
+                let x = self.b.use_var(self.gvars[k]);
+                self.b.ins().store(
+                    MemFlagsData::trusted(),
+                    x,
+                    buf,
+                    ((GTABLE + 1 + k) * 8) as i32,
+                );
+            }
+        }
         let at = self.imm(i as i64);
         self.b.ins().return_(&[at]);
         Some(())
@@ -1148,7 +1359,83 @@ impl Em<'_, '_> {
         self.b.ins().select(pos, u, d)
     }
 
+    /// A number of a field, from its address.
+    fn load_field(&mut self, p: ir::Value, ty: &Ty) -> ir::Value {
+        if *ty == Ty::Bool {
+            self.b
+                .ins()
+                .uload8(types::I64, MemFlagsData::trusted(), p, 0)
+        } else {
+            self.b.ins().load(types::I64, MemFlagsData::trusted(), p, 0)
+        }
+    }
+
+    /// A function that takes structures finds the field of each one it uses when it starts
+    /// (the machine runs the call itself when one is missing, which tells what is wrong).
+    fn hoist(&mut self, code: &Code) -> Option<()> {
+        let mut keys: Vec<((Reg, String), usize)> = Vec::new();
+        for op in &code.ops {
+            let (Op::Field { obj, fld, .. } | Op::SetField { obj, fld, .. }) = *op else {
+                continue;
+            };
+            let key = (obj, code.fields[fld as usize].name.clone());
+            if !keys.iter().any(|(k, _)| *k == key) {
+                keys.push((key.clone(), fld as usize));
+            }
+            if matches!(op, Op::SetField { .. }) && !self.written.iter().any(|(k, _)| *k == key) {
+                self.written
+                    .push((key, code.fields[fld as usize].ty.clone()));
+            }
+        }
+        self.cached = !self.written.is_empty();
+        let mut ptrs = Vec::new();
+        for (key, fld) in keys {
+            let site = &code.fields[fld];
+            let sp = self.imm(site as *const FieldSite as i64);
+            let o = self.b.use_var(self.ovars[usize::from(key.0)]);
+            let p = self.helper_checked(12, &[self.ctx, o, sp]);
+            let pv = self.b.declare_var(types::I64);
+            self.b.def_var(pv, p);
+            self.fptr.insert(key.clone(), pv);
+            if self.cached {
+                let x = self.load_field(p, &site.ty);
+                let fv = self.b.declare_var(types::I64);
+                self.b.def_var(fv, x);
+                self.fval.insert(key.clone(), fv);
+            }
+            ptrs.push((key, p));
+        }
+        // the same number reached through two registers would be held twice
+        if self.cached {
+            for (i, (a, pa)) in ptrs.iter().enumerate() {
+                for (b, pb) in &ptrs[i + 1..] {
+                    if a.1 == b.1 {
+                        let same = self.b.ins().icmp(IntCC::Equal, *pa, *pb);
+                        self.bail_if(same);
+                    }
+                }
+            }
+        }
+        Some(())
+    }
+
+    /// The numbers held for the fields written go to their places (a function returns).
+    fn commit(&mut self) {
+        for (key, ty) in self.written.clone() {
+            let p = self.b.use_var(self.fptr[&key]);
+            let x = self.b.use_var(self.fval[&key]);
+            if ty == Ty::Bool {
+                self.b.ins().istore8(MemFlagsData::trusted(), x, p, 0);
+            } else {
+                self.b.ins().store(MemFlagsData::trusted(), x, p, 0);
+            }
+        }
+    }
+
     fn body(&mut self, code: &Code) -> Option<()> {
+        if self.osr.is_none() {
+            self.hoist(code)?;
+        }
         let n = code.ops.len();
         let mut starts = vec![false; n + 1];
         starts[0] = true;
@@ -1435,6 +1722,46 @@ impl Em<'_, '_> {
                 Op::ALoad { dst, arr, idx, ety } => {
                     let v = self.array_op(6, arr, &[idx], &[], ety)?;
                     self.set(dst, v);
+                }
+                Op::Field { dst, obj, fld } if self.osr.is_none() => {
+                    let site = &code.fields[fld as usize];
+                    let key = (obj, site.name.clone());
+                    let v = if self.cached {
+                        self.b.use_var(self.fval[&key])
+                    } else {
+                        let p = self.b.use_var(self.fptr[&key]);
+                        self.load_field(p, &site.ty)
+                    };
+                    self.set(dst, v);
+                }
+                Op::SetField { obj, src, fld } if self.osr.is_none() => {
+                    let key = (obj, code.fields[fld as usize].name.clone());
+                    let x = self.get(src);
+                    self.b.def_var(self.fval[&key], x);
+                }
+                Op::MovO(d, a) if self.osr.is_none() => {
+                    let v = self.b.use_var(self.ovars[usize::from(a)]);
+                    self.b.def_var(self.ovars[usize::from(d)], v);
+                }
+                Op::MovO(d, a) => {
+                    let (x, y) = (self.obj_addr(d)?, self.obj_addr(a)?);
+                    self.b.ins().call(self.helpers[14], &[x, y]);
+                }
+                Op::LoadG { dst, g } => {
+                    let k = self.gl.iter().position(|e| e.0 == g)?;
+                    if self.gl[k].1 {
+                        let (d, t) = (self.obj_addr(dst)?, self.gtable?);
+                        let kk = self.imm(k as i64);
+                        self.b.ins().call(self.helpers[13], &[d, t, kk]);
+                    } else {
+                        let x = self.b.use_var(self.gvars[k]);
+                        self.set(dst, x);
+                    }
+                }
+                Op::StoreG { src, g } => {
+                    let k = self.gl.iter().position(|e| e.0 == g)?;
+                    let x = self.get(src);
+                    self.b.def_var(self.gvars[k], x);
                 }
                 Op::Field { dst, obj, fld } => {
                     let p = self.obj_addr(obj)?;
@@ -1755,8 +2082,19 @@ impl Em<'_, '_> {
                     let f = self.module.declare_func_in_func(callee, &mut *self.b.func);
                     let arity = self.arity(target);
                     let mut args = vec![self.ctx];
+                    let codes = self.codes;
                     for k in 0..arity {
-                        args.push(self.get(base + k as Reg));
+                        let r = base + k as Reg;
+                        if is_obj(&codes[target as usize].param_tys[k]) {
+                            let p = if self.osr.is_some() {
+                                self.obj_addr(r)?
+                            } else {
+                                self.b.use_var(self.ovars[usize::from(r)])
+                            };
+                            args.push(p);
+                        } else {
+                            args.push(self.get(r));
+                        }
                     }
                     let call = self.b.ins().call(f, &args);
                     let r = self.b.inst_results(call)[0];
@@ -1787,6 +2125,7 @@ impl Em<'_, '_> {
                 }
                 Op::Ret(a) => {
                     let v = self.get(a);
+                    self.commit();
                     self.b.ins().return_(&[v]);
                     dead = true;
                 }
@@ -1881,7 +2220,9 @@ impl Interp<'_> {
     pub(in crate::interp) fn jit_call(
         &mut self,
         entry: usize,
+        target: u32,
         stack: &[i64],
+        ostack: &[Value],
         at: usize,
     ) -> Option<i64> {
         let steps = self.steps as i64 + 4;
@@ -1901,7 +2242,22 @@ impl Interp<'_> {
         // SAFETY: `entry` is the shim made by `Jit::shim` for this function, which reads as many
         // arguments from the pointer as the function has parameters (all inside `stack`).
         let f: extern "C" fn(*mut Ctx, *const i64) -> i64 = unsafe { std::mem::transmute(entry) };
-        let v = f(&mut ctx, stack[at..].as_ptr());
+        // a function that takes structures is given their addresses in place of the numbers
+        let c = self.code_at(target);
+        let mut args = [0i64; MAX_ARGS];
+        let given = if c.jit.objs.get() {
+            for (k, t) in c.param_tys.iter().enumerate() {
+                args[k] = if is_obj(t) {
+                    ostack.get(at + k)? as *const Value as i64
+                } else {
+                    stack[at + k]
+                };
+            }
+            args.as_ptr()
+        } else {
+            stack[at..].as_ptr()
+        };
+        let v = f(&mut ctx, given);
         if ctx.bail != 0 {
             return None;
         }
@@ -1959,7 +2315,7 @@ impl Interp<'_> {
     ) -> usize {
         // where the arrays that the code reads in place are, and how long: nothing in it can
         // move them
-        let mut parts = [0i64; MAX_INLINE * 2];
+        let mut parts = [0i64; GTABLE + 1 + MAX_GLOBALS];
         for (k, (reg, ety)) in self.code_at(cur).jit.osr_arrays.borrow().iter().enumerate() {
             let Some(Value::Array(rc)) = ostack.get(base + usize::from(*reg)) else {
                 return self.jit_osr_refuse(cur, pc);
@@ -1977,6 +2333,22 @@ impl Interp<'_> {
             parts[k * 2] = p;
             parts[k * 2 + 1] = n as i64;
         }
+        // the variables of the module the loop uses: numbers in the buffer, objects in a table
+        let code = self.code_at(cur);
+        let globals = code.jit.osr_globals.borrow().clone();
+        let mut table = vec![Value::Unit; globals.len().max(1)];
+        for (k, (g, obj, _)) in globals.iter().enumerate() {
+            let gr = &code.globals[*g as usize];
+            let mut c = gr.slot.get();
+            let got = self.envs[gr.module].with_cached(&gr.name, &mut c, |v| slot_of(v, &gr.ty));
+            gr.slot.set(c);
+            match got {
+                Some(Some(Slot::N(b))) if !*obj => parts[GTABLE + 1 + k] = b,
+                Some(Some(Slot::O(o))) if *obj => table[k] = o,
+                _ => return self.jit_osr_refuse(cur, pc),
+            }
+        }
+        parts[GTABLE] = table.as_ptr() as i64;
         let mut ctx = Ctx {
             steps: self.steps as i64,
             max_steps: self.limits.max_steps as i64,
@@ -1988,17 +2360,29 @@ impl Interp<'_> {
         };
         // SAFETY: `entry` is the function made by `Jit::compile_osr` for this code, which reads
         // and writes the `nregs` registers of the code from the pointer (all inside `stack`).
-        let f: extern "C" fn(*mut Ctx, *mut i64, i64, *mut Value, *const i64) -> i64 =
+        let f: extern "C" fn(*mut Ctx, *mut i64, i64, *mut Value, *mut i64) -> i64 =
             unsafe { std::mem::transmute(entry) };
         let at = f(
             &mut ctx,
             stack[base..].as_mut_ptr(),
             pc as i64,
             ostack.as_mut_ptr().wrapping_add(base),
-            parts.as_ptr(),
+            parts.as_mut_ptr(),
         );
         // the registers are back in memory, with the steps as they were at that instruction
         self.steps = ctx.steps as u64;
+        // and the variables of the module the loop wrote
+        for (k, (g, obj, stored)) in globals.iter().enumerate() {
+            if *stored && !*obj {
+                let gr = &code.globals[*g as usize];
+                let mut c = gr.slot.get();
+                let bits = [parts[GTABLE + 1 + k]];
+                self.envs[gr.module].update_cached(&gr.name, &mut c, |slot| {
+                    store_reg(slot, &bits, &[], 0, &gr.ty);
+                });
+                gr.slot.set(c);
+            }
+        }
         at as usize
     }
 

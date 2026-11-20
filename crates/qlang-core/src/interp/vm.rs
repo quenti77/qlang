@@ -600,6 +600,15 @@ pub(super) struct JitSlot {
     /// register and the kind of their elements.
     #[cfg_attr(not(feature = "jit"), allow(dead_code))]
     osr_arrays: std::cell::RefCell<Vec<(Reg, Ety)>>,
+    /// Some parameter is an object: the machine hands the native code the address of its
+    /// register instead of a number.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    objs: Cell<bool>,
+    /// The variables of the module that the native code of a loop reads or writes: the
+    /// variable, whether it is an object, and whether the loop writes it. The machine gives
+    /// their values when it starts the native code and takes the written ones back when it ends.
+    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
+    osr_globals: std::cell::RefCell<Vec<(u32, bool, bool)>>,
 }
 
 /// A field read or written by name, and its type.
@@ -5485,7 +5494,8 @@ impl Interp<'_> {
                     {
                         let e = self.jit_entry(target);
                         if e != 0
-                            && let Some(v) = self.jit_call(e, stack, base + b as usize)
+                            && let Some(v) =
+                                self.jit_call(e, target, stack, ostack, base + b as usize)
                         {
                             r!(dst) = v;
                             continue;

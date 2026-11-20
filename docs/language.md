@@ -137,7 +137,7 @@ let x = 1 -- ou en fin de ligne
 ```
 
 - Les commentaires ne s'imbriquent pas.
-- Déprécié en 1.6 (retiré en 1.8) : l'ancien bloc `--(` … `--)` reste lu, avec
+- Déprécié en 1.6 (retiré en 1.9) : l'ancien bloc `--(` … `--)` reste lu, avec
   l'avertissement `W001`. `qlang migrate` le réécrit en `--*` … `--*`.
 - `--` suivi de `*` ou de `"` ouvre toujours un commentaire de bloc ou de
   documentation, jamais un commentaire de ligne : `--*****` ouvre donc un bloc.
@@ -523,7 +523,7 @@ De la plus faible à la plus forte :
 | `2.0 ** 0.5` | `1.414…` | sinon, un `float`                        |
 
 - `//` ne s'applique qu'à deux `int`, et coupe vers zéro (`-7 // 2` vaut `-3`), pas vers le bas comme le `//` de
-  Python. `div` est l'ancien nom : déprécié en 1.6 (`W001`), retiré en 1.8 ; `qlang migrate` écrit `//` à sa place.
+  Python. `div` est l'ancien nom : déprécié en 1.6 (`W001`), retiré en 1.9 ; `qlang migrate` écrit `//` à sa place.
   `mod` s'applique aussi aux `float`
   (`5.5 mod 2` vaut `1.5`).
 - Diviser par zéro (`/`, `//`, `mod`) est une erreur d'exécution.

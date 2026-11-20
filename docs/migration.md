@@ -23,12 +23,12 @@ reste décrit ici, à la main.
 Pour trouver ce qui pourrait casser **avant** de monter de version : lancer `qlang check --deny-warnings` (ou
 `qlang test --deny-warnings`) sur le projet avec la version actuelle ; ce qui est déprécié apparaît en `W001`.
 
-## 1.6 : `//` remplace `div`, `--*` remplace `--(` (déprécié, retiré en 1.8)
+## 1.6 : `//` remplace `div`, `--*` remplace `--(` (déprécié, retiré en 1.9)
 
 - **Avant** : la division entière s'écrivait `a div b` (`n div= 2`), et un commentaire sur plusieurs lignes `--(` … `--)`.
 - **Après** : `a // b` (`n //= 2`) et `--*` … `--*` (le même marqueur ouvre et ferme, comme `--"` pour la documentation). Le résultat est le
   même : `//` coupe **vers zéro** (`-7 // 2` vaut `-3`), il n'arrondit pas vers le bas comme le `//` de Python.
-- **Les anciennes formes marchent encore en 1.6 et 1.7**, avec l'avertissement `W001` à chaque emploi. Elles sont retirées en 1.8 ;
+- **Les anciennes formes marchent encore en 1.6 et 1.7**, avec l'avertissement `W001` à chaque emploi. Elles sont retirées en 1.9 ;
   `div` devient alors un nom comme un autre (variable, fonction, méthode, champ).
 - **S'adapter** : `qlang migrate` réécrit les deux (`qlang migrate --check` pour la liste, code 1 s'il y a quelque chose à changer).
 - **Cassant dès la 1.6** : une ligne qui commence par `--*` ouvrait un commentaire de ligne (`--*****`, `--* titre`) ; elle ouvre

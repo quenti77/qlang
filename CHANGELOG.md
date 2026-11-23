@@ -2,6 +2,21 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.11.0
+
+`Result` et les tableaux gagnent les méthodes qui évitent les `if` à la main, un nullable se déballe en une ligne et `assert` rétrécit. Rien de cassant : tout ce qui marchait marche pareil.
+
+### Langage
+
+- **`Result` : `map(f)`, `map_err(f)`, `and_then(f)`, `unwrap_or(valeur)` et `ok()`** (#323). `posts.get(id).map_err(to_http)` remplace le `if r.is_err() then ... end` avec reconstruction du `Result`. `ok()` rend la valeur en `T?` (`none` pour une erreur).
+- **Tableaux : `reversed()`, `sorted()` et `sorted_by(f)`** (#324) rendent un **nouveau** tableau, chaînable avec `filter`, `map`, `drop`, `take`. `reverse`, `sort` et `sort_by` restent sur place.
+- **Nullables : `x.unwrap()` et `x.expect("message")`** (#325) rendent la valeur, ou arrêtent le programme (`R006`) si elle est `none`, y compris sur un résultat d'appel. **`assert(x != none)` rétrécit `x`** pour la suite du bloc, comme un `if x == none then return end`.
+
+### Outils
+
+- **Un mot réservé employé comme nom le dit** (#328) : ``error[P001]: `end` is a reserved word, it cannot be a name (pick another one)``, sans erreur en cascade sur la même ligne (avant, trois erreurs sans un mot sur la cause).
+- **`qlang lint` : un nom exporté n'est plus « jamais utilisé »** (`Q001`, #329), puisque d'autres fichiers l'importent.
+
 ## 1.10.0
 
 Un trait qui en étend un autre s'implémente en un seul bloc, et le code natif (JIT) couvre les structures, les fermetures, les textes et les maps. Rien de cassant : tout ce qui marchait marche pareil.

@@ -2215,3 +2215,38 @@ fn a_variable_or_a_parameter_named_read_is_called_instead_of_the_prompt() {
     );
     assert_eq!(o.output, "Name? hi Zoe 1\n");
 }
+
+#[test]
+fn reversed_sorted_and_sorted_by_return_a_new_array() {
+    let o = out(
+        "let a = [3, 1, 2]\nprint(a.reversed())\nprint(a.sorted())\nprint(a.sorted_by(fun(x: int, y: int) -> int y - x end))\nprint(a)\nprint(a.filter(fun(x: int) -> bool x > 1 end).reversed().take(1))",
+    );
+    assert_eq!(o, "[2, 1, 3]\n[1, 2, 3]\n[3, 2, 1]\n[3, 1, 2]\n[2]\n");
+}
+
+const DOMAIN: &str = "struct DomainError\n  public message: string\nend\nstruct HttpError\n  public code: int\nend\nfun to_http(e: DomainError) -> HttpError\n  HttpError { code: 404 }\nend\nfun get(id: int) -> Result<string, DomainError>\n  if id == 1 then Ok(\"one\") else Err(DomainError { message: \"none\" }) end\nend\nfun twice(s: string) -> Result<int, DomainError>\n  Ok(s.len() * 2)\nend\n";
+
+#[test]
+fn result_map_map_err_and_then_unwrap_or_and_ok() {
+    let o = out(&format!(
+        "{DOMAIN}print(get(1).map(fun(s: string) -> int s.len() end).unwrap())\nprint(get(2).map_err(to_http).unwrap_err().code)\nprint(get(1).and_then(twice).unwrap())\nprint(get(2).and_then(twice).is_err())\nprint(get(2).unwrap_or(\"x\"))\nprint(get(1).ok())\nprint(get(2).ok())"
+    ));
+    assert_eq!(o, "3\n404\n6\ntrue\nx\none\nnone\n");
+}
+
+#[test]
+fn a_nullable_unwraps_and_assert_narrows_it() {
+    let head = "fun find(i: int) -> string?\n  if i == 1 then \"a\" else none end\nend\n";
+    let o = out(&format!(
+        "{head}let y = find(1)\nassert(y != none)\nprint(y.upper())\nprint(find(1).unwrap().len())\nprint(find(1).expect(\"need a\"))"
+    ));
+    assert_eq!(o, "A\n1\na\n");
+    let e = err(&format!("{head}print(find(2).expect(\"no value\"))"));
+    assert!(e.contains("no value"), "{e}");
+}
+
+#[test]
+fn a_reserved_word_cannot_be_a_name() {
+    let e = err("struct B\n  public end: int\nend\n");
+    assert!(e.contains("`end` is a reserved word"), "{e}");
+}

@@ -43,6 +43,8 @@ pub struct Parser<'a> {
     line_starts: std::rc::Rc<Vec<usize>>,
     /// Current nesting of expressions, blocks and types (bounded).
     depth: u32,
+    /// Errors that start before this offset follow from a reserved word used as a name: not shown.
+    quiet_until: u32,
     /// Annotations read, waiting for the declaration they belong to, and where the first began.
     pending: Vec<Annotation>,
     pending_start: Option<Span>,
@@ -101,6 +103,7 @@ impl<'a> Parser<'a> {
                 )
             }),
             depth: 0,
+            quiet_until: 0,
             pending: Vec::new(),
             pending_start: None,
             read_bound: vec![false],
@@ -270,7 +273,9 @@ impl<'a> Parser<'a> {
         if self.peek() == Tok::Ident("div".to_string()) {
             d = d.with_note(DIV_REMOVED, None);
         }
-        crate::diag::push_capped(&mut self.diags, d);
+        if span.start >= self.quiet_until {
+            crate::diag::push_capped(&mut self.diags, d);
+        }
         Err(())
     }
 
@@ -297,6 +302,22 @@ impl<'a> Parser<'a> {
             Tok::Ident(name) => {
                 let span = self.bump().span;
                 Ok(Ident { name, span })
+            }
+            t if t.is_keyword() => {
+                let span = self.peek_span();
+                let word = t.text();
+                let mut end = self.pos;
+                while !matches!(self.toks[end].tok, Tok::Newline | Tok::Eof) {
+                    end += 1;
+                }
+                let quiet = self.toks[end].span.start;
+                let r = self.error_at(
+                    "P001",
+                    format!("`{word}` is a reserved word, it cannot be a name (pick another one)"),
+                    span,
+                );
+                self.quiet_until = quiet;
+                r
             }
             _ => self.unexpected("a name"),
         }
@@ -346,7 +367,9 @@ impl<'a> Parser<'a> {
         if t == Tok::Ident("div".to_string()) {
             d = d.with_note(DIV_REMOVED, None);
         }
-        crate::diag::push_capped(&mut self.diags, d);
+        if span.start >= self.quiet_until {
+            crate::diag::push_capped(&mut self.diags, d);
+        }
         false
     }
 

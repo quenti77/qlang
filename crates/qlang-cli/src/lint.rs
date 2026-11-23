@@ -143,10 +143,25 @@ fn lint_file(file: &Path, shown: &str, max_complexity: usize) -> Result<Vec<Find
         })
         .collect();
 
+    // an exported name is part of the file's interface: other files use it, this one cannot see them
+    let exported: Vec<&str> = module
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Export(x) => Some(x),
+            _ => None,
+        })
+        .flat_map(|x| x.names.iter().map(|n| n.name.as_str()))
+        .collect();
+
     // what the type checker knows: names that nothing refers to
     let used = |def: &qlang_core::span::Location| info.refs.iter().any(|r| &r.def == def);
     for l in info.locals.iter().filter(|l| l.loc.file == shown) {
-        if l.kind != "param" && !l.name.starts_with('_') && !used(&l.loc) {
+        if l.kind != "param"
+            && !l.name.starts_with('_')
+            && !exported.contains(&l.name.as_str())
+            && !used(&l.loc)
+        {
             out.push(Finding {
                 line: l.loc.line,
                 col: l.loc.col,

@@ -117,6 +117,20 @@ impl Tok {
         }
     }
 
+    /// Whether this is a reserved word (`end`, `from`...), which cannot be used as a name.
+    pub fn is_keyword(&self) -> bool {
+        !matches!(
+            self,
+            Tok::Ident(_)
+                | Tok::Int(_)
+                | Tok::MinInt
+                | Tok::Float(_)
+                | Tok::Str(_)
+                | Tok::Newline
+                | Tok::Eof
+        ) && self.text().chars().all(|c| c.is_ascii_alphabetic())
+    }
+
     pub fn text(&self) -> &'static str {
         match self {
             Tok::Let => "let",

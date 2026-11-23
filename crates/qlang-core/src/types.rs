@@ -767,6 +767,8 @@ pub struct Resolutions {
     /// The signature of each call of a built-in method (keyed by the call): receiver,
     /// parameters and result, once the types are known.
     pub builtin_sigs: FxHashMap<NodeId, (Ty, Vec<Ty>, Ty)>,
+    /// `x.unwrap()` / `x.expect(message)` on a nullable value: the value itself, or a stop on `none`.
+    pub nullable_unwraps: FxHashSet<NodeId>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: FxHashSet<NodeId>,
     /// `xs.sum()` calls on `array<int>`; an empty sum of anything else has no zero (`R015`).

@@ -2113,6 +2113,16 @@ impl<'a> Interp<'a> {
     }
 
     fn call_method(&mut self, recv: Value, name: &Ident, args: Vec<Value>, span: Span) -> R<Value> {
+        if self.prog.res.nullable_unwraps.contains(&self.cur_call) {
+            if let Value::None = recv {
+                let why = match args.first() {
+                    Some(Value::Str(m)) => m.to_string(),
+                    _ => "called unwrap() on none".to_string(),
+                };
+                return self.fail("R006", why, span);
+            }
+            return Ok(recv);
+        }
         if let Value::None = recv {
             return self.fail(
                 "R006",
@@ -3806,6 +3816,9 @@ impl<'a> Interp<'a> {
                         | "index_of"
                         | "join"
                         | "reverse"
+                        | "reversed"
+                        | "sorted"
+                        | "sorted_by"
                         | "insert"
                         | "remove"
                         | "sum"
@@ -3908,6 +3921,22 @@ impl<'a> Interp<'a> {
             (Value::Array(a), "reverse") => {
                 a.borrow_mut().reverse();
                 Value::Unit
+            }
+            (Value::Array(a), "reversed") => {
+                let mut items: Vec<Value> = a.borrow().clone();
+                items.reverse();
+                self.guard_alloc(items.len(), span)?;
+                Value::array(items)
+            }
+            (Value::Array(a), "sorted") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let sorted = self.merge_sort(items, span)?;
+                Value::array(sorted)
+            }
+            (Value::Array(a), "sorted_by") => {
+                let items: Vec<Value> = a.borrow().clone();
+                let sorted = self.merge_sort_by(items, &args[0], span)?;
+                Value::array(sorted)
             }
             (Value::Array(a), "join") => {
                 let items: Vec<Value> = a.borrow().clone();

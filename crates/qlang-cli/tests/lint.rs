@@ -96,3 +96,12 @@ fn q002_reports_a_private_function_that_nothing_calls() {
         "{out}"
     );
 }
+
+#[test]
+fn an_exported_constant_is_not_unused() {
+    let lib = "const SAMPLE = \"x\"\nconst SPARE = \"y\"\nexport SAMPLE\n";
+    let dir = project("exported-const", &[("lib.q", lib)]);
+    let (out, _) = lint(&dir, &["lib.q"]);
+    assert!(!out.contains("`SAMPLE`"), "{out}");
+    assert!(out.contains("`SPARE` is never used"), "{out}");
+}

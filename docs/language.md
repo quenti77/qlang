@@ -307,8 +307,14 @@ corps, sans l'y avoir déclarée) n'est jamais rétrécie : un appel entre le te
 l'usage pourrait la remettre à `none`. Il faut alors copier sa valeur dans une variable
 locale avant de la tester.
 
+`assert(x != none)` (ou `assert(x != none, "message")`) rétrécit aussi `x` pour la suite
+du bloc, comme un `if x == none then return end`.
+
 Appeler une méthode ou lire un champ sur une valeur qui peut être `none` est une
-erreur de compilation.
+erreur de compilation. Deux méthodes font exception : **`x.unwrap()`** et
+**`x.expect("message")`** rendent la valeur d'un nullable (de type `T`), ou arrêtent le
+programme si elle est `none` (avec le message donné pour `expect`). Elles marchent aussi sur
+un résultat d'appel : `find(id).expect("l'utilisateur existe")`.
 
 **`a ?? b`** donne `a` s'il n'est pas `none`, sinon `b`. `a` doit être nullable (`T?`) ;
 `b` est de type `T` (le résultat est alors un `T`) ou `T?` (le résultat reste nullable).
@@ -2185,6 +2191,8 @@ La bibliothèque est volontairement petite, et s'étoffera à l'usage.
 | `find(f)`             | premier élément pour lequel `f(élément)` est `true`, ou `none`    |
 | `each(f)`             | appelle `f(élément)` pour chaque élément, dans l'ordre            |
 | `sort_by(f)`          | trie le tableau sur place avec `f(a, b)` comme comparateur (négatif si `a` avant `b`, positif sinon, `0` si égaux) |
+| `reversed()`, `sorted()` | nouveau tableau dans l'ordre inverse / trié (le tableau n'est pas modifié), chaînable avec `filter`, `map`, `take`… |
+| `sorted_by(f)`        | comme `sort_by(f)`, mais rend un nouveau tableau trié          |
 | `unique()`            | nouveau tableau ne gardant que la première occurrence de chaque valeur |
 | `flatten()`           | nouveau tableau qui aplatit un tableau de tableaux (un seul niveau) |
 | `first()`, `last()`   | premier / dernier élément, ou `none` si vide (`T?`)              |
@@ -2887,6 +2895,11 @@ end
 - `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
 - `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
   programme (`panic`) si on se trompe de cas.
+- `unwrap_or(valeur)` : la valeur, ou `valeur` pour une erreur ; `ok()` : la valeur,
+  ou `none` pour une erreur (un `T?`).
+- `map(f)` transforme la valeur d'un `Ok`, `map_err(f)` l'erreur d'un `Err`, `and_then(f)`
+  enchaîne un calcul qui rend lui-même un `Result` (l'autre cas est gardé tel quel) :
+  `posts.get(id).map_err(to_http)`.
 - `Result`/`Error` sont des déclarations ordinaires : une structure `Error` (ou une
   énumération `Result`) que tu écris toi-même dans ton propre fichier **masque** celle du
   prélude, exactement comme une variable locale masque une variable de portée plus large.

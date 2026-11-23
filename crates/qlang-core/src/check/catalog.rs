@@ -38,6 +38,21 @@ pub const ARRAY: &[Entry] = &[
         "Index of the first `value`, or `none`.",
     ),
     ("reverse", "", "Reverses the array in place."),
+    (
+        "reversed",
+        "",
+        "New array of the elements in the opposite order (the array is not changed).",
+    ),
+    (
+        "sorted",
+        "",
+        "New array of the elements, sorted (stable). The array is not changed.",
+    ),
+    (
+        "sorted_by",
+        "f",
+        "New array sorted using `f(a, b)` as the comparator, like `sort_by`. The array is not changed.",
+    ),
     ("join", "separator", "Joins the elements into one string."),
     (
         "sort",

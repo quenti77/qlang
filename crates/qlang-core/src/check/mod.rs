@@ -163,6 +163,46 @@ impl<T, E> Result<T, E>
             case Err(e) then e
         end
     end
+
+    --" The ok value, or `fallback` if this is an error result. --"
+    public fun unwrap_or(self, fallback: T) -> T
+        match self
+            case Ok(v) then v
+            case Err(_) then fallback
+        end
+    end
+
+    --" The ok value, or `none` if this is an error result. --"
+    public fun ok(self) -> T?
+        match self
+            case Ok(v) then v
+            case Err(_) then none
+        end
+    end
+
+    --" Turns the value of an ok result with `f`; an error result is kept as it is. --"
+    public fun map<U>(self, f: fun(T) -> U) -> Result<U, E>
+        match self
+            case Ok(v) then Result<U, E>.Ok(f(v))
+            case Err(e) then Result<U, E>.Err(e)
+        end
+    end
+
+    --" Turns the error of an error result with `f`; an ok result is kept as it is. --"
+    public fun map_err<F>(self, f: fun(E) -> F) -> Result<T, F>
+        match self
+            case Ok(v) then Result<T, F>.Ok(v)
+            case Err(e) then Result<T, F>.Err(f(e))
+        end
+    end
+
+    --" Chains a step that can fail: `f(value)` for an ok result, the error otherwise. --"
+    public fun and_then<U>(self, f: fun(T) -> Result<U, E>) -> Result<U, E>
+        match self
+            case Ok(v) then f(v)
+            case Err(e) then Result<U, E>.Err(e)
+        end
+    end
 end
 
 --" An ok `Result`, usually inferred from context (`return Ok(1)` inside a function

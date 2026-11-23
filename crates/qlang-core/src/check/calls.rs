@@ -1318,6 +1318,20 @@ impl Checker {
                 self.check_args_loose(args);
                 return Ty::Error;
             }
+            Ty::Nullable(inner)
+                if (name.name == "unwrap" && args.is_empty())
+                    || (name.name == "expect" && args.len() == 1) =>
+            {
+                let inner = (**inner).clone();
+                if let Some(m) = args.first() {
+                    let t = self.expr(&m.value, &Want::Exp(Ty::Str));
+                    if !self.assignable(&t, &Ty::Str) {
+                        self.mismatch(m.value.span, &Ty::Str, &t);
+                    }
+                }
+                self.res.nullable_unwraps.insert(e.id);
+                return inner;
+            }
             Ty::Nullable(_) | Ty::NoneT => {
                 let shown = self.show(&rt);
                 self.err(
@@ -2007,6 +2021,11 @@ impl Checker {
                         let t = self.expr(m, &Want::Any);
                         self.require_value(t, m.span);
                     }
+                    // past an `assert(x != none)` the value is there, as after an `if ... return`
+                    let (facts, _) = self.cond_facts(args[0]);
+                    for (n, t) in facts {
+                        self.narrow(&n, t);
+                    }
                 }
                 Ty::Unit
             }
@@ -2096,6 +2115,7 @@ impl Checker {
             (Ty::Array(t), "contains") => (vec![(**t).clone()], Ty::Bool),
             (Ty::Array(t), "index_of") => (vec![(**t).clone()], Ty::nullable(Ty::Int)),
             (Ty::Array(_), "reverse") => (vec![], Ty::Unit),
+            (Ty::Array(t), "reversed" | "sorted") => (vec![], arr(t)),
             (Ty::Array(_), "join") => (vec![s.clone()], s),
             (Ty::Array(_), "sort") => (vec![], Ty::Unit),
             (Ty::Array(t), "min" | "max") => (vec![], Ty::nullable((**t).clone())),
@@ -2140,6 +2160,13 @@ impl Checker {
                     Box::new(Ty::Int),
                 )],
                 Ty::Unit,
+            ),
+            (Ty::Array(t), "sorted_by") => (
+                vec![Ty::Fn(
+                    vec![(**t).clone(), (**t).clone()],
+                    Box::new(Ty::Int),
+                )],
+                arr(t),
             ),
             (Ty::Array(t), "unique") => (vec![], arr(t)),
             (Ty::Array(t), "first" | "last") => (vec![], Ty::nullable((**t).clone())),

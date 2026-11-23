@@ -140,7 +140,7 @@ impl Checker {
 
     /// Facts learned from a condition: variables that are not `none` when it
     /// is true, and when it is false.
-    fn cond_facts(&mut self, c: &Expr) -> (Facts, Facts) {
+    pub(super) fn cond_facts(&mut self, c: &Expr) -> (Facts, Facts) {
         match &c.kind {
             ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), l, r) => {
                 let name = match (&l.kind, &r.kind) {

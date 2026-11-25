@@ -75,7 +75,7 @@ niveau de leur partie : une clé ajoutée n'est pas un changement cassant, une c
 | `web/app.q`, `web/session.q`, `web/validate.q`, `web/migrate.q`, `web/query.q`, `web/cache.q`, `web/middleware.q`, `web/health.q`, `web/limit.q`, `web/auth.q`, `web/upload.q`, `web/testing.q` | **stable** (std 1.0) |
 | `yaml.q`, `xml.q` (des sous-ensembles des formats) et le reste de `web/` (`container`, `openapi`, `ws`, `relations`, `policy`, `resource`, `seed`, `queue_admin`, `metrics`, `events`, `commands`, `locale`, `refresh`, `proxy`, `accounts`, `admin`) | provisoire |
 | `kit` (commandes, options, codes de sortie, générateurs `make`) | **stable** (kit 1.0) ; réglages, invites, lanceur de tests et assistant : provisoires ; écrans du terminal, tableau de bord, navigateur de base de données : **expérimentaux** |
-| `qlang-test` (paquet) | **expérimental** (0.x) |
+| `qlang-test` (paquet) | **stable** (test 1.0) |
 
 `qlang-std` et `kit` ont leur propre version (1.0 chacun) et leurs niveaux sont dans leur `qlang.toml`. Un changement
 cassant d'un module *provisoire* est écrit dans le CHANGELOG du dépôt.

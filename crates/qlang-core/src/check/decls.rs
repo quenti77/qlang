@@ -1479,7 +1479,9 @@ impl Checker {
                 let sp = self.defs.fns[*fid].span;
                 self.err(
                     "T135",
-                    format!("`{name}` is not a method of trait `{trait_shown}`"),
+                    format!(
+                        "`{name}` is not a method of trait `{trait_shown}` (put helper methods in a separate `impl` block of the type)"
+                    ),
                     sp,
                 );
             }

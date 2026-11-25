@@ -614,6 +614,17 @@ fn watch_reloads_when_a_file_of_a_package_changes() {
 }
 
 #[test]
+fn a_request_knows_the_address_of_its_client() {
+    let server = start(
+        "remote-addr",
+        "fun handle(req: Request) -> Response\n  Response.text(req.remote_addr)\nend\n",
+        &[],
+    );
+    let r = exchange(&server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(r.ends_with("127.0.0.1"), "{r}");
+}
+
+#[test]
 fn the_routes_example_finds_its_handlers_by_reflection() {
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),

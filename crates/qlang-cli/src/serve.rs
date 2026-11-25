@@ -1917,6 +1917,10 @@ fn serve_one(
         },
         path,
         query,
+        remote_addr: stream
+            .peer_addr()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_default(),
     };
     let max_queue = tuning().max_queue;
     if max_queue > 0 && QUEUED.load(Ordering::SeqCst) >= max_queue {

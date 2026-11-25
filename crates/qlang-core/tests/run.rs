@@ -2250,3 +2250,42 @@ fn a_reserved_word_cannot_be_a_name() {
     let e = err("struct B\n  public end: int\nend\n");
     assert!(e.contains("`end` is a reserved word"), "{e}");
 }
+
+#[test]
+fn result_unwrap_or_else_and_nullable_ok_or() {
+    let head = "fun find(i: int) -> string?\n  if i == 1 then \"a\" else none end\nend\nfun get(i: int) -> Result<string, string>\n  find(i).ok_or(\"missing {i}\")\nend\nfun first(i: int) -> Result<int, string>\n  let s = get(i)?\n  Ok(s.len())\nend\n";
+    let o = out(&format!(
+        "{head}print(get(1).unwrap())\nprint(get(2).unwrap_err())\nprint(first(1).unwrap())\nprint(first(2).unwrap_err())\nprint(get(2).unwrap_or_else(fun(e: string) -> string e.upper() end))\nprint(get(1).unwrap_or_else(fun(e: string) -> string e.upper() end))"
+    ));
+    assert_eq!(o, "a\nmissing 2\n1\nmissing 2\nMISSING 2\na\n");
+}
+
+#[test]
+fn a_method_of_another_language_is_answered_with_the_one_that_exists() {
+    let e = err("let s = \"abc\"\nprint(s.slice(0, 1))");
+    assert!(e.contains("did you mean `substring`?"), "{e}");
+}
+
+#[test]
+fn a_helper_in_a_trait_impl_is_pointed_to_a_separate_impl() {
+    let e = err(
+        "trait T\n  fun a(self) -> int\nend\nstruct S\nend\nimpl T for S\n  fun a(self) -> int 1 end\n  fun b(self) -> int 2 end\nend\n",
+    );
+    assert!(e.contains("separate `impl` block"), "{e}");
+}
+
+#[test]
+fn a_raw_string_keeps_braces_and_backslashes() {
+    let o = out(
+        "let name = \"Ada\"\nprint(r\"{name}\\d{4}\\n\")\nprint(r\"a\" + \"{name}\")\nlet r = 2\nprint(r)",
+    );
+    assert_eq!(o, "{name}\\d{4}\\n\naAda\n2\n");
+}
+
+#[test]
+fn a_form_gives_every_value_of_a_repeated_field() {
+    let o = out(
+        "let req = Request { method: \"POST\", url: \"/\", path: \"/\", headers: { \"content-type\": \"application/x-www-form-urlencoded\" }, body: \"a=1&tag=x&tag=y%20z&b=\" }\nlet all = req.form_all().unwrap()\nprint(all[\"tag\"])\nprint(all[\"a\"])\nprint(all[\"b\"])\nprint(req.form().unwrap()[\"tag\"])",
+    );
+    assert_eq!(o, "[\"x\", \"y z\"]\n[\"1\"]\n[\"\"]\ny z\n");
+}

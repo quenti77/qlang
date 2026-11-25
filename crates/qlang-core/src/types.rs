@@ -769,6 +769,8 @@ pub struct Resolutions {
     pub builtin_sigs: FxHashMap<NodeId, (Ty, Vec<Ty>, Ty)>,
     /// `x.unwrap()` / `x.expect(message)` on a nullable value: the value itself, or a stop on `none`.
     pub nullable_unwraps: FxHashSet<NodeId>,
+    /// `x.ok_or(error)` on a nullable value: `Ok(x)`, or `Err(error)` on `none`.
+    pub nullable_ok_ors: FxHashSet<NodeId>,
     /// `xs.sum()` calls on `array<float>` (an empty sum is `0.0`, not `0`).
     pub float_sums: FxHashSet<NodeId>,
     /// `xs.sum()` calls on `array<int>`; an empty sum of anything else has no zero (`R015`).

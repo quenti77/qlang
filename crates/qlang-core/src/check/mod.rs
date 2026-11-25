@@ -172,6 +172,14 @@ impl<T, E> Result<T, E>
         end
     end
 
+    --" The ok value, or `f(error)` if this is an error result. --"
+    public fun unwrap_or_else(self, f: fun(E) -> T) -> T
+        match self
+            case Ok(v) then v
+            case Err(e) then f(e)
+        end
+    end
+
     --" The ok value, or `none` if this is an error result. --"
     public fun ok(self) -> T?
         match self
@@ -1913,6 +1921,9 @@ struct Request
     public raw: bytes? = none
     --" The decoded path of a received request (`/items`). --"
     public path: string = ""
+    --" The IP address of the client that is connected to the server (the proxy, when there is one:
+    behind a reverse proxy read `X-Forwarded-For` instead). Empty when it is not known. --"
+    public remote_addr: string = ""
     --" The decoded query parameters (the last one wins when a name is repeated). --"
     public query: map<string, string> = {}
     --" The parameters of the route a `Router` matched (`/items/:id`). --"
@@ -2069,6 +2080,38 @@ impl Request
             out[key] = value
         end
         Result<map<string, string>, Error>.Ok(out)
+    end
+
+    --" Every value of each field of a form, in order (a group of checkboxes sends the same name
+    several times): `{"tags": ["a", "b"]}`. Like `form`, `err` when the request is not a form. --"
+    public fun form_all(self) -> Result<map<string, array<string>>, Error>
+        let kind = self.header("content-type")
+        if kind == none or not kind.lower().starts_with("application/x-www-form-urlencoded") then
+            return Result<map<string, array<string>>, Error>.Err(Error { message: "the body is not a form (application/x-www-form-urlencoded)" })
+        end
+        let out: map<string, array<string>> = {}
+        let body = self.body
+        if body == none then
+            return Result<map<string, array<string>>, Error>.Ok(out)
+        end
+        for pair in body.split("&") do
+            if pair == "" then
+                continue
+            end
+            let parts = pair.split("=")
+            let key = Url.decode(parts[0])
+            let value = Url.decode(parts.slice(1, parts.len()).join("="))
+            if key == none or value == none then
+                return Result<map<string, array<string>>, Error>.Err(Error { message: "the form has a badly encoded field" })
+            end
+            let seen = out[key]
+            if seen == none then
+                out[key] = [value]
+            else
+                seen.push(value)
+            end
+        end
+        Result<map<string, array<string>>, Error>.Ok(out)
     end
 
     --" The value of the header `name` of a received request (whatever the case of `name`),

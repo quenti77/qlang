@@ -252,6 +252,7 @@ ensuite récupéré et figé dans `qlang.lock` comme n'importe quel autre. Contr
 qlang test                       # tous les tests du projet
 qlang test math_test.q           # un fichier (ou un dossier)
 qlang test --filter double       # les tests dont le nom contient « double »
+qlang test --check-all           # compile aussi chaque .q du projet (même ceux qu'aucun test n'importe)
 qlang test --coverage            # + les lignes de code que les tests n'ont pas exécutées
 qlang test --coverage-lcov c.info  # + un fichier LCOV pour un outil de couverture
 qlang test --group db --skip-group slow   # avec qlang-test : certains groupes seulement

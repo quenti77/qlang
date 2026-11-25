@@ -72,7 +72,7 @@ USAGE:
                                          the elements of a line; only white space changes);
                                          --check lists the files that would change and exits 1;
                                          --diff shows the changes as a unified diff
-    qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N]
+    qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--check-all] [--seed N] [--max-steps N]
                 [--trust-externs] [--allow-process] [--deny-warnings]
                                          run the `fun test_...()` of the *_test.q / test_*.q
                                          files of the project (or of the paths given)
@@ -85,7 +85,7 @@ USAGE:
                                          do the [externs] of a qlang.toml near the program,
                                          once you agreed to them: --trust-externs says yes;
                                          --allow-process lets the program start programs)
-    qlang check [file.q] [--extern CMD] [--deny-warnings]
+    qlang check [file.q] [dir] [--extern CMD] [--deny-warnings]
                                          check a program without running it (--deny-warnings: a
                                          warning, like a use of something deprecated, fails it; also
                                          accepted by run and test) (no file: the `entry`
@@ -264,6 +264,8 @@ fn real_main(args: Vec<String>) -> ExitCode {
             let rest: Vec<&str> = it.collect();
             if rest.contains(&"--json") {
                 json::run_stdin(true)
+            } else if let Some(dir) = rest.iter().find(|a| Path::new(a).is_dir()) {
+                check_dir(Path::new(dir))
             } else {
                 run_file(&rest, false)
             }
@@ -1328,6 +1330,70 @@ fn new_host_with(
         lines: LineFiles::default(),
         sink: None,
     })
+}
+
+/// `qlang check <dir>`: every `.q` file below the directory is checked as an entry point.
+fn check_dir(dir: &Path) -> ExitCode {
+    let mut files = Vec::new();
+    lint::find(dir, &mut files);
+    if files.is_empty() {
+        eprintln!("{}: no .q file", dir.display());
+        return ExitCode::from(66);
+    }
+    if check_files(&files) {
+        eprintln!("ok ({} files)", files.len());
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// Type-checks each file as an entry point and prints the mistakes; a mistake of a file that
+/// several entry points import is printed once. `true` when every file is sound.
+pub(crate) fn check_files(files: &[PathBuf]) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut sound = true;
+    for file in files {
+        let shown = file
+            .canonicalize()
+            .ok()
+            .and_then(|f| {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|c| c.canonicalize().ok())
+                    .and_then(|c| f.strip_prefix(c).ok().map(Path::to_path_buf))
+            })
+            .unwrap_or_else(|| file.clone())
+            .display()
+            .to_string();
+        let source = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("cannot read {shown}: {e}");
+                sound = false;
+                continue;
+            }
+        };
+        let mut host = match new_host_with(file, None, Some(0), Vec::new(), &[], true, false) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("{e}");
+                sound = false;
+                continue;
+            }
+        };
+        host.allow_process = true;
+        if let Err(e) = compile(&shown, &source, &mut host) {
+            sound = false;
+            for d in &e.diagnostics {
+                let text = d.render(&e.sources);
+                if seen.insert(text.replace("--> ./", "--> ")) {
+                    eprint!("{text}");
+                }
+            }
+        }
+    }
+    sound
 }
 
 fn run_file(args: &[&str], execute: bool) -> ExitCode {

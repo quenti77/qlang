@@ -27,7 +27,7 @@ fn usage(why: &str) -> ExitCode {
     ExitCode::from(64)
 }
 
-fn find(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn find(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

@@ -263,6 +263,10 @@ Pour afficher une accolade, écrire `\{`. Toute valeur peut être
 interpolée : elle est convertie avec `as string` (voir
 [Conversions](#conversions)).
 
+**Chaîne brute.** `r"..."` ne connaît ni échappement ni interpolation : les accolades et
+les barres obliques inverses restent telles quelles (`r"\d{4}-{x}"` est le texte `\d{4}-{x}`).
+Elle se termine au prochain `"` : un `"` ne peut pas y figurer.
+
 Les chaînes se comparent avec `==` et `<`, se concatènent avec `+`, et
 s'indexent par caractère : `"héllo"[1]` vaut `"é"`. `len()` compte les
 caractères, pas les octets.
@@ -2895,8 +2899,10 @@ end
 - `is_ok()`, `is_err()` : savoir lequel des deux cas on a.
 - `unwrap()`, `unwrap_err()` : lisent la valeur ou l'erreur, ou arrêtent le
   programme (`panic`) si on se trompe de cas.
-- `unwrap_or(valeur)` : la valeur, ou `valeur` pour une erreur ; `ok()` : la valeur,
-  ou `none` pour une erreur (un `T?`).
+- `unwrap_or(valeur)` : la valeur, ou `valeur` pour une erreur ; `unwrap_or_else(f)` : la
+  valeur, ou `f(erreur)` (le repli dépend de l'erreur) ; `ok()` : la valeur, ou `none` pour
+  une erreur (un `T?`). Dans l'autre sens, `x.ok_or(erreur)` sur un `T?` rend `Ok(x)`, ou
+  `Err(erreur)` si `x` est `none` : `let user = users.find(id).ok_or(NotFound)?`.
 - `map(f)` transforme la valeur d'un `Ok`, `map_err(f)` l'erreur d'un `Err`, `and_then(f)`
   enchaîne un calcul qui rend lui-même un `Result` (l'autre cas est gardé tel quel) :
   `posts.get(id).map_err(to_http)`.
@@ -3223,6 +3229,10 @@ rechargement. C'est fait pour le développement, pas pour la production.
     `headers` tels quels (la dernière valeur gagne) ; `req.header_all("X-Tag")` les rend en tableau ;
   - `cookies` est le contenu de l'en-tête `Cookie`, valeurs décodées (`who=Ada%20L` donne
     `"Ada L"`) ;
+  - `remote_addr` est l'adresse IP du client connecté (celle du proxy derrière un proxy : voir
+    alors `X-Forwarded-For`) ; vide si elle est inconnue ;
+  - `req.form_all()` est comme `req.form()` mais garde **toutes** les valeurs d'un champ répété
+    (un groupe de cases à cocher) : `{"tags": ["a", "b"]}` ;
   - `req.form()` rend le corps `application/x-www-form-urlencoded` décodé
     (`Result<map<string, string>, Error>`, `err` si la requête n'est pas un formulaire) ;
   - `attrs` est un espace pour le programme : un middleware y met par exemple l'utilisateur

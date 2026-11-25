@@ -2,6 +2,14 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.11.1
+
+Un correctif pour le développement avec `qlang serve --watch`. Rien de cassant.
+
+### Outils
+
+- **`qlang serve --watch` recharge aussi quand un fichier d'un package change** (#348, #359). Un module d'une dépendance par chemin (`@lib/x.q`) était surveillé sous son nom logique, qui n'est pas un chemin : ses modifications n'étaient jamais vues, et seuls les imports relatifs rechargeaient.
+
 ## 1.11.0
 
 `Result` et les tableaux gagnent les méthodes qui évitent les `if` à la main, un nullable se déballe en une ligne et `assert` rétrécit. Rien de cassant : tout ce qui marchait marche pareil.

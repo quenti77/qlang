@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-cli"
-version = "1.11.0"
+version = "1.11.1"
 dependencies = [
  "argon2",
  "bytes",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-core"
-version = "1.11.0"
+version = "1.11.1"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "qlang-wasm"
-version = "1.11.0"
+version = "1.11.1"
 dependencies = [
  "qlang-core",
 ]

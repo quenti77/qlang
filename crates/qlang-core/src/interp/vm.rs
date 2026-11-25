@@ -1984,17 +1984,22 @@ impl Gen<'_> {
                 Some(Ty::Bool)
             }
             ExprKind::Ident(..) => {
+                let mark = self.top;
                 let acc = self.access(e, false)?;
-                match self.narrow_access(e, acc)? {
+                let out = match self.narrow_access(e, acc)? {
                     Access::Reg(r, ty) => {
                         self.mov(dst, r, &ty, span);
-                        Some(ty)
+                        ty
                     }
                     Access::Global(g, ty) => {
                         self.emit(Op::LoadG { dst, g }, span);
-                        Some(ty)
+                        ty
                     }
-                }
+                };
+                // the unboxing temporary of a narrowed use must not leave a gap between
+                // consecutive argument registers (`Format`, calls)
+                self.top = mark;
+                Some(out)
             }
             ExprKind::Array(items) => {
                 if items.iter().any(|i| matches!(i.kind, ExprKind::Spread(_))) {

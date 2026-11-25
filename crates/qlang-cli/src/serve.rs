@@ -1385,7 +1385,18 @@ fn worker(
             }
             if opts.watch {
                 let mut files: Vec<String> = vec![file.to_string()];
-                files.extend(program.sources.files.iter().map(|f| f.name.clone()));
+                // a module of a package is named `@name/file.q`: watch the file behind that name
+                files.extend(program.sources.files.iter().map(|f| {
+                    if qlang_core::span::is_package_path(&f.name) {
+                        match host.packages.resolve(&f.name) {
+                            Ok(full) => full.to_string_lossy().into_owned(),
+                            Err(_) => f.name.clone(),
+                        }
+                    } else {
+                        f.name.clone()
+                    }
+                }));
+                files.sort();
                 files.dedup();
                 if let Ok(mut w) = WATCHED.lock() {
                     *w = files;

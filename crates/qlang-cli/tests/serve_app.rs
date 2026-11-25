@@ -578,6 +578,42 @@ fn watch_reloads_the_program_and_keeps_the_old_one_on_a_mistake() {
 }
 
 #[test]
+fn watch_reloads_when_a_file_of_a_package_changes() {
+    let app = "import word from \"@words/word.q\"\nfun handle(req: Request) -> Response\n  Response.text(word())\nend\n";
+    let path = app_file("watch-package", app);
+    let dir = path.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(dir.join("words")).unwrap();
+    std::fs::write(
+        dir.join("words/qlang.toml"),
+        "[package]\nname = \"words\"\nversion = \"0.1.0\"\nentry = \"word.q\"\n",
+    )
+    .unwrap();
+    let word = |text: &str| format!("fun word() -> string\n  \"{text}\"\nend\nexport word\n");
+    std::fs::write(dir.join("words/word.q"), word("one")).unwrap();
+    std::fs::write(
+        dir.join("qlang.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nentry = \"app.q\"\n\n[dependencies]\nwords = { path = \"./words\" }\n",
+    )
+    .unwrap();
+    let server = start("watch-package", app, &["--watch"]);
+    let get = |server: &Server| exchange(server, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(get(&server).ends_with("one"));
+    std::fs::write(dir.join("words/word.q"), word("second")).unwrap();
+    let mut reloaded = false;
+    for _ in 0..150 {
+        if get(&server).ends_with("second") {
+            reloaded = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        reloaded,
+        "a change in a package file did not reload the program"
+    );
+}
+
+#[test]
 fn the_routes_example_finds_its_handlers_by_reflection() {
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),

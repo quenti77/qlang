@@ -1332,6 +1332,19 @@ impl Checker {
                 self.res.nullable_unwraps.insert(e.id);
                 return inner;
             }
+            Ty::Nullable(inner) if name.name == "ok_or" && args.len() == 1 => {
+                let inner = (**inner).clone();
+                let err = self.expr(&args[0].value, &Want::Any);
+                self.require_value(err.clone(), args[0].value.span);
+                self.res.nullable_ok_ors.insert(e.id);
+                let eid = self
+                    .defs
+                    .enums
+                    .iter()
+                    .position(|d| d.module == PRELUDE_MOD && d.name == "Result")
+                    .expect("prelude Result");
+                return Ty::Enum(eid, vec![inner, err]);
+            }
             Ty::Nullable(_) | Ty::NoneT => {
                 let shown = self.show(&rt);
                 self.err(
@@ -1535,14 +1548,41 @@ impl Checker {
                 name.span,
             );
         } else {
+            let hint = self.method_alias_hint(&rt, &name.name);
             self.err(
                 "T161",
-                format!("`{shown}` has no method `{}`", name.name),
+                format!("`{shown}` has no method `{}`{hint}", name.name),
                 name.span,
             );
         }
         self.check_args_loose(args);
         Ty::Error
+    }
+
+    /// ` (did you mean `substring`?)` when `name` is the usual word of another language for a
+    /// method that exists on `ty`; empty otherwise.
+    fn method_alias_hint(&mut self, ty: &Ty, name: &str) -> String {
+        const ALIASES: &[(&str, &str)] = &[
+            ("slice", "substring"),
+            ("substr", "substring"),
+            ("length", "len"),
+            ("size", "len"),
+            ("includes", "contains"),
+            ("startswith", "starts_with"),
+            ("endswith", "ends_with"),
+            ("to_upper", "upper"),
+            ("to_lower", "lower"),
+            ("toupper", "upper"),
+            ("tolower", "lower"),
+            ("push_back", "push"),
+            ("append", "push"),
+        ];
+        for (wrong, right) in ALIASES {
+            if *wrong == name && self.builtin_method(ty, right).is_some() {
+                return format!(" (did you mean `{right}`?)");
+            }
+        }
+        String::new()
     }
 
     /// The id of a struct declared in the prelude, by name (`Request`, `Response`...).

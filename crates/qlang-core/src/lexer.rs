@@ -503,6 +503,34 @@ fn lex_impl(
                     i = b.len();
                 }
             }
+            // `r"..."`: a raw string, with no escape and no interpolation (it ends at the next `"`)
+            b'r' if b.get(i + 1) == Some(&b'"') => {
+                let start = i;
+                let content_start = i + 2;
+                match src[content_start..].find('"') {
+                    Some(len) => {
+                        let content_end = content_start + len;
+                        // the parser reads escapes and braces: give them back as plain text
+                        let text = src[content_start..content_end]
+                            .replace('\\', "\\\\")
+                            .replace('{', "\\{")
+                            .replace('}', "\\}");
+                        i = content_end + 1;
+                        push!(Tok::Str(text), start, i);
+                    }
+                    None => {
+                        crate::diag::push_capped(
+                            diags,
+                            Diagnostic::error(
+                                "L002",
+                                "unterminated raw string (missing closing `\"`)",
+                                span(start, start + 2),
+                            ),
+                        );
+                        i = b.len();
+                    }
+                }
+            }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 let start = i;
                 while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {

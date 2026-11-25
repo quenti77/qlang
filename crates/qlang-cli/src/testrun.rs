@@ -52,6 +52,7 @@ pub fn run(args: &[&str]) -> ExitCode {
     let mut allow_process = false;
     let mut deny_warnings = false;
     let mut coverage = false;
+    let mut check_all = false;
     let mut lcov: Option<String> = None;
     let mut groups: Option<String> = None;
     let mut skip_groups: Option<String> = None;
@@ -83,6 +84,7 @@ pub fn run(args: &[&str]) -> ExitCode {
             "--allow-process" => allow_process = true,
             "--deny-warnings" => deny_warnings = true,
             "--coverage" => coverage = true,
+            "--check-all" => check_all = true,
             "--coverage-lcov" => {
                 i += 1;
                 match args.get(i) {
@@ -126,6 +128,18 @@ pub fn run(args: &[&str]) -> ExitCode {
         } else {
             eprintln!("{}: no such file or directory", p.display());
             return ExitCode::from(66);
+        }
+    }
+
+    // a source file that no test imports is not compiled by the tests: check them all first
+    if check_all {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base = crate::project_dir(&cwd).unwrap_or(cwd);
+        let mut every = Vec::new();
+        crate::lint::find(&base, &mut every);
+        if !crate::check_files(&every) {
+            eprintln!("--check-all: some files do not compile, the tests were not run");
+            return ExitCode::from(1);
         }
     }
 
@@ -295,7 +309,7 @@ fn indent(text: &str) -> String {
 
 fn usage(why: &str) -> ExitCode {
     eprintln!(
-        "{why}\nusage: qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--seed N] [--max-steps N] [--trust-externs] [--allow-process] [--deny-warnings]"
+        "{why}\nusage: qlang test [path...] [--filter TEXT] [--group TAGS] [--skip-group TAGS] [--coverage] [--coverage-lcov FILE] [--check-all] [--seed N] [--max-steps N] [--trust-externs] [--allow-process] [--deny-warnings]"
     );
     ExitCode::from(64)
 }

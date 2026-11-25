@@ -110,6 +110,8 @@ pub struct AppRequest {
     pub path: String,
     /// The decoded query parameters, in order (a repeated name: the last value wins).
     pub query: Vec<(String, String)>,
+    /// The address of the client that is connected (`Request.remote_addr`), or empty if unknown.
+    pub remote_addr: String,
 }
 
 /// What the program's `handle` function answered: the fields of the prelude's `Response`.
@@ -418,6 +420,7 @@ impl Interp<'_> {
                         .map_or(Value::None, |b| Value::Bytes(Rc::from(b.clone()))),
                 ),
                 ("path", Value::str(&req.path)),
+                ("remote_addr", Value::str(&req.remote_addr)),
                 ("query", Self::string_map(&req.query)),
                 ("params", Self::string_map(&[])),
                 ("query_all", Self::list_map(&req.query)),
@@ -2122,6 +2125,13 @@ impl<'a> Interp<'a> {
                 return self.fail("R006", why, span);
             }
             return Ok(recv);
+        }
+        if self.prog.res.nullable_ok_ors.contains(&self.cur_call) {
+            let eid = self.prelude_enum("Result") as u32;
+            return Ok(match recv {
+                Value::None => Value::Enum(eid, 1, Some(Rc::new(args))),
+                value => Value::Enum(eid, 0, Some(Rc::new(vec![value]))),
+            });
         }
         if let Value::None = recv {
             return self.fail(

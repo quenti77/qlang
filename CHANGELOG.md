@@ -2,6 +2,27 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.12.0
+
+Des helpers pour `Result` et les nullables, les chaînes brutes, un formulaire à champs répétés, l'adresse du client, et des outils qui disent mieux ce qui ne va pas. Rien de cassant : tout ce qui marchait marche pareil.
+
+### Langage
+
+- **Chaînes brutes `r"..."`** (#352) : pas d'échappement, pas d'interpolation, donc une expression régulière avec `{4}` ou un JSON s'écrit sans doubler chaque accolade. La chaîne se termine au prochain `"`.
+- **`Result.unwrap_or_else(f)`** et **`x.ok_or(erreur)` sur un `T?`** (#351) : le repli qui dépend de l'erreur, et le passage d'un nullable à un `Result` pour enchaîner avec `?`.
+- **Les messages d'erreur disent ce qui existe** (#350) : `` `string` has no method `slice` (did you mean `substring`?) `` (aussi `length`, `includes`, `startswith`...) ; une méthode d'aide écrite dans `impl Trait for X` (`T135`) renvoie vers un bloc `impl` séparé.
+
+### Web
+
+- **`req.remote_addr`** : l'adresse IP du client connecté (#45 de qlang-std), pour compter les requêtes par client sans proxy.
+- **`req.form_all()`** : comme `form()`, avec toutes les valeurs d'un champ répété (un groupe de cases à cocher) (#43 de qlang-std).
+
+### Outils
+
+- **`qlang serve --watch` recharge aussi quand un fichier d'un package change** (#348). Un module d'une dépendance par chemin (`@lib/x.q`) était surveillé sous son nom logique, qui n'est pas un chemin : ses modifications n'étaient jamais vues, et seuls les imports relatifs rechargeaient.
+- **`qlang check <dossier>`** (#349) vérifie chaque `.q` du dossier, comme `lint` ; une erreur d'un fichier que plusieurs points d'entrée importent n'est affichée qu'une fois.
+- **`qlang test --check-all`** (#347) compile aussi les fichiers qu'aucun test n'importe, et ne lance pas les tests si l'un d'eux ne compile pas.
+
 ## 1.11.0
 
 `Result` et les tableaux gagnent les méthodes qui évitent les `if` à la main, un nullable se déballe en une ligne et `assert` rétrécit. Rien de cassant : tout ce qui marchait marche pareil.

@@ -77,9 +77,14 @@ pub fn publish(args: &[&str]) -> ExitCode {
 
     let name = field("name");
     match name {
-        Some(n) if qlang_core::span::valid_package_name(n) => r.ok(format!("name: {n}")),
+        Some(n)
+            if qlang_core::span::valid_package_name(n)
+                || qlang_core::span::valid_registry_name(n) =>
+        {
+            r.ok(format!("name: {n}"))
+        }
         Some(n) => r.bad(format!(
-            "name `{n}` is not valid (letters, digits, `_` and `-`)"
+            "name `{n}` is not valid (`name`, or `vendor/name`: letters, digits, `_` and `-`)"
         )),
         None => r.bad("[package] has no `name`"),
     }

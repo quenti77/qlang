@@ -197,6 +197,21 @@ pub fn valid_package_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// A registry name: `vendor/package`, one `/`, each segment lowercase letters, digits, `_` and `-`
+/// (at most 64 characters each).
+pub fn valid_registry_name(name: &str) -> bool {
+    let mut parts = name.split('/');
+    let (Some(vendor), Some(package), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    [vendor, package].iter().all(|s| {
+        !s.is_empty()
+            && s.len() <= 64
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    })
+}
+
 /// `name` or `name/dir/file.q` (after the `@`) as `@name` or `@name/dir/file.q`, normalised;
 /// `None` when the name is invalid or the path climbs out of the package.
 fn resolve_package_path(spec: &str) -> Option<String> {
@@ -227,6 +242,20 @@ fn resolve_package_path(spec: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::resolve_module_path as r;
+    use super::valid_registry_name as reg;
+
+    #[test]
+    fn registry_names_are_vendor_slash_package() {
+        assert!(reg("acme/json5") && reg("a_b-c/d-e_9"));
+        for bad in [
+            "", "std", "a/", "/a", "a/b/c", "A/b", "a/B", "a b/c", "a/b.c", "é/a",
+        ] {
+            assert!(!reg(bad), "{bad}");
+        }
+        let long = "a".repeat(65);
+        assert!(reg(&format!("{}/x", "a".repeat(64))));
+        assert!(!reg(&format!("{long}/x")) && !reg(&format!("x/{long}")));
+    }
 
     #[test]
     fn package_imports_stay_inside_their_package() {

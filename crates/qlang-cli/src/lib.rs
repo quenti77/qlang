@@ -119,6 +119,7 @@ USAGE:
     qlang add <name> --git URL [--tag T | --rev R | --branch B]
     qlang add <name> --path DIR          add a dependency to qlang.toml and install it
     qlang add <name>                     the same, from the package index (the latest tag)
+    qlang add vendor/name [--as ALIAS]   a registry name; the alias (key in qlang.toml, `@alias` in imports) defaults to `name`
     qlang search [text]                  the packages of the index
     qlang remove <name>                  remove a dependency
     qlang help [command]                 this text, or the part about one command (also: qlang <command> --help)
@@ -1203,17 +1204,21 @@ fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
                     }
                 }
             }
+            // `--as ALIAS`: the dependency key, by default the last segment of the name
+            let alias_option = options.iter().find(|(k, _)| *k == "as").map(|(_, v)| *v);
+            options.retain(|(k, _)| *k != "as");
+            let alias = alias_option.unwrap_or_else(|| name.rsplit('/').next().unwrap_or(name));
             // `qlang add std`: no source given, so the index says where the package lives
             let mut from_index: Vec<(String, String)> = Vec::new();
             if options.is_empty() {
-                match index::find(name) {
-                    Some(entry) if entry.removed.is_some() => {
+                match index::resolve(name) {
+                    Ok(entry) if entry.removed.is_some() => {
                         return fail(format!(
                             "`{name}` was removed from the package index: {}",
                             entry.removed.unwrap_or_default()
                         ));
                     }
-                    Some(entry) => {
+                    Ok(entry) => {
                         from_index.push(("git".into(), entry.git.clone()));
                         match index::latest_tag(&entry.git) {
                             Some(tag) => {
@@ -1230,11 +1235,7 @@ fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
                             ),
                         }
                     }
-                    None => {
-                        return fail(format!(
-                            "`{name}` is not in the package index: give a source (--git URL or --path DIR), or look with `qlang search`"
-                        ));
-                    }
+                    Err(e) => return fail(e),
                 }
             }
             let options: Vec<(&str, &str)> = if from_index.is_empty() {
@@ -1245,7 +1246,7 @@ fn package_command(cmd: &str, args: &[&str]) -> ExitCode {
                     .map(|(k, v)| (k.as_str(), v.as_str()))
                     .collect()
             };
-            match install::add(&cwd, name, &options) {
+            match install::add(&cwd, alias, &options) {
                 Ok(p) => p,
                 Err(e) => return fail(e),
             }

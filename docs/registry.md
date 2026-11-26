@@ -11,10 +11,22 @@ aller ; le paquet est ensuite récupéré par git, figé dans `qlang.lock` et v�
 qlang search json            # les paquets de l'index (nom, description, licence, dépôt)
 qlang info std               # licence, mots-clés, versions disponibles (les retirées sont marquées), comment l'ajouter
 qlang add std                # l'ajoute dans [dependencies] avec la version compatible la plus récente
+qlang add acme/json5         # un nom de l'index `vendor/paquet` ; la clé écrite est `json5` (le dernier segment)
+qlang add bob/json5 --as bjson   # une autre clé (alias), quand `json5` est déjà prise
 qlang install                # récupère exactement les commits de qlang.lock
 qlang update                 # avance dans les intervalles demandés, réécrit qlang.lock
 qlang verify                 # les paquets installés sont-ils bien ceux de qlang.lock, sans fichier modifié ?
 ```
+
+### Noms et alias
+
+Un nom de l'index est `vendor/paquet` (comme Packagist) : exactement un `/`, chaque segment en minuscules, chiffres,
+`_` et `-` (64 caractères au plus). Les anciens noms plats (`std`, `markdown`…) restent valables.
+
+La clé de `[dependencies]` est l'**alias** d'import : `@json5/fichier.q` ne change pas, quel que soit le vendor.
+`qlang add acme/json5` écrit la clé `json5` ; si elle est déjà prise par un autre dépôt, `qlang add` refuse et
+`--as <alias>` en choisit une autre. `qlang add json5` (nom plat) marche quand **un seul** paquet de l'index
+répond à ce nom (une entrée plate, ou un seul `vendor/json5`) ; sinon il liste les `vendor/json5` possibles.
 
 ### Contraintes de version
 
@@ -65,7 +77,7 @@ nulle part : ni dans `qlang.toml`, ni dans `qlang.lock`.
 ## Publier un paquet
 
 1. Un dépôt git (public, pour être dans l'index) avec, dans son `qlang.toml`, `[package]` :
-   `name`, `version` (X.Y.Z), `description` (une ligne), `license` (un nom SPDX, `MIT`…), éventuellement
+   `name` (`paquet` ou `vendor/paquet`), `version` (X.Y.Z), `description` (une ligne), `license` (un nom SPDX, `MIT`…), éventuellement
    `keywords = [...]` et `main` ; un `README.md` ; le fichier principal qui compile.
 2. Une étiquette `vX.Y.Z` sur le commit de la version (`git tag v1.2.3 && git push --tags`).
 3. `qlang publish` vérifie tout cela (arbre propre, étiquette sur `HEAD`, dépôt `origin` en https, README, licence…)
@@ -75,10 +87,10 @@ nulle part : ni dans `qlang.toml`, ni dans `qlang.lock`.
 
 ## Ce que l'index promet, et ne promet pas
 
-Entrée de l'index :
+Entrée de l'index (la clé est `vendor/nom`, ou un nom plat historique) :
 
 ```json
-"nom": {
+"vendor/nom": {
   "git": "https://github.com/moi/nom",
   "description": "Une ligne.",
   "license": "MIT",

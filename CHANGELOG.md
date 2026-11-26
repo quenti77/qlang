@@ -2,6 +2,18 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.12.2
+
+Un correctif de l'affichage de `qlang search`. Rien de cassant : tout ce qui marchait marche pareil.
+
+### Corrections
+
+- **`qlang search` aligne les noms sur le plus long** au lieu d'une largeur fixe, et un paquet sans description ni licence n'affiche que son nom (plus de ligne vide) : les noms `vendeur/paquet` décalaient la colonne.
+
+### Dépendances
+
+- Mise à jour de six dépendances Rust, de `vscode-languageclient` et de `taiki-e/install-action`.
+
 ## 1.12.1
 
 Un correctif de compilation et les noms `vendeur/paquet` du registre. Rien de cassant : tout ce qui marchait marche pareil.

@@ -240,33 +240,49 @@ pub fn info(name: Option<&str>) -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
+/// The lines `qlang search` prints for `list`: the names are padded to the longest one, an entry
+/// without a description shows only its name, and the repository comes under it.
+fn search_lines(list: &[Entry]) -> Vec<String> {
+    let width = list
+        .iter()
+        .map(|e| e.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut out = Vec::new();
+    for e in list {
+        let license = if e.license.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", e.license)
+        };
+        if e.description.is_empty() && license.is_empty() {
+            out.push(e.name.clone());
+        } else {
+            out.push(format!("{:<width$}  {}{license}", e.name, e.description));
+        }
+        out.push(format!("{:<width$}  {}", "", e.git));
+    }
+    out
+}
+
 /// `qlang search [text]`.
 pub fn search(text: Option<&str>) -> std::process::ExitCode {
     let wanted = text.unwrap_or("").to_lowercase();
-    let mut shown = 0;
-    for e in entries() {
-        if wanted.is_empty()
-            || e.name.to_lowercase().contains(&wanted)
-            || e.description.to_lowercase().contains(&wanted)
-        {
-            if e.removed.is_some() {
-                continue;
-            }
-            let license = if e.license.is_empty() {
-                String::new()
-            } else {
-                format!("  [{}]", e.license)
-            };
-            println!(
-                "{:<24} {}{license}\n{:<24} {}",
-                e.name, e.description, "", e.git
-            );
-            shown += 1;
-        }
-    }
-    if shown == 0 {
+    let found: Vec<Entry> = entries()
+        .into_iter()
+        .filter(|e| {
+            e.removed.is_none()
+                && (wanted.is_empty()
+                    || e.name.to_lowercase().contains(&wanted)
+                    || e.description.to_lowercase().contains(&wanted))
+        })
+        .collect();
+    if found.is_empty() {
         eprintln!("no package matches");
         return std::process::ExitCode::from(1);
+    }
+    for line in search_lines(&found) {
+        println!("{line}");
     }
     std::process::ExitCode::SUCCESS
 }
@@ -322,6 +338,24 @@ mod tests {
         assert!(
             err.contains("ambiguous") && err.contains("bob/csv, eve/csv"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn search_pads_to_the_longest_name_and_skips_an_empty_description() {
+        let list = parse(
+            r#"{"std": {"git": "https://x/std", "description": "Pieces", "license": "MIT"}, "quenti77/long-name": {"git": "https://x/l"}}"#,
+        )
+        .unwrap();
+        let lines = search_lines(&list);
+        assert_eq!(
+            lines,
+            [
+                "quenti77/long-name",
+                "                    https://x/l",
+                "std                 Pieces  [MIT]",
+                "                    https://x/std",
+            ]
         );
     }
 }

@@ -2,6 +2,18 @@
 
 > À partir de la 0.69, chaque version qui casse quelque chose a une rubrique **Cassant** (avant, après, comment s'adapter), reprise dans [docs/migration.md](docs/migration.md), et ce qui va disparaître est d'abord **déprécié** (rubrique « Déprécié »). Les niveaux de stabilité sont dans [docs/stability.md](docs/stability.md).
 
+## 1.12.1
+
+Un correctif de compilation et les noms `vendeur/paquet` du registre. Rien de cassant : tout ce qui marchait marche pareil.
+
+### Corrections
+
+- **Une variable `T?` rétrécie en `T` lisait le mauvais registre dans une chaîne interpolée** (#364) : `"{a}/{b}"` affichait la valeur de `a` deux fois.
+
+### Outils
+
+- **`qlang add vendeur/paquet`** (#369, #370) : un nom du registre peut avoir la forme `vendeur/paquet`. L'alias (la clé de `[dependencies]` et le `@alias` des imports) reste le dernier segment, `--as ALIAS` en choisit un autre, et un alias déjà pris par une autre source est refusé. Un nom plat (`std`) marche tant qu'une seule entrée de l'index y répond ; sinon la liste des candidats est affichée. `qlang search` et `qlang info` comprennent aussi les noms `vendeur/paquet`.
+
 ## 1.12.0
 
 Des helpers pour `Result` et les nullables, les chaînes brutes, un formulaire à champs répétés, l'adresse du client, et des outils qui disent mieux ce qui ne va pas. Rien de cassant : tout ce qui marchait marche pareil.

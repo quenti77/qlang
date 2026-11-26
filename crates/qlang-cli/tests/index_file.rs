@@ -9,12 +9,14 @@ fn every_entry_of_the_index_is_listable() {
     assert!(!list.is_empty());
     for (name, e) in list {
         assert!(
-            !name.is_empty()
-                && name.len() <= 64
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
-            "{name}: not a valid package name"
+            name.split('/').count() <= 2
+                && name.split('/').all(|s| {
+                    !s.is_empty()
+                        && s.len() <= 64
+                        && s.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                }),
+            "{name}: not a valid package name (`name` or `vendor/name`)"
         );
         let git = e["git"]
             .as_str()

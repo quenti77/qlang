@@ -324,3 +324,64 @@ fn add_without_a_source_asks_the_index_and_takes_the_highest_tag() {
     let (_, err, ok) = run(&["add", "unknown"]);
     assert!(!ok && err.contains("not in the package index"), "{err}");
 }
+
+#[test]
+fn add_a_vendor_name_uses_the_last_segment_as_alias_or_as() {
+    if !have_git() {
+        return;
+    }
+    let d = Dir::new("vendor");
+    let url = d.repo("mail", &[("lib.q", &lib("v1"))], "v1.0.0");
+    let other = d.repo("mail2", &[("lib.q", &lib("v2"))], "v2.0.0");
+    d.write(
+        "app/qlang.toml",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    );
+    d.write("app/main.q", APP);
+    d.write(
+        "index.json",
+        &format!(
+            "{{\"acme/mail\": {{\"git\": \"{url}\", \"description\": \"a\"}}, \"bob/mail\": {{\"git\": \"{other}\", \"description\": \"b\"}}, \"acme/csv\": {{\"git\": \"{url}\", \"description\": \"c\"}}}}"
+        ),
+    );
+    let index = d.0.join("index.json").to_string_lossy().into_owned();
+    let run = |args: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_qlang"))
+            .args(args)
+            .env("QLANG_INDEX_URL", &index)
+            .current_dir(d.0.join("app"))
+            .output()
+            .unwrap();
+        (
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+            o.status.success(),
+        )
+    };
+    // a flat name with two vendors is ambiguous
+    let (_, err, ok) = run(&["add", "mail"]);
+    assert!(!ok && err.contains("acme/mail, bob/mail"), "{err}");
+    // a vendor name: the alias is the last segment
+    let (out, err, ok) = run(&["add", "acme/mail"]);
+    assert!(ok, "{out}{err}");
+    assert!(
+        d.read("app/qlang.toml").contains("mail = {"),
+        "{}",
+        d.read("app/qlang.toml")
+    );
+    assert_eq!(run(&["run", "main.q"]).0.trim(), "v1");
+    // the alias is taken by another package: refused, then `--as` picks another one
+    let (_, err, ok) = run(&["add", "bob/mail"]);
+    assert!(!ok && err.contains("--as"), "{err}");
+    let (out, err, ok) = run(&["add", "bob/mail", "--as", "mail2"]);
+    assert!(ok, "{out}{err}");
+    assert!(d.read("app/qlang.toml").contains("mail2 = {"));
+    // a unique flat name resolves to its vendor entry
+    let (out, err, ok) = run(&["add", "csv"]);
+    assert!(
+        ok && d.read("app/qlang.toml").contains("csv = {"),
+        "{out}{err}"
+    );
+    let (_, err, ok) = run(&["add", "nobody/nothing"]);
+    assert!(!ok && err.contains("not in the package index"), "{err}");
+}

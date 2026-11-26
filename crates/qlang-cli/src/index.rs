@@ -12,6 +12,7 @@ const DEFAULT_URL: &str = "https://raw.githubusercontent.com/quenti77/qlang/main
 
 const BUILT_IN: &str = r#"{"std": {"git": "https://github.com/quenti77/qlang-std", "description": "Web framework pieces, queue, mail, S3, scheduler, JWT, CSV, TOML, templates, CLI helpers"}}"#;
 
+#[derive(Debug)]
 pub struct Entry {
     pub name: String,
     pub git: String,
@@ -46,7 +47,9 @@ fn parse(text: &str) -> Result<Vec<Entry>, String> {
         let Some(git) = v["git"].as_str() else {
             continue;
         };
-        if !qlang_core::span::valid_package_name(name) {
+        if !qlang_core::span::valid_package_name(name)
+            && !qlang_core::span::valid_registry_name(name)
+        {
             continue;
         }
         out.push(Entry {
@@ -109,8 +112,42 @@ pub fn entries() -> Vec<Entry> {
     }
 }
 
-pub fn find(name: &str) -> Option<Entry> {
-    entries().into_iter().find(|e| e.name == name)
+/// The entry `name` stands for: an exact `vendor/package`, or a flat name when exactly one entry
+/// answers to it (a flat entry, or a single `vendor/name`).
+pub fn resolve(name: &str) -> Result<Entry, String> {
+    pick(entries(), name)
+}
+
+fn pick(list: Vec<Entry>, name: &str) -> Result<Entry, String> {
+    if name.contains('/') {
+        return list
+            .into_iter()
+            .find(|e| e.name == name)
+            .ok_or_else(|| not_found(name));
+    }
+    let suffix = format!("/{name}");
+    let mut found: Vec<Entry> = list
+        .into_iter()
+        .filter(|e| e.name == name || e.name.ends_with(&suffix))
+        .collect();
+    match found.len() {
+        0 => Err(not_found(name)),
+        1 => Ok(found.remove(0)),
+        _ => Err(format!(
+            "`{name}` is ambiguous in the package index, choose one: {}",
+            found
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+fn not_found(name: &str) -> String {
+    format!(
+        "`{name}` is not in the package index: give a source (--git URL or --path DIR), or look with `qlang search`"
+    )
 }
 
 /// Every version tag (`vX.Y.Z`, optionally with a pre-release) of a git repository, highest first.
@@ -147,9 +184,12 @@ pub fn info(name: Option<&str>) -> std::process::ExitCode {
         eprintln!("usage: qlang info <name>");
         return std::process::ExitCode::from(64);
     };
-    let Some(e) = find(name) else {
-        eprintln!("`{name}` is not in the package index (see `qlang search`)");
-        return std::process::ExitCode::from(1);
+    let e = match resolve(name) {
+        Ok(e) => e,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return std::process::ExitCode::from(1);
+        }
     };
     println!("{}  {}", e.name, e.description);
     println!("repository: {}", e.git);
@@ -218,7 +258,7 @@ pub fn search(text: Option<&str>) -> std::process::ExitCode {
                 format!("  [{}]", e.license)
             };
             println!(
-                "{:<16} {}{license}\n{:<16} {}",
+                "{:<24} {}{license}\n{:<24} {}",
                 e.name, e.description, "", e.git
             );
             shown += 1;
@@ -245,5 +285,43 @@ mod tests {
         assert_eq!(list[0].description, "A");
         assert!(parse("[]").is_err());
         assert!(!parse(BUILT_IN).unwrap().is_empty());
+    }
+
+    fn sample() -> Vec<Entry> {
+        parse(
+            r#"{"std": {"git": "https://x/std"}, "acme/json5": {"git": "https://x/a"}, "bob/yaml": {"git": "https://x/b"}, "bob/csv": {"git": "https://x/c"}, "eve/csv": {"git": "https://x/d"}, "A/b": {"git": "u"}, "a/b/c": {"git": "u"}}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn vendor_names_are_listed_and_invalid_ones_skipped() {
+        let names: Vec<_> = sample().into_iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            ["acme/json5", "bob/csv", "bob/yaml", "eve/csv", "std"]
+        );
+    }
+
+    #[test]
+    fn a_flat_name_resolves_when_there_is_one_candidate() {
+        assert_eq!(pick(sample(), "std").unwrap().git, "https://x/std");
+        assert_eq!(pick(sample(), "json5").unwrap().name, "acme/json5");
+        assert_eq!(pick(sample(), "bob/yaml").unwrap().git, "https://x/b");
+        assert!(
+            pick(sample(), "nope")
+                .unwrap_err()
+                .contains("not in the package index")
+        );
+        assert!(pick(sample(), "other/json5").is_err());
+    }
+
+    #[test]
+    fn an_ambiguous_flat_name_lists_the_candidates() {
+        let err = pick(sample(), "csv").unwrap_err();
+        assert!(
+            err.contains("ambiguous") && err.contains("bob/csv, eve/csv"),
+            "{err}"
+        );
     }
 }

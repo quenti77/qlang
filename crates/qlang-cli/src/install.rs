@@ -544,11 +544,12 @@ fn edit(file: &Path) -> Result<toml_edit::DocumentMut, String> {
     text.parse().map_err(|e| format!("{}: {e}", file.display()))
 }
 
-/// `qlang add name --git URL [--tag T | --rev R | --branch B]` or `--path DIR`.
+/// `qlang add name --git URL [--tag T | --rev R | --branch B]` or `--path DIR`. `name` is the
+/// alias: the key in `[dependencies]`, and the `@name` of imports.
 pub fn add(cwd: &Path, name: &str, options: &[(&str, &str)]) -> Result<PathBuf, String> {
     if !qlang_core::span::valid_package_name(name) {
         return Err(format!(
-            "`{name}` is not a valid package name (letters, digits, `_` and `-`)"
+            "`{name}` is not a valid import alias (letters, digits, `_` and `-`)"
         ));
     }
     let file = manifest_path(cwd);
@@ -584,6 +585,17 @@ pub fn add(cwd: &Path, name: &str, options: &[(&str, &str)]) -> Result<PathBuf, 
         .or_insert(toml_edit::table())
         .as_table_mut()
         .ok_or("`dependencies` in qlang.toml must be a table")?;
+    if let (Some(old), Some(new)) = (
+        deps.get(name)
+            .and_then(|d| d.get("git"))
+            .and_then(|g| g.as_str()),
+        dep.get("git").and_then(|g| g.as_str()),
+    ) && old != new
+    {
+        return Err(format!(
+            "`{name}` is already a dependency (from {old}): choose another alias with --as <alias>"
+        ));
+    }
     deps.insert(name, toml_edit::value(dep));
     std::fs::write(&file, doc.to_string())
         .map_err(|e| format!("cannot write {}: {e}", file.display()))?;

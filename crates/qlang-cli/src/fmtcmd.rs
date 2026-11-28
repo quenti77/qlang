@@ -68,7 +68,7 @@ fn unified_diff(name: &str, before: &str, after: &str, color: bool) -> String {
 }
 
 /// Colours only for a terminal, and not when `NO_COLOR` is set.
-fn use_color() -> bool {
+pub(crate) fn use_color() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }

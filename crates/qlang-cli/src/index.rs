@@ -240,9 +240,13 @@ pub fn info(name: Option<&str>) -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// The lines `qlang search` prints for `list`: the names are padded to the longest one, an entry
-/// without a description shows only its name, and the repository comes under it.
-fn search_lines(list: &[Entry]) -> Vec<String> {
+/// What `qlang search` shows for a package that has no description.
+const NO_DESCRIPTION: &str = "(pas de description)";
+
+/// The lines `qlang search` prints for `list`: the names are padded to the longest one, a package
+/// without a description shows `(pas de description)` (in grey when `color` is set), and the
+/// repository comes under it.
+fn search_lines(list: &[Entry], color: bool) -> Vec<String> {
     let width = list
         .iter()
         .map(|e| e.name.chars().count())
@@ -255,11 +259,14 @@ fn search_lines(list: &[Entry]) -> Vec<String> {
         } else {
             format!("  [{}]", e.license)
         };
-        if e.description.is_empty() && license.is_empty() {
-            out.push(e.name.clone());
+        let description = if !e.description.is_empty() {
+            e.description.clone()
+        } else if color {
+            format!("\x1b[90m{NO_DESCRIPTION}\x1b[0m")
         } else {
-            out.push(format!("{:<width$}  {}{license}", e.name, e.description));
-        }
+            NO_DESCRIPTION.to_string()
+        };
+        out.push(format!("{:<width$}  {description}{license}", e.name));
         out.push(format!("{:<width$}  {}", "", e.git));
     }
     out
@@ -281,7 +288,7 @@ pub fn search(text: Option<&str>) -> std::process::ExitCode {
         eprintln!("no package matches");
         return std::process::ExitCode::from(1);
     }
-    for line in search_lines(&found) {
+    for line in search_lines(&found, crate::fmtcmd::use_color()) {
         println!("{line}");
     }
     std::process::ExitCode::SUCCESS
@@ -342,20 +349,32 @@ mod tests {
     }
 
     #[test]
-    fn search_pads_to_the_longest_name_and_skips_an_empty_description() {
+    fn search_pads_to_the_longest_name_and_says_when_there_is_no_description() {
         let list = parse(
             r#"{"std": {"git": "https://x/std", "description": "Pieces", "license": "MIT"}, "quenti77/long-name": {"git": "https://x/l"}}"#,
         )
         .unwrap();
-        let lines = search_lines(&list);
         assert_eq!(
-            lines,
+            search_lines(&list, false),
             [
-                "quenti77/long-name",
+                "quenti77/long-name  (pas de description)",
                 "                    https://x/l",
                 "std                 Pieces  [MIT]",
                 "                    https://x/std",
             ]
+        );
+    }
+
+    #[test]
+    fn the_missing_description_is_grey_only_with_colour_and_keeps_the_licence() {
+        let list = parse(r#"{"a": {"git": "https://x/a", "license": "MIT"}}"#).unwrap();
+        assert_eq!(
+            search_lines(&list, true)[0],
+            "a  \x1b[90m(pas de description)\x1b[0m  [MIT]"
+        );
+        assert_eq!(
+            search_lines(&list, false)[0],
+            "a  (pas de description)  [MIT]"
         );
     }
 }
